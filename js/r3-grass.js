@@ -15,7 +15,10 @@
   // grass, Horizon): within NRADIUS of the camera every blade is geometry, a tapered strip in
   // four segments curving over under its own weight, NBLADES to a clump of NCELL. The cards
   // above take over beyond, where a blade is under a pixel wide.
-  const NCELL = 0.2, NRADIUS = 13, NBLADES = 14, NSEG = 3;
+  const NCELL = 0.2, NRADIUS = 13, NBLADES = 22, NSEG = 3;
+  // Settings (setQuality): density keeps a share of each clump's NBLADES blades; LOD is the
+  // radius of modelled blades; draw distance the radius of the whole field. Both grids are
+  // rebuilt to the radius asked for, so a shorter distance also costs less.
 
   // Blade card: shape and a gentle root-to-tip brightness ramp only; the colour comes from
   // the ground under each clump. Transparent texels keep a mid brightness instead of black,
@@ -60,7 +63,7 @@
   // normals are rounded across the width (a blade has a midrib and curls slightly), so it
   // shades like a leaf rather than a flat card. bt is the height along the blade, 0 root to 1 tip.
   function bladeClumpGeometry() {
-    const r = U.rng(77), pos = [], nor = [], bt = [], idx = [];
+    const r = U.rng(77), pos = [], nor = [], bt = [], bi = [], idx = [];
     for (let b = 0; b < NBLADES; b++) {
       const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * NCELL * 0.55, ox = Math.cos(r() * 6.283) * rr, oz = Math.sin(r() * 6.283) * rr;
       const w = 0.007 + r() * 0.004, h = 0.06 + Math.pow(r(), 1.4) * 0.06, k = 0.1 + r() * 0.45;
@@ -76,7 +79,7 @@
         for (const sd of [-1, 1]) {
           pos.push(cx + sx * wt * 0.5 * sd, cy, cz + sz * wt * 0.5 * sd);
           const rx = nx + sx * 0.45 * sd, ry = ny, rz = nz + sz * 0.45 * sd, rl = Math.hypot(rx, ry, rz);
-          nor.push(rx / rl, ry / rl, rz / rl); bt.push(t);
+          nor.push(rx / rl, ry / rl, rz / rl); bt.push(t); bi.push((b + 0.5) / NBLADES);
         }
         if (i < NSEG) { const q = base + i * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
       }
@@ -88,6 +91,7 @@
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setAttribute('bT', new THREE.Float32BufferAttribute(bt, 1));
+    g.setAttribute('bI', new THREE.Float32BufferAttribute(bi, 1)); // the blade's place in the clump, for the density setting
     g.setIndex(idx);
     g.setAttribute('gOff', new THREE.InstancedBufferAttribute(off, 2));
     g.instanceCount = n * n;
@@ -205,6 +209,7 @@
       uGOrigin: { value: new THREE.Vector2() },
       uGCell: { value: CELL },
       uGR: { value: RADIUS },
+      uGNear: { value: NRADIUS }, // where the modelled blades hand over to these cards
       uGTime: { value: 0 },
       uGMask: { value: grassMap(tr, W2, ext, extra) },
       uGMaskB: { value: new THREE.Vector4(ext.x0, ext.z0, ext.w, ext.h) },
@@ -225,7 +230,7 @@
     mesh.userData.grassHalf = geo.userData.half;
     // the modelled blades near the camera: opaque geometry (no alpha test to shimmer), lit both sides
     const bgeo = bladeClumpGeometry();
-    const bu = Object.assign({}, uniforms, { uGOrigin: { value: new THREE.Vector2() }, uGCell: { value: NCELL }, uGR: { value: NRADIUS }, uGBlade: { value: 1 } });
+    const bu = Object.assign({}, uniforms, { uGOrigin: { value: new THREE.Vector2() }, uGCell: { value: NCELL }, uGR: { value: NRADIUS }, uGBlade: { value: 1 }, uGDens: { value: 0.85 } });
     const bm = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.62, metalness: 0, side: THREE.DoubleSide });
     bm.userData.grass = bu;
     const blades = new THREE.Mesh(bgeo, bm);
@@ -238,11 +243,29 @@
   }
 
   // keep the clump grid centred on the camera (snapped to whole cells)
+  // a camera-centred grid of radius R in cells of the given size
+  function regrid(g, R, cell) {
+    const n = Math.round(R / cell) * 2 + 1;
+    if (g.userData.n === n) return;
+    const off = new Float32Array(n * n * 2); let q = 0;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { off[q++] = i; off[q++] = j; }
+    g.setAttribute('gOff', new THREE.InstancedBufferAttribute(off, 2));
+    g.instanceCount = n * n; g.userData.half = (n - 1) / 2; g.userData.n = n;
+  }
+  // o: { density (share of blades, 0.2 to 1), near (m of modelled blades), far (m of grass) }
+  function setQuality(grp, o) {
+    if (!grp || !grp.userData.parts) return;
+    const [cards, blades] = grp.userData.parts;
+    const near = Math.max(3, o.near || NRADIUS), far = Math.max(near + 4, o.far || RADIUS);
+    const cu = cards.material.userData.grass, bu = blades.material.userData.grass;
+    regrid(cards.geometry, far, CELL); cu.uGR.value = far; cu.uGNear.value = near;
+    regrid(blades.geometry, near, NCELL); bu.uGR.value = near; bu.uGDens.value = Math.min(1, Math.max(0.1, o.density || 0.85));
+  }
   function update(grp, camera, time) {
     if (!grp) return;
     const cam = camera.position || camera;
     for (const mesh of grp.userData.parts || [grp]) {
-      const u = mesh.material.userData.grass, half = mesh.userData.grassHalf, c = u.uGCell.value;
+      const u = mesh.material.userData.grass, half = mesh.geometry.userData.half, c = u.uGCell.value;
       u.uGOrigin.value.set(Math.floor(cam.x / c) * c - half * c, Math.floor(cam.z / c) * c - half * c);
       u.uGTime.value = time;
     }
@@ -251,7 +274,7 @@
   // shader injection used by F1.R3S.patch when a material carries userData.grass
   const VERT_PARS = [
     'attribute vec2 gOff;',
-    'uniform vec2 uGOrigin; uniform float uGCell; uniform float uGR; uniform float uGTime;',
+    'uniform vec2 uGOrigin; uniform float uGCell; uniform float uGR; uniform float uGTime; uniform float uGNear; uniform float uGDens;',
     'uniform sampler2D uGMask; uniform vec4 uGMaskB; uniform sampler2D uGHeight; uniform vec4 uGHeightB;',
     'uniform sampler2D uGMacro;',
     'varying vec2 vGWp; varying float vGShade;',
@@ -266,7 +289,7 @@
     '  float gDist = distance(gWp, cameraPosition.xz);',
     '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7), gDens) * (1.0 - smoothstep(uGR * 0.55, uGR, gDist));',
     // the cards start where the modelled blades fade (they cross over between 8 and 12 m)
-    '  gKeep *= smoothstep(' + (NRADIUS * 0.6).toFixed(1) + ', ' + (NRADIUS * 0.92).toFixed(1) + ', gDist);',
+    '  gKeep *= smoothstep(uGNear * 0.6, uGNear * 0.92, gDist);',
     '  float gSc = gKeep * (0.75 + 0.5 * gHash(gBase + 5.3));',
     '  float gA = gHash(gBase + 9.1) * 6.2831;',
     '  transformed.xz = mat2(cos(gA), -sin(gA), sin(gA), cos(gA)) * transformed.xz;',
@@ -290,7 +313,7 @@
     '  float gH = texture2D(uGHeight, (gWp - uGHeightB.xy) / uGHeightB.zw).r;',
     '  float gDist = distance(gWp, cameraPosition.xz);',
     '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7) * 0.85, gDens);',
-    '  float gSc = gKeep * (0.8 + 0.4 * gHash(gBase + 5.3)) * (1.0 - smoothstep(uGR * 0.7, uGR, gDist));',
+    '  float gSc = gKeep * step(bI, uGDens) * (0.8 + 0.4 * gHash(gBase + 5.3)) * (1.0 - smoothstep(uGR * 0.7, uGR, gDist));',
     '  float gA = gHash(gBase + 9.1) * 6.2831; mat2 gR = mat2(cos(gA), -sin(gA), sin(gA), cos(gA));',
     '  transformed.xz = gR * transformed.xz;',
     '  transformed.y *= gSc * (0.8 + 0.35 * gDens); transformed.xz *= max(gSc, 0.001);',
@@ -300,7 +323,7 @@
     '  transformed += vec3(gWp.x, gH + 0.005, gWp.y);',
     '  vGWp = transformed.xz; vBT = bT; vGView = transformed - cameraPosition;',
     '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
-    '  vGShade = mix(0.78, 1.22, gM) * (0.92 + 0.16 * gHash(gBase + 11.3));',
+    '  vGShade = mix(0.86, 1.14, gM) * (0.95 + 0.1 * gHash(gBase + 11.3));',
   ].join('\n');
   function patchShader(sh, u) {
     if (u.uGBlade) return patchBlades(sh, u);
@@ -314,7 +337,7 @@
 
   function patchBlades(sh, u) {
     Object.assign(sh.uniforms, u);
-    sh.vertexShader = VERT_PARS + '\nattribute float bT; varying float vBT; varying vec3 vGView;\n' + sh.vertexShader
+    sh.vertexShader = VERT_PARS + '\nattribute float bT; attribute float bI; varying float vBT; varying vec3 vGView;\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', [
         '#include <beginnormal_vertex>',
         // turn the normal with the clump, and lean it halfway to the sky, as AAA grass does, so
@@ -329,7 +352,7 @@
         // the ground's own colour and variation, darker toward the root where the sward shades
         // itself, the tip a touch paler and yellower where it has been cut
         '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);',
-        '  diffuseColor.rgb *= mix(0.6, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));'].join('\n'))
+        '  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));'].join('\n'))
       // both faces keep the leaned-up normal: three would flip it for the back face, into the ground
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
       .replace('#include <lights_fragment_end>', [
@@ -339,5 +362,5 @@
         '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);'].join('\n'));
   }
 
-  F1.R3Grass = { build, update, patchShader };
+  F1.R3Grass = { build, update, patchShader, setQuality };
 })(typeof window !== 'undefined' ? window : globalThis);

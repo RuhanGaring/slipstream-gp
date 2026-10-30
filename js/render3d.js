@@ -420,7 +420,7 @@
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
     renderer.shadowMap.needsUpdate = true;
-    if (state.grass) state.grass.visible = grassOn();
+    if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (state.wx) state.wx.density = GFX.rainK;
     applyScenery();
     setView();
@@ -465,6 +465,7 @@
   }
 
   const grassOn = () => (GFX.grass != null ? !!GFX.grass : !GFX.lite);
+  const grassQ = () => ({ density: GFX.grassDensity || 0.85, near: GFX.grassLod || 13, far: GFX.grassDist || 56 });
   // View distance: the far plane, with the sky dome kept inside it and the fog thickened to
   // hide its edge (about 90 per cent at the far plane). Potato and rock draw with a plain
   // depth buffer, which loses precision far out, so they keep within 3 km.
@@ -635,7 +636,7 @@
     let built = state.cache.get(tr.id);
     if (!built || built.tr !== tr) { built = buildTrack(tr, W2); state.cache.set(tr.id, built); }
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
-    if (state.grass) state.grass.visible = grassOn();
+    if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
