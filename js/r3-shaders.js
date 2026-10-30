@@ -37,6 +37,9 @@
   //   annua: paler, yellower), fescue (finer, blue-green). Domain-warped noise, thresholded,
   //   draws those clumps; it is not left as soft blotches.
   // - weeds: clover and other broadleaves in small spots, gathered in some areas.
+  // - yellow patches: now and then a patch a few metres across has gone yellow (a dry spot over
+  //   compacted or shallow soil, disease, or something left lying on it), irregular in outline,
+  //   with a slightly paler rim where it fades into the green. Rare, and not evenly spread.
   // - wear: the strip beside the track, where cars run wide, is scuffed toward soil.
   // - mowing stripes: blades laid in alternate directions read light along their lay and dark
   //   against it, as from a grandstand.
@@ -69,6 +72,13 @@
     '  c *= mix(vec3(1.0), vec3(0.86, 0.93, 0.90), wet * 0.75);',
     '  vec3 stress = mix(vec3(1.10, 1.05, 0.76), vec3(1.32, 1.12, 0.62), smoothstep(0.55, 1.0, dry));',
     '  c *= mix(vec3(1.0), stress, smoothstep(0.12, 0.75, dry));',
+    // yellow patches: warped cells of about 6 m, only the highest few percent, and only where a
+    // coarser field allows (so they cluster in some areas and are absent from others)
+    '  vec2 yq = w / 6.0 + (vec2(tfN(w / 3.1 + 2.0), tfN(w / 3.1 + 6.3)) - 0.5) * 1.3;',
+    '  float yv = tfN(yq) * 0.75 + tfN(yq * 2.6 + 1.9) * 0.25;',
+    '  float ya = smoothstep(0.35, 0.65, tfN(w / 60.0 + 3.7));',
+    '  float yp = smoothstep(0.815, 0.835, yv) * ya, yr = smoothstep(0.79, 0.815, yv) * ya - yp;',
+    '  c *= mix(vec3(1.0), vec3(1.30, 1.16, 0.58), yp) * mix(vec3(1.0), vec3(1.10, 1.06, 0.84), max(yr, 0.0));',
     // wear beside the track: patchy, toward bare soil
     '  float wr = site.g * smoothstep(0.35, 0.7, tfF(w / 1.3 + 4.4));',
     '  c *= mix(vec3(1.0), vec3(1.18, 0.98, 0.70), wr * 0.7);',
