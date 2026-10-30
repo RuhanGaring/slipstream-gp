@@ -26,7 +26,7 @@
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
     bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, lawnDesat: 0.16, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
-    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.45, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
+    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 4600, fogK: 0.32, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
     lonestar: { sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
       ridge: ['#b3a07c', '#9a8a68', '#7f7258'], ridgeH: 45, jag: 3 },
@@ -836,15 +836,17 @@
       }
       add(gr.geo(), M.gravel);
       // worn verges: a strip of sandy soil and thinned turf where the grass meets the track or
-      // the run-off, 0.5 to 1.5 m wide and broken up toward the grass (a decal over the lawn)
+      // the run-off, 0.25 to 0.8 m wide and broken up toward the grass (a decal over the lawn)
       if (style !== 'street') {
         const wa = new Acc();
         for (const side of [0, 1]) {
           const sg = side ? 1 : -1;
-          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw : hw + tr.runW[side][k];
+          // (behind the kerb where there is one: the decal must never lie over the paint)
+          const kb = side ? tr.kerbR : tr.kerbL;
+          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw + (kb[k] ? tr.kerbW : 0) + 0.04 : hw + tr.runW[side][k];
           let prev = -1, len = 0, px = 0, pz = 0;
           for (let i = 0; i <= N; i++) {
-            const k = mod(i, N), e0 = edge(k), wd = 0.5 + 1.0 * (0.5 + 0.5 * Math.sin(k * 0.37 + side * 2.1) * Math.sin(k * 0.071 + 1.3));
+            const k = mod(i, N), e0 = edge(k), wd = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(k * 0.37 + side * 2.1) * Math.sin(k * 0.071 + 1.3));
             if (prev >= 0 && Math.abs(e0 - edge(mod(i - 1, N))) > 1.5) prev = -1; // a step in the edge (run-off starts): start a new strip
             const ax = tr.x[k] + tr.nx[k] * sg * (e0 - 0.05), az = tr.y[k] + tr.ny[k] * sg * (e0 - 0.05);
             const bx = tr.x[k] + tr.nx[k] * sg * (e0 + wd), bz = tr.y[k] + tr.ny[k] * sg * (e0 + wd);
@@ -856,7 +858,7 @@
             prev = a;
           }
         }
-        if (!M.wear) { M.wear = std({ map: T.wear(), transparent: true, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); M.wear.userData.maskK = 0.5; }
+        if (!M.wear) { M.wear = std({ map: T.wear(), transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); M.wear.userData.maskK = 0.5; }
         add(wa.geo(), M.wear, { order: 1 });
       }
       { const tm = std({ map: T.runoff(th.runoff), roughness: 0.85 }); tm.userData.wetK = [1, 1]; add(ta.geo(), tm); }
