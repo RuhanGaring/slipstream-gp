@@ -278,15 +278,15 @@
         for (const q of poly) W.solid.push({ x: q[0], y: q[1], r: 20 });
       }
     }
-    // grandstands: along the main straight (opposite the pits) and at the slow corners
+    // grandstands: along the main straight (opposite the pits) and at the slow and medium corners
     const stands = [{ s: tr.L - 120, len: 180, side: -tr.pit.side }];
-    for (const z of tr.brakeZones) if (z.vOut < 30) {
+    for (const z of tr.brakeZones) if (z.vOut < 45) {
       let k = 0;
       const i0 = Math.floor(z.s1 / tr.ds);
       for (let q = -10; q < 20; q++) k += tr.kap[(i0 + q + tr.N) % tr.N];
       stands.push({ s: z.s1 - 30, len: 90, side: k > 0 ? -1 : 1 });
     }
-    for (const st of stands.slice(0, 6)) {
+    for (const st of stands.slice(0, 10)) {
       for (let s = st.s - st.len / 2; s < st.s + st.len / 2; s += 30) {
         const i = Math.floor(((s % tr.L) + tr.L) % tr.L / tr.ds) % tr.N;
         const side = st.side > 0 ? 1 : 0;
