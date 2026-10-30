@@ -1327,9 +1327,9 @@
       const twist = (G.__handTip != null ? G.__handTip : -0.9) * kn * Math.sign(sp), roll = (G.__handRoll != null ? G.__handRoll : 0.2) * kn;
       H.premultiply(_roll.makeTranslation(-_gp.x, -_gp.y, -_gp.z)).premultiply(_roll.makeRotationY(twist))
         .premultiply(_roll.makeRotationZ(-sp * roll))
-        // and tips back toward the driver (about the wheel's level axis, as seen from the seat)
-        // so the palm rides on the rim instead of pressing flat into it
-        .premultiply(_roll.makeRotationZ(sp)).premultiply(_roll.makeRotationX((G.__handPitch != null ? G.__handPitch : 0.35) * kn)).premultiply(_roll.makeRotationZ(-sp))
+        // and tips forward, away from the driver (about the wheel's level axis, as seen from the seat),
+        // so the palm stands off the rim instead of pressing flat into it
+        .premultiply(_roll.makeRotationZ(sp)).premultiply(_roll.makeRotationX((G.__handPitch != null ? G.__handPitch : -0.35) * kn)).premultiply(_roll.makeRotationZ(-sp))
         .premultiply(_roll.makeTranslation(_gp.x, _gp.y, _gp.z));
     }
     _Hc.multiplyMatrices(ck.pivot.matrix, _spinR).multiply(H);
