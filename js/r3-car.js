@@ -1206,7 +1206,18 @@
           '  aCol = mix(aCol, uPanel, aCuff * step(0.045, aAl) * step(aAl, 0.054));',
           '  aCol = mix(aCol, vec3(0.85), aCuff * step(0.064, aAl) * step(aAl, 0.068));',
           '  float aH = mix(aF.r, mix(aF.g, aF.b, aSu), aGl);',
-          '  aCol *= mix(0.92, 1.04, aH);',
+          // the cloth reads at a glance: weave and knit light and dark, as on a real suit
+          '  aCol *= mix(0.74, 1.12, aH);',
+          // palm grip: a field of small dark silicone dots printed on the suede
+          '  vec2 aDp = fract(vec2(vRP.x + vRP.z, vRP.y) * 190.0) - 0.5;',
+          '  aCol = mix(aCol, vec3(0.03), aSu * (1.0 - smoothstep(0.17, 0.24, length(aDp))));',
+          // gauntlet: a dark hook-and-loop strap round the wrist with a stitched edge
+          '  float aStrap = aCuff * smoothstep(0.004, 0.008, aAl) * (1.0 - smoothstep(0.036, 0.04, aAl));',
+          '  aCol = mix(aCol, vec3(0.05) * (0.8 + 0.4 * aF.b), aStrap);',
+          '  aCol = mix(aCol, vec3(0.7), aCuff * (step(0.008, aAl) * step(aAl, 0.0095) + step(0.0345, aAl) * step(aAl, 0.036)));',
+          // suit sleeve: stitched panel seams round the forearm, a darker double line
+          '  float aSm = fract(aAl / 0.085);',
+          '  aCol *= 1.0 - 0.45 * vColor.r * step(0.07, aAl) * (step(aSm, 0.012) + step(0.03, aSm) * step(aSm, 0.04));',
           '  diffuseColor.rgb = aCol;',
         ].join('\n'))
         .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.sheenColor *= clamp(diffuseColor.rgb * 2.6, 0.0, 1.0);')
