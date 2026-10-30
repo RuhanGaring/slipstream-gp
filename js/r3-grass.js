@@ -11,6 +11,11 @@
   const U = F1.U, Tracks = F1.Tracks, SURF = F1.SURF;
 
   const CELL = 0.42, RADIUS = 56;
+  // Near field: modelled blades, as current AAA grass does it (Ghost of Tsushima's procedural
+  // grass, Horizon): within NRADIUS of the camera every blade is geometry, a tapered strip in
+  // four segments curving over under its own weight, NBLADES to a clump of NCELL. The cards
+  // above take over beyond, where a blade is under a pixel wide.
+  const NCELL = 0.2, NRADIUS = 13, NBLADES = 14, NSEG = 3;
 
   // Blade card: shape and a gentle root-to-tip brightness ramp only; the colour comes from
   // the ground under each clump. Transparent texels keep a mid brightness instead of black,
@@ -48,6 +53,46 @@
     t.needsUpdate = true;
     t.userData.norm = 255 / mean; // scales the blades' mean brightness to exactly 1
     return (_blades = t);
+  }
+
+  // A clump of blades. Each is 7 to 11 mm wide at the root, narrowing to a point, 6 to 12 cm
+  // tall (a mown circuit verge), curving away from its facing by up to half its height. The
+  // normals are rounded across the width (a blade has a midrib and curls slightly), so it
+  // shades like a leaf rather than a flat card. bt is the height along the blade, 0 root to 1 tip.
+  function bladeClumpGeometry() {
+    const r = U.rng(77), pos = [], nor = [], bt = [], idx = [];
+    for (let b = 0; b < NBLADES; b++) {
+      const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * NCELL * 0.55, ox = Math.cos(r() * 6.283) * rr, oz = Math.sin(r() * 6.283) * rr;
+      const w = 0.007 + r() * 0.004, h = 0.06 + Math.pow(r(), 1.4) * 0.06, k = 0.1 + r() * 0.45;
+      const sx = Math.cos(a), sz = Math.sin(a), lx = -sz, lz = sx; // across the blade, and the way it bends
+      const base = pos.length / 3;
+      for (let i = 0; i <= NSEG; i++) {
+        const t = i / NSEG, wt = w * Math.max(0.04, 1 - Math.pow(t, 1.4));
+        const cy = h * t * (1 - 0.3 * k * t), cl = h * k * t * t;
+        const cx = ox + lx * cl, cz = oz + lz * cl;
+        // tangent along the blade, and the face normal across it
+        const ty = h * (1 - 0.6 * k * t), tl = 2 * h * k * t;
+        let nx = -lx * ty, ny = tl, nz = -lz * ty; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+        for (const sd of [-1, 1]) {
+          pos.push(cx + sx * wt * 0.5 * sd, cy, cz + sz * wt * 0.5 * sd);
+          const rx = nx + sx * 0.45 * sd, ry = ny, rz = nz + sz * 0.45 * sd, rl = Math.hypot(rx, ry, rz);
+          nor.push(rx / rl, ry / rl, rz / rl); bt.push(t);
+        }
+        if (i < NSEG) { const q = base + i * 2; idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
+      }
+    }
+    const n = Math.round(NRADIUS / NCELL) * 2 + 1, off = new Float32Array(n * n * 2);
+    let q = 0;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { off[q++] = i; off[q++] = j; }
+    const g = new THREE.InstancedBufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('bT', new THREE.Float32BufferAttribute(bt, 1));
+    g.setIndex(idx);
+    g.setAttribute('gOff', new THREE.InstancedBufferAttribute(off, 2));
+    g.instanceCount = n * n;
+    g.userData.half = (n - 1) / 2;
+    return g;
   }
 
   // three crossed cards, 0.6 m wide and 0.26 m tall, rooted at y = 0
@@ -178,16 +223,29 @@
     const mesh = new THREE.Mesh(geo, m);
     mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
     mesh.userData.grassHalf = geo.userData.half;
-    return mesh;
+    // the modelled blades near the camera: opaque geometry (no alpha test to shimmer), lit both sides
+    const bgeo = bladeClumpGeometry();
+    const bu = Object.assign({}, uniforms, { uGOrigin: { value: new THREE.Vector2() }, uGCell: { value: NCELL }, uGR: { value: NRADIUS }, uGBlade: { value: 1 } });
+    const bm = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.62, metalness: 0, side: THREE.DoubleSide });
+    bm.userData.grass = bu;
+    const blades = new THREE.Mesh(bgeo, bm);
+    blades.frustumCulled = false; blades.receiveShadow = true; blades.castShadow = false;
+    blades.userData.grassHalf = bgeo.userData.half;
+    const grp = new THREE.Group();
+    grp.add(mesh, blades);
+    grp.userData.parts = [mesh, blades];
+    return grp;
   }
 
   // keep the clump grid centred on the camera (snapped to whole cells)
-  function update(mesh, camera, time) {
-    if (!mesh) return;
+  function update(grp, camera, time) {
+    if (!grp) return;
     const cam = camera.position || camera;
-    const u = mesh.material.userData.grass, half = mesh.userData.grassHalf;
-    u.uGOrigin.value.set(Math.floor(cam.x / CELL) * CELL - half * CELL, Math.floor(cam.z / CELL) * CELL - half * CELL);
-    u.uGTime.value = time;
+    for (const mesh of grp.userData.parts || [grp]) {
+      const u = mesh.material.userData.grass, half = mesh.userData.grassHalf, c = u.uGCell.value;
+      u.uGOrigin.value.set(Math.floor(cam.x / c) * c - half * c, Math.floor(cam.z / c) * c - half * c);
+      u.uGTime.value = time;
+    }
   }
 
   // shader injection used by F1.R3S.patch when a material carries userData.grass
@@ -207,6 +265,8 @@
     '  float gH = texture2D(uGHeight, (gWp - uGHeightB.xy) / uGHeightB.zw).r;',
     '  float gDist = distance(gWp, cameraPosition.xz);',
     '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7), gDens) * (1.0 - smoothstep(uGR * 0.55, uGR, gDist));',
+    // the cards start where the modelled blades fade (they cross over between 8 and 12 m)
+    '  gKeep *= smoothstep(' + (NRADIUS * 0.6).toFixed(1) + ', ' + (NRADIUS * 0.92).toFixed(1) + ', gDist);',
     '  float gSc = gKeep * (0.75 + 0.5 * gHash(gBase + 5.3));',
     '  float gA = gHash(gBase + 9.1) * 6.2831;',
     '  transformed.xz = mat2(cos(gA), -sin(gA), sin(gA), cos(gA)) * transformed.xz;',
@@ -220,13 +280,63 @@
     '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
     '  vGShade = mix(0.78, 1.22, gM) * (0.96 + 0.08 * gHash(gBase + 11.3));',
   ].join('\n');
+  // the modelled blades: placed like the cards (snapped grid, hashed jitter and turn, ground
+  // height, grass map), then bent by the wind more toward the tip, and faded out by height
+  // between 70 and 100 per cent of their radius, where the cards have come in
+  const VERTB = [
+    '  vec2 gBase = uGOrigin + gOff * uGCell;',
+    '  vec2 gWp = gBase + (vec2(gHash(gBase), gHash(gBase + 3.17)) - 0.5) * uGCell * 1.1;',
+    '  float gDens = clamp((texture2D(uGMask, (gWp - uGMaskB.xy) / uGMaskB.zw).r - 0.2) / 0.8, 0.0, 1.0);',
+    '  float gH = texture2D(uGHeight, (gWp - uGHeightB.xy) / uGHeightB.zw).r;',
+    '  float gDist = distance(gWp, cameraPosition.xz);',
+    '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7) * 0.85, gDens);',
+    '  float gSc = gKeep * (0.8 + 0.4 * gHash(gBase + 5.3)) * (1.0 - smoothstep(uGR * 0.7, uGR, gDist));',
+    '  float gA = gHash(gBase + 9.1) * 6.2831; mat2 gR = mat2(cos(gA), -sin(gA), sin(gA), cos(gA));',
+    '  transformed.xz = gR * transformed.xz;',
+    '  transformed.y *= gSc * (0.8 + 0.35 * gDens); transformed.xz *= max(gSc, 0.001);',
+    // wind: gusts travel across the field; the bend grows with the square of height up the blade
+    '  float gw = sin(uGTime * 1.7 - dot(gWp, vec2(0.21, 0.13))) * 0.6 + sin(uGTime * 3.1 + gWp.x * 0.7) * 0.25;',
+    '  transformed.xz += vec2(0.8, 0.6) * gw * 0.035 * bT * bT * gSc;',
+    '  transformed += vec3(gWp.x, gH + 0.005, gWp.y);',
+    '  vGWp = transformed.xz; vBT = bT; vGView = transformed - cameraPosition;',
+    '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
+    '  vGShade = mix(0.78, 1.22, gM) * (0.92 + 0.16 * gHash(gBase + 11.3));',
+  ].join('\n');
   function patchShader(sh, u) {
+    if (u.uGBlade) return patchBlades(sh, u);
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = 'varying vec2 vGWp; varying float vGShade; uniform sampler2D uGGround; uniform sampler2D uGMacro; uniform float uGNorm;\n' + F1.R3S.LAWN + '\n' + sh.fragmentShader
       .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);')
       // both faces of a card take the ground's up normal (a flipped back face would go dark)
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);');
+  }
+
+  function patchBlades(sh, u) {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = VERT_PARS + '\nattribute float bT; varying float vBT; varying vec3 vGView;\n' + sh.vertexShader
+      .replace('#include <beginnormal_vertex>', [
+        '#include <beginnormal_vertex>',
+        // turn the normal with the clump, and lean it halfway to the sky, as AAA grass does, so
+        // a field of blades lights like the ground it grows from instead of going dark side-on
+        '  { vec2 gB0 = uGOrigin + gOff * uGCell; float gA0 = gHash(gB0 + 9.1) * 6.2831;',
+        '    objectNormal.xz = mat2(cos(gA0), -sin(gA0), sin(gA0), cos(gA0)) * objectNormal.xz;',
+        '    objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), 0.5)); }'].join('\n'))
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERTB);
+    sh.fragmentShader = 'varying vec2 vGWp; varying float vGShade; varying float vBT; varying vec3 vGView; uniform sampler2D uGGround; uniform sampler2D uGMacro; uniform float uGNorm;\n' + F1.R3S.LAWN + '\n' + sh.fragmentShader
+      .replace('#include <map_fragment>', [
+        '#include <map_fragment>',
+        // the ground's own colour and variation, darker toward the root where the sward shades
+        // itself, the tip a touch paler and yellower where it has been cut
+        '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);',
+        '  diffuseColor.rgb *= mix(0.6, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));'].join('\n'))
+      // both faces keep the leaned-up normal: three would flip it for the back face, into the ground
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
+      .replace('#include <lights_fragment_end>', [
+        '#include <lights_fragment_end>',
+        // light through the leaf: looking toward the sun, thin blades glow, less near the root
+        // and not at all in shadow
+        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);'].join('\n'));
   }
 
   F1.R3Grass = { build, update, patchShader };
