@@ -177,7 +177,7 @@
 
   S.title = () => {
     const el = h('div');
-    el.innerHTML = `<div class="stage"><div class="brand"><span class="w1">SLIPSTREAM</span><span class="w2">GRAND PRIX</span></div><div class="press">PRESS ENTER</div></div>
+    el.innerHTML = `<div class="stage"><div class="brand"><span class="w1">SLIPSTREAM</span><span class="w2">GRAND PRIX</span></div><div class="press">${F1.Game.mobile && F1.Game.mobile() ? 'TAP TO START' : 'PRESS ENTER'}</div></div>
       <div class="legal">A fictional championship. All teams, drivers and circuits are original. Car model: "Aston Martin F1 AMR23 2023" by Redgrund, CC BY 4.0, modified. Textures and skies: Poly Haven, ambientCG (CC0). See CREDITS.md.</div>`;
     return { el, items: [], onKey: c => { if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') { Audio.init(); Audio.ui.select(); F1.Game.menuMusic(); go('main'); return true; } return false; }, click: true };
   };
@@ -563,6 +563,7 @@
     add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; F1.Game.applySettings(); }, pct));
     add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; F1.Game.applySettings(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; F1.Game.applySettings(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; F1.Game.applySettings(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; F1.Game.applySettings(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));

@@ -505,3 +505,30 @@ table.res td.pts { font-weight: 700; text-align: right; }
   .split, .two { grid-template-columns: 1fr; }
   .brand .w1 { font-size: 64px; }
 }
+
+/* ---------- touch controls (mobile mode) ---------- */
+body.mobile { touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }
+#touch { position: fixed; inset: 0; z-index: 40; display: none; touch-action: none; pointer-events: none; }
+#touch.show { display: block; }
+#touch .t-steer { position: absolute; left: 0; bottom: 0; width: 46%; height: 62%; pointer-events: auto; }
+#touch .t-knob { position: absolute; bottom: 18%; left: 22%; width: 68px; height: 68px; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); background: rgba(255,255,255,.12); opacity: .55; transition: opacity .15s; }
+#touch .t-knob.on { opacity: 1; background: rgba(255,255,255,.25); }
+#touch .t-btn, #touch .t-pedal { position: absolute; pointer-events: auto; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 13px/1 'Titillium Web', 'Segoe UI', sans-serif; letter-spacing: .08em; background: rgba(10,12,16,.45); border: 2px solid rgba(255,255,255,.4); border-radius: 12px; }
+#touch .t-btn { top: calc(10px + env(safe-area-inset-top)); width: 54px; height: 40px; }
+#touch .t-pause { right: calc(14px + env(safe-area-inset-right)); }
+#touch .t-cam { right: calc(76px + env(safe-area-inset-right)); }
+#touch .t-drs { right: calc(138px + env(safe-area-inset-right)); }
+#touch .t-pedal { bottom: calc(18px + env(safe-area-inset-bottom)); width: 17vw; max-width: 140px; height: 36vh; max-height: 220px; }
+#touch .t-thr { right: calc(16px + env(safe-area-inset-right)); border-color: rgba(80,220,120,.7); }
+#touch .t-brk { right: calc(min(17vw, 140px) + 30px + env(safe-area-inset-right)); border-color: rgba(240,80,70,.7); }
+#touch .on { background: rgba(255,255,255,.3); }
+
+/* phone layout: smaller HUD that clears the touch controls; no keyboard hints */
+body.mobile #keyhint { display: none; }
+body.mobile #hud-top-left, body.mobile #tower { transform: scale(.62); transform-origin: top left; }
+body.mobile #hud-mini { transform: scale(.55); transform-origin: top right; margin-top: 44px; }
+body.mobile #timing { transform: translateX(-50%) scale(.6); transform-origin: top center; bottom: auto; top: 6px; }
+body.mobile #dash { transform: translateX(-50%) scale(.55); transform-origin: bottom center; right: auto; left: 50%; bottom: 6px; }
+body.mobile #pedals { display: none; }
+
+body.mobile #tower { max-height: 62vh; overflow: hidden; }

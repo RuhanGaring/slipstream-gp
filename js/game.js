@@ -25,7 +25,7 @@
   const Game = F1.Game = {
     state: 'boot', race: null, world: null, flow: { kind: 'race', mode: 'arcade', track: 'kestrel', team: 0, driver: 0 },
     settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
-      mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
+      mobile: 'auto', mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
     raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
     champ: null, paused: false, hudOn: true,
   };
@@ -41,6 +41,9 @@
     high: { potato: false, lite: false, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true },
     ultra: { potato: false, lite: false, post: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true },
   };
+  // phones and tablets start on the low preset (a desktop starts on high)
+  const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+  if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'low', tone: 'agx', ev: 0 }, GFX_PRESETS.low);
   Game.settings.gfx = Object.assign({ preset: 'high', tone: 'agx', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
   // settings saved before the lite flag existed
   Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato';
@@ -62,6 +65,50 @@
   // ---------- input ----------
   const keys = new Set();
   const inp = { steer: 0, thr: 0, brk: 0 };
+
+  // ---------- touch (mobile mode) ----------
+  // Mobile mode (Settings: AUTO follows a touch screen) puts driving controls over the race:
+  // the left half of the screen is a steering pad (put a thumb down anywhere and slide it
+  // sideways, the further the harder), the right holds brake and throttle pedals, and small
+  // buttons along the top pause, change camera and open DRS. Menus already work by tapping.
+  // Several fingers at once are tracked by pointer id.
+  const touch = { steer: 0, thr: false, brk: false, drs: false, sid: null, x0: 0, pads: new Map() };
+  Game.mobile = () => Game.settings.mobile === 'on' || (Game.settings.mobile !== 'off' && COARSE);
+  const tl = document.createElement('div');
+  tl.id = 'touch';
+  tl.innerHTML = '<div class="t-steer"><div class="t-knob"></div></div>' +
+    '<div class="t-btn t-pause" data-k="Escape">II</div><div class="t-btn t-cam" data-k="KeyC">CAM</div><div class="t-btn t-drs" data-hold="drs">DRS</div>' +
+    '<div class="t-pedal t-brk" data-hold="brk">BRAKE</div><div class="t-pedal t-thr" data-hold="thr">GAS</div>';
+  document.body.appendChild(tl);
+  const knob = tl.querySelector('.t-knob'), steerZone = tl.querySelector('.t-steer');
+  const setKnob = () => { knob.style.transform = 'translateX(' + (touch.steer * 70) + 'px)'; };
+  tl.addEventListener('pointerdown', e => {
+    e.preventDefault(); Audio.init();
+    const el = e.target.closest('[data-k],[data-hold],.t-steer');
+    if (!el) return;
+    if (el.dataset.k) { onKey(el.dataset.k, false); el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 150); return; }
+    if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
+    if (el.dataset.hold) { touch[el.dataset.hold] = true; touch.pads.set(e.pointerId, el); el.classList.add('on'); return; }
+    touch.sid = e.pointerId; touch.x0 = e.clientX; touch.steer = 0; setKnob();
+    knob.style.left = (e.clientX - steerZone.getBoundingClientRect().left - 34) + 'px'; knob.classList.add('on');
+  });
+  tl.addEventListener('pointermove', e => {
+    if (e.pointerId !== touch.sid) return;
+    touch.steer = U.clamp((e.clientX - touch.x0) / Math.max(60, innerWidth * 0.11), -1, 1); setKnob();
+  });
+  const lift = e => {
+    if (e.pointerId === touch.sid) { touch.sid = null; touch.steer = 0; setKnob(); knob.classList.remove('on'); }
+    const el = touch.pads.get(e.pointerId);
+    if (el) { touch[el.dataset.hold] = false; el.classList.remove('on'); touch.pads.delete(e.pointerId); }
+  };
+  tl.addEventListener('pointerup', lift); tl.addEventListener('pointercancel', lift);
+  function showTouch() {
+    const on = Game.mobile() && Game.state === 'race' && !Game.paused;
+    tl.classList.toggle('show', on);
+    document.body.classList.toggle('mobile', Game.mobile());
+    if (!on) { touch.thr = touch.brk = touch.drs = false; touch.sid = null; touch.steer = 0; touch.pads.clear(); }
+  }
+  Game.showTouch = showTouch;
   window.addEventListener('keydown', e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
     if (e.repeat && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) return;
@@ -269,6 +316,11 @@
     const ms = mouse.on ? mouseSteer(dt) : null;
     if (pad && pad.active) {
       inp.steer = pad.steer; inp.thr = pad.thr; inp.brk = pad.brk;
+    } else if (Game.mobile() && (touch.sid != null || touch.thr || touch.brk || Math.abs(inp.steer) > 0.001 && st === 0 && !mouse.on)) {
+      // the steering pad is analogue: follow it quickly, ease back to centre when let go
+      inp.steer = U.approach(inp.steer, touch.steer, (touch.sid == null ? 7 : 10) * dt);
+      inp.thr = U.approach(inp.thr, touch.thr ? 1 : 0, (touch.thr ? 6 : 12) * dt);
+      inp.brk = U.approach(inp.brk, touch.brk ? 1 : 0, (touch.brk ? 7 : 14) * dt);
     } else {
       const toward = st === 0 ? 7 : (Math.sign(st) !== Math.sign(inp.steer) && inp.steer !== 0 ? 9 : (arcade ? 4.2 : 3.8));
       inp.steer = U.approach(inp.steer, st, toward * dt);
@@ -278,7 +330,7 @@
       if (ms != null && st === 0) inp.steer = ms;
     }
     p.ctl.steer = inp.steer; p.ctl.throttle = inp.thr; p.ctl.brake = inp.brk;
-    p.ctl.drs = keys.has('Space') || (pad && pad.drs) || false;
+    p.ctl.drs = keys.has('Space') || (pad && pad.drs) || touch.drs || false;
   }
 
   // ---------- camera ----------
@@ -1039,6 +1091,7 @@
   }
 
   function tick(dt) {
+    showTouch();
     perf.frames++; perf.t += dt;
     if (perf.t > 1) { perf.fps = perf.frames / perf.t; perf.frames = 0; perf.t = 0; }
     const pad = pollPad();
