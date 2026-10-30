@@ -854,7 +854,7 @@
     FX.parts.length = 0; FX.skidN = 0; FX.skidHead = 0; FX.debris.length = 0;
     evIdx = 0; finishT = -1; acc = 0;
     trace.cur = []; trace.best = null;
-    for (const c of race.cars) c.onShift = c.isPlayer ? () => Audio.shiftClack() : null;
+    for (const c of race.cars) c.onShift = c.isPlayer ? d => Audio.shiftClack(d) : null;
     return race;
   }
 

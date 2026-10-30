@@ -87,7 +87,7 @@
   function setVoice(v, o) {
     if (v.legacy) { legacySet(v.legacy, o.rpm * (o.dop || 1), o.thr); return; }
     const L = v.last;
-    if (Math.abs((L.rpm || 0) - o.rpm) > 15 || Math.abs((L.thr || 0) - o.thr) > 0.02 || Math.abs((L.speed || 0) - o.speed) > 0.5 || L.dop !== o.dop || L.on !== o.on || Math.abs((L.kers || 0) - o.kers) > 0.05 || L.gear !== o.gear) {
+    if (Math.abs((L.rpm || 0) - o.rpm) > 15 || Math.abs((L.thr || 0) - o.thr) > 0.02 || Math.abs((L.speed || 0) - o.speed) > 0.5 || L.dop !== o.dop || L.on !== o.on || Math.abs((L.kers || 0) - o.kers) > 0.05 || Math.abs((L.harv || 0) - (o.harv || 0)) > 0.05 || L.gear !== o.gear || L.view !== o.view || L.shift !== o.shift) {
       v.node.port.postMessage(o); Object.assign(L, o);
     }
   }
@@ -171,8 +171,14 @@
   }
   function light(n) { blip(n === 5 ? 520 : 440, 0.16, 'square', 0.05); }
   function go() { blip(880, 0.35, 'square', 0.06); }
-  // a seamless-shift gearbox: a dull clunk through the chassis and a short ignition cut
-  function shiftClack() { blip(95, 0.06, 'sine', 0.16, 0.6); noiseBurst(0.035, 2200, 1.8, 0.05); R.shiftT = 0.03; }
+  // a seamless-shift gearbox: the engine voice makes the ignition cut (up) or the rev-matching
+  // blip (down); here only the dog rings engaging, a dull clunk through the chassis and the
+  // driver's seat (louder on board)
+  function shiftClack(dir) {
+    R.shiftN = (R.shiftN || 0) + 1; R.shiftDir = dir || 1;
+    const k = R.onboard ? 1 : 0.45;
+    blip(dir < 0 ? 120 : 95, 0.05, 'sine', 0.14 * k, 0.6); noiseBurst(0.025, 2600, 2, 0.045 * k);
+  }
   function chime(ok) { blip(ok ? 988 : 523, 0.12, 'sine', 0.08); setTimeout(() => blip(ok ? 1319 : 392, 0.18, 'sine', 0.07), 90); }
 
   // ---------- the race layer ----------
@@ -204,6 +210,9 @@
         scrub: loop({ f: [['bandpass', 700, 1.2]] }),
         judder: loop({ brown: true, f: [['lowpass', 180, 1]] }),
         road: loop({ brown: true, f: [['lowpass', 300, 0.7]] }),
+        // tyre on asphalt: the tread and the road texture (a band around 1 kHz) and the hum of the carcass
+        tread: loop({ f: [['bandpass', 900, 0.8], ['lowpass', 2600, 0.7]] }),
+        hum: loop({ brown: true, f: [['bandpass', 95, 1.4]] }),
         wind: loop({ f: [['lowpass', 700, 0.5]] }),
         buffet: loop({ brown: true, f: [['bandpass', 120, 0.8]] }),
         gravel: loop({ f: [['bandpass', 1600, 0.9]] }),
@@ -214,6 +223,10 @@
         spray: loop({ f: [['bandpass', 1100, 0.6]] }),
         crowd: loop({ brown: false, f: [['bandpass', 600, 0.4], ['lowpass', 1400, 0.6]], verb: 0.8 }),
       };
+      // each turn of the wheels thumps a little through the rumble (a tyre is never perfectly round)
+      const ctx = A.ctx, lfo = ctx.createOscillator(), dep = ctx.createGain();
+      lfo.frequency.value = 1; dep.gain.value = 0; lfo.connect(dep); dep.connect(R.loops.hum.g.gain); lfo.start();
+      R.wheelLfo = { lfo, dep };
     });
   }
 
@@ -227,6 +240,7 @@
       for (const k in R.loops) { const l = R.loops[k]; l.g.gain.setTargetAtTime(0, t, 0.05); setTimeout(() => { try { l.s.stop(); l.g.disconnect(); } catch (x) { /* ignore */ } }, 300); }
       R.loops = null;
     }
+    if (R.wheelLfo) { try { R.wheelLfo.lfo.stop(); R.wheelLfo.dep.disconnect(); } catch (x) { /* ignore */ } R.wheelLfo = null; }
     R.failed = false;
   }
 
@@ -250,14 +264,17 @@
     // pit limiter: the ignition cuts in and out against the speed limit
     let on = 1;
     if (p.limiter && p.u > p.limitSpeed - 1) { R.limT += dt; on = Math.sin(R.limT * 2 * Math.PI * 9) > -0.2 ? 1 : 0.15; }
-    if (R.shiftT > 0) { R.shiftT -= dt; on = Math.min(on, 0.35); }
+    R.onboard = onboard;
     // --- the player's engine ---
-    setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: 1, kers: (p.deploy || 0) + 0.6 * (p.harvest || 0), on: dead ? 0.05 : on, gain: 1 });
+    // view: 1 on board (the airbox, MGU-K, gears and seat close), 0 outside (the exhaust leads);
+    // the T-cam sits on the airbox, between the two
+    const view = mode === 'tcam' ? 0.7 : onboard ? 1 : 0;
+    const harv = (p.harvest || 0) * Math.min(1, v / 30);
+    setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: 1, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
     const engLvl = onboard ? 0.95 : mode === 'far' ? 0.7 : 0.82;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
-    // on board: the airbox above the driver's head is close and bright; outside: the exhaust
-    R.engine.eq.gain.setTargetAtTime(onboard ? 4 : -2, t, 0.2);
-    R.engine.lp.frequency.setTargetAtTime(onboard ? 9000 : 14000, t, 0.2);
+    R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
+    R.engine.lp.frequency.setTargetAtTime(onboard ? 11000 : 15000, t, 0.2);
     // --- tyres ---
     const W = p.wheels || [];
     const lock = W.reduce((a, w) => Math.max(a, w.lock || 0), 0), spin = W.reduce((a, w) => Math.max(a, w.spin || 0), 0);
@@ -272,6 +289,24 @@
     const SURF = F1.SURF, gravel = (p.surfMask & (1 << SURF.GRAVEL)) ? 1 : 0, grass = (p.surfMask & (1 << SURF.GRASS)) ? 1 : 0;
     at(L.road.g.gain, Math.min(0.22, v / 380) * (onboard ? 1.3 : 0.7), 0.1);
     at(L.road.f[0].frequency, 120 + v * 3.2, 0.1);
+    // rolling: tread noise grows a little faster than speed and brightens with it; on board the
+    // tyres are an arm's length from the helmet
+    const roll = tarmac ? Math.min(1, Math.pow(v / 85, 1.3)) * (1 - 0.5 * wet) : 0;
+    at(L.tread.g.gain, roll * (onboard ? 0.075 : 0.035), 0.08);
+    at(L.tread.f[0].frequency, 600 + v * 6, 0.1);
+    at(L.hum.g.gain, Math.min(0.14, v / 500) * (onboard ? 1.4 : 0.6), 0.1);
+    if (R.wheelLfo) { at(R.wheelLfo.lfo.frequency, Math.max(0.5, v / 2.262), 0.05); at(R.wheelLfo.dep.gain, Math.min(0.05, v / 1600) * (onboard ? 1 : 0.4), 0.1); }
+    // seams and patches in the asphalt: a tick and a thud through the stiff suspension now and then
+    if (tarmac && v > 12) {
+      R.seamT = (R.seamT == null ? 1 : R.seamT) - dt;
+      if (R.seamT <= 0) {
+        R.seamT = (18 + Math.random() * 60) / v;
+        const k = Math.min(1, v / 70) * (onboard ? 1 : 0.35);
+        blip(85 + Math.random() * 40, 0.045, 'sine', 0.07 * k, 0.6); noiseBurst(0.018, 1400 + Math.random() * 900, 1.2, 0.025 * k);
+      }
+    }
+    // the DRS flap opening and closing: a pneumatic clack behind the driver
+    if (p.drsOpen !== R.drs) { if (R.drs != null && v > 20) { noiseBurst(0.04, 1900, 1.5, (onboard ? 0.09 : 0.05)); blip(160, 0.05, 'triangle', onboard ? 0.06 : 0.03, 0.7); } R.drs = p.drsOpen; }
     at(L.gravel.g.gain, gravel * Math.min(0.45, v / 60) * (0.6 + 0.4 * Math.random()), 0.03);
     at(L.grass.g.gain, grass * Math.min(0.3, v / 80), 0.05);
     // kerbs: a thump each time a tyre crosses a kerb block (about 1 m apart)
