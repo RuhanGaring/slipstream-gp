@@ -199,7 +199,7 @@
       // lifted to a used circuit's mid grey and worn in by F1.R3S.wear.asphalt
       MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 3.5, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
       MATS.pitlane = macro(pbr('pitlane', 9 / 3, { color: '#dedede' }), 50, 0.07);
-      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#f4ecdf' }), 45, 0.12);
+      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#f4ecdf' }), 45, 0.2);
     } else {
       MATS.asphalt = std({ map: T.asphalt(), roughness: 0.88 });
       MATS.pitlane = std({ map: T.asphalt(), color: '#e3e3e6', roughness: 0.82 });
@@ -536,7 +536,7 @@
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
       const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
-      state.exposure = { kestrel: 1.0, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
+      state.exposure = { kestrel: 1.0, bahia: 1.14, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
@@ -814,8 +814,16 @@
           const acc = t === SURF.GRAVEL ? gr : t === SURF.TARMAC ? ta : ve;
           if (t === SURF.GRASS && style === 'park') continue;
           for (const [i0, i1] of runs(N, k => tr.runT[side][k] === t)) {
-            const fa = k => (sg < 0 ? -(hw + tr.runW[side][k]) : hw - 0.3);
-            const fb = k => (sg < 0 ? -hw + 0.3 : hw + tr.runW[side][k]);
+            // a gravel trap's outer edge is raked by hand, not cut by a ruler: it wanders by half
+            // a metre and the trap rounds off at its ends instead of stopping square
+            const gw = k => {
+              const w = tr.runW[side][k];
+              if (t !== SURF.GRAVEL) return w;
+              const e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds, h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
+              return w * (0.3 + 0.7 * U.smooth(Math.min(1, e / 14))) + (Math.sin(k * 0.9 + side) * 0.35 + (h - Math.floor(h) - 0.5) * 0.5) * Math.min(1, e / 6);
+            };
+            const fa = k => (sg < 0 ? -(hw + gw(k)) : hw - 0.3);
+            const fb = k => (sg < 0 ? -hw + 0.3 : hw + gw(k));
             ribbon(acc, tr, i0, i1, fa, fb, t === SURF.GRAVEL ? -0.035 : -0.02, 10);
           }
         }

@@ -349,7 +349,7 @@
         };
         for (let i = 0; i < tr.N; i += Math.max(1, Math.round(5 / tr.ds))) for (let side = 0; side < 2; side++) {
           const sg = side ? 1 : -1, b0 = tr.barr[side][i];
-          for (let o = 0; o < 120; o += 4 + rnd() * 3) {
+          for (let o = 0; o < 95; o += 5 + rnd() * 3) {
             const x0 = tr.x[i] + tr.nx[i] * sg * (b0 + 12 + o), y0 = tr.y[i] + tr.ny[i] * sg * (b0 + 12 + o);
             const x = x0 + (rnd() - 0.5) * 5, y = y0 + (rnd() - 0.5) * 5;
             // clearings and a ragged forest edge: the wall starts 12 to 40 m back
@@ -359,7 +359,7 @@
             if (taken.has(k)) continue;
             if (!clearance(tr, x, y, 12, W)) continue;
             taken.add(k);
-            addDecor(W, { type: 'tree', x, y, r: 2.4 + Math.pow(rnd(), 0.8) * 6, c: th.tree[Math.floor(rnd() * th.tree.length)] });
+            addDecor(W, { type: 'tree', x, y, r: 2.4 + Math.pow(rnd(), 0.8) * 6, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: o > 30 });
           }
         }
       }

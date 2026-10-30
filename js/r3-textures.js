@@ -96,17 +96,29 @@
     const t = tex(c); return t;
   });
   T.crowd = () => get('crowd', () => {
-    const c = cv(512, 256), g = c.getContext('2d'), r = U.rng(17);
-    g.fillStyle = '#5c6169'; g.fillRect(0, 0, 512, 256);
-    const cols = ['#e64545', '#2f6fd6', '#f2c230', '#f4f4f4', '#222', '#2c9c62', '#e07a1f', '#b84ad6', '#f0d6b8', '#8a5a3c'];
-    for (let y = 4; y < 256; y += 16) {
-      g.fillStyle = '#4a4f57'; g.fillRect(0, y + 10, 512, 6);
-      for (let x = 2; x < 512; x += 7) {
-        if (r() < 0.12) continue;
-        g.fillStyle = cols[Math.floor(r() * cols.length)];
-        g.fillRect(x, y + 2 + r() * 2, 5, 7);
-        g.fillStyle = r() < 0.5 ? '#f0d6b8' : '#8a5a3c';
-        g.fillRect(x + 1, y, 3, 3);
+    // spectators on stepped seating: each row a band of people (shoulders and a head) over
+    // the seat backs, in the muted clothing of a real crowd with the odd team colour, and gaps
+    // where seats are empty. Shaded under each row so the steps read.
+    const c = cv(1024, 512), g = c.getContext('2d'), r = U.rng(17);
+    g.fillStyle = '#3c4148'; g.fillRect(0, 0, 1024, 512);
+    const cloth = ['#2a2d33', '#3a4250', '#f0f0ee', '#d9d6cf', '#1d2a44', '#5d6670', '#7a1e1e', '#c23a2c', '#e8c547', '#2b5fa8', '#ff7a1a', '#4a6b3a', '#8c8f94', '#151719'];
+    const skin = ['#e3bf9e', '#c99a73', '#a5714c', '#7a4f33', '#f0d0b4'];
+    for (let y = 0; y < 512; y += 24) {
+      g.fillStyle = '#596370'; g.fillRect(0, y + 17, 1024, 4); // seat backs
+      g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, y + 21, 1024, 3); // the step's shadow
+      let x = r() * 4;
+      while (x < 1024) {
+        const w = 8 + r() * 4;
+        if (r() > 0.16) {
+          const cx = x + w / 2, top = y + 3 + r() * 3;
+          g.fillStyle = cloth[Math.floor(r() * cloth.length)];
+          g.beginPath(); g.ellipse(cx, top + 11, w * 0.5, 7, 0, Math.PI, 0); g.fill();
+          g.fillRect(cx - w * 0.5, top + 11, w, 6);
+          g.fillStyle = skin[Math.floor(r() * skin.length)];
+          g.beginPath(); g.arc(cx, top + 3, 2.6 + r() * 0.6, 0, 6.283); g.fill();
+          if (r() < 0.3) { g.fillStyle = r() < 0.5 ? '#1b1b1d' : cloth[Math.floor(r() * cloth.length)]; g.fillRect(cx - 3, top - 0.5, 6, 2.2); } // caps
+        }
+        x += w + r() * 2;
       }
     }
     return tex(c);

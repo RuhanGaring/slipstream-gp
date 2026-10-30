@@ -267,7 +267,7 @@
     '  c += texture2D(tBloom, vUv).rgb * uBloom;',
     '  c += texture2D(tShaft, vUv).rgb * uShaftCol * uShaft;',
     '  c *= uExposure;',
-    '  if (uLens > 0.5) c *= mix(1.0, smoothstep(0.95, 0.2, length(d * vec2(1.0, 0.8))), 0.45);', // optical vignetting
+    '  if (uLens > 0.5) c *= mix(1.0, smoothstep(1.0, 0.3, length(d * vec2(1.0, 0.8))), 0.18);', // optical vignetting
     '  c = uTone == 1 ? aces(c) : agx(c);',
     '  c = toSRGB(c);',
     // grain doubles as dither, which also hides 8-bit banding in skies and fog

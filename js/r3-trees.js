@@ -128,11 +128,11 @@
     const rnd = U.rng(91), tiles = new Map();
     for (const it of items) {
       const sp = names[Math.floor(rnd() * names.length)];
-      const key = sp + '|' + Math.floor(it.x / 450) + ',' + Math.floor(it.y / 450);
-      let t = tiles.get(key); if (!t) tiles.set(key, t = { sp, list: [] });
+      const key = sp + '|' + Math.floor(it.x / 450) + ',' + Math.floor(it.y / 450) + (it.deep ? 'd' : '');
+      let t = tiles.get(key); if (!t) tiles.set(key, t = { sp, list: [], deep: !!it.deep });
       t.list.push(it);
     }
-    for (const { sp, list } of tiles.values()) {
+    for (const { sp, list, deep } of tiles.values()) {
       // shuffled, so a thinned tile (scenery setting) keeps a random share spread over it
       for (let k = list.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [list[k], list[j]] = [list[j], list[k]]; }
       const S = getSpecies(sp), n = list.length;
@@ -152,7 +152,8 @@
       g.boundingSphere = new THREE.Sphere(new THREE.Vector3((x0 + x1) / 2, cy + hMax / 2, (z0 + z1) / 2), Math.hypot(x1 - x0, z1 - z0) / 2 + hMax * 1.5 + 60);
       const mesh = new THREE.Mesh(g, S.lit);
       mesh.customDepthMaterial = S.depth;
-      mesh.castShadow = true; mesh.receiveShadow = false;
+      // inside a forest the trees behind the first rows shade only each other, out of sight
+      mesh.castShadow = !deep; mesh.receiveShadow = false;
       mesh.userData.dens = n;
       root.add(mesh);
     }
