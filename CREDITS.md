@@ -35,3 +35,5 @@ The teams, drivers and circuits in the game are fictional.
 - three.js r158 (MIT), vendored in `js/vendor/`.
 
 Titillium Web is licensed under the SIL Open Font License 1.1 (Accademia di Belle Arti di Urbino), bundled in assets/fonts for offline play.
+
+- Driver suit and glove cloth relief: ambientCG Fabric066, Fabric061, Leather039 (CC0), https://ambientcg.com

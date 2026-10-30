@@ -1129,6 +1129,14 @@
   let _fab = null;
   function fabricTexture() {
     if (_fab) return _fab;
+    // scanned cloth (js/assets/fabric.js, CC0) when it is there; the drawn relief below otherwise
+    if (F1.Assets && F1.Assets.fabric) {
+      const img = new Image(), t = new THREE.Texture(img);
+      img.onload = () => { t.needsUpdate = true; };
+      img.src = F1.Assets.fabric;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 8;
+      return (_fab = t);
+    }
     const N = 1024, c = document.createElement('canvas'); c.width = c.height = N;
     const g = c.getContext('2d'), img = g.createImageData(N, N), d = img.data;
     const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -1206,7 +1214,7 @@
           '#include <normal_fragment_maps>',
           // bump relief from the cloth height (Mikkelsen's screen-space method)
           '  {',
-          '    float aHs = aH * mix(0.0008, 0.0005, aSu);',
+          '    float aHs = aH * mix(0.00055, 0.0005, aSu);',
           '    vec3 sX = dFdx(-vViewPosition), sY = dFdy(-vViewPosition);',
           '    float dHx = dFdx(aHs), dHy = dFdy(aHs);',
           '    vec3 R1 = cross(sY, normal), R2 = cross(normal, sX);',
