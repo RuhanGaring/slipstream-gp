@@ -9,7 +9,7 @@
 
   // Per-venue light: sun position (degrees), sky gradient, fog, horizon backdrop.
   const LOOKS = {
-    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, skyK: 1.8, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
+    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, skyK: 1.8, lawnDesat: 0.42, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
       ridge: ['#7f9076', '#5f7356', '#4b5f45'], ridgeH: 90, jag: 5 },
     varenna: { sunEl: 21, sunAz: 235, sun: '#ffcf96', sunI: 3.2, top: '#3f78c0', hor: '#f1d4ab', bot: '#8d8a6a', fog: '#e3d2b6', fogN: 500, fogF: 4800, cloud: 0.32, haze: 1.2, exp: 0.95, env: 0.85,
       ridge: ['#a7a58e', '#7d8768', '#5f6d4c'], ridgeH: 110, jag: 7 },
@@ -535,7 +535,7 @@
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
       const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
-      state.exposure = { kestrel: 1.15, bahia: 1.22, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
+      state.exposure = { kestrel: 1.06, bahia: 1.22, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
@@ -647,7 +647,7 @@
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
-    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 4.5, 0.06); }
+    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 5, 0); }
     scene.add(built.root);
     applyLook(Tracks.lookOf(tr));
     backdropFor(Tracks.lookOf(tr), built.root);
