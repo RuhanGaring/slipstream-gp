@@ -9,7 +9,7 @@
 
   // Per-venue light: sun position (degrees), sky gradient, fog, horizon backdrop.
   const LOOKS = {
-    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 4200, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
+    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 4200, skyK: 1.8, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
       ridge: ['#7f9076', '#5f7356', '#4b5f45'], ridgeH: 90, jag: 5 },
     varenna: { sunEl: 21, sunAz: 235, sun: '#ffcf96', sunI: 3.2, top: '#3f78c0', hor: '#f1d4ab', bot: '#8d8a6a', fog: '#e3d2b6', fogN: 500, fogF: 4800, cloud: 0.32, haze: 1.2, exp: 0.95, env: 0.85,
       ridge: ['#a7a58e', '#7d8768', '#5f6d4c'], ridgeH: 110, jag: 7 },
@@ -24,7 +24,7 @@
       ridge: ['#8fa3b0', '#73889a', '#5d7385'], ridgeH: 70, jag: 3 },
     sierra: { sunEl: 18, sunAz: 220, sun: '#ffd9a8', sunI: 3.2, top: '#3c6fb8', hor: '#e8d8bf', bot: '#9c8a68', fog: '#dcd2c0', fogN: 500, fogF: 5600, cloud: 0.1, haze: 1.0, exp: 0.95, env: 0.9,
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
-    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 4400, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
+    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
     nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.62, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
@@ -599,7 +599,7 @@
     const L = state.look;
     if (state.hdr) { // lighting already comes from the HDR probe: the photo is only the backdrop
       scene.background = tex;
-      scene.backgroundIntensity = state.hdr.bg;
+      scene.backgroundIntensity = state.hdr.bg * (L.skyK || 1); // skyK: lifts a probe photographed under heavy cloud
       skyMesh.visible = false;
       return;
     }
@@ -681,7 +681,7 @@
       let gm;
       if (T.has('grass')) {
         const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);
-        gm = macro(pbr(key, rep, { color: style === 'modern' ? '#f3dcc0' : '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.22 : 0.14, 0.1, style === 'park');
+        gm = macro(pbr(key, rep, { color: style === 'modern' ? '#f3dcc0' : '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
       } else gm = std({ map: style === 'park' ? T.grass(th.grassA, th.grassB) : T.ground(th.ground, th.groundN), roughness: 0.97 });
       gm.userData.wetK = [0.55, 0.25];
       MATS['ground_' + style] = gm;
@@ -827,7 +827,7 @@
       }
       add(gr.geo(), M.gravel);
       { const tm = std({ map: T.runoff(th.runoff), roughness: 0.85 }); tm.userData.wetK = [1, 1]; add(ta.geo(), tm); }
-      add(ve.geo(), T.has('grass') ? macro(pbr('grass', 10 / 3.2), 140, 0.22, 0.1, true) : std({ map: T.grass(th.grassA, th.grassB), roughness: 0.97 }));
+      add(ve.geo(), T.has('grass') ? macro(pbr('grass', 10 / 3.2), 140, 0.1, 0.1, true) : std({ map: T.grass(th.grassA, th.grassB), roughness: 0.97 }));
     }
 
     // asphalt, rubber line, pit lane
@@ -931,7 +931,7 @@
 
     // barriers
     {
-      const conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), posts = new Batch(false);
+      const conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
       const pit = tr.pit, ps = pit.side > 0 ? 1 : 0;
       const gz0 = (pit.boxS[9] - 16 + tr.L) % tr.L, gz1 = (pit.boxS[0] + 16) % tr.L;
       const garageZone = k => !isNaN(pit.off[k]) && Tracks.inRange(tr, k * tr.ds, gz0, gz1);
@@ -954,6 +954,14 @@
             wallRun(arm, tr, i0, i1, d, 0.42, 0.95, 4, 0.53, 0);
             for (let i = i0; i <= i1; i += 2) { const k = mod(i, N), dd = d(k) + sg * 0.12; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 0.45, tr.y[k] + tr.ny[k] * dd, 0, 1, 0.95, 1)); }
           }
+          // sponsor hoardings standing just behind the armco, in runs of a hundred metres or so
+          // with gaps (marshal access, gravel traps keep their catch fence instead)
+          const boardOn = k => { const c = Math.floor(k * tr.ds / 120); return ((c * 7 + side * 3 + (tr.def.seed || 1)) % 5) < 3; };
+          for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] !== SURF.GRAVEL && boardOn(k))) {
+            if (i1 - i0 < 6) continue;
+            wallRun(hoard, tr, i0, i1, k => d(k) + sg * 0.9, 0.12, 1.12, 9, 1.12, 0.05);
+            for (let i = i0; i <= i1; i += 4) { const k = mod(i, N), dd = d(k) + sg * 0.98; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 0.55, tr.y[k] + tr.ny[k] * dd, 0, 0.7, 1.1, 0.7)); }
+          }
           // catch fence behind gravel traps
           for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] === SURF.GRAVEL)) {
             wallRun(fen, tr, i0, i1, k => d(k) + sg * 1.4, 0, fenceH, 1.6, 1.6, 0);
@@ -969,7 +977,7 @@
         wallRun(ad, tr, i0, i1 - 1, d, -0.07, 1.1, 14, 1.12, 0.6);
         wallRun(fen, tr, i0, i1 - 1, k => d(k) + pit.side * 0.3, 1.1, 3.6, 1.6, 1.6, 0);
       }
-      add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true });
+      add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
       add(fen.geo(), M.fence, { cast: false });
       add(posts.geo(), M.steel, { cast: true });

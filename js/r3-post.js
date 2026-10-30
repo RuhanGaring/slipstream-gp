@@ -65,7 +65,10 @@
     '  vec3 dy1 = viewPos(vUv + vec2(0.0, uTexel.y)) - p, dy2 = p - viewPos(vUv - vec2(0.0, uTexel.y));',
     '  vec3 n = normalize(cross(dot(dx1, dx1) < dot(dx2, dx2) ? dx1 : dx2, dot(dy1, dy1) < dot(dy2, dy2) ? dy1 : dy2));',
     '  if (dot(n, p) > 0.0) n = -n;',
-    '  float rad = uRadius * uProj.y / w * 0.5;', // world radius projected to uv
+    // inside the cockpit a 1.5 m radius spans the whole tub and blacks it out: the radius shrinks
+    // with distance under a couple of metres, so close surfaces keep only their own creases
+    '  float R = min(uRadius, max(0.1, w * 0.22));',
+    '  float rad = R * uProj.y / w * 0.5;', // world radius projected to uv
     '  float a0 = ign(gl_FragCoord.xy) * 6.2831853, sum = 0.0;',
     '  for (int i = 0; i < 16; i++) {',
     '    if (i >= uSamples) break;',
@@ -74,11 +77,12 @@
     '    vec2 off = vec2(cos(a), sin(a)) * rad * sqrt(t);',
     '    vec3 v = viewPos(vUv + off) - p;',
     '    float vv = dot(v, v);',
-    '    float fall = 1.0 - smoothstep(uRadius * uRadius * 0.5, uRadius * uRadius * 2.0, vv);',
+    '    float fall = 1.0 - smoothstep(R * R * 0.5, R * R * 2.0, vv);',
     '    sum += max(0.0, dot(v, n) - 0.02 * w * 0.01) / (vv + 0.01) * fall;',
     '  }',
     '  float ao = uSamples > 0 ? max(0.0, 1.0 - 3.6 * sum / float(uSamples)) : 1.0;', // strong enough that the shade under a car reads as a contact shadow
     '  ao *= ao;',
+    '  ao = mix(1.0, ao, smoothstep(0.3, 2.5, w) * 0.5 + 0.5);',
     // the cars' sky occlusion, on surfaces that face up, kept in its own channel (g) so it is
     // not limited like the screen-space term: deep under a floor in the shade only a little
     // bounce light gets in

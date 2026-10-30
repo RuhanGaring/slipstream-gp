@@ -108,6 +108,11 @@
     // wear beside the track: patchy, toward bare soil
     '  float wr = site.g * smoothstep(0.4, 0.75, tfF(w / 1.3 + 4.4));',
     '  c *= mix(vec3(1.0), vec3(0.98, 0.86, 0.64), wr * 0.45);',
+    // the worn strip at the edge of the track: wheels running wide and the mower turning there
+    // leave a ragged band, under a metre to two wide, of thin tired grass over sandy soil
+    '  float sdE = site.b * 255.0;',
+    '  float ew = (1.0 - smoothstep(0.1, 0.8 + 1.2 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
+    '  c *= mix(vec3(1.0), vec3(1.03, 0.86, 0.6), ew * 0.6);',
     '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
     // mowing stripes: the mower runs alongside the track, so the bands lie at constant distances
     // from its edge (site.b, metres from the tarmac, 255 = far away), 4 m wide; light along the

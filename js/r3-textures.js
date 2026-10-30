@@ -193,12 +193,12 @@
         const n = 9000 + layer * 3000, rad = 1.1 + layer * 0.55;
         for (let k = 0; k < n; k++) {
           const x = r() * 2048, y = top - 20 + r() * (256 - top + 20), q = r();
-          lg.fillStyle = q < 0.5 ? 'rgba(10,22,12,' + (0.12 + layer * 0.06) + ')' : 'rgba(225,235,200,' + (0.05 + layer * 0.03) + ')';
+          lg.fillStyle = q < 0.5 ? 'rgba(10,22,12,' + (0.05 + layer * 0.025) + ')' : 'rgba(225,235,200,' + (0.025 + layer * 0.012) + ')';
           lg.beginPath(); lg.ellipse(x, y, rad * (0.8 + r()), rad * (0.6 + r() * 0.6), 0, 0, 6.283); lg.fill();
         }
         for (let k = 0; k < 10 + layer * 4; k++) {
           const x = r() * 2048, y = top + 40 + r() * 120, w = 20 + r() * 70, h = 4 + r() * 10;
-          lg.fillStyle = 'rgba(190,200,140,' + (0.12 + r() * 0.12) + ')';
+          lg.fillStyle = 'rgba(190,200,140,' + (0.05 + r() * 0.06) + ')';
           lg.beginPath(); lg.ellipse(x, y, w, h, (r() - 0.5) * 0.3, 0, 6.283); lg.fill();
         }
         lg.globalCompositeOperation = 'source-over';

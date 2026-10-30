@@ -68,7 +68,7 @@
     return (_blades = t);
   }
 
-  // A clump of blades. Each is 5 to 8 mm wide at the root, narrowing to a point, 3 to 5.5 cm
+  // A clump of blades. Each is 5 to 8 mm wide at the root, narrowing to a point, 2.6 to 4.4 cm
   // tall (circuit turf is mown short), curving away from its facing by up to half its height. The
   // normals are rounded across the width (a blade has a midrib and curls slightly), so it
   // shades like a leaf rather than a flat card. bt is the height along the blade, 0 root to 1 tip.
@@ -76,7 +76,7 @@
     const r = U.rng(77), pos = [], nor = [], bt = [], bi = [], idx = [];
     for (let b = 0; b < NBLADES; b++) {
       const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * NCELL * 0.55, ox = Math.cos(r() * 6.283) * rr, oz = Math.sin(r() * 6.283) * rr;
-      const w = 0.005 + r() * 0.003, h = 0.03 + Math.pow(r(), 1.3) * 0.025, k = 0.08 + r() * 0.3;
+      const w = 0.005 + r() * 0.003, h = 0.026 + Math.pow(r(), 1.3) * 0.018, k = 0.08 + r() * 0.3;
       const sx = Math.cos(a), sz = Math.sin(a), lx = -sz, lz = sx; // across the blade, and the way it bends
       const base = pos.length / 3;
       for (let i = 0; i <= nseg; i++) {
@@ -520,7 +520,7 @@
         // the ground's own colour and variation, darker toward the root where the sward shades
         // itself, the tip a touch paler and yellower where it has been cut
         '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);',
-        '  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));',
+        '  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.04, 1.03, 0.92), smoothstep(0.75, 1.0, vBT));',
         // rough grass is coarser and more olive, going to seed at the top; clover a deeper, bluer green
         '  diffuseColor.rgb *= mix(vec3(1.0), mix(vec3(1.02, 1.0, 0.84), vec3(1.18, 1.08, 0.72), smoothstep(0.6, 1.0, vBT)), max(vGType, 0.0)) * mix(vec3(1.0), vec3(0.82, 0.96, 0.92), max(-vGType, 0.0));',
         // a flower: white daisy or yellow buttercup, chosen per clump
@@ -531,10 +531,10 @@
         '#include <lights_fragment_end>',
         // light through the leaf: looking toward the sun, thin blades glow, less near the root
         // and not at all in shadow
-        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
+        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.25 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
         // the waxy cuticle: a broad, pale sheen looking toward the sun at a low angle
         '  { vec3 gv = normalize(vGView); float gs = pow(clamp(dot(gv, uSunDir), 0.0, 1.0), 2.0) * pow(1.0 - clamp(-gv.y, 0.0, 1.0), 3.0);',
-        '    reflectedLight.directSpecular = reflectedLight.directSpecular * 0.5 + uSunCol * r3SunVis * 0.05 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
+        '    reflectedLight.directSpecular = reflectedLight.directSpecular * (0.06 + 0.5 * diffuseColor.rgb) + uSunCol * r3SunVis * 0.05 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
   }
 
   F1.R3Grass = { build, update, patchShader, setQuality, surfaceMask };
