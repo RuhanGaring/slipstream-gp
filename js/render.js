@@ -337,6 +337,21 @@
           addDecor(W, th.palms ? { type: 'palm', x, y, r: 4 + rnd() * 2, a: rnd() * 6 } : { type: 'tree', x, y, r: 3.5 + rnd() * 4, c: th.tree[Math.floor(rnd() * th.tree.length)] });
         }
       }
+      // a treeline round the edge of the venue, a few rows deep, so the ground plane never
+      // runs out flat to the horizon behind the last trackside clumps
+      if (!th.palms) {
+        const B = W.bounds, per = [[B.x0, B.y0, B.x1, B.y0], [B.x1, B.y0, B.x1, B.y1], [B.x1, B.y1, B.x0, B.y1], [B.x0, B.y1, B.x0, B.y0]];
+        for (const [ax, ay, bx, by] of per) {
+          const L = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / L, uy = (by - ay) / L, ix = -uy, iy = ux; // inward normal (bounds wind clockwise on screen)
+          for (let s = 0; s < L; s += 5 + rnd() * 4) for (let row = 0; row < 4; row++) {
+            if (rnd() < 0.25) continue;
+            const o = row * 9 + rnd() * 8 - 20, x = ax + ux * s + ix * o, y = ay + uy * s + iy * o;
+            if (W.water && y < W.water.y + 4) continue;
+            if (!clearance(tr, x, y, 8, W)) continue;
+            addDecor(W, { type: 'tree', x, y, r: 3.5 + rnd() * 4, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: row > 0 });
+          }
+        }
+      }
       // conifer venues sit in forest, like Spa or the Nurburgring: a closed wall of trees a
       // few tens of metres behind the barriers, broken by clearings, instead of scattered clumps
       if (Tracks.treesOf(tr) === 'fir' && Tracks.lookOf(tr) !== 'sierra') {

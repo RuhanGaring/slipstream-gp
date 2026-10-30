@@ -93,7 +93,7 @@
     '  c *= mix(vec3(1.0), vec3(1.09, 1.06, 0.80), poa);',
     '  c *= mix(vec3(1.0), vec3(0.88, 0.95, 1.03), fes);',
     '  c *= mix(vec3(1.0), vec3(0.96, 1.07, 0.93), clov);',
-    '  c *= mix(vec3(1.0), vec3(0.88, 0.94, 0.91), wet * 0.45);',
+    '  c *= mix(vec3(1.0), vec3(0.95, 0.97, 0.96), wet * 0.35);',
     '  vec3 stress = mix(vec3(1.10, 1.05, 0.76), vec3(1.32, 1.12, 0.62), smoothstep(0.55, 1.0, dry));',
     '  c *= mix(vec3(1.0), stress, smoothstep(0.12, 0.75, dry));',
     // yellow patches: warped cells of about 6 m, only the highest few percent, and only where a
@@ -103,23 +103,23 @@
     '  float ya = smoothstep(0.25, 0.6, tfN(w / 45.0 + 3.7));',
     // the patch is broken up by green growing through it, at a few centimetres
     '  float ybr = smoothstep(0.3, 0.62, tfN(w * 4.3 + 1.1) * 0.6 + tfN(w * 11.0) * 0.4);',
-    '  float yp = smoothstep(0.70, 0.77, yv) * ya * ybr;',
-    '  c *= mix(vec3(1.0), vec3(1.16, 1.0, 0.62), yp * 0.85);',
+    '  float yp = smoothstep(0.66, 0.70, yv) * ya * ybr;',
+    '  c *= mix(vec3(1.0), vec3(1.22, 1.02, 0.56), yp * 0.9);',
     // wear beside the track: patchy, toward bare soil
     '  float wr = site.g * smoothstep(0.4, 0.75, tfF(w / 1.3 + 4.4));',
     '  c *= mix(vec3(1.0), vec3(0.98, 0.86, 0.64), wr * 0.45);',
     // the worn strip at the edge of the track: wheels running wide and the mower turning there
     // leave a ragged band, under a metre to two wide, of thin tired grass over sandy soil
-    '  float sdE = site.b * 255.0;',
+    '  float sdE = site.b * 63.75;',
     '  float ew = (1.0 - smoothstep(0.1, 1.4 + 1.6 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
     '  c *= mix(vec3(1.0), vec3(1.04, 0.86, 0.58), ew * 0.75);',
     '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
     // mowing stripes: the mower runs alongside the track, so the bands lie at constant distances
-    // from its edge (site.b, metres from the tarmac, 255 = far away), 4 m wide; light along the
+    // from its edge (site.b, quarter metres from the tarmac up to 63 m), 4 m wide, fading out past 40 m; light along the
     // lay, dark against it, strongest seen at a low angle
-    '  float sd = site.b * 255.0, sband = smoothstep(-0.25, 0.25, sin(sd * 3.14159 / 4.0)) * 2.0 - 1.0;',
+    '  float sd = site.b * 63.75, sband = smoothstep(-0.25, 0.25, sin(sd * 3.14159 / 4.0)) * 2.0 - 1.0;',
     '  vec2 vd0 = w - eye.xz; float vgl = clamp(length(vd0) / max(abs(eye.y - 0.0) + 1.0, 1.0), 0.0, 6.0);',
-    '  { float sk = sband * step(sd, 240.0) * smoothstep(0.0, 1.2, sd); c *= 1.0 + sk * vec3(0.125, 0.11, 0.06); }',
+    '  { float sk = sband * step(sd, 60.0) * smoothstep(0.0, 1.2, sd) * (1.0 - smoothstep(40.0, 60.0, sd)); c *= 1.0 + sk * vec3(0.125, 0.11, 0.06); }',
     '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',

@@ -808,6 +808,13 @@
     // run-off: gravel traps and tarmac, per side
     {
       const gr = new Acc(), ta = new Acc(), ve = new Acc();
+      // run-off width eased over 12 samples either side (within the same surface), so steps in
+      // the data become curves instead of polygon corners
+      const smoothW = (side, k, t) => {
+        let w = 0, n = 0;
+        for (let q = -12; q <= 12; q++) { const kk = mod(k + q, N); if (tr.runT[side][kk] !== t) continue; const f = 13 - Math.abs(q); w += tr.runW[side][kk] * f; n += f; }
+        return w / n;
+      };
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         for (const t of [SURF.GRAVEL, SURF.TARMAC, SURF.GRASS]) {
@@ -817,7 +824,8 @@
             // a gravel trap's outer edge is raked by hand, not cut by a ruler: it wanders by half
             // a metre and the trap rounds off at its ends instead of stopping square
             const gw = k => {
-              const w = tr.runW[side][k], e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds;
+              const w = smoothW(side, k, t);
+              const e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds;
               const taper = w * (0.3 + 0.7 * U.smooth(Math.min(1, e / 14)));
               if (t !== SURF.GRAVEL) return taper;
               const h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
@@ -843,7 +851,7 @@
           const sg = side ? 1 : -1;
           // (behind the kerb where there is one: the decal must never lie over the paint)
           const kb = side ? tr.kerbR : tr.kerbL;
-          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw + (kb[k] ? tr.kerbW : 0) + 0.04 : hw + tr.runW[side][k];
+          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw + (kb[k] ? tr.kerbW : 0) + 0.04 : hw + smoothW(side, k, tr.runT[side][k]);
           let prev = -1, len = 0, px = 0, pz = 0;
           for (let i = 0; i <= N; i++) {
             const k = mod(i, N), e0 = edge(k), wd = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(k * 0.37 + side * 2.1) * Math.sin(k * 0.071 + 1.3));
@@ -1199,7 +1207,7 @@
       data[k * 4] = Math.round((0.5 + 0.5 * d) * 255);
       const e = hg.edge[k];
       data[k * 4 + 1] = e > -1 && e < 6 ? Math.round((1 - U.smooth(e / 6)) * 255) : 0;
-      data[k * 4 + 2] = Math.round(U.clamp(e, 0, 255)); // metres from the tarmac edge, for the mowing stripes
+      data[k * 4 + 2] = Math.round(U.clamp(e * 4, 0, 255)); // quarter metres from the tarmac edge (to 63 m), for the mowing stripes
       data[k * 4 + 3] = 255;
     }
     const t = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat);
