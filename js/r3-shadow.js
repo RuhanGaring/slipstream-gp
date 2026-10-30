@@ -55,15 +55,18 @@
     }
   }
 
-  function setQuality(level) {
-    const q = Q[level];
-    S.on = !!q;
-    S.q = q || Q.high;
+  // o (advanced graphics): res, dist and soft multiply the level's map sizes, slice reach and
+  // filter radius
+  function setQuality(level, o = {}) {
+    const q0 = Q[level];
+    S.on = !!q0;
+    const base = q0 || Q.high, res = o.res || 1, dist = o.dist || 1, soft = o.soft || 1;
+    S.q = { n: base.n, size: base.size.map(z => Math.max(256, Math.min(8192, Math.round(z * res)))), ends: base.ends.map(e => e * dist) };
     S.lights.forEach((l, i) => {
       l.castShadow = S.on && i < S.q.n;
       const sz = S.q.size[i] || 512;
       if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
-      l.shadow.radius = RADIUS[i];
+      l.shadow.radius = RADIUS[i] * soft;
     });
   }
 

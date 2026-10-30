@@ -44,11 +44,45 @@
     high: { potato: false, rock: false, lite: false, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
     ultra: { potato: false, rock: false, lite: false, post: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
   };
+  // Advanced graphics (Settings > Advanced graphics): every other knob that trades speed for
+  // looks, with each preset's value. A preset sets all of these; touching one makes it CUSTOM.
+  //   dprCap      highest device pixel ratio used (phones are 2 to 3)
+  //   fpsCap      frame rate limit, 0 for none (saves battery and heat on phones)
+  //   aniso       texture filtering at grazing angles
+  //   shadowRes / shadowDist / shadowSoft   multipliers on the shadow maps' size, reach and blur
+  //   aoSamples / aoStrength, bloomK, shaftK, shutter (degrees), grain    post-processing detail
+  //   trees (share drawn), treeDist (m, 0 all), boards, backdrop, grass    scenery
+  //   viewDist    far plane in metres (the fog thickens to meet it)
+  //   carNear / carFar   distances (m) where a car drops to low detail, then to one merged mesh
+  //   carDraw     cars further than this (m) are not drawn, 0 for all
+  //   dispHz      steering-wheel display refresh, 0 for frozen
+  //   particles, skids, debris, rainK    effects budgets
+  //   physLod / physLodDist   distant AI cars step their physics at half rate past this many metres
+  //   catchup     most physics steps run in one frame before the game slows instead (8 = 30 fps)
+  const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
+    trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, viewDist: 14000, carNear: 50, carFar: 300, carDraw: 0, dispHz: 12,
+    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40 };
+  const ADV_P = {
+    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1 },
+    high: {},
+    medium: { aoSamples: 8 },
+    low: { dprCap: 1, aniso: 4, grass: false, trees: 0.6, carNear: 22, carFar: 90, particles: 500, skids: 4500, dispHz: 8 },
+    potato: { dprCap: 1, aniso: 2, grass: false, trees: 0.33, boards: false, viewDist: 3000, carNear: 12, carFar: 40, carDraw: 350, particles: 300, skids: 3000, debris: 20, dispHz: 6, catchup: 8 },
+    rock: { dprCap: 1, aniso: 1, grass: false, trees: 0.12, treeDist: 700, boards: false, backdrop: false, viewDist: 1600, carNear: 2.5, carFar: 9, carDraw: 250, particles: 150, skids: 1500, debris: 10, dispHz: 4, rainK: 0.4, physLod: true, catchup: 8 },
+  };
+  for (const k in GFX_PRESETS) Object.assign(GFX_PRESETS[k], ADV, ADV_P[k]);
+  Game.GFX_ADV = ADV;
   // phones and tablets start on the potato preset (a desktop starts on high); the slowest can go to rock
   const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
   if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'potato', tone: 'agx', ev: 0 }, GFX_PRESETS.potato);
-  // settings saved before the scenery option take the scenery of their preset
-  { const sv = Game.settings.gfx; if (sv && !sv.scenery && GFX_PRESETS[sv.preset]) sv.scenery = GFX_PRESETS[sv.preset].scenery; }
+  // settings saved before an option existed take its value from their preset (a custom setup
+  // from the preset it most resembles), so an old save never ends up with missing values
+  { const sv = Game.settings.gfx;
+    if (sv) {
+      const base = GFX_PRESETS[sv.preset] || (sv.potato ? GFX_PRESETS.potato : sv.lite ? GFX_PRESETS.low : GFX_PRESETS.high);
+      for (const k in base) if (sv[k] === undefined) sv[k] = base[k];
+      if (sv.boot === undefined) sv.boot = sv.preset === 'rock' || sv.preset === 'potato' ? sv.preset : '';
+    } }
   Game.settings.gfx = Object.assign({ preset: 'high', tone: 'agx', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
   // settings saved before the lite flag existed
   Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato' || Game.settings.gfx.preset === 'rock';
@@ -428,17 +462,21 @@
   // ---------- effects ----------
   const FX = { parts: [], skid: new Float32Array(9000 * 5), skidN: 0, skidHead: 0, debris: [] };
   function addSkid(x1, y1, x2, y2, kind) {
+    // the ring holds up to 9000 marks; the skid budget (advanced graphics) uses the first part
+    const cap = Math.min(9000, Game.settings.gfx.skids | 0);
+    if (cap <= 0) return;
+    if (FX.skidHead >= cap) FX.skidHead = 0;
     const k = FX.skidHead * 5;
     FX.skid[k] = x1; FX.skid[k + 1] = y1; FX.skid[k + 2] = x2; FX.skid[k + 3] = y2; FX.skid[k + 4] = kind;
-    FX.skidHead = (FX.skidHead + 1) % 9000; FX.skidN = Math.min(9000, FX.skidN + 1);
+    FX.skidHead = (FX.skidHead + 1) % cap; FX.skidN = Math.min(cap, FX.skidN + 1);
   }
   let fxZ = 0; // ground height for the particles being spawned (the 3D view sits them on the road)
   function puff(x, y, vx, vy, r0, r1, life, col, a) {
-    if (FX.parts.length > 900) return;
+    if (FX.parts.length >= Game.settings.gfx.particles) return;
     FX.parts.push({ x, y, z: fxZ, vx, vy, r0, r1, life, t: 0, col, a, kind: 0 });
   }
   function spark(x, y, vx, vy) {
-    if (FX.parts.length > 900) return;
+    if (FX.parts.length >= Game.settings.gfx.particles) return;
     FX.parts.push({ x, y, z: fxZ, vx, vy, life: 0.22 + Math.random() * 0.2, t: 0, kind: 1 });
   }
   function carEffects(c, dt) {
@@ -483,7 +521,8 @@
     for (let k = 0; k < n; k++) spark(f.x, f.y, (Math.random() - 0.5) * 30 + (f.car ? f.car.vx * 0.6 : 0), (Math.random() - 0.5) * 30 + (f.car ? f.car.vy * 0.6 : 0));
     if (f.power > 9) {
       for (let k = 0; k < 6; k++) FX.debris.push({ x: f.x, y: f.y, z: fxZ, vx: (Math.random() - 0.5) * 16 + (f.car ? f.car.vx * 0.5 : 0), vy: (Math.random() - 0.5) * 16 + (f.car ? f.car.vy * 0.5 : 0), a: Math.random() * 6, s: 0.2 + Math.random() * 0.35, t: 0 });
-      if (FX.debris.length > 200) FX.debris.splice(0, FX.debris.length - 200);
+      const dcap = Game.settings.gfx.debris * 5;
+      if (FX.debris.length > dcap) FX.debris.splice(0, FX.debris.length - dcap);
       puff(f.x, f.y, 0, 0, 1, 6, 1.4, '170,170,170', 0.3);
     }
   }
@@ -809,8 +848,8 @@
 
   function newRace(cfg) {
     const race = Race.create(cfg);
-    // the Rock preset also runs distant AI cars' physics at half rate (see Race.step)
-    race.physLod = !!(Game.settings.gfx && Game.settings.gfx.rock);
+    // distant AI cars' physics at half rate (advanced graphics; on in Rock; see Race.step)
+    race.physLod = !!Game.settings.gfx.physLod; race.physLodDist = Game.settings.gfx.physLodDist;
     buildWorld(race.track);
     FX.parts.length = 0; FX.skidN = 0; FX.skidHead = 0; FX.debris.length = 0;
     evIdx = 0; finishT = -1; acc = 0;
@@ -1243,6 +1282,9 @@
   let perf = { frames: 0, t: 0, fps: 0 };
   let booted = 0;
   function frame(now) {
+    // frame rate limit (advanced graphics): skip display refreshes until the next frame is due
+    const cap = Game.settings.gfx.fpsCap;
+    if (cap && booted >= 3 && now - last < 1000 / cap - 2) { requestAnimationFrame(frame); return; }
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     tick(dt);
@@ -1287,7 +1329,7 @@
       // (that makes the next frame slower still); it runs a little behind real time instead.
       // On the potato and rock presets (phones) a race does the same below 30 fps: catching up
       // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
-      const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.potato ? 8 : 40;
+      const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.catchup || 40;
       while (acc >= DT && n < maxSteps) {
         if (Game.state === 'race') applyInput(race.player, DT, pad);
         snapPoses(race);
@@ -1377,6 +1419,8 @@
     const s = Game.settings;
     Audio.setVolumes({ master: Game.muted ? 0 : s.master, sfx: s.sfx, music: s.music });
     if (R3ok) R3.setQuality(s.gfx);
+    if (Game.race) { Game.race.physLod = !!s.gfx.physLod; Game.race.physLodDist = s.gfx.physLodDist; }
+    if (FX.skidN > s.gfx.skids) { FX.skidN = Math.max(0, s.gfx.skids | 0); FX.skidHead = 0; }
     saveSettings();
   };
   Game.menuMusic = () => Audio.musicStart();

@@ -112,7 +112,7 @@
       v: new THREE.Vector3(c.vx * 0.85 + kick.x + R() * 4, 2.5 + Math.random() * 4 + (isWheel ? 1.5 : 0), c.vy * 0.85 + kick.z + R() * 4),
       w: new THREE.Vector3(R() * 14, R() * 14, R() * 14), r: isWheel ? 0.36 : 0.12,
     });
-    if (debris.length > 40) { const d = debris.shift(); scene.remove(d.o); }
+    while (debris.length > Math.max(0, F1.R3 && F1.R3.GFX.debris != null ? F1.R3.GFX.debris : 40)) { const d = debris.shift(); scene.remove(d.o); }
   }
   const _q = new THREE.Quaternion(), _a = new THREE.Vector3();
   function stepDebris(dt, tr) {

@@ -13,7 +13,7 @@
   const F1 = G.F1;
 
   let R = null, W = 2, H = 2;
-  const Q = { on: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, bloom: true, shafts: true, motion: true, lens: true, tone: 'agx' };
+  const Q = { on: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
   const RT = {};
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quadGeo = new THREE.BufferGeometry();
@@ -330,7 +330,7 @@
       else motionMat.uniforms.tVel.value = black;
       motionMat.uniforms.uInvView.value.copy(camera.matrixWorld);
       motionMat.uniforms.uPrevVP.value.copy(prevVP);
-      motionMat.uniforms.uScale.value = Math.min(1, 0.5 / 60 / view.dt); // a 180 degree shutter
+      motionMat.uniforms.uScale.value = Math.min(1, Q.shutter / 360 / 60 / view.dt); // shutter angle, 180 degrees by default
       motionMat.uniforms.uNear.value = view.motionNear || 9;
       pass(motionMat, RT.motion);
       src = RT.motion.texture;
@@ -394,9 +394,9 @@
     const u = compMat.uniforms;
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0;
-    u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? 0.85 : 0; u.uBloom.value = Q.bloom ? 0.06 : 0;
-    u.uShaft.value = shaftK * 0.45; if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
-    u.uGrain.value = view.dt > 0 ? 1 : 0; // no grain on the frozen frame behind the pause menu
+    u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
+    u.uShaft.value = shaftK * Q.shaftK; if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
+    u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
     u.uLens.value = Q.lens ? 1 : 0; u.uTime.value = performance.now() / 1000; u.uTone.value = Q.tone === 'aces' ? 1 : 0;
     u.uRes.value.set(R.domElement.width, R.domElement.height);
     pass(compMat, null);

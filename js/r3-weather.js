@@ -90,7 +90,7 @@
         have = true; lastCam.copy(cam.position);
         const u = m.uniforms;
         u.uCam.value.copy(cam.position); u.uCamV.value.copy(vel); u.uTime.value = time; u.uAlpha.value = 0.14 + 0.42 * k;
-        g.setDrawRange(0, Math.floor(N * (0.25 + 0.75 * k)) * 2);
+        g.setDrawRange(0, Math.floor(N * (0.25 + 0.75 * k) * Math.min(1, this.density == null ? 1 : this.density)) * 2); // density: advanced graphics
         storm.position.copy(cam.position);
         sm.uniforms.uRain.value = k; sm.uniforms.uTime.value = time; if (fog) sm.uniforms.uFog.value.copy(fog).multiplyScalar(0.8);
       },

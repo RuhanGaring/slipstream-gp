@@ -853,7 +853,7 @@
       let half = false;
       if (race.physLod && race.green && P && c !== P && !c.inPit && !c.brain.pit && !c.finished) {
         const g = Math.abs(c.loc.s - P.loc.s) % L;
-        if (Math.min(g, L - g) > 150) { if ((race.tickN + c.id) & 1) continue; half = true; }
+        if (Math.min(g, L - g) > (race.physLodDist || 150)) { if ((race.tickN + c.id) & 1) continue; half = true; }
       }
       const dt = half ? dt2 : dt1;
       if (c.dm && race.green) {

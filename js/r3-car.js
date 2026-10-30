@@ -1500,7 +1500,9 @@
     if (!ck || !ck.group.visible) return;
     if (car && ck.disp) {
       const now = performance.now();
-      if (now - ck.disp.last > 80) { ck.disp.last = now; drawDisplay(ck.disp, car); }
+      // refresh rate from advanced graphics (each redraw re-uploads the display texture); 0 freezes it
+      const hz = F1.R3 && F1.R3.GFX.dispHz != null ? F1.R3.GFX.dispHz : 12;
+      if ((hz > 0 && now - ck.disp.last > 1000 / hz) || !ck.disp.drawn) { ck.disp.last = now; ck.disp.drawn = true; drawDisplay(ck.disp, car); }
     }
     let a = Math.max(-1.75, Math.min(1.75, -(steer || 0) * STEER_RATIO));
     // From the driver's seat the wheel never sits dead still: the engine and the road come up

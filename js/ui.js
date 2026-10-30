@@ -551,10 +551,55 @@
     return { el, items, back: () => go('driver'), focus: items.length - 1 };
   };
 
+  // ---------- settings draft and APPLY ----------
+  // The settings screens edit a copy of the settings; nothing changes until APPLY (graphics
+  // changes can rebuild shaders, or restart the game for potato and rock, so they go in one
+  // batch). The advanced graphics screen edits the same copy. Leaving with changes not yet
+  // applied asks once, then discards them.
+  let SD = null;
+  const draftOf = () => JSON.parse(JSON.stringify(F1.Game.settings));
+  const draftDirty = () => !!SD && JSON.stringify(SD) !== JSON.stringify(F1.Game.settings);
+  function applyDraft() {
+    const G = F1.Game, gx = SD.gfx;
+    if (gx.boot == null) gx.boot = F1.R3 && F1.R3.bootTier ? F1.R3.bootTier() : '';
+    Object.assign(G.settings.gfx, gx);
+    const { gfx, ...rest } = SD; void gfx;
+    Object.assign(G.settings, rest);
+    G.applySettings();
+    SD = draftOf();
+    if (F1.R3 && F1.R3.bootTier && F1.R3.bootTier() !== (gx.boot || '')) { G.saveSettings(); setTimeout(() => location.reload(), 200); return true; }
+    return false;
+  }
+  // the APPLY button: dimmed with nothing to apply, says what applying will do
+  function applyButton(parent, items, after) {
+    const b = h('div', 'btn apply', '<span>APPLY</span><span class="arrow">&#10003;</span>');
+    parent.appendChild(b);
+    let warned = false;
+    const label = b.querySelector('span');
+    const update = () => {
+      const d = draftDirty();
+      b.classList.toggle('dim', !d);
+      const restart = d && F1.R3 && F1.R3.bootTier && F1.R3.bootTier() !== (SD.gfx.boot != null ? SD.gfx.boot : F1.R3.bootTier());
+      label.textContent = warned && d ? 'APPLY CHANGES?  ESC AGAIN DISCARDS' : d ? (restart ? 'APPLY AND RESTART' : 'APPLY') : 'APPLIED';
+    };
+    items.push({ el: b, activate: () => { if (!draftDirty()) return; warned = false; if (!applyDraft()) { after(); update(); } else label.textContent = 'RESTARTING'; } });
+    update();
+    return { update, leave: () => { if (draftDirty() && !warned) { warned = true; update(); return false; } SD = null; return true; } };
+  }
+  // the scenery level is a shorthand for four values
+  const SCENERY = {
+    full: { trees: 1, treeDist: 0, boards: true, backdrop: true },
+    reduced: { trees: 0.6, treeDist: 0, boards: true, backdrop: true },
+    sparse: { trees: 0.33, treeDist: 0, boards: false, backdrop: true },
+    minimal: { trees: 0.12, treeDist: 700, boards: false, backdrop: false },
+  };
+  const sceneryOf = gx => Object.keys(SCENERY).find(k => Object.entries(SCENERY[k]).every(([a, v]) => gx[a] === v)) || 'custom';
+
   S.settings = o => {
     const el = h('div');
     const wrap = h('div', 'menu-wrap stage');
-    const st = F1.Game.settings;
+    if (!o.keep || !SD) SD = draftOf();
+    const st = SD;
     wrap.innerHTML = `<div class="crumbs">OPTIONS</div><div class="h1">SETTINGS</div>`;
     const opts = h('div', 'opts');
     const items = [];
@@ -563,40 +608,39 @@
     const opts2 = h('div', 'opts');
     let col = opts;
     const add = (o, sec) => { if (sec) col.appendChild(h('div', 'opt sec', sec)); col.appendChild(o.el); items.push(o); };
-    add(optRow('Master volume', '', vols, () => st.master, v => { st.master = v; F1.Game.applySettings(); }, pct), 'AUDIO');
-    add(optRow('Effects volume', '', vols, () => st.sfx, v => { st.sfx = v; F1.Game.applySettings(); }, pct));
-    add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; F1.Game.applySettings(); }, pct));
-    add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; F1.Game.applySettings(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
-    add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
-    add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
-    add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
-    add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tSens || 1, v => { st.tSens = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
-    add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tiltSens || 1, v => { st.tiltSens = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
-    add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; F1.Game.applySettings(); }, v => (v ? 'ON' : 'OFF')));
-    add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; F1.Game.applySettings(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
-    add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; F1.Game.applySettings(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
-    add(optRow('Name tags', 'Driver codes above nearby cars', [true, false], () => st.tags, v => { st.tags = v; F1.Game.applySettings(); }, v => (v ? 'ON' : 'OFF')));
-    add(optRow('Sensitivity', 'Right click in a race to switch mouse steering on', [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], () => st.mSens, v => { st.mSens = v; F1.Game.applySettings(); }, v => v.toFixed(2) + 'x'), 'MOUSE STEERING');
-    add(optRow('Deadzone', 'Movement ignored around the centre', [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15], () => st.mDead, v => { st.mDead = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
-    add(optRow('Steering curve', 'Progressive is gentle near the centre', ['linear', 'progressive', 'aggressive'], () => st.mCurve, v => { st.mCurve = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
-    add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', [0, 0.6, 1.5, 3], () => st.mCentre, v => { st.mCentre = v; F1.Game.applySettings(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1.5: 'MEDIUM', 3: 'HIGH' })[v]));
-    add(optRow('Smoothing', '', [0, 0.04, 0.1], () => st.mSmooth, v => { st.mSmooth = v; F1.Game.applySettings(); }, v => ({ 0: 'OFF', 0.04: 'LOW', 0.1: 'HIGH' })[v]));
-    add(optRow('Invert', '', [false, true], () => st.mInvert, v => { st.mInvert = v; F1.Game.applySettings(); }, v => (v ? 'ON' : 'OFF')));
+    add(optRow('Master volume', '', vols, () => st.master, v => { st.master = v; touched(); }, pct), 'AUDIO');
+    add(optRow('Effects volume', '', vols, () => st.sfx, v => { st.sfx = v; touched(); }, pct));
+    add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; touched(); }, pct));
+    add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; touched(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
+    add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; touched(); }, v => v.toUpperCase()));
+    add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; touched(); }, v => v.toUpperCase()));
+    add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tSens || 1, v => { st.tSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; touched(); }, v => (v ? 'ON' : 'OFF')));
+    add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; touched(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
+    add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; touched(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
+    add(optRow('Name tags', 'Driver codes above nearby cars', [true, false], () => st.tags, v => { st.tags = v; touched(); }, v => (v ? 'ON' : 'OFF')));
+    add(optRow('Sensitivity', 'Right click in a race to switch mouse steering on', [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], () => st.mSens, v => { st.mSens = v; touched(); }, v => v.toFixed(2) + 'x'), 'MOUSE STEERING');
+    add(optRow('Deadzone', 'Movement ignored around the centre', [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15], () => st.mDead, v => { st.mDead = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Steering curve', 'Progressive is gentle near the centre', ['linear', 'progressive', 'aggressive'], () => st.mCurve, v => { st.mCurve = v; touched(); }, v => v.toUpperCase()));
+    add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', [0, 0.6, 1.5, 3], () => st.mCentre, v => { st.mCentre = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1.5: 'MEDIUM', 3: 'HIGH' })[v]));
+    add(optRow('Smoothing', '', [0, 0.04, 0.1], () => st.mSmooth, v => { st.mSmooth = v; touched(); }, v => ({ 0: 'OFF', 0.04: 'LOW', 0.1: 'HIGH' })[v]));
+    add(optRow('Invert', '', [false, true], () => st.mInvert, v => { st.mInvert = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     // graphics: a preset sets everything below it; touching any single option makes it CUSTOM
     if (F1.R3 && document.body.classList.contains('three')) {
       col = opts2;
       const gx = st.gfx, P = F1.Game.GFX_PRESETS;
       const onOff = v => (v ? 'ON' : 'OFF');
-      const setG = (k, v) => { gx[k] = v; gx.preset = 'custom'; F1.Game.applySettings(); items.forEach(i => i.render && i.render()); };
+      const setG = (k, v) => { gx[k] = v; gx.preset = 'custom'; touched(); };
       add(optRow('Quality preset', 'Rock and Potato are for phones and integrated graphics, and restart the game', ['rock', 'potato', 'low', 'medium', 'high', 'ultra', 'custom'], () => gx.preset, v => {
-        if (v === 'custom') { gx.preset = 'custom'; return; }
-        Object.assign(gx, P[v], { preset: v }); F1.Game.applySettings(); items.forEach(i => i.render && i.render());
-        // potato and rock change how the WebGL context is made, so they only take effect on a fresh start
-        if (F1.R3.bootTier() !== (v === 'rock' || v === 'potato' ? v : '')) { F1.Game.saveSettings(); setTimeout(() => location.reload(), 150); }
+        if (v === 'custom') { gx.preset = 'custom'; touched(); return; }
+        // potato and rock change how the WebGL context is made: applying one restarts the game
+        Object.assign(gx, P[v], { preset: v, boot: v === 'rock' || v === 'potato' ? v : '' }); touched();
       }, v => v.toUpperCase()), 'GRAPHICS');
       add(optRow('Post-processing', 'HDR pipeline. Off is fastest', [true, false], () => gx.post, v => setG('post', v), onOff));
-      add(optRow('Scenery', 'Tree density, trackside boards and distant hills', ['full', 'reduced', 'sparse', 'minimal'], () => gx.scenery || 'full', v => setG('scenery', v), v => v.toUpperCase()));
-      add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
+      add(optRow('Scenery', 'Tree density, trackside boards and distant hills', ['full', 'reduced', 'sparse', 'minimal'], () => sceneryOf(gx), v => { Object.assign(gx, SCENERY[v], { scenery: v }); gx.preset = 'custom'; touched(); }, v => v.toUpperCase()));
+      add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.7, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
       add(optRow('Anti-aliasing', '', [0, 2, 4, 8], () => gx.msaa, v => setG('msaa', v), v => (v ? 'MSAA ' + v + 'X' : 'OFF')));
       add(optRow('Shadows', '', ['off', 'low', 'medium', 'high', 'ultra'], () => gx.shadows, v => setG('shadows', v), v => v.toUpperCase()));
       add(optRow('Ambient occlusion', 'Contact shadowing in creases', [true, false], () => gx.ssao, v => setG('ssao', v), onOff));
@@ -605,18 +649,112 @@
       add(optRow('Motion blur', 'Camera motion only', [true, false], () => gx.motion, v => setG('motion', v), onOff));
       add(optRow('Lens effects', 'Vignette, chromatic aberration, grain', [true, false], () => gx.lens, v => setG('lens', v), onOff));
       add(optRow('Tone mapping', 'AgX keeps bright colours natural', ['agx', 'aces'], () => gx.tone, v => setG('tone', v), v => (v === 'agx' ? 'AGX' : 'ACES FILMIC')));
-      add(optRow('Exposure', '', [-1, -0.5, 0, 0.5, 1], () => gx.ev, v => { gx.ev = v; F1.Game.applySettings(); }, v => (v > 0 ? '+' : '') + v.toFixed(1) + ' EV'));
+      add(optRow('Exposure', '', [-1, -0.5, 0, 0.5, 1], () => gx.ev, v => { gx.ev = v; touched(); }, v => (v > 0 ? '+' : '') + v.toFixed(1) + ' EV'));
+      const adv = h('div', 'btn', '<span>ADVANCED GRAPHICS</span><span class="arrow">&#8594;</span>');
+      adv.style.marginTop = '14px';
+      opts2.appendChild(adv);
+      items.push({ el: adv, activate: () => go('gfxadv', { back: o.back }) });
     }
+    const ap = applyButton(opts, items, () => refresh());
     const back = h('div', 'btn', '<span>BACK</span><span class="arrow">&#8592;</span>');
     opts.appendChild(back);
     items.push({ el: back, activate: () => doBack() });
+    function touched() { items.forEach(i => i.render && i.render()); ap.update(); }
+    function refresh() { items.forEach(i => i.render && i.render()); ap.update(); }
     const two = h('div', 'two');
     opts.style.maxWidth = opts2.style.maxWidth = '';
     two.appendChild(opts); two.appendChild(opts2);
     wrap.appendChild(two);
     el.appendChild(wrap);
     el.appendChild(foot([['&#8593;&#8595;', 'select'], ['&#8592;&#8594;', 'change'], ['ESC', 'back']]));
-    const doBack = () => { F1.Game.saveSettings(); if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
+    const doBack = () => { if (!ap.leave()) return; if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
+    return { el, items, back: doBack };
+  };
+
+  // ---------- advanced graphics ----------
+  // Every setting that trades speed for looks, grouped. Each edits the settings draft (see
+  // APPLY above) and turns the preset to CUSTOM.
+  const pctF = v => Math.round(v * 100) + '%', onOffF = v => (v ? 'ON' : 'OFF'), mF = v => v + ' M', allM = v => (v ? v + ' M' : 'ALL');
+  const ADV_ROWS = [
+    ['RESOLUTION AND FRAME RATE'],
+    ['scale', 'Render scale', 'Resolution the 3D scene is drawn at', [0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.9, 1, 1.25, 1.5, 2], pctF],
+    ['dprCap', 'Pixel density cap', 'Phones have 2 to 3 pixels per point. 1x is far faster', [1, 1.5, 2, 3], v => v + 'X'],
+    ['fpsCap', 'Frame rate limit', 'A lower limit saves battery and heat', [0, 30, 45, 60, 90, 120], v => (v ? v + ' FPS' : 'OFF')],
+    ['msaa', 'Anti-aliasing', 'Needs post-processing', [0, 2, 4, 8], v => (v ? 'MSAA ' + v + 'X' : 'OFF')],
+    ['aniso', 'Texture filtering', 'Road and kerb sharpness at a glancing angle', [1, 2, 4, 8, 16], v => (v === 1 ? 'BILINEAR' : v + 'X ANISOTROPIC')],
+    ['LIGHTING AND SHADOWS'],
+    ['shadows', 'Shadows', 'Number and size of the sun shadow slices', ['off', 'low', 'medium', 'high', 'ultra'], v => v.toUpperCase()],
+    ['shadowRes', 'Shadow resolution', 'Sharpness of shadow edges', [0.5, 0.75, 1, 1.5, 2], pctF],
+    ['shadowDist', 'Shadow distance', 'How far from the camera shadows reach', [0.5, 0.75, 1, 1.5, 2], pctF],
+    ['shadowSoft', 'Shadow softness', '', [0.5, 1, 1.5, 2, 3], pctF],
+    ['ssao', 'Ambient occlusion', 'Contact shadow in creases. Needs post-processing', [true, false], onOffF],
+    ['aoSamples', 'Occlusion quality', 'Samples per pixel', [6, 8, 10, 16, 24], v => v + ' SAMPLES'],
+    ['aoStrength', 'Occlusion strength', '', [0.5, 0.7, 0.85, 1, 1.2], pctF],
+    ['POST-PROCESSING'],
+    ['post', 'Post-processing', 'HDR pipeline. Off is fastest and turns off everything below', [true, false], onOffF],
+    ['bloom', 'Bloom', 'Glow from bright highlights', [true, false], onOffF],
+    ['bloomK', 'Bloom strength', '', [0.03, 0.06, 0.1, 0.15], v => Math.round(v / 0.06 * 100) + '%'],
+    ['shafts', 'Sun shafts', '', [true, false], onOffF],
+    ['shaftK', 'Sun shaft strength', '', [0.2, 0.45, 0.7, 1], v => Math.round(v / 0.45 * 100) + '%'],
+    ['motion', 'Motion blur', 'Camera motion and moving cars', [true, false], onOffF],
+    ['shutter', 'Motion blur amount', 'Shutter angle. 360 blurs the most', [90, 180, 270, 360], v => v + ' DEG'],
+    ['lens', 'Lens effects', 'Vignette, chromatic aberration', [true, false], onOffF],
+    ['grain', 'Film grain', 'Needs lens effects', [true, false], onOffF],
+    ['tone', 'Tone mapping', 'AgX keeps bright colours natural', ['agx', 'aces'], v => (v === 'agx' ? 'AGX' : 'ACES FILMIC')],
+    ['ev', 'Exposure', '', [-1, -0.5, 0, 0.5, 1], v => (v > 0 ? '+' : '') + v.toFixed(1) + ' EV', true],
+    ['WORLD'],
+    ['viewDist', 'View distance', 'The fog closes in to meet it. Potato and Rock stop at 3 km', [1600, 2400, 3000, 5000, 8000, 14000], v => (v / 1000).toFixed(1) + ' KM'],
+    ['trees', 'Tree density', 'Share of the trees drawn', [0, 0.12, 0.33, 0.6, 1], pctF],
+    ['treeDist', 'Tree draw distance', '', [400, 700, 1200, 2000, 0], allM],
+    ['grass', '3D grass', 'Blades around the camera on parkland circuits', [true, false], onOffF],
+    ['boards', 'Trackside boards', 'Marker boards before the corners', [true, false], onOffF],
+    ['backdrop', 'Distant hills', 'Needs a long view distance', [true, false], onOffF],
+    ['CARS'],
+    ['carNear', 'Full detail up to', 'Distance a car keeps its full model', [2.5, 6, 12, 22, 50, 100], mF],
+    ['carFar', 'Simple model beyond', 'One draw call per car, no livery detail', [9, 20, 40, 90, 300, 1000], mF],
+    ['carDraw', 'Car draw distance', 'Further cars are not drawn', [150, 250, 350, 600, 0], allM],
+    ['dispHz', 'Wheel display refresh', 'The screen on the steering wheel in the cockpit', [0, 4, 6, 8, 12, 20, 30], v => (v ? v + ' HZ' : 'FROZEN')],
+    ['EFFECTS'],
+    ['particles', 'Smoke and sparks', 'Particles alive at once', [0, 150, 300, 500, 900, 1500], v => (v ? String(v) : 'OFF')],
+    ['skids', 'Skid marks', 'Marks kept on the track', [0, 1500, 3000, 4500, 9000], v => (v ? String(v) : 'OFF')],
+    ['debris', 'Crash debris', 'Loose parts kept on the track', [0, 10, 20, 40, 80], v => (v ? String(v) : 'OFF')],
+    ['rainK', 'Rain density', 'Drops drawn in wet weather', [0.25, 0.4, 0.6, 1], pctF],
+    ['SIMULATION'],
+    ['physLod', 'Distant AI physics', 'Half rate past the distance below. Close racing is untouched', [false, true], v => (v ? 'HALF RATE' : 'FULL')],
+    ['physLodDist', 'Half rate beyond', '', [100, 150, 250, 400], mF],
+    ['catchup', 'Slow motion below', 'When the device falls behind: slow the game instead of stuttering', [40, 12, 8], v => ({ 40: 'OFF', 12: '20 FPS', 8: '30 FPS' })[v] || v],
+  ];
+  S.gfxadv = o => {
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    if (!SD) SD = draftOf();
+    const gx = SD.gfx;
+    wrap.innerHTML = `<div class="crumbs">OPTIONS  /  SETTINGS</div><div class="h1">ADVANCED GRAPHICS</div>`;
+    const c1 = h('div', 'opts'), c2 = h('div', 'opts'), items = [];
+    let col = c1, sec = null;
+    ADV_ROWS.forEach(r => {
+      if (r.length === 1) { sec = r[0]; if (sec === 'WORLD') col = c2; return; }
+      const [k, label, sub2, values, fmt, keepPreset] = r;
+      const row = optRow(label, sub2, values, () => gx[k], v => { gx[k] = v; if (!keepPreset) gx.preset = 'custom'; touched(); }, fmt);
+      if (sec) { col.appendChild(h('div', 'opt sec', sec)); sec = null; }
+      col.appendChild(row.el); items.push(row);
+    });
+    const pre = h('div', 'opt sec', 'PRESET  ' + '<b class="adv-pre"></b>');
+    c1.insertBefore(pre, c1.firstChild);
+    const ap = applyButton(c2, items, () => touched());
+    const back = h('div', 'btn', '<span>BACK</span><span class="arrow">&#8592;</span>');
+    c2.appendChild(back);
+    items.push({ el: back, activate: () => doBack() });
+    function touched() { items.forEach(i => i.render && i.render()); pre.querySelector('.adv-pre').textContent = gx.preset.toUpperCase(); ap.update(); }
+    touched();
+    const two = h('div', 'two adv');
+    c1.style.maxWidth = c2.style.maxWidth = '';
+    two.appendChild(c1); two.appendChild(c2);
+    wrap.appendChild(two);
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8593;&#8595;', 'select'], ['&#8592;&#8594;', 'change'], ['ESC', 'back']]));
+    // back to the settings screen with the draft kept
+    const doBack = () => go('settings', { back: o.back, keep: true });
     return { el, items, back: doBack };
   };
 

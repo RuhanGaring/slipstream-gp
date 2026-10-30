@@ -392,7 +392,7 @@ b { font-weight: 700; }
 .wk-grid b { font-size: 16px; font-weight: 700; text-transform: capitalize; }
 .wk-grid div:last-child:nth-child(odd) { grid-column: 1 / -1; }
 
-#scr-settings .menu-wrap, #scr-controls .menu-wrap { width: min(1180px, 88vw); }
+#scr-settings .menu-wrap, #scr-controls .menu-wrap, #scr-gfxadv .menu-wrap { width: min(1180px, 88vw); }
 /* circuit generator (list + detail) and the summaries elsewhere share the carbon panels */
 .split { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: stretch; }
 .list { display: flex; flex-direction: column; gap: 3px; }
@@ -542,3 +542,8 @@ body.mobile #pedals { display: none; }
 /* qualifying classification: knocked-out drivers dimmed below the cut line */
 table.res tr.out td { opacity: .5; }
 table.res tr.cutline td { padding: 4px 10px; font-size: 11px; font-weight: 800; letter-spacing: .2em; color: var(--accent); border-top: 2px solid var(--accent); }
+
+/* settings: APPLY (dimmed when there is nothing to apply) and the advanced graphics screen */
+.btn.apply.dim { opacity: .45; }
+.two.adv .opts { max-height: 68vh; overflow-y: auto; scrollbar-width: thin; padding-right: 6px; }
+.opt.sec .adv-pre { margin-left: 10px; color: var(--ink); }
