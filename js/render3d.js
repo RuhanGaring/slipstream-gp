@@ -700,6 +700,18 @@
               Wv[k] = 1 - U.smooth((Math.abs(dl) - tr.hw) / 9);
               hgrid.edge[k] = Math.abs(dl) - tr.hw; // metres from the edge of the tarmac
               y -= sag * Wv[k];
+              // A wide gravel or tarmac run-off is a ribbon in the road's own plane; out at its far
+              // edge a rising hillside can stand above it and show through as bare turf. The ground
+              // under the whole run-off is kept below it (and its neighbours' minimum, below).
+              const sd = dl > 0 ? 1 : 0, rt = tr.runT[sd][bi];
+              if (rt === F1.SURF.GRAVEL || rt === F1.SURF.TARMAC) {
+                const re = tr.hw + tr.runW[sd][bi], wr = 1 - U.smooth((Math.abs(dl) - re - 0.5) / 3);
+                if (wr > 0) {
+                  const under = Tracks.surfZ(tr, bi, dl) - 0.25; // a quarter metre under the run-off surface
+                  if (y > under) y += (under - y) * wr;
+                  Wv[k] = Math.max(Wv[k], wr);
+                }
+              }
             }
             Yv[k] = y;
           }
@@ -1065,7 +1077,7 @@
     tag('lots');
     buildTrees(root, W2, tr); tag('trees');
     const venue = buildVenue(root, tr, W2); tag('venue');
-    const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue) : null;
+    const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue, { root, renderer, ground: MATS['ground_' + style] }) : null;
     if (grass) root.add(grass);
     tag('grass');
     const gantry = buildGantry(root, tr); tag('gantry');
@@ -2028,6 +2040,7 @@
     skyMesh.position.copy(camera.position);
     skyMat.uniforms.time.value = clock;
     if (state.grass && state.grass.visible) F1.R3Grass.update(state.grass, camera, clock);
+    F1.R3S.U.uWindT.value = clock; // the same gusts on the ground as in the 3D grass
     // the sun: a direction (its light needs no position); its shadow comes from the cascades,
     // fitted to the camera's view each frame
     if (G.__sunDir) state.sunDir.fromArray(G.__sunDir).normalize(); // debug: [x, y, z] toward the sun (world)

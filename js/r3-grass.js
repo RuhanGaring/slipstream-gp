@@ -150,7 +150,52 @@
   }
 
   // where grass grows (red channel, 0..1 density), 1 m per pixel over the venue
-  function grassMap(tr, W2, ext, extra) {
+  // Where turf is what the venue actually shows: the circuit's surfaces drawn once from straight
+  // above at a metre a pixel, the turf ground white and everything laid over it (asphalt,
+  // kerbs, gravel and tarmac run-off, paint, car parks, buildings, barriers) black, in that
+  // order (no depth test, so a surface a few centimetres above or below the turf still counts).
+  // Trees and boards are left out: grass grows under them. Returns one byte a pixel, rows +z.
+  function surfaceMask(scn, ext, W, H) {
+    const R = scn.renderer, root = scn.root, ground = scn.ground;
+    if (!R || !root || !ground) return null;
+    const white = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+    const black = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+    const saved = [];
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      let p = o, cat = null; while (p && !cat) { cat = p.userData && p.userData.cat; p = p.parent; }
+      const skip = cat === 'trees' || cat === 'boards' || o.isInstancedMesh || (o.geometry && o.geometry.isInstancedBufferGeometry);
+      saved.push([o, o.material, o.renderOrder, o.visible]);
+      if (skip) { o.visible = false; return; }
+      const isGround = o.material === ground;
+      o.material = isGround ? white : black; o.renderOrder = isGround ? -1000 : 1000;
+    });
+    const sc = new THREE.Scene(), parent = root.parent;
+    sc.add(root);
+    const cam = new THREE.OrthographicCamera(ext.x0, ext.x0 + W, -ext.z0, -(ext.z0 + H), 1, 4000);
+    cam.position.set(0, 2000, 0); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    const rt = new THREE.WebGLRenderTarget(W, H), prev = R.getRenderTarget(), cc = new THREE.Color(), ca = R.getClearAlpha();
+    R.getClearColor(cc);
+    let out = null;
+    try {
+      R.setRenderTarget(rt); R.setClearColor(0x000000, 1); R.clear();
+      const sm = R.shadowMap.autoUpdate; R.shadowMap.autoUpdate = false;
+      R.render(sc, cam);
+      R.shadowMap.autoUpdate = sm;
+      const px = new Uint8Array(W * H * 4);
+      R.readRenderTargetPixels(rt, 0, 0, W, H, px);
+      // the target's rows run up the screen, which is -z: flip to rows of +z
+      out = new Uint8Array(W * H);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) out[(H - 1 - y) * W + x] = px[(y * W + x) * 4] > 127 ? 1 : 0;
+    } catch (e) { console.warn('grass surface mask failed', e); out = null; }
+    R.setRenderTarget(prev); R.setClearColor(cc, ca); rt.dispose();
+    sc.remove(root); if (parent) parent.add(root);
+    for (const [o, mat, ro, vis] of saved) { o.material = mat; o.renderOrder = ro; o.visible = vis; }
+    white.dispose(); black.dispose();
+    return out;
+  }
+
+  function grassMap(tr, W2, ext, extra, scn) {
     const W = Math.ceil(ext.w), H = Math.ceil(ext.h);
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
@@ -172,10 +217,10 @@
       }
     };
     for (const side of [0, 1]) {
-      // beyond the barrier the field grows freely; inside it only the grass verges do,
-      // trimmed back from the kerbs; gravel, tarmac run-off and asphalt have none
+      // clear of the barrier's foot and trimmed back from the kerbs; which ground is turf (and
+      // not gravel or tarmac run-off) comes from the rendered surfaces (surfaceMask)
       band(side, k => tr.barr[side][k] + 1.2, '#000');
-      band(side, k => (tr.runT[side][k] === SURF.GRASS ? tr.barr[side][k] - 0.6 : 0), 'rgb(235,235,235)');
+      band(side, k => tr.barr[side][k] - 0.6, 'rgb(235,235,235)');
       band(side, k => tr.hw + tr.kerbW + 1.3, '#000');
     }
     // the whole road and its kerbs, painted solid over the seam where the two sides meet
@@ -210,6 +255,15 @@
     }
     for (const it of extra || []) rect(it.x, it.y, it.w + 8, it.d + 8, it.h);
     if (W2.water) g.fillRect(0, Z(W2.water.y) - 2, W, H);
+    // and only where the turf ground is what is actually drawn
+    if (scn) {
+      const m = surfaceMask(scn, ext, W, H);
+      if (m) {
+        const img = g.getImageData(0, 0, W, H), d = img.data;
+        for (let k = 0, q = 0; k < m.length; k++, q += 4) if (!m[k]) d[q] = d[q + 1] = d[q + 2] = 0;
+        g.putImageData(img, 0, 0);
+      }
+    }
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.NoColorSpace; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false;
     t.flipY = false; // canvas rows run with +z, the same way the shader samples
@@ -226,7 +280,7 @@
   }
 
   // build the grass for a circuit; returns null where the venue has none (street, desert)
-  function build(tr, W2, hg, extra) {
+  function build(tr, W2, hg, extra, scn) {
     if (tr.def.style !== 'park') return null;
     const pad = 40;
     const ext = { x0: hg.x0 + pad, z0: hg.z0 + pad, w: (hg.nx - 1) * hg.cell - 2 * pad, h: (hg.nz - 1) * hg.cell - 2 * pad };
@@ -238,7 +292,7 @@
       uGNear: { value: NRADIUS }, // where the modelled blades hand over to these cards
       uGSize: { value: 1 }, // card width multiplier (the far ring's are wider)
       uGTime: { value: 0 },
-      uGMask: { value: grassMap(tr, W2, ext, extra) },
+      uGMask: { value: grassMap(tr, W2, ext, extra, scn) },
       uGMaskB: { value: new THREE.Vector4(ext.x0, ext.z0, ext.w, ext.h) },
       uGHeight: { value: heightMap(hg) },
       uGHeightB: { value: new THREE.Vector4(hg.x0 - hg.cell / 2, hg.z0 - hg.cell / 2, hg.nx * hg.cell, hg.nz * hg.cell) },
@@ -335,6 +389,8 @@
     // (a sin()-based hash falls apart at world coordinates of hundreds of metres)
     'float gHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
     // is a root (plus a margin for the clump's size) on screen? one projection, before any other work
+    // gusts: broad bands of wind rolling across the field (shared with the ground, js/r3-shaders.js)
+    'float gGust(vec2 w, float t) { vec2 d = vec2(0.8, 0.6); return 0.5 + 0.5 * sin(dot(w, d) * 0.16 - t * 2.1 + sin(dot(w, vec2(-d.y, d.x)) * 0.05 + t * 0.3) * 2.4); }',
     'bool gOnScreen(vec3 w, float m) { vec4 c = projectionMatrix * viewMatrix * vec4(w, 1.0); if (c.w < -m) return false; float k = c.w + m * 2.0; return abs(c.x) < k * 1.1 && c.y < k * 1.25 && c.y > -k * 1.25; }',
   ].join('\n');
   const VERT = [
@@ -371,7 +427,7 @@
     '  vec2 gWp = gBase + (vec2(gHash(gBase), gHash(gBase + 3.17)) - 0.5) * uGCell * 1.1;',
     '  float gH = texture2D(uGHeight, (gWp - uGHeightB.xy) / uGHeightB.zw).r;',
     '  bool gCull = !gOnScreen(vec3(gWp.x, gH + 0.06, gWp.y), 0.25);',
-    '  vGWp = gWp; vBT = bT; vGView = vec3(0.0, 0.0, 1.0); vGShade = 1.0;',
+    '  vGWp = gWp; vBT = bT; vGView = vec3(0.0, 0.0, 1.0); vGShade = 1.0; vGType = 0.0; vGFl = 0.0;',
     '  if (!gCull) {',
     '  float gDens = clamp((texture2D(uGMask, (gWp - uGMaskB.xy) / uGMaskB.zw).r - 0.2) / 0.8, 0.0, 1.0);',
     '  float gDist = distance(gWp, cameraPosition.xz);',
@@ -383,14 +439,23 @@
     '  float gSc = gKeep * gRing * step(bI, uGDens * gFall) * (0.8 + 0.4 * gHash(gBase + 5.3)) * (1.0 - smoothstep(uGR * (uGIn > 0.0 ? 0.7 : 0.8), uGR, gDist));',
     '  float gA = gHash(gBase + 9.1) * 6.2831; mat2 gR = mat2(cos(gA), -sin(gA), sin(gA), cos(gA));',
     '  transformed.xz = gR * transformed.xz;',
-    '  transformed.y *= gSc * (0.8 + 0.35 * gDens); transformed.xz *= max(gSc, 0.001);',
-    // wind: gusts travel across the field; the bend grows with the square of height up the blade
-    '  float gw = sin(uGTime * 1.7 - dot(gWp, vec2(0.21, 0.13))) * 0.6 + sin(uGTime * 3.1 + gWp.x * 0.7) * 0.25;',
-    '  transformed.xz += vec2(0.8, 0.6) * gw * 0.035 * bT * bT * gSc;',
+    // what grows in this clump: mostly the sward; now and then a coarser, taller rough-grass
+    // tuft, a low spread of clover leaves, or (rarely) a flower or two among the blades
+    '  float gT = gHash(gBase + 13.7);',
+    '  float gRough = step(0.93, gT), gClov = step(gT, 0.05) * step(0.02, gT), gFlow = step(gT, 0.012);',
+    '  vGType = gRough - gClov; vGFl = gFlow * step(0.78, bI) * step(0.85, bT);',
+    '  float gTy = mix(1.0, 1.9, gRough) * mix(1.0, 0.42, gClov), gTx = mix(1.0, 1.25, gRough) * mix(1.0, 1.7, gClov);',
+    '  transformed.y *= gSc * (0.8 + 0.35 * gDens) * gTy; transformed.xz *= max(gSc, 0.001) * gTx;',
+    // wind: gusts roll across the field, bending the blades over as they pass, with a quicker
+    // flutter on top; the bend grows with the square of height up the blade
+    '  float gg = gGust(gWp, uGTime);',
+    '  float gw = gg * 1.4 - 0.3 + sin(uGTime * 3.1 + gWp.x * 0.7 + gWp.y * 0.4) * 0.22;',
+    '  transformed.xz += vec2(0.8, 0.6) * gw * 0.04 * bT * bT * gSc * gTy;',
+    '  vGShade = 1.0 + 0.07 * gg;',
     '  transformed += vec3(gWp.x, gH + 0.005, gWp.y);',
     '  vGWp = transformed.xz; vBT = bT; vGView = transformed - cameraPosition;',
     '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
-    '  vGShade = mix(0.86, 1.14, gM) * (0.95 + 0.1 * gHash(gBase + 11.3));',
+    '  vGShade *= mix(0.86, 1.14, gM) * (0.95 + 0.1 * gHash(gBase + 11.3));',
     '  }',
   ].join('\n');
   // anything dropped by the screen check is sent off screen whole
@@ -433,7 +498,7 @@
 
   function patchBlades(sh, u) {
     Object.assign(sh.uniforms, u);
-    sh.vertexShader = VERT_PARS + '\nattribute float bT; attribute float bI; varying float vBT; varying vec3 vGView;\n' + sh.vertexShader
+    sh.vertexShader = VERT_PARS + '\nattribute float bT; attribute float bI; varying float vBT; varying vec3 vGView; varying float vGType; varying float vGFl;\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', [
         '#include <beginnormal_vertex>',
         // turn the normal with the clump, and lean it halfway to the sky, as AAA grass does, so
@@ -443,21 +508,28 @@
         '    objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), 0.5)); }'].join('\n'))
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERTB)
       .replace('#include <project_vertex>', CULL_OUT);
-    sh.fragmentShader = 'varying vec2 vGWp; varying float vGShade; varying float vBT; varying vec3 vGView; uniform sampler2D uGGround; uniform sampler2D uGMacro; uniform float uGNorm;\n' + F1.R3S.LAWN + '\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying vec2 vGWp; varying float vGShade; varying float vBT; varying vec3 vGView; varying float vGType; varying float vGFl; uniform sampler2D uGGround; uniform sampler2D uGMacro; uniform float uGNorm;\n' + F1.R3S.LAWN + '\n' + sh.fragmentShader
       .replace('#include <map_fragment>', [
         '#include <map_fragment>',
         // the ground's own colour and variation, darker toward the root where the sward shades
         // itself, the tip a touch paler and yellower where it has been cut
         '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);',
-        '  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));'].join('\n'))
+        '  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 0.6, vBT)) * mix(vec3(1.0), vec3(1.07, 1.05, 0.86), smoothstep(0.75, 1.0, vBT));',
+        // rough grass is coarser and more olive, going to seed at the top; clover a deeper, bluer green
+        '  diffuseColor.rgb *= mix(vec3(1.0), mix(vec3(1.02, 1.0, 0.84), vec3(1.18, 1.08, 0.72), smoothstep(0.6, 1.0, vBT)), max(vGType, 0.0)) * mix(vec3(1.0), vec3(0.82, 0.96, 0.92), max(-vGType, 0.0));',
+        // a flower: white daisy or yellow buttercup, chosen per clump
+        '  if (vGFl > 0.5) diffuseColor.rgb = fract(vGWp.x * 13.7 + vGWp.y * 7.1) > 0.5 ? vec3(0.85, 0.84, 0.78) : vec3(0.85, 0.66, 0.08);'].join('\n'))
       // both faces keep the leaned-up normal: three would flip it for the back face, into the ground
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
       .replace('#include <lights_fragment_end>', [
         '#include <lights_fragment_end>',
         // light through the leaf: looking toward the sun, thin blades glow, less near the root
         // and not at all in shadow
-        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);'].join('\n'));
+        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
+        // the waxy cuticle: a broad, pale sheen looking toward the sun at a low angle
+        '  { vec3 gv = normalize(vGView); float gs = pow(clamp(dot(gv, uSunDir), 0.0, 1.0), 2.0) * pow(1.0 - clamp(-gv.y, 0.0, 1.0), 3.0);',
+        '    reflectedLight.directSpecular += uSunCol * r3SunVis * 0.08 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
   }
 
-  F1.R3Grass = { build, update, patchShader, setQuality };
+  F1.R3Grass = { build, update, patchShader, setQuality, surfaceMask };
 })(typeof window !== 'undefined' ? window : globalThis);
