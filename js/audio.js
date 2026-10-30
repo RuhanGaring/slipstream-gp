@@ -51,9 +51,15 @@
     A.on = true;
     // the engine worklet, from source in memory (works from file://)
     if (ctx.audioWorklet && F1.EngineWorklet) {
+      // a blob URL first; opened as a local file (file://, an opaque origin) Chrome refuses
+      // blob worklets, so then the same source goes in as a data: URL, which it accepts
       const src = '(' + F1.EngineWorklet.toString() + ')();';
       const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-      A.workletReady = ctx.audioWorklet.addModule(url).then(() => { A.worklet = true; }).catch(e => { console.warn('engine worklet unavailable', e); });
+      const dataUrl = () => 'data:application/javascript;base64,' + btoa(unescape(encodeURIComponent(src)));
+      A.workletReady = ctx.audioWorklet.addModule(url)
+        .catch(() => ctx.audioWorklet.addModule(dataUrl()))
+        .then(() => { A.worklet = true; })
+        .catch(e => { console.warn('engine worklet unavailable', e); });
     } else A.workletReady = Promise.resolve();
   }
 
@@ -288,15 +294,15 @@
     at(L.judder.g.gain, lock * Math.min(1, v / 20) * 0.35, 0.03); // a locked tyre flat-spotting
     // --- road and surfaces ---
     const SURF = F1.SURF, gravel = (p.surfMask & (1 << SURF.GRAVEL)) ? 1 : 0, grass = (p.surfMask & (1 << SURF.GRASS)) ? 1 : 0;
-    at(L.road.g.gain, Math.min(0.22, v / 380) * (onboard ? 1.3 : 0.7), 0.1);
+    at(L.road.g.gain, Math.min(0.4, v / 210) * (onboard ? 1.3 : 0.7), 0.1);
     at(L.road.f[0].frequency, 120 + v * 3.2, 0.1);
     // rolling: tread noise grows a little faster than speed and brightens with it; on board the
     // tyres are an arm's length from the helmet
     const roll = tarmac ? Math.min(1, Math.pow(v / 85, 1.3)) * (1 - 0.5 * wet) : 0;
-    at(L.tread.g.gain, roll * (onboard ? 0.075 : 0.035), 0.08);
+    at(L.tread.g.gain, roll * (onboard ? 0.135 : 0.063), 0.08);
     at(L.tread.f[0].frequency, 600 + v * 6, 0.1);
-    at(L.hum.g.gain, Math.min(0.14, v / 500) * (onboard ? 1.4 : 0.6), 0.1);
-    if (R.wheelLfo) { at(R.wheelLfo.lfo.frequency, Math.max(0.5, v / 2.262), 0.05); at(R.wheelLfo.dep.gain, Math.min(0.05, v / 1600) * (onboard ? 1 : 0.4), 0.1); }
+    at(L.hum.g.gain, Math.min(0.25, v / 280) * (onboard ? 1.4 : 0.6), 0.1);
+    if (R.wheelLfo) { at(R.wheelLfo.lfo.frequency, Math.max(0.5, v / 2.262), 0.05); at(R.wheelLfo.dep.gain, Math.min(0.09, v / 900) * (onboard ? 1 : 0.4), 0.1); }
     // seams and patches in the asphalt: a tick and a thud through the stiff suspension now and then
     if (tarmac && v > 12) {
       R.seamT = (R.seamT == null ? 1 : R.seamT) - dt;
