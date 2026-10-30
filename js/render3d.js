@@ -337,6 +337,31 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap; // filter radius set per cascade (js/r3-shadow.js)
+    // The shadow slices are drawn one at a time. For the outer two every car is swapped for its
+    // one-mesh stand-in (see js/r3-shadow.js): at their scale a car is a few texels, and its full
+    // detail (twenty-odd parts, the cockpit, skinned arms) cost more than the rest of the scene.
+    {
+      const SM = renderer.shadowMap, smRender = SM.render.bind(SM), CL = F1.R3Shadow.S.lights;
+      const swap = on => {
+        for (const o of live.values()) {
+          const b = o.userData.body, px = b && b.userData.shadowProxy;
+          if (!px) continue;
+          for (const ch of b.children) {
+            if (ch === px) continue;
+            if (on) { ch.userData.sv = ch.visible; ch.visible = false; } else ch.visible = ch.userData.sv;
+          }
+          px.visible = on;
+        }
+      };
+      SM.render = (lights, sc, cam) => {
+        if (lights.length < 2 || G.__shFull) return smRender(lights, sc, cam); // debug: G.__shFull draws every slice in full
+        for (const l of lights) {
+          const outer = CL.indexOf(l) > 0 && l.shadow.needsUpdate;
+          if (outer) swap(true);
+          try { smRender([l], sc, cam); } finally { if (outer) swap(false); }
+        }
+      };
+    }
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(60, 1, 0.06, FAR);
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
@@ -1385,6 +1410,14 @@
     // across the wheel, the cockpit sides over the hands and lap, the car over its own floor
     body.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
     applyAniso(body);
+    // the car's stand-in for the outer shadow slices: its merged far model, hidden except while
+    // those slices are drawn (see the shadow-map wrapper in init)
+    if (body.userData.far) {
+      const proxy = new THREE.Mesh(body.userData.far.geometry, body.userData.far.material);
+      proxy.castShadow = true; proxy.receiveShadow = false; proxy.visible = false;
+      body.add(proxy);
+      body.userData.shadowProxy = proxy;
+    }
     F1.R3S.patchTree(outer);
     scene.add(outer);
     live.set(car, outer);

@@ -45,11 +45,24 @@
     r3SunA: { value: 0 },
   };
 
+  // Cost control. The near slice draws every caster in full (it holds the cockpit, the hands
+  // and the cars alongside, where shadow detail shows). The outer slices, where a car is a few
+  // shadow texels, draw each car as a one-mesh stand-in (its merged far model) instead of its
+  // twenty-odd detailed parts, cockpit and skinned arms (the swap is made in js/render3d.js,
+  // which renders the slices one at a time). The outer
+  // slices are also re-rendered less often: the middle one every other frame and the far one
+  // every third, staggered so no frame pays for both; between renders each keeps sampling its
+  // last map through the matrix it was drawn with, so the shadows stay put. Any jump (a camera
+  // cut, a quality change) re-renders everything at once.
+  const EVERY = [1, 2, 3], PHASE = [0, 0, 1];
+  let frame = 0, force = true;
+  const lastPos = [new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0)];
+  const lastSun = new THREE.Vector3();
   function init(scene) {
     for (let i = 0; i < N; i++) {
       const l = new THREE.DirectionalLight(0xffffff, 0);
       l.castShadow = true;
-      l.shadow.autoUpdate = true;
+      l.shadow.autoUpdate = false;
       scene.add(l, l.target);
       S.lights.push(l);
     }
@@ -68,6 +81,7 @@
       if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
       l.shadow.radius = RADIUS[i] * soft;
     });
+    force = true;
   }
 
   const _m = new THREE.Matrix4(), _mi = new THREE.Matrix4(), _c = new THREE.Vector3(), _o = new THREE.Vector3(), _up = new THREE.Vector3();
@@ -81,12 +95,20 @@
     _m.lookAt(_o.set(0, 0, 0), _c.copy(sunDir).negate(), _up);
     _mi.copy(_m).invert();
     let start = camera.near;
+    frame++;
+    if (lastSun.distanceToSquared(sunDir) > 1e-6) { force = true; lastSun.copy(sunDir); }
     for (let i = 0; i < S.q.n; i++) {
       const end = ends[i];
       // the slice reaches back over the previous one's last fifth, where they cross-fade
       const over = i ? (ends[i - 1] - (i > 1 ? ends[i - 2] : 0)) * 0.2 : 0;
       const d0 = Math.max(camera.near, start - over), d1 = end;
       U.r3Casc.value[i].set(i ? d0 : -1, i ? start : 0, end);
+      // due this frame? (a camera that jumped further than a tenth of the slice re-renders it now)
+      const l0 = S.lights[i], jump = lastPos[i].distanceToSquared(camera.position) > (end * 0.1) ** 2;
+      const due = force || jump || G.__shFull || frame % EVERY[i] === PHASE[i];
+      l0.shadow.needsUpdate = due;
+      if (!due) { start = end; continue; }
+      lastPos[i].copy(camera.position);
       // bounding sphere of the slice: centred on the view axis, radius to its far corners
       const cz = (d0 + d1) / 2;
       const rN = Math.hypot(d0 * tx, d0 * ty, d0 - cz), rF = Math.hypot(d1 * tx, d1 * ty, d1 - cz);
@@ -110,6 +132,7 @@
       start = end;
     }
     U.r3ShadowEnd.value = ends[S.q.n - 1];
+    force = false;
   }
 
   // the directional-light part of three's lights_fragment_begin, rewritten: the cascade
