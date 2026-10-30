@@ -318,8 +318,16 @@
   // made: no canvas MSAA, and a plain depth buffer instead of the logarithmic one (which writes
   // gl_FragDepth and so turns off early depth rejection for every pixel). Read straight from the
   // saved settings, since the renderer is built before the game loads them; switching it reloads.
-  let POT = false;
-  try { POT = (JSON.parse(localStorage.getItem('slip_settings') || '{}').gfx || {}).preset === 'potato'; } catch (e) { /* no storage */ }
+  // Rock (the slowest phones) goes further: the far plane comes in to 1.6 km, with the fog
+  // thickened to meet it, so whole tiles of trees and scenery are culled before they are drawn.
+  let POT = false, ROCK = false;
+  try {
+    const gx = JSON.parse(localStorage.getItem('slip_settings') || '{}').gfx;
+    // a first start on a phone or tablet is on potato (js/game.js picks the same preset)
+    const pr = gx ? gx.preset : typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches ? 'potato' : '';
+    ROCK = pr === 'rock'; POT = ROCK || pr === 'potato';
+  } catch (e) { /* no storage */ }
+  const FAR = ROCK ? 1600 : POT ? 3000 : 14000;
   function init(canvas) {
     // (three always gives the canvas an alpha channel and keeps it opaque by clearing alpha to 1:
     // nothing drawn straight to the screen may write alpha below 1, or Edge shows the black page
@@ -330,7 +338,7 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap; // filter radius set per cascade (js/r3-shadow.js)
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(60, 1, 0.06, POT ? 3000 : 14000);
+    camera = new THREE.PerspectiveCamera(60, 1, 0.06, FAR);
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
     scene.add(hemi);
     // the sun lights the scene; its shadow comes from the cascades (js/r3-shadow.js)
@@ -344,7 +352,7 @@
     });
     skyMesh = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 16), skyMat);
     skyMesh.renderOrder = -10; skyMesh.frustumCulled = false;
-    if (POT) skyMesh.scale.setScalar(0.25); // inside the shorter far plane
+    if (POT) skyMesh.scale.setScalar(FAR / 9000 * 0.75); // inside the shorter far plane
     scene.add(skyMesh);
     envScene = new THREE.Scene();
     envScene.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), skyMat));
@@ -372,7 +380,7 @@
   }
 
   // ---------- graphics quality ----------
-  const GFX = { post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, tone: 'agx', ev: 0, aniso: 16 };
+  const GFX = { scenery: 'full', post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, tone: 'agx', ev: 0, aniso: 16 };
   // Only post on/off and the shadow setup change which shader programs the scene needs; every
   // other setting is a uniform or a render target size. When the programs do change they are
   // built with compileAsync (parallel, off the main thread where the driver allows) while the
@@ -380,12 +388,15 @@
   let progKey = '', compiling = null;
   function setQuality(g) {
     Object.assign(GFX, g);
+    // the tier the context was made for wins while it runs (changing it restarts the game)
+    GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
     F1.R3Post.setQuality({ on: GFX.post, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.shadows === 'ultra' ? 16 : 10, bloom: GFX.bloom, shafts: GFX.shafts, motion: GFX.motion, lens: GFX.lens, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows);
     renderer.shadowMap.needsUpdate = true;
     if (state.grass) state.grass.visible = !GFX.lite;
+    applyScenery();
     const key = (GFX.post ? 'p' : 'n') + F1.R3Shadow.casters();
     if (key !== progKey) {
       const first = !progKey;
@@ -402,6 +413,29 @@
     if (W > 1) resize(W, H, DPR);
   }
 
+  // Scenery detail. Trees thin out by drawing only the first share of each tile's instances
+  // (shuffled when built, so the forest keeps its outline and just gets sparser; a tile left
+  // empty is not drawn at all); the trackside boards go below Reduced and the distant hills
+  // in Rock, where they would lie beyond the far plane anyway.
+  const DENS = { full: 1, reduced: 0.6, sparse: 0.33, minimal: 0.12 };
+  function applyScenery() {
+    const root = state.root;
+    if (!root) return;
+    const lv = GFX.scenery || 'full', k = DENS[lv] || 1;
+    state.dens = [];
+    for (const o of root.children) {
+      const n0 = o.userData.dens;
+      if (n0) {
+        const n = Math.round(n0 * k);
+        if (o.isInstancedMesh) o.count = n; else o.geometry.instanceCount = n;
+        o.visible = o.userData.on = n > 0;
+        if (n > 0) state.dens.push(o);
+      }
+      if (o.userData.cat === 'boards') o.visible = lv === 'full' || lv === 'reduced';
+    }
+    if (root.userData.backdropMesh) root.userData.backdropMesh.visible = !ROCK;
+  }
+
   function applyLook(id) {
     const L = LOOKS[id] || LOOKS.kestrel;
     state.look = L;
@@ -412,10 +446,12 @@
     u.sunCol.value.set(L.sun); u.cloud.value = L.cloud; u.haze.value = L.haze;
     sun.color.set(L.sun); sun.intensity = L.sunI;
     hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.25;
-    scene.fog = new THREE.FogExp2(L.fog, 0.9 / L.fogF);
+    // rock: fog thick enough to hide the near far plane (about 90 per cent at 1.6 km)
+    const fogD = Math.max(0.9 / L.fogF, ROCK ? 1.5 / FAR : 0);
+    scene.fog = new THREE.FogExp2(L.fog, fogD);
     renderer.toneMappingExposure = L.exp;
     const S3 = F1.R3S.U;
-    S3.uFogCol.value.set(L.fog); S3.uFogDensity.value = 0.9 / L.fogF; S3.uFogFalloff.value = id === 'hakone' || id === 'sierra' ? 1 / 260 : 1 / 420;
+    S3.uFogCol.value.set(L.fog); S3.uFogDensity.value = fogD; S3.uFogFalloff.value = id === 'hakone' || id === 'sierra' ? 1 / 260 : 1 / 420;
     if (envRT) envRT.dispose();
     envRT = null;
     scene.background = null; skyMesh.visible = true;
@@ -544,6 +580,7 @@
     scene.add(built.root);
     applyLook(Tracks.lookOf(tr));
     backdropFor(Tracks.lookOf(tr), built.root);
+    applyScenery();
     clearFx();
   }
 
@@ -871,6 +908,11 @@
       }
     }
 
+    // Every part of the venue is tagged with a category (userData.cat) so the scenery setting
+    // can thin or hide it as a whole: road and ground stay; stands, buildings, trees, boards...
+    let mark = 0;
+    const tag = cat => { for (let i = mark; i < root.children.length; i++) root.children[i].userData.cat = cat; mark = root.children.length; };
+    tag('base');
     // grandstands
     {
       const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true);
@@ -903,6 +945,7 @@
       add(roof.geo(), M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
     }
 
+    tag('stands');
     // city blocks (street circuit)
     {
       const walls = new Batch(true), roofs = new Batch(true);
@@ -942,6 +985,7 @@
       for (const [k, , bt] of kinds) add(bt.parts.length ? bt.geo() : null, kindMat[k], { cast: true });
     }
 
+    tag('city');
     // car parks
     for (const it of W2.decor) {
       if (it.type !== 'lot') continue;
@@ -950,12 +994,14 @@
       add(g, M.lot);
     }
 
-    buildTrees(root, W2, tr);
-    const venue = buildVenue(root, tr, W2);
+    tag('lots');
+    buildTrees(root, W2, tr); tag('trees');
+    const venue = buildVenue(root, tr, W2); tag('venue');
     const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue) : null;
     if (grass) root.add(grass);
-    const gantry = buildGantry(root, tr);
-    buildBoards(root, W2, tr);
+    tag('grass');
+    const gantry = buildGantry(root, tr); tag('gantry');
+    buildBoards(root, W2, tr); tag('boards');
     buildBackdrop(root, W2);
     const tvCams = buildTvCams(tr);
     return { tr, root, gantry, water, tvCams, grass };
@@ -1034,6 +1080,8 @@
     }
     const tmp = new THREE.Object3D(), c = new THREE.Color();
     for (const list of tiles.values()) {
+      // shuffled, so a thinned tile (scenery setting) keeps a random share spread over it
+      for (let k = list.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [list[k], list[j]] = [list[j], list[k]]; }
       const trees = list.filter(i => i.type === 'tree'), palms = list.filter(i => i.type === 'palm');
       if (trees.length) {
         const trunks = new THREE.InstancedMesh(trunkG, M.bark, trees.length);
@@ -1053,7 +1101,7 @@
           else c.set(it.c || '#3c6a2c').offsetHSL((rnd() - 0.5) * 0.03, 0, (rnd() - 0.5) * 0.08);
           crowns.setColorAt(k, c);
         });
-        for (const m of [trunks, crowns]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); root.add(m); }
+        for (const m of [trunks, crowns]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.dens = trees.length; root.add(m); }
       }
       if (palms.length) {
         const trunks = new THREE.InstancedMesh(palmTrunk, M.bark, palms.length);
@@ -1066,7 +1114,7 @@
           tmp.position.set(it.x, h - 0.2 + gy, it.y); tmp.scale.set(1, 1, 1); tmp.updateMatrix();
           tops.setMatrixAt(k, tmp.matrix);
         });
-        for (const m of [trunks, tops]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); root.add(m); }
+        for (const m of [trunks, tops]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.dens = palms.length; root.add(m); }
       }
     }
   }
@@ -1359,9 +1407,12 @@
       // detail level by distance to the camera
       if (bu.lodGroups) {
         const d2 = (c.x - camera.position.x) ** 2 + (c.y - camera.position.z) ** 2;
-        RC.setLod(body, d2 > (GFX.potato ? 12 * 12 : GFX.lite ? 22 * 22 : 50 * 50) ? 1 : 0);
-        // potato: cars past 350 m are a few pixels; skip drawing them
-        body.visible = !GFX.potato || d2 < 350 * 350 || c === o.focus;
+        // full detail close up, the low-detail model further out, then the merged far mesh
+        // (one draw call); in Rock even the player's car is low detail outside the cockpit
+        const T = GFX.rock ? [2.5, 9] : GFX.potato ? [12, 40] : GFX.lite ? [22, 90] : [50, 300];
+        RC.setLod(body, d2 > T[1] * T[1] ? 2 : d2 > T[0] * T[0] ? 1 : 0);
+        // potato: cars past 350 m (Rock: 250 m) are a few pixels; skip drawing them
+        body.visible = !GFX.potato || d2 < (GFX.rock ? 250 * 250 : 350 * 350) || c === o.focus;
         RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel
         RC.updateHead(body, c, dt);
       }
@@ -1852,6 +1903,12 @@
     clock += dt;
     state.lastCars = o.cars;
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null);
+    // Rock: tree tiles whose nearest edge is past 700 m are lost in the fog; skip drawing them
+    if (ROCK && state.dens) for (const m of state.dens) {
+      const bs = m.isInstancedMesh ? m.boundingSphere : m.geometry.boundingSphere; // the tile's own sphere, not one tree's
+      if (!bs) continue;
+      m.visible = camera.position.distanceTo(bs.center) - bs.radius < 700;
+    }
     updateGhost(o.ghost);
     updateFx(o.fx, dt);
     if (F1.R3D) F1.R3D.stepDebris(dt, state.tr);
@@ -1927,5 +1984,5 @@
     return { x: (PJ.x + 1) / 2 * W, y: (1 - PJ.y) / 2 * H, d: camera.position.distanceTo(V(x, h, y)) };
   }
 
-  F1.R3 = { HM, potatoBoot: () => POT, init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
+  F1.R3 = { HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

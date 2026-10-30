@@ -842,8 +842,20 @@
     race.aeroT = (race.aeroT || 0) - dt;
     if (race.aeroT <= 0) { race.aeroT = 1 / 20; aeroMods(race); }
 
+    // Physics detail (race.physLod, the Rock graphics preset for the slowest phones): an AI car
+    // more than 150 m round the lap from the player, and out of the pits, steps every other
+    // tick with twice the time step, alternating cars so the work stays even. Nobody close
+    // enough to see or touch it is affected; it halves most of the field's physics.
+    race.tickN = (race.tickN || 0) + 1;
+    const dt1 = dt, dt2 = dt * 2, P = race.player, L = tr.L;
     for (const c of race.cars) {
       if (c.retired) continue;
+      let half = false;
+      if (race.physLod && race.green && P && c !== P && !c.inPit && !c.brain.pit && !c.finished) {
+        const g = Math.abs(c.loc.s - P.loc.s) % L;
+        if (Math.min(g, L - g) > 150) { if ((race.tickN + c.id) & 1) continue; half = true; }
+      }
+      const dt = half ? dt2 : dt1;
       if (c.dm && race.green) {
         F1.Damage.step(race, c, dt);
         if (c.dm.failed && !c.dm.handled) {

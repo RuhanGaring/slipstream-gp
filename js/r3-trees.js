@@ -133,6 +133,8 @@
       t.list.push(it);
     }
     for (const { sp, list } of tiles.values()) {
+      // shuffled, so a thinned tile (scenery setting) keeps a random share spread over it
+      for (let k = list.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [list[k], list[j]] = [list[j], list[k]]; }
       const S = getSpecies(sp), n = list.length;
       const pos = new Float32Array(n * 4), vr = new Float32Array(n * 2);
       let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, hMax = 0;
@@ -151,6 +153,7 @@
       const mesh = new THREE.Mesh(g, S.lit);
       mesh.customDepthMaterial = S.depth;
       mesh.castShadow = true; mesh.receiveShadow = false;
+      mesh.userData.dens = n;
       root.add(mesh);
     }
     return true;

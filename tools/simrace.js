@@ -8,6 +8,7 @@ for (const id of ids) {
   const t0 = Date.now();
   const race = F1.Race.create({ track: id, mode, laps, difficulty: diff, team: 0, driver: 0, grid: 10, field: 20, seed: +(process.env.SEED || 7), assists: {} });
   race.autoPlayer = true;
+  if (process.env.PHYSLOD) race.physLod = true;
   const lastInc = new Map();
   let wall = 0, contact = 0, recov = 0, offs = 0, overtakes = 0, lastOrder = null;
   const offState = new Map();

@@ -588,14 +588,15 @@
       const gx = st.gfx, P = F1.Game.GFX_PRESETS;
       const onOff = v => (v ? 'ON' : 'OFF');
       const setG = (k, v) => { gx[k] = v; gx.preset = 'custom'; F1.Game.applySettings(); items.forEach(i => i.render && i.render()); };
-      add(optRow('Quality preset', 'Potato is for integrated graphics and restarts the game', ['potato', 'low', 'medium', 'high', 'ultra', 'custom'], () => gx.preset, v => {
+      add(optRow('Quality preset', 'Rock and Potato are for phones and integrated graphics, and restart the game', ['rock', 'potato', 'low', 'medium', 'high', 'ultra', 'custom'], () => gx.preset, v => {
         if (v === 'custom') { gx.preset = 'custom'; return; }
         Object.assign(gx, P[v], { preset: v }); F1.Game.applySettings(); items.forEach(i => i.render && i.render());
-        // potato changes how the WebGL context is made, so it only takes effect on a fresh start
-        if (F1.R3.potatoBoot() !== (v === 'potato')) setTimeout(() => location.reload(), 150);
+        // potato and rock change how the WebGL context is made, so they only take effect on a fresh start
+        if (F1.R3.bootTier() !== (v === 'rock' || v === 'potato' ? v : '')) { F1.Game.saveSettings(); setTimeout(() => location.reload(), 150); }
       }, v => v.toUpperCase()), 'GRAPHICS');
       add(optRow('Post-processing', 'HDR pipeline. Off is fastest', [true, false], () => gx.post, v => setG('post', v), onOff));
-      add(optRow('Render scale', 'Above 100% supersamples', [0.5, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
+      add(optRow('Scenery', 'Tree density, trackside boards and distant hills', ['full', 'reduced', 'sparse', 'minimal'], () => gx.scenery || 'full', v => setG('scenery', v), v => v.toUpperCase()));
+      add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
       add(optRow('Anti-aliasing', '', [0, 2, 4, 8], () => gx.msaa, v => setG('msaa', v), v => (v ? 'MSAA ' + v + 'X' : 'OFF')));
       add(optRow('Shadows', '', ['off', 'low', 'medium', 'high', 'ultra'], () => gx.shadows, v => setG('shadows', v), v => v.toUpperCase()));
       add(optRow('Ambient occlusion', 'Contact shadowing in creases', [true, false], () => gx.ssao, v => setG('ssao', v), onOff));

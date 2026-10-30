@@ -35,18 +35,24 @@
     // grass cards, a 1x pixel ratio cap and earlier car LOD (lite)
     // potato: for when low is still too slow. No shadows, half resolution, and at boot no canvas
     // MSAA and a plain depth buffer (see POT in js/render3d.js), so switching to or from it reloads
-    potato: { potato: true, lite: true, post: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false },
-    low: { potato: false, lite: true, post: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false },
-    medium: { potato: false, lite: false, post: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true },
-    high: { potato: false, lite: false, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true },
-    ultra: { potato: false, lite: false, post: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true },
+    // rock: the slowest phones. Potato plus a lower resolution, sparse scenery, a near far plane
+    // and simplified cars (each distant car one draw call)
+    rock: { potato: true, rock: true, lite: true, post: false, scale: 0.4, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'minimal' },
+    potato: { potato: true, rock: false, lite: true, post: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'sparse' },
+    low: { potato: false, rock: false, lite: true, post: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
+    medium: { potato: false, rock: false, lite: false, post: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
+    high: { potato: false, rock: false, lite: false, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    ultra: { potato: false, rock: false, lite: false, post: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
   };
-  // phones and tablets start on the low preset (a desktop starts on high)
+  // phones and tablets start on the potato preset (a desktop starts on high); the slowest can go to rock
   const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-  if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'low', tone: 'agx', ev: 0 }, GFX_PRESETS.low);
+  if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'potato', tone: 'agx', ev: 0 }, GFX_PRESETS.potato);
+  // settings saved before the scenery option take the scenery of their preset
+  { const sv = Game.settings.gfx; if (sv && !sv.scenery && GFX_PRESETS[sv.preset]) sv.scenery = GFX_PRESETS[sv.preset].scenery; }
   Game.settings.gfx = Object.assign({ preset: 'high', tone: 'agx', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
   // settings saved before the lite flag existed
-  Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato';
+  Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato' || Game.settings.gfx.preset === 'rock';
+  Game.settings.gfx.rock = Game.settings.gfx.preset === 'rock';
   if (Game.settings.gfx.lite === undefined) Game.settings.gfx.lite = Game.settings.gfx.preset === 'low';
 
   // ---------- canvas ----------
@@ -803,6 +809,8 @@
 
   function newRace(cfg) {
     const race = Race.create(cfg);
+    // the Rock preset also runs distant AI cars' physics at half rate (see Race.step)
+    race.physLod = !!(Game.settings.gfx && Game.settings.gfx.rock);
     buildWorld(race.track);
     FX.parts.length = 0; FX.skidN = 0; FX.skidHead = 0; FX.debris.length = 0;
     evIdx = 0; finishT = -1; acc = 0;
@@ -1276,8 +1284,10 @@
       acc += dt;
       let n = 0;
       // the home-screen race is only a backdrop: after a slow frame it does not rush to catch up
-      // (that makes the next frame slower still); it runs a little behind real time instead
-      const maxSteps = Game.state === 'menu' ? 7 : 40;
+      // (that makes the next frame slower still); it runs a little behind real time instead.
+      // On the potato and rock presets (phones) a race does the same below 30 fps: catching up
+      // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
+      const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.potato ? 8 : 40;
       while (acc >= DT && n < maxSteps) {
         if (Game.state === 'race') applyInput(race.player, DT, pad);
         snapPoses(race);

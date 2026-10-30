@@ -526,6 +526,50 @@
   // of a panel turns into a see-through hole, so all model materials render both sides.
   const twoSided = m => { if (m.side !== THREE.DoubleSide) { m.side = THREE.DoubleSide; m.needsUpdate = true; } return m; };
 
+  // Far detail level: the whole car (the low-detail body with its livery zones as vertex
+  // colours, and the four wheels) merged into one mesh under one shared material, so a
+  // distant car costs one draw call instead of about twenty-five. The wheels neither turn
+  // nor steer at this level; from as far away as it is used, nobody can tell.
+  const FAR_COL = { [ID.carbon]: '#1c1d20', [ID.carbonGloss]: '#17181b', [ID.halo]: '#22242a', [ID.mirror]: '#1c1d20', [ID.interior]: '#121315', [ID.tyre]: '#1a1a1b', [ID.rim]: '#2a2c30', [ID.nut]: '#c9a24a' };
+  const farCache = new Map();
+  let farMatS = null;
+  function farMat() {
+    return farMatS || (farMatS = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.05, side: THREE.DoubleSide }));
+  }
+  function farGeo(team) {
+    if (farCache.has(team.id)) return farCache.get(team.id);
+    const MD = model(), lod = MD.lods.length - 1, L = MD.lods[lod];
+    const pos = [], nor = [], col = [], idx = [];
+    const add = (G, colorAt, off) => {
+      const p = G.attributes.position, n = G.attributes.normal, base = pos.length / 3;
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i) + off[0], p.getY(i) + off[1], p.getZ(i) + off[2]);
+        if (n) nor.push(n.getX(i), n.getY(i), n.getZ(i)); else nor.push(0, 1, 0);
+        const c = colorAt(i); col.push(c[0], c[1], c[2]);
+      }
+      if (G.index) for (let i = 0; i < G.index.count; i++) idx.push(base + G.index.getX(i));
+      else for (let i = 0; i < p.count; i++) idx.push(base + i);
+    };
+    const flat = id => { const c = new THREE.Color(FAR_COL[id] || FAR_COL[ID.carbon]); return () => [c.r, c.g, c.b]; };
+    for (const [id, part] of Object.entries(L.body)) {
+      if (+id === ID.helmet || +id === ID.visor) continue;
+      if (+id === ID.paint) { const ca = liveryGeo(team, lod).attributes.color; add(part.G, i => [ca.getX(i), ca.getY(i), ca.getZ(i)], [0, 0, 0]); }
+      else add(part.G, flat(id), [0, 0, 0]);
+    }
+    for (const key of ['FL', 'FR', 'RL', 'RR']) {
+      const W = L.wheels[key], c = MD.lods[0].wheels[key].c;
+      for (const [id, G] of Object.entries(W.parts)) add(G, flat(id), c);
+    }
+    const G = new THREE.BufferGeometry();
+    G.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    G.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    G.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    G.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+    G.computeBoundingSphere();
+    farCache.set(team.id, G);
+    return G;
+  }
+
   function makeModelCar(team, num, comp) {
     const MD = model();
     const root = new THREE.Group();
@@ -575,6 +619,9 @@
     const nose = new THREE.Mesh(ng, numMat);
     nose.position.set(1.95, 0.71, 0);
     root.add(nose);
+    const far = new THREE.Mesh(farGeo(team), farMat());
+    far.castShadow = true; far.visible = false;
+    root.add(far);
     const rainMat = new THREE.MeshStandardMaterial({ color: 0x400808, emissive: 0xff2010, emissiveIntensity: 0 });
     const rain = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.1), rainMat);
     rain.position.set(-2.2, 0.47, 0);
@@ -597,7 +644,7 @@
     { const e = G.__helmetEye || [-0.12, 1.46, -6.2]; hEye.position.set(e[0], e[1], 0); hLook.position.set(30, e[2], 0); }
     root.add(hEye, hLook); // bolted to the chassis, not the head
     root.add(tcamEye, tcamLook);
-    root.userData = { wheels, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, helmet: cockpit.helmet, model: true, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
+    root.userData = { wheels, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, far, nose, helmet: cockpit.helmet, model: true, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
     updateCockpit(root, 0);
     return root;
   }
@@ -605,9 +652,16 @@
     const u = root.userData;
     if (!u.lodGroups || u.lod === lod) return;
     u.lod = lod;
-    u.lodGroups.forEach((g, k) => { g.visible = k === lod; });
-    for (const w of u.wheels) w.userData.lods.forEach((g, k) => { g.visible = k === lod; });
-    if (u.cockpit) u.cockpit.group.visible = lod === 0;
+    // level 2 is the merged far mesh: every separate part is hidden. Hidden groups are also
+    // taken out of the scene graph, or three would still update every matrix inside them each
+    // frame (the full-detail body, wheels and cockpit of twenty cars is thousands of nodes)
+    const far = lod === 2 && !!u.far, L = far ? -1 : Math.min(lod, u.lodGroups.length - 1);
+    const put = (g, on, par) => { g.visible = on; if (on && !g.parent) par.add(g); else if (!on && g.parent) g.parent.remove(g); };
+    u.lodGroups.forEach((g, k) => put(g, k === L, root));
+    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = !far; }); }
+    if (u.far) u.far.visible = far;
+    if (u.nose) u.nose.visible = !far;
+    if (u.cockpit) put(u.cockpit.group, lod === 0, root);
   }
 
   // ---------- cockpit: steering wheel, driver, T-cam pod ----------
