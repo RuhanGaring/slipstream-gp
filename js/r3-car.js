@@ -1223,18 +1223,19 @@
   // panel (b); in the glove, faces turned toward the palm are suede. Cloth relief comes from
   // fabricTexture, projected three ways onto the arm's rest pose (the geometry before
   // skinning), so the weave stays put on the cloth as the arm bends, and is applied as bump
-  // relief from its screen-space slope. The gauntlet carries a stitched white edge and a band
-  // in the team's accent colour.
+  // relief from its screen-space slope. The gloves are black whatever the team: black knit
+  // backs, a slightly deeper black knuckle panel and cuff band, dark stitching; only the
+  // sleeve takes the team's colours.
   function armMaterial(team, sd) {
     const A = armData(), m3 = v => (sd < 0 ? new THREE.Vector3(v.x, v.y, -v.z) : v.clone());
-    const suit = new THREE.Color(team.base), acc = new THREE.Color(team.accent);
-    const glove = suit.clone().lerp(new THREE.Color(0x0b0d14), 0.55);
+    const suit = new THREE.Color(team.base);
+    const glove = new THREE.Color(0x26272b), panel = new THREE.Color(0x1a1b1e);
     const X0 = new THREE.Vector3().setFromMatrixColumn(A.RF0inv.clone().invert(), 0);
     // Cloth sheen is light scattered by the fibres, so it takes the fabric's own colour; an
     // untinted sheen on a dark glove turns every edge pale where the sun grazes it
     const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.84, metalness: 0, sheen: 1, sheenRoughness: 0.65, sheenColor: new THREE.Color(0xffffff) });
     const u = {
-      uSuit: { value: suit.multiplyScalar(0.8) }, uGlove: { value: glove }, uPanel: { value: acc }, uSuede: { value: new THREE.Color(0x2b2c30) },
+      uSuit: { value: suit.multiplyScalar(0.8) }, uGlove: { value: glove }, uPanel: { value: panel }, uSuede: { value: new THREE.Color(0x2b2c30) },
       uFab: { value: fabricTexture() }, uPalm: { value: m3(X0) }, uWrist: { value: m3(A.W0) }, uUpArm: { value: m3(A.F0.clone().sub(A.W0).normalize()) },
     };
     m.userData.patchKey = 'arm';
@@ -1255,10 +1256,10 @@
           '  float aAl = dot(vRP - uWrist, uUpArm);', // metres up the forearm from the wrist
           '  vec3 aCol = uSuit * vColor.r + uGlove * vColor.g + uPanel * vColor.b;',
           '  aCol = mix(aCol, uSuede, aSu);',
-          // gauntlet: accent band and a white edge with a stitch line
+          // gauntlet: a deeper black band and a dark stitched edge
           '  float aCuff = vColor.g * step(0.0, aAl);',
           '  aCol = mix(aCol, uPanel, aCuff * step(0.045, aAl) * step(aAl, 0.054));',
-          '  aCol = mix(aCol, vec3(0.85), aCuff * step(0.064, aAl) * step(aAl, 0.068));',
+          '  aCol = mix(aCol, vec3(0.045), aCuff * step(0.064, aAl) * step(aAl, 0.068));',
           '  float aH = mix(aF.r, mix(aF.g, aF.b, aSu), aGl);',
           // the cloth reads at a glance: weave and knit light and dark, as on a real suit
           '  aCol *= mix(0.74, 1.12, aH);',
@@ -1268,7 +1269,7 @@
           // gauntlet: a dark hook-and-loop strap round the wrist with a stitched edge
           '  float aStrap = aCuff * smoothstep(0.004, 0.008, aAl) * (1.0 - smoothstep(0.036, 0.04, aAl));',
           '  aCol = mix(aCol, vec3(0.05) * (0.8 + 0.4 * aF.b), aStrap);',
-          '  aCol = mix(aCol, vec3(0.7), aCuff * (step(0.008, aAl) * step(aAl, 0.0095) + step(0.0345, aAl) * step(aAl, 0.036)));',
+          '  aCol = mix(aCol, vec3(0.045), aCuff * (step(0.008, aAl) * step(aAl, 0.0095) + step(0.0345, aAl) * step(aAl, 0.036)));',
           // suit sleeve: stitched panel seams round the forearm, a darker double line
           '  float aSm = fract(aAl / 0.085);',
           '  aCol *= 1.0 - 0.45 * vColor.r * step(0.07, aAl) * (step(aSm, 0.012) + step(0.03, aSm) * step(aSm, 0.04));',
