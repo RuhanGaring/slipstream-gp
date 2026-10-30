@@ -838,7 +838,7 @@
       launchRound();
       return;
     }
-    if (f.kind === 'weekend') { weekendStart(); return; }
+    if (f.kind === 'weekend') { weekendStart({ track: f.track, fp: (R.wkFmt || 'full') === 'full' }); return; }
     launch({ track: f.track, mode: f.kind === 'tt' ? 'tt' : f.mode, ttHandling: f.mode });
   };
 
@@ -850,11 +850,17 @@
   // skill: the ideal lap of the speed profile they race to (the same team spec, pace and
   // learned grip the AI drives, scaled to the laps the AI actually turns), plus driver error, with the track rubbering in
   // from session to session. The race then starts from the qualifying order.
+  // A full weekend opens with free practice: a longer solo session to learn the circuit and
+  // the car, classified against the field's practice times (heavier fuel and long-run
+  // programmes, so the AI runs a little slower and less consistently than in qualifying).
+  // In the championship each round can be a full weekend, qualifying and race, or race only.
   const QSEG = [{ name: 'Q1', laps: 3 }, { name: 'Q2', laps: 2 }, { name: 'Q3', laps: 2 }];
+  const FP = { name: 'PRACTICE', laps: 6 };
+  const sessionOf = race => (race.quali != null ? QSEG[race.quali] : race.practice ? FP : null);
   // the AI's real laps run slower than the ideal of its speed profile (braking points, line
   // errors, kerbs): measured on Kestrel Park the quickest race laps came out about 13 per cent over
   const AI_LAP_K = 1.13;
-  function weekendStart() {
+  function weekendStart(o) {
     const f = Game.flow, R = Game.raceDefaults;
     const roster = [];
     F1.Data.TEAMS.forEach(t => t.drivers.forEach((d, di) => roster.push({ t, d, di })));
@@ -862,13 +868,17 @@
     const field = roster.slice(0, R.field || 20);
     if (!field.includes(me)) field[field.length - 1] = me;
     const n = field.length, cut = n >= 16 ? 5 : Math.max(1, Math.floor(n / 4));
-    Game.weekend = { track: f.track, seg: 0, n, cut, me: me.d[2], info: {}, res: [], ai: null };
+    Game.weekend = { track: o.track, round: o.round, seg: 0, n, cut, me: me.d[2], info: {}, res: [], fpRes: null, ai: null };
     for (const r of field) Game.weekend.info[r.d[2]] = { code: r.d[2], name: r.d[0] + ' ' + r.d[1], team: r.t, skill: r.d[4] };
-    launchQuali();
+    if (o.fp) launchPractice(); else launchQuali();
+  }
+  function launchPractice() {
+    const W = Game.weekend;
+    launch({ track: W.track, mode: 'tt', ttHandling: Game.flow.mode, practice: true, weekend: true, round: W.round });
   }
   function launchQuali() {
     const W = Game.weekend;
-    launch({ track: W.track, mode: 'tt', ttHandling: Game.flow.mode, quali: W.seg, weekend: true });
+    launch({ track: W.track, mode: 'tt', ttHandling: Game.flow.mode, quali: W.seg, weekend: true, round: W.round });
   }
   // each AI driver's clean lap on this circuit, from the profile they race to
   function aiBaseTimes() {
@@ -900,21 +910,39 @@
     W.res[seg] = rows;
     return rows;
   }
+  // practice: everyone on long runs, so slower and more spread out than qualifying
+  function runPractice(playerTime) {
+    const W = Game.weekend, base = aiBaseTimes();
+    const rows = Object.keys(W.info).map(code => {
+      if (code === W.me) return { code, t: playerTime };
+      const err = Math.abs(gauss()) * 0.006 * (1.6 - W.info[code].skill);
+      // fuel and programmes cost about 0.7 per cent, a greener track another 0.25
+      return { code, t: base[code] * AI_LAP_K * (1.0095 + err) };
+    });
+    rows.sort((a, b) => (a.t == null ? 1e9 : a.t) - (b.t == null ? 1e9 : b.t));
+    W.fpRes = rows;
+    return rows;
+  }
   // who is still in after session seg
   function through(seg) { const r = Game.weekend.res[seg], W = Game.weekend; return r.slice(0, seg < 2 ? r.length - W.cut : r.length).map(x => x.code); }
   function endQuali() {
     const race = Game.race, W = Game.weekend;
-    if (!race || race.quali == null || Game.state !== 'race') return;
+    if (!race || !sessionOf(race) || Game.state !== 'race') return;
     if (mouse.on) setMouseSteer(false, true);
     Game.state = 'results'; Game.paused = false;
     Audio.stopRace();
     setBlur(false);
     document.getElementById('hud').classList.add('off');
     document.getElementById('shade').className = 'full';
+    const pt = race.player.bestLap, t = pt != null && isFinite(pt) ? pt : null;
+    if (race.practice) { runPractice(t); showPractice(); return; }
     const seg = W.seg, codes = seg === 0 ? Object.keys(W.info) : through(seg - 1);
-    const pt = race.player.bestLap;
-    runSegment(seg, codes, pt != null && isFinite(pt) ? pt : null);
+    runSegment(seg, codes, t);
     showQuali(seg);
+  }
+  function showPractice() {
+    const W = Game.weekend, rows = W.fpRes;
+    UIm.go('quali', { practice: true, name: FP.name, round: W.round, rows: rows.map((r, k) => Object.assign({ pos: k + 1, out: false }, W.info[r.code], { t: r.t, me: r.code === W.me })), pole: rows[0].t, next: { label: 'CONTINUE TO Q1', fn: () => { W.seg = 0; launchQuali(); } }, cut: null, track: Race.getTrack(W.track).name });
   }
   Game.endQuali = endQuali;
   function showQuali(seg) {
@@ -924,7 +952,7 @@
     const next = seg < 2 && playerIn
       ? { label: 'CONTINUE TO ' + QSEG[seg + 1].name, fn: () => { W.seg = seg + 1; launchQuali(); } }
       : { label: 'TO THE RACE', fn: () => weekendRace() };
-    UIm.go('quali', { seg, name: QSEG[seg].name, rows: rows.map((r, k) => Object.assign({ pos: k + 1, out: k >= out && seg < 2 }, W.info[r.code], { t: r.t, me: r.code === W.me })), pole: rows[0].t, next, cut: seg < 2 ? out : null, track: Race.getTrack(W.track).name });
+    UIm.go('quali', { seg, name: QSEG[seg].name, round: W.round, rows: rows.map((r, k) => Object.assign({ pos: k + 1, out: k >= out && seg < 2 }, W.info[r.code], { t: r.t, me: r.code === W.me })), pole: rows[0].t, next, cut: seg < 2 ? out : null, track: Race.getTrack(W.track).name });
   }
   function weekendRace() {
     const W = Game.weekend;
@@ -935,14 +963,18 @@
     // the player, if knocked out after a session they set no time in, still has a slot
     for (const code in W.info) if (!grid.includes(code)) grid.push(code);
     W.grid = grid;
-    launch({ track: W.track, mode: Game.flow.mode, gridOrder: grid, weekend: true });
+    // the championship counts poles
+    const ch = Game.champ;
+    if (W.round && ch && ch.table[grid[0]]) { ch.table[grid[0]].poles = (ch.table[grid[0]].poles || 0) + 1; ch.quali = true; }
+    launch({ track: W.track, mode: Game.flow.mode, gridOrder: grid, weekend: true, round: W.round });
   }
 
 
   function launchRound() {
     const ch = Game.champ, f = Game.flow;
-    const def = Tracks.DEFS[ch.round];
-    // grid in later rounds: reverse championship order for the player is not used; field by pace
+    const def = Tracks.DEFS[ch.round], fmt = Game.raceDefaults.chFmt || 'race';
+    // a round with qualifying is a weekend of its own; race only starts from a random slot
+    if (fmt !== 'race') { weekendStart({ track: def.id, round: ch.round + 1, fp: fmt === 'full' }); return; }
     launch({ track: def.id, mode: f.mode, round: ch.round + 1 });
   }
 
@@ -955,7 +987,7 @@
       mandatory: R.mandatory !== false, weather: R.weather || 'dry', safetyCar: R.safetyCar || 'on',
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
       grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists, compound: R.compound,
-      ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, noGhost: o.quali != null,
+      ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, noGhost: o.quali != null || !!o.practice,
     };
   }
 
@@ -971,7 +1003,7 @@
       const tr0 = Race.getTrack(def.id);
       const R0 = Game.raceDefaults;
       UIm.go('loading', {
-        def, tr: tr0, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali,
+        def, tr: tr0, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali, practice: o.practice,
         laps: o.mode === 'tt' ? null : R0.laps, best: Game.bestLap(def.id, o.mode === 'arcade' || (o.mode === 'tt' && o.ttHandling !== 'sim') ? 'arcade' : 'sim'),
         team: F1.Data.TEAMS[Game.flow.team || 0], driver: F1.Data.TEAMS[Game.flow.team || 0].drivers[Game.flow.driver || 0],
       });
@@ -987,6 +1019,7 @@
         }
         race.handling = cfg.ttArcade || o.mode === 'arcade' ? 'arcade' : 'sim';
         if (o.quali != null) race.quali = o.quali;
+        if (o.practice) race.practice = true;
         Game.pendingRace = race;
         Game.lastLaunch = o;
         // hold the shot: continue on Enter once ready, or by itself after a few seconds
@@ -1011,6 +1044,7 @@
             Audio.startRace();
             fade.classList.remove('on');
             if (race.quali != null) HUD.message('QUALIFYING  ' + QSEG[race.quali].name, 'blue', QSEG[race.quali].laps + ' LAPS, OUT LAP FIRST', 3.5);
+            else if (race.practice) HUD.message('FREE PRACTICE', 'blue', FP.laps + ' LAPS, END IT EARLY FROM PAUSE', 3.5);
             else if (race.mode === 'tt') HUD.message('TIME TRIAL', 'blue', race.ghost ? 'GHOST ' + U.fmtTime(race.ghost.t) : 'SET A BENCHMARK LAP', 3);
           }, 380);
         };
@@ -1053,7 +1087,7 @@
     setBlur(false);
     if (mouse.on) setMouseSteer(false, true);
     Audio.stopRace();
-    if (Game.flow.kind === 'champ' && Game.champ) launchRound();
+    if (Game.flow.kind === 'champ' && Game.champ && !(Game.lastLaunch && Game.lastLaunch.weekend)) launchRound();
     else launch(Game.lastLaunch);
   };
 
@@ -1286,7 +1320,7 @@
           showResults();
         } else if (race.done && Game.state === 'race' && p.finished) showResults();
         // qualifying: the session ends after its laps (the chequered flag on the last one)
-        if (race.quali != null && Game.state === 'race' && !race.qDone && p.lapTimes.length >= QSEG[race.quali].laps) {
+        if (sessionOf(race) && Game.state === 'race' && !race.qDone && p.lapTimes.length >= sessionOf(race).laps) {
           race.qDone = true;
           HUD.message('SESSION COMPLETE', 'purple', p.bestLap ? 'BEST  ' + U.fmtTime(p.bestLap) : 'NO TIME SET', 2.5);
           setTimeout(endQuali, 2600);

@@ -189,8 +189,8 @@
     const menu = h('div', 'menu');
     const entries = [
       ['QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', () => { F1.Game.flow = { kind: 'race' }; go('mode'); }],
-      ['GRAND PRIX WEEKEND', 'The full event: Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
-      ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
+      ['GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
+      ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
       ['SETTINGS', 'Audio, camera, units and HUD.', () => go('settings', { back: 'main' })],
       ['CONTROLS', 'Keyboard and gamepad layout.', () => go('controls', { back: 'main' })],
@@ -485,6 +485,7 @@
     return { el, items, focus: flow.driver || 0, back: () => go('team') };
   };
 
+  const FMT = { race: 'RACE ONLY', quali: 'QUALIFYING + RACE', full: 'PRACTICE + QUALIFYING + RACE' };
   S.setup = () => {
     const el = h('div', 'wk');
     const flow = F1.Game.flow;
@@ -503,6 +504,8 @@
       add(optRow('AI difficulty', 'Legend drives at the limit the AI learned for each circuit', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
       if (kind !== 'champ' && kind !== 'weekend') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
       add(optRow('Field size', '', [10, 16, 20], () => R.field, v => { R.field = v; updSummary(); }, v => v + ' CARS'));
+      if (kind === 'weekend') add(optRow('Weekend format', 'Practice is a longer solo session before qualifying', ['full', 'quali'], () => R.wkFmt || 'full', v => { R.wkFmt = v; updSummary(); }, v => FMT[v]));
+      if (kind === 'champ') add(optRow('Round format', 'Each round as a race only, or with qualifying for the grid', ['race', 'quali', 'full'], () => R.chFmt || 'race', v => { R.chFmt = v; updSummary(); }, v => FMT[v]));
     }
     if (sim) {
       add(optRow('Starting tyre', '', ['S', 'M', 'H'], () => R.compound, v => { R.compound = v; updSummary(); }, v => F1.Car.COMPOUNDS[v].name), 'Car');
@@ -536,6 +539,7 @@
         <div class="wk-drv"><span class="no">${d[3]}</span><span class="dn"><small>${d[0]}</small>${d[1].toUpperCase()}<em>${t.name}</em></span></div>
         <div class="wk-grid">
           <div><span>Handling</span><b>${sim ? 'Simulation' : 'Arcade'}</b></div>
+          ${kind === 'weekend' || kind === 'champ' ? `<div><span>Format</span><b>${{ race: 'Race only', quali: 'Qualifying, race', full: 'Practice, qualifying, race' }[kind === 'champ' ? R.chFmt || 'race' : R.wkFmt || 'full']}</b></div>` : ''}
           ${kind !== 'tt' ? `<div><span>Distance</span><b>${R.laps} laps</b></div><div><span>Opponents</span><b>${R.field - 1}, ${Data.DIFFICULTY[R.difficulty].name.toLowerCase()}</b></div>` : ''}
           ${sim ? `<div><span>Tyre</span><b class="c-${R.compound}">${F1.Car.COMPOUNDS[R.compound].name.toLowerCase()}</b></div>` : ''}
           ${sim && kind !== 'tt' ? `<div><span>Weather</span><b>${wx}</b></div>` : ''}
@@ -638,7 +642,8 @@
     const el = h('div');
     const def = o.def, tr = o.tr;
     const num = o.round ? String(o.round).padStart(2, '0') : def.gen ? 'GEN' : String(F1.Tracks.DEFS.indexOf(def) + 1).padStart(2, '0');
-    const session = o.quali != null ? 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : 'GRAND PRIX';
+    const rnd = o.round ? `ROUND ${o.round}  /  ` : '';
+    const session = o.quali != null ? rnd + 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.practice ? rnd + 'FREE PRACTICE' : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : 'GRAND PRIX';
     const handling = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim') ? 'SIMULATION' : 'ARCADE';
     const tc = o.team.base === '#121417' ? o.team.accent : o.team.base;
     el.innerHTML = `
@@ -677,7 +682,7 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null ? [['END SESSION', () => F1.Game.endQuali()], ['QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
+    const entries = [['RESUME', () => F1.Game.resume()], ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
     const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: fn }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
@@ -752,7 +757,7 @@
     }
     const tbl = h('div');
     tbl.style.maxHeight = done ? '40vh' : '52vh'; tbl.style.overflow = 'auto';
-    tbl.innerHTML = `<table class="res"><tr><th>POS</th><th>DRIVER</th><th>TEAM</th><th>WINS</th><th>PODIUMS</th><th style="text-align:right">PTS</th></tr>${list.map((r, k) => `<tr class="${r.player ? 'me' : ''}"><td class="pos">${k + 1}</td><td><span class="sw" style="background:${r.color}"></span>${r.name}</td><td>${r.team}</td><td>${r.wins}</td><td>${r.pods}</td><td class="pts">${r.pts}</td></tr>`).join('')}</table>`;
+    tbl.innerHTML = `<table class="res"><tr><th>POS</th><th>DRIVER</th><th>TEAM</th>${ch.quali ? '<th>POLES</th>' : ''}<th>WINS</th><th>PODIUMS</th><th style="text-align:right">PTS</th></tr>${list.map((r, k) => `<tr class="${r.player ? 'me' : ''}"><td class="pos">${k + 1}</td><td><span class="sw" style="background:${r.color}"></span>${r.name}</td><td>${r.team}</td>${ch.quali ? `<td>${r.poles || 0}</td>` : ''}<td>${r.wins}</td><td>${r.pods}</td><td class="pts">${r.pts}</td></tr>`).join('')}</table>`;
     wrap.appendChild(tbl);
     const acts = h('div', 'res-actions');
     const items = [];
@@ -768,7 +773,8 @@
   S.quali = o => {
     const el = h('div');
     const wrap = h('div', 'menu-wrap stage');
-    wrap.innerHTML = `<div class="crumbs">GRAND PRIX WEEKEND  /  ${o.track.toUpperCase()}</div><div class="h1">QUALIFYING  ${o.name}</div>`;
+    const ev = o.round ? `ROUND ${o.round} OF ${F1.Tracks.DEFS.length}` : 'GRAND PRIX WEEKEND';
+    wrap.innerHTML = `<div class="crumbs">${ev}  /  ${o.track.toUpperCase()}</div><div class="h1">${o.practice ? 'FREE PRACTICE' : 'QUALIFYING  ' + o.name}</div>`;
     const sw = c => (c.team.base === '#121417' ? c.team.accent : c.team.base);
     const rows = o.rows.map((r, k) => {
       const t = r.t == null ? 'NO TIME' : k === 0 ? (o.name === 'Q3' ? 'POLE' : 'FASTEST') : '+' + (r.t - o.pole).toFixed(3);
@@ -783,7 +789,7 @@
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     mk(o.next.label, o.next.fn);
-    mk('QUIT WEEKEND', () => F1.Game.quitToMenu());
+    mk(o.round ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu());
     wrap.appendChild(acts);
     el.appendChild(wrap);
     return { el, items, nav: 'h', back: () => {} };
