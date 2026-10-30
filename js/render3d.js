@@ -1482,7 +1482,8 @@
         // full detail close up, the low-detail model further out, then the merged far mesh
         // (one draw call); in Rock even the player's car is low detail outside the cockpit
         const n0 = GFX.carNear || 50, n1 = Math.max(n0, GFX.carFar || 300);
-        RC.setLod(body, d2 > n1 * n1 ? 2 : d2 > n0 * n0 ? 1 : 0);
+        // the cockpit interior only within 10 m (or for the car being driven from inside)
+        RC.setLod(body, d2 > n1 * n1 ? 2 : d2 > n0 * n0 ? 1 : 0, d2 < 100 || c === hideHelmet);
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
         RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel

@@ -648,20 +648,35 @@
     updateCockpit(root, 0);
     return root;
   }
-  function setLod(root, lod) {
+  // inner: whether the cockpit interior is drawn at full detail. From outside a car only its
+  // helmet shows in the opening, so beyond a few metres the rest of the cockpit (some eighty
+  // meshes: the wheel and its buttons, the arms, harness and pads) is taken out, and its
+  // animation (updateCockpit) stops with it.
+  function setLod(root, lod, inner = true) {
     const u = root.userData;
-    if (!u.lodGroups || u.lod === lod) return;
-    u.lod = lod;
+    if (!u.lodGroups || (u.lod === lod && u.inner === inner)) return;
+    u.lod = lod; u.inner = inner;
     // level 2 is the merged far mesh: every separate part is hidden. Hidden groups are also
     // taken out of the scene graph, or three would still update every matrix inside them each
     // frame (the full-detail body, wheels and cockpit of twenty cars is thousands of nodes)
     const far = lod === 2 && !!u.far, L = far ? -1 : Math.min(lod, u.lodGroups.length - 1);
     const put = (g, on, par) => { g.visible = on; if (on && !g.parent) par.add(g); else if (!on && g.parent) g.parent.remove(g); };
     u.lodGroups.forEach((g, k) => put(g, k === L, root));
-    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = !far; }); }
+    // the compound rings on the sidewalls are a centimetre wide: full detail only
+    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = lod === 0; }); }
     if (u.far) u.far.visible = far;
     if (u.nose) u.nose.visible = !far;
-    if (u.cockpit) put(u.cockpit.group, lod === 0, root);
+    const ck = u.cockpit;
+    if (ck) {
+      put(ck.group, lod === 0, root);
+      // the cockpit's parts as built, and which of them hold the helmet (kept from outside)
+      if (!ck.kids) {
+        const hel = new Set(ck.helmet || []);
+        ck.kids = ck.group.children.slice().map(ch => { let h = false; ch.traverse(m => { if (hel.has(m)) h = true; }); return { ch, h }; });
+      }
+      ck.inner = inner;
+      for (const { ch, h } of ck.kids) { const on = inner || h; if (on && ch.parent !== ck.group) ck.group.add(ch); else if (!on && ch.parent === ck.group) ck.group.remove(ch); }
+    }
   }
 
   // ---------- cockpit: steering wheel, driver, T-cam pod ----------
@@ -1498,7 +1513,7 @@
   // gloves stay on the grips. With the car being driven, the wheel's screen shows its data.
   function updateCockpit(root, steer, car) {
     const ck = root.userData.cockpit;
-    if (!ck || !ck.group.visible) return;
+    if (!ck || !ck.group.visible || ck.inner === false) return;
     if (car && ck.disp) {
       const now = performance.now();
       // refresh rate from advanced graphics (each redraw re-uploads the display texture); 0 freezes it
