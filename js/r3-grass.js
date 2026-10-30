@@ -25,7 +25,7 @@
   // Far ring: past MIDR the cards continue on a coarser grid (FCELL) with cards widened to
   // match (FSIZE), out to the draw distance, so the field keeps its texture to the horizon.
   const MIDR = 45, FCELL = 1.1, FSIZE = 2.2;
-  const INNER = 5, SHELLS = 8, SHELL_H = 0.0055, SCELL = 0.5, SRADIUS = 5.5;
+  const INNER = 5, SHELLS = 8, SHELL_H = 0.0032, SCELL = 0.5, SRADIUS = 5.5;
   // Settings (setQuality): density keeps a share of each clump's NBLADES blades; LOD is the
   // radius of modelled blades; draw distance the radius of the whole field. Both grids are
   // rebuilt to the radius asked for, so a shorter distance also costs less.
@@ -68,15 +68,15 @@
     return (_blades = t);
   }
 
-  // A clump of blades. Each is 7 to 11 mm wide at the root, narrowing to a point, 6 to 12 cm
-  // tall (a mown circuit verge), curving away from its facing by up to half its height. The
+  // A clump of blades. Each is 5 to 8 mm wide at the root, narrowing to a point, 3 to 5.5 cm
+  // tall (circuit turf is mown short), curving away from its facing by up to half its height. The
   // normals are rounded across the width (a blade has a midrib and curls slightly), so it
   // shades like a leaf rather than a flat card. bt is the height along the blade, 0 root to 1 tip.
   function bladeClumpGeometry(nseg = NSEG) {
     const r = U.rng(77), pos = [], nor = [], bt = [], bi = [], idx = [];
     for (let b = 0; b < NBLADES; b++) {
       const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * NCELL * 0.55, ox = Math.cos(r() * 6.283) * rr, oz = Math.sin(r() * 6.283) * rr;
-      const w = 0.007 + r() * 0.004, h = 0.06 + Math.pow(r(), 1.4) * 0.06, k = 0.1 + r() * 0.45;
+      const w = 0.005 + r() * 0.003, h = 0.03 + Math.pow(r(), 1.3) * 0.025, k = 0.08 + r() * 0.3;
       const sx = Math.cos(a), sz = Math.sin(a), lx = -sz, lz = sx; // across the blade, and the way it bends
       const base = pos.length / 3;
       for (let i = 0; i <= nseg; i++) {
@@ -125,12 +125,12 @@
     return g;
   }
 
-  // three crossed cards, 0.6 m wide and 0.26 m tall, rooted at y = 0
+  // three crossed cards, 0.6 m wide and 0.08 m tall (mown turf), rooted at y = 0
   function clumpGeometry() {
     const pos = [], uv = [], nor = [], idx = [];
     for (let k = 0; k < 3; k++) {
       const a = k * Math.PI / 3, ca = Math.cos(a) * 0.3, sa = Math.sin(a) * 0.3, b = pos.length / 3;
-      [[-ca, 0, -sa, 0, 0], [ca, 0, sa, 1, 0], [ca, 0.26, sa, 1, 1], [-ca, 0.26, -sa, 0, 1]].forEach(v => {
+      [[-ca, 0, -sa, 0, 0], [ca, 0, sa, 1, 0], [ca, 0.08, sa, 1, 1], [-ca, 0.08, -sa, 0, 1]].forEach(v => {
         pos.push(v[0], v[1], v[2]); uv.push(v[3], v[4]); nor.push(0, 1, 0);
       });
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
@@ -219,12 +219,12 @@
     for (const side of [0, 1]) {
       // clear of the barrier's foot and trimmed back from the kerbs; which ground is turf (and
       // not gravel or tarmac run-off) comes from the rendered surfaces (surfaceMask)
-      band(side, k => tr.barr[side][k] + 1.2, '#000');
-      band(side, k => tr.barr[side][k] - 0.6, 'rgb(235,235,235)');
-      band(side, k => tr.hw + tr.kerbW + 1.3, '#000');
+      band(side, k => tr.barr[side][k] + 0.6, '#000');
+      band(side, k => tr.barr[side][k] - 0.25, 'rgb(235,235,235)');
+      band(side, k => tr.hw + tr.kerbW + 0.15, '#000');
     }
     // the whole road and its kerbs, painted solid over the seam where the two sides meet
-    g.strokeStyle = '#000'; g.lineWidth = 2 * (tr.hw + tr.kerbW + 1.3);
+    g.strokeStyle = '#000'; g.lineWidth = 2 * (tr.hw + tr.kerbW + 0.15);
     g.beginPath();
     for (let i = 0; i <= tr.N; i++) { const k = i % tr.N; if (i) g.lineTo(X(tr.x[k]), Z(tr.y[k])); else g.moveTo(X(tr.x[k]), Z(tr.y[k])); }
     g.stroke();
@@ -322,7 +322,7 @@
     const blades = bladeMesh(NSEG, INNER, 0), ring = bladeMesh(1, NRADIUS, INNER);
     // the shells: opaque layers cut by a strand pattern
     const su = Object.assign({}, uniforms, { uGOrigin: { value: new THREE.Vector2() }, uGCell: { value: SCELL }, uGR: { value: SRADIUS }, uGShell: { value: 1 } });
-    const sm = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8, metalness: 0 });
+    const sm = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95, metalness: 0 });
     sm.userData.grass = su;
     const shells = new THREE.Mesh(shellGeometry(), sm);
     shells.frustumCulled = false; shells.receiveShadow = true; shells.castShadow = false;
@@ -409,7 +409,7 @@
     '  float gA = gHash(gBase + 9.1) * 6.2831;',
     '  transformed.xz = mat2(cos(gA), -sin(gA), sin(gA), cos(gA)) * transformed.xz;',
     '  transformed *= vec3(gSc * uGSize, gSc * (0.75 + 0.45 * gDens), gSc * uGSize);',
-    '  transformed.xz += vec2(sin(uGTime * 1.8 + gWp.x * 0.33 + gWp.y * 0.21), cos(uGTime * 1.4 + gWp.y * 0.29)) * 0.04 * transformed.y / 0.26;',
+    '  transformed.xz += vec2(sin(uGTime * 1.8 + gWp.x * 0.33 + gWp.y * 0.21), cos(uGTime * 1.4 + gWp.y * 0.29)) * 0.012 * transformed.y / 0.08;',
     '  transformed += vec3(gWp.x, gH + 0.02, gWp.y);',
     // the turf takes the ground's own colour: the fragment shader projects the ground photo
     // straight down onto the blades (so they carry the same detail as the field around them),
@@ -442,9 +442,9 @@
     // what grows in this clump: mostly the sward; now and then a coarser, taller rough-grass
     // tuft, a low spread of clover leaves, or (rarely) a flower or two among the blades
     '  float gT = gHash(gBase + 13.7);',
-    '  float gRough = step(0.93, gT), gClov = step(gT, 0.05) * step(0.02, gT), gFlow = step(gT, 0.012);',
+    '  float gRough = step(0.985, gT), gClov = step(gT, 0.04) * step(0.0, gT), gFlow = 0.0;',
     '  vGType = gRough - gClov; vGFl = gFlow * step(0.78, bI) * step(0.85, bT);',
-    '  float gTy = mix(1.0, 1.9, gRough) * mix(1.0, 0.42, gClov), gTx = mix(1.0, 1.25, gRough) * mix(1.0, 1.7, gClov);',
+    '  float gTy = mix(1.0, 1.4, gRough) * mix(1.0, 0.6, gClov), gTx = mix(1.0, 1.25, gRough) * mix(1.0, 1.7, gClov);',
     '  transformed.y *= gSc * (0.8 + 0.35 * gDens) * gTy; transformed.xz *= max(gSc, 0.001) * gTx;',
     // wind: gusts roll across the field, bending the blades over as they pass, with a quicker
     // flutter on top; the bend grows with the square of height up the blade
@@ -483,7 +483,10 @@
         '    float top = (0.25 + 0.75 * sh0) * vSDens;',
         '    vec2 lc = fract(sp) - 0.5 - (vec2(sh1, tfH(sc + 4.1)) - 0.5) * 0.35;',
         '    if (vSL > top || length(lc) > 0.42 * (1.0 - 0.75 * vSL / max(top, 1e-3))) discard; }',
-        '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp) * mix(0.8, 1.0, vSL);'].join('\n'));
+        '  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp) * mix(0.8, 1.0, vSL);',
+        '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);'].join('\n'))
+      // flat horizontal layers would mirror a low sun like water: keep them matte
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= 0.1; reflectedLight.indirectSpecular *= 0.2;');
   }
   function patchShader(sh, u) {
     if (u.uGBlade) return patchBlades(sh, u);
@@ -491,9 +494,12 @@
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT).replace('#include <project_vertex>', CULL_OUT);
     sh.fragmentShader = 'varying vec2 vGWp; varying float vGShade; uniform sampler2D uGGround; uniform sampler2D uGMacro; uniform float uGNorm;\n' + F1.R3S.LAWN + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);')
+      .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= texture2D(uGGround, vGWp / 3.2).rgb * vGShade * uGNorm * lawnTint(uGMacro, vGWp, cameraPosition) * lawnBreak(uGGround, vGWp);\n  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);')
       // both faces of a card take the ground's up normal (a flipped back face would go dark)
-      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);');
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
+      // a card faces the sky; grass is a matte tangle, so no glancing mirror toward a low sun
+      // (it turned sunlit cards white), only a little reflection tinted by the blades
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= 0.06 + 0.5 * diffuseColor.rgb; reflectedLight.indirectSpecular *= 0.15 + 0.6 * diffuseColor.rgb;');
   }
 
   function patchBlades(sh, u) {
@@ -518,7 +524,7 @@
         // rough grass is coarser and more olive, going to seed at the top; clover a deeper, bluer green
         '  diffuseColor.rgb *= mix(vec3(1.0), mix(vec3(1.02, 1.0, 0.84), vec3(1.18, 1.08, 0.72), smoothstep(0.6, 1.0, vBT)), max(vGType, 0.0)) * mix(vec3(1.0), vec3(0.82, 0.96, 0.92), max(-vGType, 0.0));',
         // a flower: white daisy or yellow buttercup, chosen per clump
-        '  if (vGFl > 0.5) diffuseColor.rgb = fract(vGWp.x * 13.7 + vGWp.y * 7.1) > 0.5 ? vec3(0.85, 0.84, 0.78) : vec3(0.85, 0.66, 0.08);'].join('\n'))
+        '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);'].join('\n'))
       // both faces keep the leaned-up normal: three would flip it for the back face, into the ground
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
       .replace('#include <lights_fragment_end>', [
@@ -528,7 +534,7 @@
         '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.4 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
         // the waxy cuticle: a broad, pale sheen looking toward the sun at a low angle
         '  { vec3 gv = normalize(vGView); float gs = pow(clamp(dot(gv, uSunDir), 0.0, 1.0), 2.0) * pow(1.0 - clamp(-gv.y, 0.0, 1.0), 3.0);',
-        '    reflectedLight.directSpecular += uSunCol * r3SunVis * 0.08 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
+        '    reflectedLight.directSpecular = reflectedLight.directSpecular * 0.5 + uSunCol * r3SunVis * 0.05 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
   }
 
   F1.R3Grass = { build, update, patchShader, setQuality, surfaceMask };

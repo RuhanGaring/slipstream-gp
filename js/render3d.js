@@ -638,6 +638,12 @@
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
+    if (built.grass && built.grass.userData.parts) { const gu = built.grass.userData.parts[0].material.userData.grass; F1.R3S.U.uGrassMask.value = gu.uGMask.value; F1.R3S.U.uGrassMaskB.value.copy(gu.uGMaskB.value); }
+    {
+      // turf under a clear sky is lighter and more yellow-green; under cloud, greyer and more olive
+      const L0 = LOOKS[Tracks.lookOf(tr)] || LOOKS.kestrel, oc = U.smooth((L0.cloud - 0.42) / 0.3);
+      F1.R3S.U.uLawnGrade.value.set(1.12 - 0.14 * oc, 1.12 - 0.12 * oc, 0.9 - 0.02 * oc, 0.28 * oc);
+    }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
     { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 10, 0); }
@@ -681,10 +687,11 @@
         const nxv = Math.ceil((x1 - x0) / cell) + 1, nzv = Math.ceil((z1 - z0) / cell) + 1;
         if (fine) { hgrid = { x0, z0, cell, nx: nxv, nz: nzv, y: new Float32Array(nxv * nzv), edge: new Float32Array(nxv * nzv) }; hgrid.edge.fill(99); }
         const pos = new Float32Array(nxv * nzv * 3), uv = new Float32Array(nxv * nzv * 2), idx = new Uint32Array((nxv - 1) * (nzv - 1) * 6);
-        const Yv = fine ? new Float32Array(nxv * nzv) : null, Wv = fine ? new Float32Array(nxv * nzv) : null;
+        const Yv = fine ? new Float32Array(nxv * nzv) : null, Wv = fine ? new Float32Array(nxv * nzv) : null, Bv = fine ? new Float32Array(nxv * nzv) : null;
         for (let j = 0; j < nzv; j++) for (let i = 0; i < nxv; i++) {
           const x = x0 + i * cell, z = z0 + j * cell, k = j * nxv + i;
           let y = fine ? Tracks.groundAt(tr, x, z) - 0.07 : tr.H(x, z) - 0.6;
+          if (fine) Bv[k] = y; // the landform itself, before any sinking under the road (lights the turf)
           // the coarse outer ground lies under the detailed one: inside it (clear of its edge) it
           // is sunk well out of the way, or it pokes through wherever the road is cut below the terrain
           if (!fine && x > b.x0 - 220 + 100 && x < b.x1 + 220 - 100 && z > b.y0 - 220 + 100 && z < b.y1 + 220 - 100) y -= 60;
@@ -693,21 +700,23 @@
             // triangles would poke through the tarmac. Sink the ground near the road by the sag a
             // chord of this size makes (curvature x cell^2 / 8, with a margin), fading out beyond.
             let bi = -1, bd = 1e18;
-            tr.hash.near(x, z, 60, q => { const dd = (x - tr.x[q]) ** 2 + (z - tr.y[q]) ** 2; if (dd < bd) { bd = dd; bi = q; } });
+            tr.hash.near(x, z, 150, q => { const dd = (x - tr.x[q]) ** 2 + (z - tr.y[q]) ** 2; if (dd < bd) { bd = dd; bi = q; } });
             if (bi >= 0) {
               const dl = (x - tr.x[bi]) * tr.nx[bi] + (z - tr.y[bi]) * tr.ny[bi];
-              const sag = Math.min(0.9, 0.1 + Math.abs(tr.ddz[bi]) * cell * cell * 0.6 + Math.abs(tr.bank[bi]) * 2);
-              Wv[k] = 1 - U.smooth((Math.abs(dl) - tr.hw) / 9);
+              const sag = bd > 3600 ? 0 : Math.min(0.9, 0.1 + Math.abs(tr.ddz[bi]) * cell * cell * 0.6 + Math.abs(tr.bank[bi]) * 2);
+              Wv[k] = bd < 3600 ? 1 - U.smooth((Math.abs(dl) - tr.hw) / 9) : 0;
               hgrid.edge[k] = Math.abs(dl) - tr.hw; // metres from the edge of the tarmac
               y -= sag * Wv[k];
               // A wide gravel or tarmac run-off is a ribbon in the road's own plane; out at its far
               // edge a rising hillside can stand above it and show through as bare turf. The ground
               // under the whole run-off is kept below it (and its neighbours' minimum, below).
               const sd = dl > 0 ? 1 : 0, rt = tr.runT[sd][bi];
-              if (rt === F1.SURF.GRAVEL || rt === F1.SURF.TARMAC) {
+              if (bd < 3600 && rt === F1.SURF.GRAVEL) {
                 const re = tr.hw + tr.runW[sd][bi], wr = 1 - U.smooth((Math.abs(dl) - re - 0.5) / 3);
                 if (wr > 0) {
-                  const under = Tracks.surfZ(tr, bi, dl) - 0.25; // a quarter metre under the run-off surface
+                  // a quarter metre under the gravel, and never more than 1.5 m below the terrain
+                  // (the surface height extrapolated far out can fall away; the ground must not)
+                  const under = Math.max(Tracks.surfZ(tr, bi, dl) - 0.25, y - 1.5);
                   if (y > under) y += (under - y) * wr;
                   Wv[k] = Math.max(Wv[k], wr);
                 }
@@ -747,6 +756,18 @@
         g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
         g.setIndex(new THREE.BufferAttribute(idx, 1));
         g.computeVertexNormals(); g.computeBoundingSphere();
+        if (fine) {
+          // The ground is sunk in places to stay under the road, kerbs and gravel; lit with those
+          // facets' normals, slivers of turf would face a low sun like little walls and glare
+          // white. It is lit by the landform instead (central differences of the unsunk heights).
+          const nr = g.attributes.normal;
+          const B = (i, j) => Bv[Math.min(nzv - 1, Math.max(0, j)) * nxv + Math.min(nxv - 1, Math.max(0, i))];
+          for (let j = 0; j < nzv; j++) for (let i = 0; i < nxv; i++) {
+            const gx = (B(i + 1, j) - B(i - 1, j)) / (2 * cell), gz = (B(i, j + 1) - B(i, j - 1)) / (2 * cell), l = Math.hypot(gx, 1, gz);
+            nr.setXYZ(j * nxv + i, -gx / l, 1 / l, -gz / l);
+          }
+          nr.needsUpdate = true;
+        }
         return g;
       };
       const pad = 220;
@@ -1106,6 +1127,7 @@
       data[k * 4] = Math.round((0.5 + 0.5 * d) * 255);
       const e = hg.edge[k];
       data[k * 4 + 1] = e > -1 && e < 6 ? Math.round((1 - U.smooth(e / 6)) * 255) : 0;
+      data[k * 4 + 2] = Math.round(U.clamp(e, 0, 255)); // metres from the tarmac edge, for the mowing stripes
       data[k * 4 + 3] = 255;
     }
     const t = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat);
