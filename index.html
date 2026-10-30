@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slipstream Grand Prix</title>
+<link href="assets/fonts/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<!-- the boot screen: drawn on the first paint, before any of the (large) scripts below load -->
+<style>
+#boot { position: fixed; inset: 0; z-index: 100; background: #0b0b10; color: #f4f6f8; font-family: 'Titillium Web', 'Segoe UI', sans-serif;
+  display: flex; flex-direction: column; justify-content: center; padding: 0 9vw; transition: opacity .6s ease; }
+#boot.out { opacity: 0; pointer-events: none; }
+#boot .bm { display: flex; align-items: center; gap: 16px; font-weight: 900; font-style: italic; font-size: clamp(40px, 6.4vw, 96px); line-height: .9; letter-spacing: -.01em; }
+#boot .bm i { width: clamp(44px, 5vw, 76px); height: clamp(18px, 2vw, 30px); background: #e10600; transform: skewX(-32deg); flex: none; }
+#boot .bs { margin: 14px 0 0 calc(clamp(44px, 5vw, 76px) + 16px); font-size: clamp(13px, 1.3vw, 18px); font-weight: 700; letter-spacing: .5em; color: #9a9aa8; }
+#boot .bp { position: absolute; left: 9vw; right: 9vw; bottom: 12vh; }
+#boot .bt { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: #c9c9d3; margin-bottom: 10px; }
+#boot .bt b { color: #fff; font-variant-numeric: tabular-nums; }
+#boot .bb { position: relative; height: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+#boot .bb i { position: absolute; inset: 0; background: #e10600; transform-origin: left; transform: scaleX(var(--p, 0.02)); transition: transform .35s ease; }
+/* runs on the compositor, so it keeps moving while a script is being parsed */
+#boot .bb u { position: absolute; top: 0; bottom: 0; width: 18%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); animation: bootSweep 1.1s linear infinite; }
+@keyframes bootSweep { from { transform: translateX(-100%); } to { transform: translateX(560%); } }
+</style>
+<script>
+  // progress for the boot screen: p 0..1 and what is happening
+  window.__boot = function (p, t) {
+    var b = document.getElementById('boot'); if (!b) return;
+    b.style.setProperty('--p', p);
+    document.getElementById('boot-n').textContent = Math.round(p * 100) + '%';
+    if (t) document.getElementById('boot-t').textContent = t;
+  };
+  window.__bootDone = function () {
+    var b = document.getElementById('boot'); if (!b || b.classList.contains('out')) return;
+    window.__boot(1);
+    b.classList.add('out');
+    setTimeout(function () { b.remove(); }, 700);
+  };
+</script>
+</head>
+<body>
+<div id="boot"><div class="bm"><i></i>SLIPSTREAM</div><div class="bs">GRAND PRIX</div>
+  <div class="bp"><div class="bt"><span id="boot-t">Loading the game</span><b id="boot-n">0%</b></div><div class="bb"><i></i><u></u></div></div></div>
+<canvas id="gl"></canvas>
+<canvas id="world"></canvas>
+<div id="shade"></div>
+
+<div id="hud" class="off">
+  <div id="hud-top-left">
+    <div id="hud-pos"><span class="lbl">POS</span><b id="pos">1</b><span id="pos-of">/20</span></div>
+    <div id="hud-lap"><span class="lbl">LAP</span><b id="lap">1</b><span id="lap-of">/5</span></div>
+  </div>
+  <div id="tower"></div>
+  <div id="hud-mini">
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div id="mini-name"></div>
+  </div>
+  <div id="timing">
+    <div class="t-row t-main"><span id="t-cur">0:00.000</span><span id="t-delta" class="delta"></span></div>
+    <div class="t-sectors"><i id="sec0"></i><i id="sec1"></i><i id="sec2"></i></div>
+    <div class="t-row t-sub"><span class="lbl">LAST</span><span id="t-last">--:--.---</span><span class="lbl">BEST</span><span id="t-best">--:--.---</span></div>
+  </div>
+  <div id="dash">
+    <div id="revs"></div>
+    <div id="dash-main">
+      <div id="gear">N</div>
+      <div id="speed-wrap"><b id="speed">0</b><span id="unit">KM/H</span></div>
+    </div>
+    <div id="pedals"><i id="ped-thr"></i><i id="ped-brk"></i></div>
+    <div id="ers"><span class="lbl">ERS</span><i id="ers-bar"></i><b id="ers-pct">85%</b></div>
+    <div id="dash-flags">
+      <span id="f-drs" class="chip">OVERTAKE</span>
+      <span id="f-xm" class="chip">X-MODE</span>
+      <span id="f-lim" class="chip">PIT LIMITER</span>
+      <span id="f-box" class="chip">BOX</span>
+      <span id="f-man" class="chip">MANUAL</span>
+    </div>
+    <div id="tyres">
+      <div class="tyre-grid"><i data-w="0"></i><i data-w="1"></i><i data-w="2"></i><i data-w="3"></i></div>
+      <div id="tyre-info"><b id="tyre-comp">M</b><span id="tyre-wear">0%</span><span id="wing">WING OK</span></div>
+    </div>
+  </div>
+  <div id="msgs"></div>
+  <div id="lights"><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="center-big"></div>
+  <div id="pitpanel">
+    <div class="pp-title">PIT STRATEGY</div>
+    <div class="pp-row"><span class="key">1</span><b class="c-S">SOFT</b><span class="key">2</span><b class="c-M">MEDIUM</b><span class="key">3</span><b class="c-H">HARD</b><span class="key">4</span><b class="c-I">INTER</b><span class="key">5</span><b class="c-W">WET</b></div>
+    <div class="pp-advice" id="pp-advice"></div>
+    <div class="pp-hint">P to cancel. The car boxes at the end of this lap.</div>
+  </div>
+  <div id="msteer"><span class="mode">MOUSE STEERING</span><div class="track"><i class="dz"></i><i class="out"></i><i class="mid"></i><i class="raw"></i></div></div>
+  <div id="keyhint"></div>
+</div>
+
+<div id="screens"></div>
+<div id="fade"></div>
+
+<script src="js/util.js"></script>
+<script src="js/tracks.js"></script>
+<script src="js/trackgen.js"></script>
+<script src="js/car.js"></script>
+<script src="js/damage.js"></script>
+<script src="js/softbody.js"></script>
+<script src="js/raceline.js"></script>
+<script src="js/lines.js"></script>
+<script src="js/limits.js"></script>
+<script src="js/data.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/race.js"></script>
+<script src="js/learncore.js"></script>
+<script src="js/learnjob.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/render.js"></script>
+<script>__boot(0.05, 'Loading the 3D engine')</script>
+<script src="js/vendor/three.min.js"></script>
+<script>__boot(0.1, 'Loading textures')</script>
+<script src="js/assets/core.js"></script>
+<script>__boot(0.33, 'Loading the venues')</script>
+<script src="js/assets/venue.js"></script>
+<script>__boot(0.36, 'Loading trees')</script>
+<script src="js/assets/trees.js"></script>
+<script src="js/assets/arm.js"></script>
+<script>__boot(0.46, 'Loading skies')</script>
+<script src="js/assets/sky_kestrel.js"></script>
+<script src="js/assets/sky_varenna.js"></script>
+<script src="js/assets/sky_lucerne.js"></script>
+<script src="js/assets/sky_hakone.js"></script>
+<script src="js/assets/sky_rimal.js"></script>
+<script src="js/assets/sky_ileverte.js"></script>
+<script src="js/assets/sky_sierra.js"></script>
+<script src="js/assets/sky_bahia.js"></script>
+<script src="js/assets/sky_nordwald.js"></script>
+<script src="js/assets/sky_lonestar.js"></script>
+<script>__boot(0.58, 'Loading the car')</script>
+<script src="js/assets/car_model.js"></script>
+<script>__boot(0.68, 'Loading light probes')</script>
+<script src="js/assets/hdr_kestrel.js"></script>
+<script src="js/assets/hdr_varenna.js"></script>
+<script src="js/assets/hdr_lucerne.js"></script>
+<script src="js/assets/hdr_hakone.js"></script>
+<script src="js/assets/hdr_rimal.js"></script>
+<script src="js/assets/hdr_ileverte.js"></script>
+<script src="js/assets/hdr_sierra.js"></script>
+<script src="js/assets/hdr_bahia.js"></script>
+<script src="js/assets/hdr_nordwald.js"></script>
+<script src="js/assets/hdr_lonestar.js"></script>
+<script>__boot(0.86, 'Loading the renderer')</script>
+<script src="js/r3-textures.js"></script>
+<script src="js/r3-shadow.js"></script>
+<script src="js/r3-shaders.js"></script>
+<script src="js/r3-grass.js"></script>
+<script src="js/r3-trees.js"></script>
+<script src="js/r3-weather.js"></script>
+<script src="js/r3-damage.js"></script>
+<script src="js/r3-post.js"></script>
+<script src="js/r3-car.js"></script>
+<script src="js/render3d.js"></script>
+<script src="js/audio-engine-worklet.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/ui.js"></script>
+<script>__boot(0.88, 'Starting up')</script>
+<script src="js/game.js"></script>
+</body>
+</html>
