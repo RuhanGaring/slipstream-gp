@@ -531,4 +531,10 @@ body.mobile #timing { transform: translateX(-50%) scale(.6); transform-origin: t
 body.mobile #dash { transform: translateX(-50%) scale(.55); transform-origin: bottom center; right: auto; left: 50%; bottom: 6px; }
 body.mobile #pedals { display: none; }
 
-body.mobile #tower { max-height: 62vh; overflow: hidden; }
+#touch.tilt .t-knob { display: none; }
+#touch.tilt .t-steer::after { content: 'TAP TO CENTRE'; position: absolute; left: 20px; bottom: 24px; color: rgba(255,255,255,.45); font: 700 11px 'Titillium Web', sans-serif; letter-spacing: .12em; }
+#touch .t-pit, #touch .t-gup, #touch .t-gdn { display: none; }
+#touch.sim .t-pit { display: flex; right: calc(200px + env(safe-area-inset-right)); }
+#touch.manual .t-gup, #touch.manual .t-gdn { display: flex; top: auto; width: 56px; height: 56px; font-size: 24px; right: calc(16px + env(safe-area-inset-right)); }
+#touch.manual .t-gup { bottom: calc(min(36vh, 220px) + 90px + env(safe-area-inset-bottom)); }
+#touch.manual .t-gdn { bottom: calc(min(36vh, 220px) + 28px + env(safe-area-inset-bottom)); }

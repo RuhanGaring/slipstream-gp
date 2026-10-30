@@ -564,6 +564,9 @@
     add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; F1.Game.applySettings(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
+    add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; F1.Game.applySettings(); }, v => v.toUpperCase()));
+    add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tSens || 1, v => { st.tSens = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tiltSens || 1, v => { st.tiltSens = v; F1.Game.applySettings(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; F1.Game.applySettings(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; F1.Game.applySettings(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; F1.Game.applySettings(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));

@@ -172,9 +172,12 @@
     if (H.towerT <= 0 && H.rows.length) {
       H.towerT = 0.25;
       const order = race.order;
+      // on a phone the tower is short: the top five, then the player and the cars either side
+      const short = document.body.classList.contains('mobile'), me = order.indexOf(p);
       order.forEach((c, k) => {
         const r = H.rows[k];
         if (!r) return;
+        r.el.style.display = !short || k < 5 || Math.abs(k - me) <= 1 ? '' : 'none';
         let gap;
         if (k === 0) gap = race.chequered && c.finished ? 'FINISH' : 'LEADER';
         else if (c.inPit) gap = 'PIT';

@@ -25,7 +25,7 @@
   const Game = F1.Game = {
     state: 'boot', race: null, world: null, flow: { kind: 'race', mode: 'arcade', track: 'kestrel', team: 0, driver: 0 },
     settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
-      mobile: 'auto', mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
+      mobile: 'auto', touchSteer: 'pad', tSens: 1, tiltSens: 1, mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
     raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
     champ: null, paused: false, hudOn: true,
   };
@@ -78,23 +78,25 @@
   tl.id = 'touch';
   tl.innerHTML = '<div class="t-steer"><div class="t-knob"></div></div>' +
     '<div class="t-btn t-pause" data-k="Escape">II</div><div class="t-btn t-cam" data-k="KeyC">CAM</div><div class="t-btn t-drs" data-hold="drs">DRS</div>' +
+    '<div class="t-btn t-pit" data-k="KeyP">PIT</div><div class="t-btn t-gup" data-k="KeyE">+</div><div class="t-btn t-gdn" data-k="KeyQ">&minus;</div>' +
     '<div class="t-pedal t-brk" data-hold="brk">BRAKE</div><div class="t-pedal t-thr" data-hold="thr">GAS</div>';
   document.body.appendChild(tl);
   const knob = tl.querySelector('.t-knob'), steerZone = tl.querySelector('.t-steer');
   const setKnob = () => { knob.style.transform = 'translateX(' + (touch.steer * 70) + 'px)'; };
   tl.addEventListener('pointerdown', e => {
-    e.preventDefault(); Audio.init();
+    e.preventDefault(); Audio.init(); if (useTilt()) askTilt();
     const el = e.target.closest('[data-k],[data-hold],.t-steer');
     if (!el) return;
     if (el.dataset.k) { onKey(el.dataset.k, false); el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 150); return; }
     if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
     if (el.dataset.hold) { touch[el.dataset.hold] = true; touch.pads.set(e.pointerId, el); el.classList.add('on'); return; }
+    if (useTilt()) { askTilt(); Game.tiltZero(); return; }
     touch.sid = e.pointerId; touch.x0 = e.clientX; touch.steer = 0; setKnob();
     knob.style.left = (e.clientX - steerZone.getBoundingClientRect().left - 34) + 'px'; knob.classList.add('on');
   });
   tl.addEventListener('pointermove', e => {
     if (e.pointerId !== touch.sid) return;
-    touch.steer = U.clamp((e.clientX - touch.x0) / Math.max(60, innerWidth * 0.11), -1, 1); setKnob();
+    touch.steer = U.clamp((e.clientX - touch.x0) / Math.max(40, innerWidth * 0.11 / (Game.settings.tSens || 1)), -1, 1); setKnob();
   });
   const lift = e => {
     if (e.pointerId === touch.sid) { touch.sid = null; touch.steer = 0; setKnob(); knob.classList.remove('on'); }
@@ -105,10 +107,46 @@
   function showTouch() {
     const on = Game.mobile() && Game.state === 'race' && !Game.paused;
     tl.classList.toggle('show', on);
+    tl.classList.toggle('tilt', useTilt());
+    // sim races: the pit-strategy button, and shift buttons when the gears are manual
+    const R = Game.race, sim = !!(on && R && R.sim);
+    tl.classList.toggle('sim', sim);
+    tl.classList.toggle('manual', sim && R.player && R.player.assist && R.player.assist.autoGear === false);
     document.body.classList.toggle('mobile', Game.mobile());
-    if (!on) { touch.thr = touch.brk = touch.drs = false; touch.sid = null; touch.steer = 0; touch.pads.clear(); }
+    if (!on) { touch.thr = touch.brk = touch.drs = false; touch.sid = null; touch.steer = 0; touch.pads.clear(); tilt.zero = null; } // tilt re-centres when the race resumes
   }
   Game.showTouch = showTouch;
+
+  // Tilt steering: hold the phone like a wheel and turn it. Gravity is read in the screen's
+  // own plane (devicemotion, rotated by the screen orientation), so the steering angle is the
+  // phone's roll whatever way up it is held; the centre is wherever the phone was at the
+  // start of the race (or when it is recalibrated by tapping the steering half). Full lock at
+  // 35 degrees of roll divided by the sensitivity. iOS asks permission on the first tap.
+  const tilt = { a: 0, zero: null, ok: false, asked: false };
+  function askTilt() {
+    if (tilt.asked) return;
+    tilt.asked = true;
+    const D = window.DeviceMotionEvent;
+    if (D && typeof D.requestPermission === 'function') D.requestPermission().then(r => { tilt.ok = r === 'granted'; }).catch(() => {});
+    else tilt.ok = true;
+  }
+  window.addEventListener('devicemotion', e => {
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x == null) return;
+    tilt.ok = true;
+    const ang = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180;
+    // device axes to screen axes
+    const sx = g.x * Math.cos(ang) + g.y * Math.sin(ang), sy = -g.x * Math.sin(ang) + g.y * Math.cos(ang);
+    tilt.a = Math.atan2(sx, -sy) * 180 / Math.PI;
+    if (tilt.zero === null) tilt.zero = tilt.a;
+  });
+  Game.tiltSteer = () => {
+    if (!tilt.ok || tilt.zero === null) return null;
+    let d = tilt.a - tilt.zero; d = ((d + 540) % 360) - 180;
+    return U.clamp(d / (35 / (Game.settings.tiltSens || 1)), -1, 1);
+  };
+  Game.tiltZero = () => { tilt.zero = null; };
+  const useTilt = () => Game.settings.touchSteer === 'tilt';
   window.addEventListener('keydown', e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
     if (e.repeat && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) return;
@@ -316,6 +354,10 @@
     const ms = mouse.on ? mouseSteer(dt) : null;
     if (pad && pad.active) {
       inp.steer = pad.steer; inp.thr = pad.thr; inp.brk = pad.brk;
+    } else if (Game.mobile() && useTilt() && Game.tiltSteer() !== null) {
+      inp.steer = U.approach(inp.steer, Game.tiltSteer(), 12 * dt);
+      inp.thr = U.approach(inp.thr, touch.thr ? 1 : 0, (touch.thr ? 6 : 12) * dt);
+      inp.brk = U.approach(inp.brk, touch.brk ? 1 : 0, (touch.brk ? 7 : 14) * dt);
     } else if (Game.mobile() && (touch.sid != null || touch.thr || touch.brk || Math.abs(inp.steer) > 0.001 && st === 0 && !mouse.on)) {
       // the steering pad is analogue: follow it quickly, ease back to centre when let go
       inp.steer = U.approach(inp.steer, touch.steer, (touch.sid == null ? 7 : 10) * dt);
