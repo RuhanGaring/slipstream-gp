@@ -17,23 +17,63 @@
     // lawn: xy the direction the mower laid the stripes, z stripe width (m), w stripe strength
     uLawn: { value: new THREE.Vector4(1, 0, 10, 0) },
     uWet: { value: 0 }, // how wet the road is, 0..1
+    // the venue's turf map (render3d.js turfMap): r how dry the site is (0.5 neutral), g wear
+    // beside the track; uTurfB its world rectangle (x0, z0, width, depth)
+    uTurf: { value: null },
+    uTurfB: { value: new THREE.Vector4(0, 0, 1, 1) },
+    uLawnK: { value: 2 }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
   };
+  { const t = new THREE.DataTexture(new Uint8Array([128, 0, 0, 255]), 1, 1); t.needsUpdate = true; U.uTurf.value = t; }
   if (F1.R3Shadow) Object.assign(U, F1.R3Shadow.U); // the cascaded sun shadow (js/r3-shadow.js)
 
   // Lawn shading shared by the park ground and the grass blades, so the two always agree.
-  // lawnTint: dry and lush patches (a hue shift from two noise octaves) and mowing stripes,
-  // whose blades lie in alternate directions: a band looks light seen along its lay and dark
-  // against it, the way a mown field reads from a grandstand.
+  // lawnTint colours turf by what actually varies it at a circuit, all as gentle multipliers on
+  // the grass photo (an irrigated, mown venue: nothing goes fully brown):
+  // - water: the site's drainage from the turf map (crests, steep and sun-facing slopes dry out,
+  //   hollows stay wet) plus soil variation over tens of metres. Wet turf is a deeper, bluer
+  //   green; drought stress turns it yellow-green and, where it is driest, toward straw.
+  // - species: sports turf is a mix, and each grass grows in its own clumps a metre or two
+  //   across with fairly sharp edges: perennial ryegrass (the base), annual meadow grass (Poa
+  //   annua: paler, yellower), fescue (finer, blue-green). Domain-warped noise, thresholded,
+  //   draws those clumps; it is not left as soft blotches.
+  // - weeds: clover and other broadleaves in small spots, gathered in some areas.
+  // - wear: the strip beside the track, where cars run wide, is scuffed toward soil.
+  // - mowing stripes: blades laid in alternate directions read light along their lay and dark
+  //   against it, as from a grandstand.
   // lawnBreak: the ground photo again at 11.3 m and rotated, as brightness only, so its
   // 3.2 m tile stops repeating visibly across a field.
   const LAWN_ROUGH = 0.78;
   const LAWN = [
-    'uniform vec4 uLawn;',
+    'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK;',
+    // a hash that holds up at world coordinates of kilometres (no sin), value noise and fbm
+    'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+    'float tfN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+    '  return mix(mix(tfH(i), tfH(i + vec2(1.0, 0.0)), f.x), mix(tfH(i + vec2(0.0, 1.0)), tfH(i + vec2(1.0, 1.0)), f.x), f.y); }',
+    'float tfF(vec2 p) { return tfN(p) * 0.5 + tfN(p * 2.03 + 7.1) * 0.3 + tfN(p * 4.07 + 3.3) * 0.2; }',
     'vec3 lawnTint(sampler2D mm, vec2 w, vec3 eye) {',
-    '  float n = texture2D(mm, w / 97.0 + vec2(0.37, 0.11)).g * 0.65 + texture2D(mm, w / 21.0 + vec2(0.71, 0.53)).r * 0.35;',
-    '  float dry = smoothstep(0.55, 0.82, n), lush = 1.0 - smoothstep(0.18, 0.42, n);',
-    '  vec3 c = mix(vec3(1.0), vec3(1.16, 1.06, 0.7), dry * 0.35) * mix(1.0, 0.9, lush * 0.6);',
-    '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
+    '  vec2 site = texture2D(uTurf, clamp((w - uTurfB.xy) / uTurfB.zw, 0.0, 1.0)).rg;',
+    // water: drainage of the site plus warped soil variation (positive wet, negative dry)
+    '  vec2 wq = w + (vec2(tfN(w / 37.0), tfN(w / 37.0 + 5.2)) - 0.5) * 22.0;',
+    '  float moist = (0.5 - site.r) * 1.6 + (tfF(wq / 26.0) - 0.5) * 1.2;',
+    '  float wet = clamp(moist, 0.0, 1.0), dry = clamp(-moist, 0.0, 1.0);',
+    // species clumps: warped, then cut at thresholds so each clump has an edge
+    '  vec2 sq = w / 1.7 + (vec2(tfN(w / 5.3), tfN(w / 5.3 + 9.7)) - 0.5) * 2.4;',
+    '  float sp = tfF(sq);',
+    '  float poa = smoothstep(0.63, 0.67, sp) * (0.6 + 0.4 * tfN(w / 23.0));',
+    '  float fes = 1.0 - smoothstep(0.31, 0.35, sp);',
+    '  float clov = smoothstep(0.80, 0.83, tfN(w * 2.1 + 3.0)) * smoothstep(0.45, 0.7, tfN(w / 9.0 + 1.7));',
+    '  vec3 c = vec3(1.0);',
+    '  c *= mix(vec3(1.0), vec3(1.09, 1.06, 0.80), poa);',
+    '  c *= mix(vec3(1.0), vec3(0.88, 0.95, 1.03), fes);',
+    '  c *= mix(vec3(1.0), vec3(0.96, 1.07, 0.93), clov);',
+    '  c *= mix(vec3(1.0), vec3(0.86, 0.93, 0.90), wet * 0.75);',
+    '  vec3 stress = mix(vec3(1.10, 1.05, 0.76), vec3(1.32, 1.12, 0.62), smoothstep(0.55, 1.0, dry));',
+    '  c *= mix(vec3(1.0), stress, smoothstep(0.12, 0.75, dry));',
+    // wear beside the track: patchy, toward bare soil
+    '  float wr = site.g * smoothstep(0.35, 0.7, tfF(w / 1.3 + 4.4));',
+    '  c *= mix(vec3(1.0), vec3(1.18, 0.98, 0.70), wr * 0.7);',
+    '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
+    '  vec2 perp = vec2(-uLawn.y, uLawn.x);', // mowing stripes
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',
     '  return c * (1.0 + uLawn.w * band * (0.6 * dot(vd, uLawn.xy) + 0.35));',

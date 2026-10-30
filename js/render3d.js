@@ -636,6 +636,7 @@
     if (!built || built.tr !== tr) { built = buildTrack(tr, W2); state.cache.set(tr.id, built); }
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) state.grass.visible = grassOn();
+    if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
     { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 10, 0); }
@@ -665,6 +666,7 @@
     // ground: the venue's terrain, cut and filled to meet the circuit
     const SEA = 0;
     let hgrid = null; // the fine terrain samples, kept for the grass
+    let turf = null;  // the lawn's site conditions (turfMap)
     const waterZ = W2.water ? W2.water.y : null;
     {
       let gm;
@@ -676,7 +678,7 @@
       MATS['ground_' + style] = gm;
       const grid = (x0, z0, x1, z1, cell, fine) => {
         const nxv = Math.ceil((x1 - x0) / cell) + 1, nzv = Math.ceil((z1 - z0) / cell) + 1;
-        if (fine) hgrid = { x0, z0, cell, nx: nxv, nz: nzv, y: new Float32Array(nxv * nzv) };
+        if (fine) { hgrid = { x0, z0, cell, nx: nxv, nz: nzv, y: new Float32Array(nxv * nzv), edge: new Float32Array(nxv * nzv) }; hgrid.edge.fill(99); }
         const pos = new Float32Array(nxv * nzv * 3), uv = new Float32Array(nxv * nzv * 2), idx = new Uint32Array((nxv - 1) * (nzv - 1) * 6);
         const Yv = fine ? new Float32Array(nxv * nzv) : null, Wv = fine ? new Float32Array(nxv * nzv) : null;
         for (let j = 0; j < nzv; j++) for (let i = 0; i < nxv; i++) {
@@ -695,6 +697,7 @@
               const dl = (x - tr.x[bi]) * tr.nx[bi] + (z - tr.y[bi]) * tr.ny[bi];
               const sag = Math.min(0.9, 0.1 + Math.abs(tr.ddz[bi]) * cell * cell * 0.6 + Math.abs(tr.bank[bi]) * 2);
               Wv[k] = 1 - U.smooth((Math.abs(dl) - tr.hw) / 9);
+              hgrid.edge[k] = Math.abs(dl) - tr.hw; // metres from the edge of the tarmac
               y -= sag * Wv[k];
             }
             Yv[k] = y;
@@ -735,6 +738,7 @@
       };
       const pad = 220;
       add(grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, 7, true), gm);
+      turf = turfMap(hgrid, tr);
       const size = span + 9000;
       add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gm);
     }
@@ -1067,7 +1071,33 @@
     buildBoards(root, W2, tr); tag('boards');
     buildBackdrop(root, W2);
     const tvCams = buildTvCams(tr);
-    return { tr, root, gantry, water, tvCams, grass };
+    return { tr, root, gantry, water, tvCams, grass, turf };
+  }
+
+  // The turf map: what the ground does to the grass at each 7 m terrain sample.
+  // r, dryness of the site (0.5 neutral): water runs off crests and collects in hollows (the
+  // terrain's curvature over 14 m), steeper ground drains faster, and slopes turned toward the
+  // venue's sun dry out sooner than those turned away. g, wear: the first five metres of grass
+  // beside the tarmac, where cars run wide.
+  function turfMap(hg, tr) {
+    const { nx, nz, cell, y } = hg, data = new Uint8Array(nx * nz * 4);
+    const L = LOOKS[Tracks.lookOf(tr)] || LOOKS.kestrel, el = L.sunEl * Math.PI / 180, az = L.sunAz * Math.PI / 180;
+    const sx = Math.cos(el) * Math.cos(az), sz = Math.cos(el) * Math.sin(az);
+    const Y = (i, j) => y[U.clamp(j, 0, nz - 1) * nx + U.clamp(i, 0, nx - 1)];
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = j * nx + i, h = Y(i, j);
+      const lap = (Y(i - 2, j) + Y(i + 2, j) + Y(i, j - 2) + Y(i, j + 2)) / 4 - h; // > 0 in a hollow
+      const gx = (Y(i + 1, j) - Y(i - 1, j)) / (2 * cell), gz = (Y(i, j + 1) - Y(i, j - 1)) / (2 * cell);
+      const slope = Math.hypot(gx, gz), sun = -(gx * sx + gz * sz); // > 0 facing the sun
+      const d = U.clamp(-lap / 0.45 * 0.55 + slope * 1.6 + sun * 2.2, -1, 1);
+      data[k * 4] = Math.round((0.5 + 0.5 * d) * 255);
+      const e = hg.edge[k];
+      data[k * 4 + 1] = e > -1 && e < 6 ? Math.round((1 - U.smooth(e / 6)) * 255) : 0;
+      data[k * 4 + 3] = 255;
+    }
+    const t = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat);
+    t.minFilter = t.magFilter = THREE.LinearFilter; t.needsUpdate = true;
+    return { tex: t, b: new THREE.Vector4(hg.x0 - cell / 2, hg.z0 - cell / 2, nx * cell, nz * cell) };
   }
 
   // trees, conifers and palms, instanced and split into tiles so they cull
