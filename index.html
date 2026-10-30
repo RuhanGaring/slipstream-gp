@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Slipstream Grand Prix</title>
-<link href="assets/fonts/fonts.css?v=202610310406" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=202610310406">
+<link href="assets/fonts/fonts.css?v=202610310413" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=202610310413">
 <!-- the boot screen: drawn on the first paint, before any of the (large) scripts below load -->
 <style>
 #boot { position: fixed; inset: 0; z-index: 100; background: #0b0b10; color: #f4f6f8; font-family: 'Titillium Web', 'Segoe UI', sans-serif;
@@ -97,72 +97,72 @@
 <div id="screens"></div>
 <div id="fade"></div>
 
-<script src="js/util.js?v=202610310406"></script>
-<script src="js/tracks.js?v=202610310406"></script>
-<script src="js/trackgen.js?v=202610310406"></script>
-<script src="js/car.js?v=202610310406"></script>
-<script src="js/damage.js?v=202610310406"></script>
-<script src="js/softbody.js?v=202610310406"></script>
-<script src="js/raceline.js?v=202610310406"></script>
-<script src="js/lines.js?v=202610310406"></script>
-<script src="js/limits.js?v=202610310406"></script>
-<script src="js/data.js?v=202610310406"></script>
-<script src="js/ai.js?v=202610310406"></script>
-<script src="js/race.js?v=202610310406"></script>
-<script src="js/learncore.js?v=202610310406"></script>
-<script src="js/learnjob.js?v=202610310406"></script>
-<script src="js/sprites.js?v=202610310406"></script>
-<script src="js/render.js?v=202610310406"></script>
+<script src="js/util.js?v=202610310413"></script>
+<script src="js/tracks.js?v=202610310413"></script>
+<script src="js/trackgen.js?v=202610310413"></script>
+<script src="js/car.js?v=202610310413"></script>
+<script src="js/damage.js?v=202610310413"></script>
+<script src="js/softbody.js?v=202610310413"></script>
+<script src="js/raceline.js?v=202610310413"></script>
+<script src="js/lines.js?v=202610310413"></script>
+<script src="js/limits.js?v=202610310413"></script>
+<script src="js/data.js?v=202610310413"></script>
+<script src="js/ai.js?v=202610310413"></script>
+<script src="js/race.js?v=202610310413"></script>
+<script src="js/learncore.js?v=202610310413"></script>
+<script src="js/learnjob.js?v=202610310413"></script>
+<script src="js/sprites.js?v=202610310413"></script>
+<script src="js/render.js?v=202610310413"></script>
 <script>__boot(0.05, 'Loading the 3D engine')</script>
-<script src="js/vendor/three.min.js?v=202610310406"></script>
+<script src="js/vendor/three.min.js?v=202610310413"></script>
 <script>__boot(0.1, 'Loading textures')</script>
-<script src="js/assets/core.js?v=202610310406"></script>
+<script src="js/assets/core.js?v=202610310413"></script>
 <script>__boot(0.33, 'Loading the venues')</script>
-<script src="js/assets/venue.js?v=202610310406"></script>
+<script src="js/assets/venue.js?v=202610310413"></script>
 <script>__boot(0.36, 'Loading trees')</script>
-<script src="js/assets/trees.js?v=202610310406"></script>
-<script src="js/assets/arm.js?v=202610310406"></script>
-<script src="js/assets/fabric.js?v=202610310406"></script>
+<script src="js/assets/trees.js?v=202610310413"></script>
+<script src="js/assets/arm.js?v=202610310413"></script>
+<script src="js/assets/fabric.js?v=202610310413"></script>
 <script>__boot(0.46, 'Loading skies')</script>
-<script src="js/assets/sky_kestrel.js?v=202610310406"></script>
-<script src="js/assets/sky_varenna.js?v=202610310406"></script>
-<script src="js/assets/sky_lucerne.js?v=202610310406"></script>
-<script src="js/assets/sky_hakone.js?v=202610310406"></script>
-<script src="js/assets/sky_rimal.js?v=202610310406"></script>
-<script src="js/assets/sky_ileverte.js?v=202610310406"></script>
-<script src="js/assets/sky_sierra.js?v=202610310406"></script>
-<script src="js/assets/sky_bahia.js?v=202610310406"></script>
-<script src="js/assets/sky_nordwald.js?v=202610310406"></script>
-<script src="js/assets/sky_lonestar.js?v=202610310406"></script>
+<script src="js/assets/sky_kestrel.js?v=202610310413"></script>
+<script src="js/assets/sky_varenna.js?v=202610310413"></script>
+<script src="js/assets/sky_lucerne.js?v=202610310413"></script>
+<script src="js/assets/sky_hakone.js?v=202610310413"></script>
+<script src="js/assets/sky_rimal.js?v=202610310413"></script>
+<script src="js/assets/sky_ileverte.js?v=202610310413"></script>
+<script src="js/assets/sky_sierra.js?v=202610310413"></script>
+<script src="js/assets/sky_bahia.js?v=202610310413"></script>
+<script src="js/assets/sky_nordwald.js?v=202610310413"></script>
+<script src="js/assets/sky_lonestar.js?v=202610310413"></script>
 <script>__boot(0.58, 'Loading the car')</script>
-<script src="js/assets/car_model.js?v=202610310406"></script>
+<script src="js/assets/car_model.js?v=202610310413"></script>
 <script>__boot(0.68, 'Loading light probes')</script>
-<script src="js/assets/hdr_kestrel.js?v=202610310406"></script>
-<script src="js/assets/hdr_varenna.js?v=202610310406"></script>
-<script src="js/assets/hdr_lucerne.js?v=202610310406"></script>
-<script src="js/assets/hdr_hakone.js?v=202610310406"></script>
-<script src="js/assets/hdr_rimal.js?v=202610310406"></script>
-<script src="js/assets/hdr_ileverte.js?v=202610310406"></script>
-<script src="js/assets/hdr_sierra.js?v=202610310406"></script>
-<script src="js/assets/hdr_bahia.js?v=202610310406"></script>
-<script src="js/assets/hdr_nordwald.js?v=202610310406"></script>
-<script src="js/assets/hdr_lonestar.js?v=202610310406"></script>
+<script src="js/assets/hdr_kestrel.js?v=202610310413"></script>
+<script src="js/assets/hdr_varenna.js?v=202610310413"></script>
+<script src="js/assets/hdr_lucerne.js?v=202610310413"></script>
+<script src="js/assets/hdr_hakone.js?v=202610310413"></script>
+<script src="js/assets/hdr_rimal.js?v=202610310413"></script>
+<script src="js/assets/hdr_ileverte.js?v=202610310413"></script>
+<script src="js/assets/hdr_sierra.js?v=202610310413"></script>
+<script src="js/assets/hdr_bahia.js?v=202610310413"></script>
+<script src="js/assets/hdr_nordwald.js?v=202610310413"></script>
+<script src="js/assets/hdr_lonestar.js?v=202610310413"></script>
 <script>__boot(0.86, 'Loading the renderer')</script>
-<script src="js/r3-textures.js?v=202610310406"></script>
-<script src="js/r3-shadow.js?v=202610310406"></script>
-<script src="js/r3-shaders.js?v=202610310406"></script>
-<script src="js/r3-grass.js?v=202610310406"></script>
-<script src="js/r3-trees.js?v=202610310406"></script>
-<script src="js/r3-weather.js?v=202610310406"></script>
-<script src="js/r3-damage.js?v=202610310406"></script>
-<script src="js/r3-post.js?v=202610310406"></script>
-<script src="js/r3-car.js?v=202610310406"></script>
-<script src="js/render3d.js?v=202610310406"></script>
-<script src="js/audio-engine-worklet.js?v=202610310406"></script>
-<script src="js/audio.js?v=202610310406"></script>
-<script src="js/hud.js?v=202610310406"></script>
-<script src="js/ui.js?v=202610310406"></script>
+<script src="js/r3-textures.js?v=202610310413"></script>
+<script src="js/r3-shadow.js?v=202610310413"></script>
+<script src="js/r3-shaders.js?v=202610310413"></script>
+<script src="js/r3-grass.js?v=202610310413"></script>
+<script src="js/r3-trees.js?v=202610310413"></script>
+<script src="js/r3-weather.js?v=202610310413"></script>
+<script src="js/r3-damage.js?v=202610310413"></script>
+<script src="js/r3-post.js?v=202610310413"></script>
+<script src="js/r3-car.js?v=202610310413"></script>
+<script src="js/render3d.js?v=202610310413"></script>
+<script src="js/audio-engine-worklet.js?v=202610310413"></script>
+<script src="js/audio.js?v=202610310413"></script>
+<script src="js/hud.js?v=202610310413"></script>
+<script src="js/ui.js?v=202610310413"></script>
 <script>__boot(0.88, 'Starting up')</script>
-<script src="js/game.js?v=202610310406"></script>
+<script src="js/game.js?v=202610310413"></script>
 </body>
 </html>

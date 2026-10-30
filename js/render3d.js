@@ -24,7 +24,7 @@
       ridge: ['#8fa3b0', '#73889a', '#5d7385'], ridgeH: 70, jag: 3 },
     sierra: { sunEl: 18, sunAz: 220, sun: '#ffd9a8', sunI: 3.2, top: '#3c6fb8', hor: '#e8d8bf', bot: '#9c8a68', fog: '#dcd2c0', fogN: 500, fogF: 5600, cloud: 0.1, haze: 1.0, exp: 0.95, env: 0.9,
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
-    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, lawnDesat: 0.16, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
+    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 8000, fogK: 0.6, skyK: 1.12, lawnDesat: 0.05, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
     nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 4600, fogK: 0.32, shaftK: 0.4, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
@@ -535,7 +535,7 @@
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
       const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
-      state.exposure = { kestrel: 1.15, bahia: 1.14, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
+      state.exposure = { kestrel: 1.15, bahia: 1.22, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
@@ -647,7 +647,7 @@
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
-    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 5, 0.035); }
+    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 4.5, 0.06); }
     scene.add(built.root);
     applyLook(Tracks.lookOf(tr));
     backdropFor(Tracks.lookOf(tr), built.root);

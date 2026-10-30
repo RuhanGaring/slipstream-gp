@@ -343,9 +343,10 @@
         const B = W.bounds, per = [[B.x0, B.y0, B.x1, B.y0], [B.x1, B.y0, B.x1, B.y1], [B.x1, B.y1, B.x0, B.y1], [B.x0, B.y1, B.x0, B.y0]];
         for (const [ax, ay, bx, by] of per) {
           const L = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / L, uy = (by - ay) / L, ix = -uy, iy = ux; // inward normal (bounds wind clockwise on screen)
-          for (let s = 0; s < L; s += 5 + rnd() * 4) for (let row = 0; row < 4; row++) {
-            if (rnd() < 0.25) continue;
-            const o = row * 9 + rnd() * 8 - 20, x = ax + ux * s + ix * o, y = ay + uy * s + iy * o;
+          // (rows 4 to 6 stand well outside, so even an elevated view sees woods at the horizon)
+          for (let s = 0; s < L; s += 5 + rnd() * 4) for (let row = 0; row < 7; row++) {
+            if (rnd() < (row < 4 ? 0.25 : 0.45)) continue;
+            const o = row < 4 ? row * 9 + rnd() * 8 - 20 : -150 - (row - 4) * 14 - rnd() * 10, x = ax + ux * s + ix * o, y = ay + uy * s + iy * o;
             if (W.water && y < W.water.y + 4) continue;
             if (!clearance(tr, x, y, 8, W)) continue;
             addDecor(W, { type: 'tree', x, y, r: 3.5 + rnd() * 4, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: row > 0 });

@@ -46,7 +46,7 @@
     '  float tH = tPos.w, tW = tH * uTAspect;',
     '  transformed = vec3(tPos.x, tPos.y - 0.15, tPos.z) + tRight * position.x * tW + vec3(0.0, position.y * tH, 0.0);',
     '  vTRight = tRight; vTFwd = vec3(tF.x, 0.0, tF.y);',
-    '  vTTint = vec3(1.0 + tVar.y * 0.08, 1.0 + tVar.y * 0.03, 1.0 - tVar.y * 0.1) * (1.0 + tVar.y * 0.06);',
+    '  vTTint = vec3(1.0 + tVar.y * 0.13, 1.0 + tVar.y * 0.05, 1.0 - tVar.y * 0.16) * (1.0 + tVar.y * 0.1);',
   ].join('\n');
   const FRAG_PARS = [
     'uniform sampler2D uTNrm; uniform vec2 uTCrown;',
@@ -139,7 +139,7 @@
       const pos = new Float32Array(n * 4), vr = new Float32Array(n * 2);
       let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, hMax = 0;
       list.forEach((it, k) => {
-        const h = set.h(it.r) * (0.85 + rnd() * 0.3);
+        const h = set.h(it.r) * (0.72 + rnd() * 0.56);
         pos[k * 4] = it.x; pos[k * 4 + 1] = Tracks.groundAt(tr, it.x, it.y); pos[k * 4 + 2] = it.y; pos[k * 4 + 3] = h;
         vr[k * 2] = rnd() * Math.PI * 2; vr[k * 2 + 1] = rnd() * 2 - 1;
         x0 = Math.min(x0, it.x); x1 = Math.max(x1, it.x); z0 = Math.min(z0, it.y); z1 = Math.max(z1, it.y); hMax = Math.max(hMax, h);
