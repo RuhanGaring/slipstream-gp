@@ -114,9 +114,10 @@
         // primary pipe delays (in samples) differ a little between the banks
         const pd0 = Math.round(sr * 0.0011), pd1 = Math.round(sr * 0.00128);
         const view = S.view;
-        const turboF = S.turbo / 60 * 3.3, hF = S.turbo / 60 * 2, kF = rpm / 60 * 3.33 * 4;
+        // Doppler: rpm already carries it (P.rpm * P.dop); the whines that do not follow rpm take it here
+        const turboF = S.turbo / 60 * 3.3 * P.dop, hF = S.turbo / 60 * 2 * P.dop, kF = rpm / 60 * 3.33 * 4;
         // input shaft turns with the crank; the output shaft with the wheels (0.36 m tyre radius, about 3.5:1 final drive)
-        const giF = rpm / 60 * 29, goF = P.speed / 2.262 * 3.5 * 31;
+        const giF = rpm / 60 * 29, goF = P.speed / 2.262 * 3.5 * 31 * P.dop;
         const plenumF = 170 + rpm * 0.012;
         const kLvl = 0.018 * S.kers + 0.04 * S.harv, tLvl = 0.02 + 0.03 * S.load;
         // output low-pass corner: about 7 kHz outside, 5.5 kHz in the helmet

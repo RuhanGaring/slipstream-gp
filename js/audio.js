@@ -48,6 +48,20 @@
     }
     A.verbIn = ctx.createGain(); A.verbIn.gain.value = 0.12;
     A.verbIn.connect(A.verb); A.verb.connect(A.sfx);
+    // A very small, dark space for the engines: about a third of a second of decorrelated,
+    // low-passed decay. Mixed in faintly it moves the low end out of the head (dry bass sounds
+    // as if it were inside the ears) without being heard as reverb.
+    A.room = ctx.createConvolver();
+    {
+      const L = Math.floor(ctx.sampleRate * 0.35), ir = ctx.createBuffer(2, L, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const a = ir.getChannelData(ch); let lp = 0;
+        for (let i = 0; i < L; i++) { lp += ((Math.random() * 2 - 1) - lp) * 0.18; a[i] = lp * Math.exp(-i / (ctx.sampleRate * 0.07)) * (i < ctx.sampleRate * 0.004 ? 0 : 1); }
+      }
+      A.room.buffer = ir;
+    }
+    A.roomIn = ctx.createGain(); A.roomIn.gain.value = 1;
+    A.roomIn.connect(A.room); A.room.connect(A.sfx);
     A.on = true;
     // the engine worklet, from source in memory (works from file://)
     if (ctx.audioWorklet && F1.EngineWorklet) {
@@ -76,6 +90,10 @@
     const out = ctx.createGain(); out.gain.value = 0;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 16000; lp.Q.value = 0.5;
     const eq = ctx.createBiquadFilter(); eq.type = 'peaking'; eq.frequency.value = 1800; eq.Q.value = 0.8; eq.gain.value = 0;
+    // less bass than a studio microphone would give: onboard cameras carry small dynamic or
+    // electret capsules that roll off the low end, and so does a TV boom at a distance
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 75; hp.Q.value = 0.6;
+    const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = 240; shelf.gain.value = -4;
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
     if (A.worklet) {
@@ -84,10 +102,12 @@
     } else {
       legacy = legacyEngine(cheap); node = legacy.out;
     }
-    node.connect(eq); eq.connect(lp); lp.connect(out);
+    node.connect(hp); hp.connect(shelf); shelf.connect(eq); eq.connect(lp); lp.connect(out);
     if (pan) { out.connect(pan); pan.connect(dest || A.sfx); } else out.connect(dest || A.sfx);
     out.connect(A.verbIn);
-    return { node, legacy, out, lp, eq, pan, last: {} };
+    const roomSend = ctx.createGain(); roomSend.gain.value = 0.1;
+    out.connect(roomSend); roomSend.connect(A.roomIn);
+    return { node, legacy, out, lp, eq, shelf, pan, roomSend, last: {} };
   }
   // send parameters (only when they change enough)
   function setVoice(v, o) {
@@ -100,7 +120,7 @@
   function stopVoice(v) {
     if (!v) return;
     try { v.out.gain.setTargetAtTime(0, A.ctx.currentTime, 0.05); } catch (x) { /* already stopped */ }
-    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); v.node.disconnect(); v.out.disconnect(); } catch (x) { /* ignore */ } }, 300);
+    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
   }
   // the fallback: oscillators through a waveshaper (the original engine sound)
   function legacyEngine(cheap) {
@@ -196,7 +216,7 @@
     const ctx = A.ctx, s = noiseSrc(chain.brown), g = ctx.createGain(); g.gain.value = 0;
     let n = s; const fs = [];
     for (const [type, f, q] of chain.f) { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q || 0.7; n.connect(b); n = b; fs.push(b); }
-    n.connect(g); g.connect(A.sfx); if (chain.verb) { const vg = ctx.createGain(); vg.gain.value = chain.verb; g.connect(vg); vg.connect(A.verbIn); }
+    n.connect(g); g.connect(R.carBus || A.sfx); if (chain.verb) { const vg = ctx.createGain(); vg.gain.value = chain.verb; g.connect(vg); vg.connect(A.verbIn); }
     s.start();
     return { s, g, f: fs };
   }
@@ -208,7 +228,23 @@
     A.workletReady.then(() => {
       if (!R.pending) return;
       R.pending = false;
+      // the player's car's own sounds (tyres, road, wind...) share one bus, so a camera away
+      // from the car hears them at the right distance and side
+      const ctx0 = A.ctx;
+      R.carBus = ctx0.createGain(); R.carLp = ctx0.createBiquadFilter(); R.carLp.type = 'lowpass'; R.carLp.frequency.value = 16000;
+      R.carPan = ctx0.createStereoPanner ? ctx0.createStereoPanner() : null;
+      R.carBus.connect(R.carLp); if (R.carPan) { R.carLp.connect(R.carPan); R.carPan.connect(A.sfx); } else R.carLp.connect(A.sfx);
       R.engine = makeVoice(false);
+      // Reflections: the engine bounced back off the barrier on each side, delayed by the trip
+      // there and back (2 x distance / 343 m/s), darker and quieter the further away the wall
+      R.refl = [0, 1].map(k => {
+        const dl = ctx0.createDelay(0.5), f = ctx0.createBiquadFilter(), g = ctx0.createGain();
+        const pn = ctx0.createStereoPanner ? ctx0.createStereoPanner() : null;
+        f.type = 'lowpass'; f.frequency.value = 2800; g.gain.value = 0; dl.delayTime.value = 0.05;
+        R.engine.out.connect(dl); dl.connect(f); f.connect(g);
+        if (pn) { pn.pan.value = k ? 0.75 : -0.75; g.connect(pn); pn.connect(A.sfx); } else g.connect(A.sfx);
+        return { dl, f, g };
+      });
       for (let k = 0; k < N_OTHERS; k++) R.others.push(makeVoice(true));
       R.loops = {
         squeal: loop({ f: [['bandpass', 1500, 9]] }),
@@ -247,6 +283,9 @@
       R.loops = null;
     }
     if (R.wheelLfo) { try { R.wheelLfo.lfo.stop(); R.wheelLfo.dep.disconnect(); } catch (x) { /* ignore */ } R.wheelLfo = null; }
+    if (R.refl) { R.refl.forEach(r => { try { r.g.disconnect(); r.dl.disconnect(); } catch (x) { /* ignore */ } }); R.refl = null; }
+    if (R.carBus) { const b = R.carBus; setTimeout(() => { try { b.disconnect(); } catch (x) { /* ignore */ } }, 300); R.carBus = null; }
+    R.dist = {};
     R.failed = false;
   }
 
@@ -271,17 +310,64 @@
     let on = 1;
     if (p.limiter && p.u > p.limitSpeed - 1) { R.limT += dt; on = Math.sin(R.limT * 2 * Math.PI * 9) > -0.2 ? 1 : 0.15; }
     R.onboard = onboard;
+    // The listener: on board, the driver; outside, the camera itself, so a trackside camera hears
+    // the car arrive, pass with the Doppler drop in pitch and fade away, and a chase camera hears
+    // it just ahead. Each source's closing speed comes from how fast its distance to the
+    // listener changes (camera and car motion both count); a camera cut resets it.
+    const C3 = F1.R3 && F1.R3.camera;
+    let lx = p.x, ly = p.y, fx = Math.cos(p.h), fy = Math.sin(p.h), rx = -fy, ry = fx;
+    if (!onboard && C3) {
+      // the camera's own axes (the sim's y is the scene's z): forward is -Z, right is +X
+      lx = C3.position.x; ly = C3.position.z;
+      const e = C3.matrixWorld.elements, l = Math.hypot(e[8], e[10]) || 1, lr = Math.hypot(e[0], e[2]) || 1;
+      fx = -e[8] / l; fy = -e[10] / l; rx = e[0] / lr; ry = e[2] / lr;
+    }
+    if (R.lastMode !== mode) { R.dist = {}; R.lastMode = mode; }
+    const src = (key, sx, sy) => {
+      const dx = sx - lx, dy = sy - ly, d = Math.max(0.5, Math.hypot(dx, dy)), D = R.dist || (R.dist = {});
+      const prev = D[key];
+      let vr = prev ? (d - prev.d) / Math.max(1e-3, dt) : 0;
+      if (Math.abs(vr) > 160) vr = 0; // a cut or a teleport, not motion
+      const vs = prev ? prev.v + (vr - prev.v) * Math.min(1, dt * 8) : 0;
+      D[key] = { d, v: vs };
+      const lat = (dx * rx + dy * ry) / d, fwd = (dx * fx + dy * fy) / d;
+      return { d, dop: U.clamp(343 / (343 + vs), 0.7, 1.4), lat, fwd };
+    };
+    const me = src('me', p.x, p.y);
     // --- the player's engine ---
     // view: 1 on board, 0 outside (the exhaust leads). On board uses the voicing fitted to a
     // T-cam microphone recording (js/audio-engine-worklet.js); the T-cam, cockpit and helmet
     // views all sit at the airbox, the cockpit and helmet a little duller (lp below)
     const view = onboard ? 1 : 0;
     const harv = (p.harvest || 0) * Math.min(1, v / 30);
-    setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: 1, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
-    const engLvl = onboard ? 0.95 : mode === 'far' ? 0.7 : 0.82;
+    const dopMe = onboard ? 1 : +me.dop.toFixed(3);
+    setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: dopMe, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
+    // outside: the level falls past 10 m, the air takes the top end off, and the car sits where it is
+    const far = onboard ? 1 : Math.min(1, Math.pow(10 / me.d, 1.25));
+    const engLvl = (onboard ? 0.95 : 0.82) * far;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
     R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
-    R.engine.lp.frequency.setTargetAtTime(mode === 'tcam' ? 15000 : onboard ? 9000 : 15000, t, 0.2);
+    R.engine.shelf.gain.setTargetAtTime(onboard ? -7 : -4, t, 0.2);
+    // the engine's faint room: a touch more on board, where the dry low end is closest
+    R.engine.roomSend.gain.setTargetAtTime(onboard ? 0.14 : 0.1, t, 0.3);
+    const air = onboard ? (mode === 'tcam' ? 15000 : 9000) : Math.max(1500, 15000 / (1 + me.d / 60)) * (me.fwd < -0.3 ? 0.75 : 1);
+    R.engine.lp.frequency.setTargetAtTime(air, t, 0.1);
+    if (R.engine.pan) at(R.engine.pan.pan, onboard ? 0 : U.clamp(me.lat * 0.85, -1, 1), 0.05);
+    if (R.carBus) {
+      at(R.carBus.gain, onboard ? 1 : far, 0.05);
+      at(R.carLp.frequency, onboard ? 16000 : air, 0.1);
+      if (R.carPan) at(R.carPan.pan, onboard ? 0 : U.clamp(me.lat * 0.85, -1, 1), 0.05);
+    }
+    // reflections off the barriers either side of the car
+    if (R.refl && race.track && p.loc && p.loc.i >= 0) {
+      const tr = race.track, i = p.loc.i, dd = p.loc.d || 0;
+      [Math.max(1, tr.barr[0][i] + dd), Math.max(1, tr.barr[1][i] - dd)].forEach((w, k) => {
+        const r = R.refl[k];
+        at(r.dl.delayTime, U.clamp(2 * w / 343, 0.004, 0.45), 0.08);
+        at(r.g.gain, (onboard ? 0.16 : 0.11) * Math.exp(-w / 22) * far, 0.08);
+        at(r.f.frequency, 3500 / (1 + w / 30), 0.1);
+      });
+    }
     // --- tyres ---
     const W = p.wheels || [];
     const lock = W.reduce((a, w) => Math.max(a, w.lock || 0), 0), spin = W.reduce((a, w) => Math.max(a, w.spin || 0), 0);
@@ -337,15 +423,11 @@
     at(L.crowd.g.gain, 0.025 + 0.015 * Math.max(0, Math.sin(t * 0.13)), 0.5);
 
     // --- the nearest cars ---
-    const ch = Math.cos(p.h), sh = Math.sin(p.h);
-    const near = race.cars.filter(c => c !== p && !c.retired).map(c => ({ c, d: Math.hypot(c.x - p.x, c.y - p.y) })).sort((a, b) => a.d - b.d).slice(0, R.others.length);
+    const near = race.cars.filter(c => c !== p && !c.retired).map(c => ({ c, d: Math.hypot(c.x - lx, c.y - ly) })).sort((a, b) => a.d - b.d).slice(0, R.others.length);
     R.others.forEach((e, k) => {
       const n = near[k];
       if (!n || n.d > 400) { e.out.gain.setTargetAtTime(0, t, 0.1); return; }
-      const c = n.c, dx = c.x - p.x, dy = c.y - p.y, inv = 1 / Math.max(1, n.d);
-      const vr = ((c.vx - p.vx) * dx + (c.vy - p.vy) * dy) * inv; // closing speed (negative = closing)
-      const dop = U.clamp(343 / (343 + vr), 0.75, 1.3);
-      const lat = (-dx * sh + dy * ch) * inv, fwd = (dx * ch + dy * sh) * inv;
+      const c = n.c, s0 = src('c' + c.id, c.x, c.y), dop = s0.dop, lat = s0.lat, fwd = s0.fwd;
       const cdead = c.dm && c.dm.failed === 'ENGINE';
       setVoice(e, { rpm: cdead ? 700 : c.rpm, thr: cdead ? 0 : (c.throttleOut != null ? c.throttleOut : 0.5), speed: c.speed, gear: c.gear, dop: +dop.toFixed(3), kers: 0, on: cdead ? 0 : 1, gain: 1 });
       // level falls with distance; the air takes the top end off far-away cars; behind is duller
