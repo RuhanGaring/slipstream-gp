@@ -189,6 +189,7 @@
     const menu = h('div', 'menu');
     const entries = [
       ['QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', () => { F1.Game.flow = { kind: 'race' }; go('mode'); }],
+      ['GRAND PRIX WEEKEND', 'The full event: Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
       ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
       ['SETTINGS', 'Audio, camera, units and HUD.', () => go('settings', { back: 'main' })],
@@ -208,7 +209,7 @@
   // ---------- race-weekend chrome ----------
   // The selection screens share a broadcast-style frame: a header strip with the event and a
   // step tracker (where you are in the flow), the page title, and the prompts bar at the foot.
-  const KIND = { race: 'QUICK RACE', champ: 'CHAMPIONSHIP', tt: 'TIME TRIAL' };
+  const KIND = { race: 'QUICK RACE', weekend: 'GRAND PRIX WEEKEND', champ: 'CHAMPIONSHIP', tt: 'TIME TRIAL' };
   const STEP_NAME = { mode: 'HANDLING', track: 'CIRCUIT', team: 'TEAM', driver: 'DRIVER', setup: 'SETUP' };
   function steps(kind) { return kind === 'champ' ? ['mode', 'team', 'driver', 'setup'] : ['mode', 'track', 'team', 'driver', 'setup']; }
   function header(cur) {
@@ -500,7 +501,7 @@
     if (kind !== 'tt') {
       add(optRow('Race distance', '', [2, 3, 5, 8, 12, 20], () => R.laps, v => { R.laps = v; updSummary(); }, v => v + ' LAPS'), 'Race');
       add(optRow('AI difficulty', 'Legend drives at the limit the AI learned for each circuit', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
-      if (kind !== 'champ') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
+      if (kind !== 'champ' && kind !== 'weekend') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
       add(optRow('Field size', '', [10, 16, 20], () => R.field, v => { R.field = v; updSummary(); }, v => v + ' CARS'));
     }
     if (sim) {
@@ -515,7 +516,7 @@
     }
     add(optRow('Damage', 'Full: soft-body crashes, parts break off, punctures, engine and gearbox failures', sim ? ['full', 'limited', 'off'] : ['full', 'off'], () => (R.damage === true ? 'limited' : R.damage === false ? 'off' : R.damage || 'full'), v => { R.damage = v; }, v => ({ full: 'FULL', limited: 'FRONT WING ONLY', off: 'OFF' })[v]), sim ? '' : 'Assists');
     add(optRow('Racing line', 'Red bar: brake. Yellow: turn in. Blue: apex. Green: track out.', ['full', 'brake', 'off'], () => (sim ? R.lineSim : R.lineArcade), v => { if (sim) R.lineSim = v; else R.lineArcade = v; }, v => ({ full: 'FULL', brake: 'BRAKING ONLY', off: 'OFF' })[v]));
-    const btn = h('div', 'btn go', `<span>${kind === 'tt' ? 'Start session' : kind === 'champ' ? 'Start championship' : 'Start race'}</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>`);
+    const btn = h('div', 'btn go', `<span>${kind === 'tt' ? 'Start session' : kind === 'champ' ? 'Start championship' : kind === 'weekend' ? 'Start weekend' : 'Start race'}</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>`);
     const sum = h('div', 'weekend');
     two.appendChild(opts); two.appendChild(sum);
     wrap.appendChild(two);
@@ -637,7 +638,7 @@
     const el = h('div');
     const def = o.def, tr = o.tr;
     const num = o.round ? String(o.round).padStart(2, '0') : def.gen ? 'GEN' : String(F1.Tracks.DEFS.indexOf(def) + 1).padStart(2, '0');
-    const session = o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : 'GRAND PRIX';
+    const session = o.quali != null ? 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : 'GRAND PRIX';
     const handling = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim') ? 'SIMULATION' : 'ARCADE';
     const tc = o.team.base === '#121417' ? o.team.accent : o.team.base;
     el.innerHTML = `
@@ -676,7 +677,7 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], [o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]];
+    const entries = [['RESUME', () => F1.Game.resume()], ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null ? [['END SESSION', () => F1.Game.endQuali()], ['QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
     const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: fn }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
@@ -758,6 +759,31 @@
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     if (done) mk('MAIN MENU', () => F1.Game.quitToMenu());
     else { mk('NEXT ROUND  ' + F1.Tracks.DEFS[ch.round + 1].name.toUpperCase(), () => F1.Game.champNext()); mk('QUIT TO MENU', () => F1.Game.quitToMenu()); }
+    wrap.appendChild(acts);
+    el.appendChild(wrap);
+    return { el, items, nav: 'h', back: () => {} };
+  };
+
+  // qualifying session classification, with the knockout line
+  S.quali = o => {
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    wrap.innerHTML = `<div class="crumbs">GRAND PRIX WEEKEND  /  ${o.track.toUpperCase()}</div><div class="h1">QUALIFYING  ${o.name}</div>`;
+    const sw = c => (c.team.base === '#121417' ? c.team.accent : c.team.base);
+    const rows = o.rows.map((r, k) => {
+      const t = r.t == null ? 'NO TIME' : k === 0 ? (o.name === 'Q3' ? 'POLE' : 'FASTEST') : '+' + (r.t - o.pole).toFixed(3);
+      const line = o.cut != null && k === o.cut ? '<tr class="cutline"><td colspan="5">ELIMINATED</td></tr>' : '';
+      return `${line}<tr class="${r.me ? 'me' : ''}${r.out ? ' out' : ''}"><td class="pos">${r.pos}</td><td><span class="sw" style="background:${sw(r)}"></span>${r.name.toUpperCase()}</td><td>${r.team.name}</td><td>${r.t == null ? '-' : U.fmtTime(r.t)}</td><td>${t}</td></tr>`;
+    }).join('');
+    const tbl = h('div');
+    tbl.style.maxHeight = '56vh'; tbl.style.overflow = 'auto';
+    tbl.innerHTML = `<table class="res"><tr><th>POS</th><th>DRIVER</th><th>TEAM</th><th>BEST LAP</th><th>GAP</th></tr>${rows}</table>`;
+    wrap.appendChild(tbl);
+    const acts = h('div', 'res-actions');
+    const items = [];
+    const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
+    mk(o.next.label, o.next.fn);
+    mk('QUIT WEEKEND', () => F1.Game.quitToMenu());
     wrap.appendChild(acts);
     el.appendChild(wrap);
     return { el, items, nav: 'h', back: () => {} };

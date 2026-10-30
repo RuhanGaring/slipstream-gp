@@ -209,6 +209,11 @@
       if (cfg.grid === 'back') slot = order.length;
       order.splice(slot, 0, race.player);
     }
+    // a grid set by qualifying: driver codes in grid order (any car not listed goes to the back)
+    if (cfg.gridOrder && mode !== 'tt') {
+      const at = c => { const i = cfg.gridOrder.indexOf(c.driver.code); return i < 0 ? 999 : i; };
+      order.sort((a, b) => at(a) - at(b));
+    }
     order.forEach((car, k) => {
       const g = tr.grid[k];
       const [x, y, h] = Tracks.pointAt(tr, g.s, g.d);
@@ -223,7 +228,7 @@
     race.cars.forEach(c => { c.pos = order.indexOf(c) + 1; });
 
     // time trial ghost
-    if (mode === 'tt') race.ghost = loadGhost(tr.id);
+    if (mode === 'tt' && !cfg.noGhost) race.ghost = loadGhost(tr.id);
     race.servicePit = c => servicePit(race, c);
     race.recover = c => recover(race, c);
     return race;

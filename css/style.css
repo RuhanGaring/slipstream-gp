@@ -538,3 +538,7 @@ body.mobile #pedals { display: none; }
 #touch.manual .t-gup, #touch.manual .t-gdn { display: flex; top: auto; width: 56px; height: 56px; font-size: 24px; right: calc(16px + env(safe-area-inset-right)); }
 #touch.manual .t-gup { bottom: calc(min(36vh, 220px) + 90px + env(safe-area-inset-bottom)); }
 #touch.manual .t-gdn { bottom: calc(min(36vh, 220px) + 28px + env(safe-area-inset-bottom)); }
+
+/* qualifying classification: knocked-out drivers dimmed below the cut line */
+table.res tr.out td { opacity: .5; }
+table.res tr.cutline td { padding: 4px 10px; font-size: 11px; font-weight: 800; letter-spacing: .2em; color: var(--accent); border-top: 2px solid var(--accent); }
