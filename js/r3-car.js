@@ -1224,18 +1224,18 @@
   // fabricTexture, projected three ways onto the arm's rest pose (the geometry before
   // skinning), so the weave stays put on the cloth as the arm bends, and is applied as bump
   // relief from its screen-space slope. The gloves are black whatever the team: black knit
-  // backs, a slightly deeper black knuckle panel and cuff band, dark stitching; only the
-  // sleeve takes the team's colours.
+  // backs, a slightly deeper black knuckle panel, dark stitching. The sleeve and the band
+  // round the gauntlet cuff take the team's colours.
   function armMaterial(team, sd) {
     const A = armData(), m3 = v => (sd < 0 ? new THREE.Vector3(v.x, v.y, -v.z) : v.clone());
-    const suit = new THREE.Color(team.base);
+    const suit = new THREE.Color(team.base), acc = new THREE.Color(team.accent);
     const glove = new THREE.Color(0x26272b), panel = new THREE.Color(0x1a1b1e);
     const X0 = new THREE.Vector3().setFromMatrixColumn(A.RF0inv.clone().invert(), 0);
     // Cloth sheen is light scattered by the fibres, so it takes the fabric's own colour; an
     // untinted sheen on a dark glove turns every edge pale where the sun grazes it
     const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.84, metalness: 0, sheen: 1, sheenRoughness: 0.65, sheenColor: new THREE.Color(0xffffff) });
     const u = {
-      uSuit: { value: suit.multiplyScalar(0.8) }, uGlove: { value: glove }, uPanel: { value: panel }, uSuede: { value: new THREE.Color(0x2b2c30) },
+      uSuit: { value: suit.multiplyScalar(0.8) }, uGlove: { value: glove }, uPanel: { value: panel }, uBand: { value: acc }, uSuede: { value: new THREE.Color(0x2b2c30) },
       uFab: { value: fabricTexture() }, uPalm: { value: m3(X0) }, uWrist: { value: m3(A.W0) }, uUpArm: { value: m3(A.F0.clone().sub(A.W0).normalize()) },
     };
     m.userData.patchKey = 'arm';
@@ -1244,7 +1244,7 @@
       sh.vertexShader = 'varying vec3 vRP; varying vec3 vRN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRP = position; vRN = normal;');
       sh.fragmentShader = [
         'varying vec3 vRP; varying vec3 vRN;',
-        'uniform vec3 uSuit; uniform vec3 uGlove; uniform vec3 uPanel; uniform vec3 uSuede; uniform sampler2D uFab;',
+        'uniform vec3 uSuit; uniform vec3 uGlove; uniform vec3 uPanel; uniform vec3 uBand; uniform vec3 uSuede; uniform sampler2D uFab;',
         'uniform vec3 uPalm; uniform vec3 uWrist; uniform vec3 uUpArm;',
         'vec4 fabTri(vec3 p, vec3 n) { vec3 w = pow(abs(n), vec3(4.0)); w /= w.x + w.y + w.z;',
         '  return texture2D(uFab, p.zy) * w.x + texture2D(uFab, p.xz) * w.y + texture2D(uFab, p.xy) * w.z; }',
@@ -1256,9 +1256,9 @@
           '  float aAl = dot(vRP - uWrist, uUpArm);', // metres up the forearm from the wrist
           '  vec3 aCol = uSuit * vColor.r + uGlove * vColor.g + uPanel * vColor.b;',
           '  aCol = mix(aCol, uSuede, aSu);',
-          // gauntlet: a deeper black band and a dark stitched edge
+          // gauntlet: a band in the team's accent colour and a dark stitched edge
           '  float aCuff = vColor.g * step(0.0, aAl);',
-          '  aCol = mix(aCol, uPanel, aCuff * step(0.045, aAl) * step(aAl, 0.054));',
+          '  aCol = mix(aCol, uBand, aCuff * step(0.045, aAl) * step(aAl, 0.054));',
           '  aCol = mix(aCol, vec3(0.045), aCuff * step(0.064, aAl) * step(aAl, 0.068));',
           '  float aH = mix(aF.r, mix(aF.g, aF.b, aSu), aGl);',
           // the cloth reads at a glance: weave and knit light and dark, as on a real suit

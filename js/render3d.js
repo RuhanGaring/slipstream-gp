@@ -464,7 +464,12 @@
     const a = Math.max(1, Math.min(GFX.aniso || 8, renderer.capabilities.getMaxAnisotropy()));
     root.traverse(o => {
       const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
-      for (const m of ms) for (const k of TEX_KEYS) { const t = m[k]; if (t && t.isTexture && !t.isRenderTargetTexture && t.anisotropy !== a) { t.anisotropy = a; t.needsUpdate = true; } }
+      for (const m of ms) for (const k of TEX_KEYS) { const t = m[k]; if (t && t.isTexture && !t.isRenderTargetTexture && t.anisotropy !== a) {
+        t.anisotropy = a;
+        // re-upload only what is already loaded; anything still loading takes the value when it arrives
+        const img = t.image;
+        if (img && img.complete !== false && (img.width || img.data || img.length)) t.needsUpdate = true;
+      } }
     });
   }
 
