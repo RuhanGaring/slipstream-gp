@@ -26,7 +26,7 @@
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
     bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
-    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.62, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
+    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.45, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
     lonestar: { sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
       ridge: ['#b3a07c', '#9a8a68', '#7f7258'], ridgeH: 45, jag: 3 },
@@ -536,7 +536,7 @@
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
       const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
-      state.exposure = { kestrel: 1.0, bahia: 1.14, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
+      state.exposure = { kestrel: 1.15, bahia: 1.14, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
@@ -1067,7 +1067,8 @@
     tag('stands');
     // city blocks (street circuit)
     {
-      const walls = new Batch(true), roofs = new Batch(true);
+      const walls = new Batch(true), roofs = new Batch(true), relief = new Batch(true), ub = new THREE.BoxGeometry(1, 1, 1);
+      const awn = ['#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a', '#3d3f44', '#8a6a3a'];
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
       const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2'];
       for (const it of W2.decor) {
@@ -1095,9 +1096,33 @@
         g.scale(1, (hgt + 3) / hgt, 1);
         g.translate(it.x, (hgt + 3) / 2 + gy, it.y);
         walls.add(g, null, col(tints[Math.floor(r() * tints.length)]));
+        // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
+        // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
+        // dark glazing under fabric awnings
+        let front = false;
+        tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
+        if (front) {
+          const balc = r() < 0.65, stone = col('#e9e2d6'), rail = col('#2b2d31');
+          for (const [fx, fz, len, rot] of [[0, it.h / 2, it.w, 0], [0, -it.h / 2, it.w, 0], [it.w / 2, 0, it.h, 1], [-it.w / 2, 0, it.h, 1]]) {
+            const sx = Math.sign(fx), sz = Math.sign(fz), L = len - 2.4;
+            if (L < 4) continue;
+            const at = (out, y, l, hh, dd) => mat(it.x + fx + sx * out, gy + y, it.y + fz + sz * out, 0, rot ? dd : l, hh, rot ? l : dd);
+            // shopfronts: dark glass band, a stone fascia over it and an awning on most bays
+            relief.add(ub, at(0.08, 3 + 1.6, L, 3.2, 0.2), col('#1f2428'));
+            relief.add(ub, at(0.14, 3 + 3.45, L + 0.6, 0.5, 0.3), stone);
+            if (r() < 0.75) relief.add(ub, mat(it.x + fx + sx * 0.75, gy + 3 + 3.0, it.y + fz + sz * 0.75, 0, rot ? 1.3 : L * 0.8, 0.12, rot ? L * 0.8 : 1.3), col(awn[Math.floor(r() * awn.length)]));
+            if (!balc) continue;
+            for (let y = 3 + 6.6; y < hgt + 1; y += 3.3) {
+              relief.add(ub, at(0.45, y, L, 0.16, 0.9), stone);
+              relief.add(ub, at(0.86, y + 0.95, L, 0.05, 0.05), rail);
+              relief.add(ub, at(0.86, y + 0.45, L, 0.8, 0.02), col('#4a4d52'));
+            }
+          }
+        }
         const rf = new THREE.BoxGeometry(it.w + 0.6, 0.6, it.h + 0.6); rf.translate(it.x, hgt + 3 + gy, it.y);
         roofs.add(rf, null, col(it.col));
       }
+      add(relief.geo(), M.vcol, { cast: true });
       add(walls.geo(), T.has('facade') ? pbr('facade', 1, { vertexColors: true }) : std({ map: repTex(T.windows(), 1, 1), vertexColors: true, roughness: 0.75 }), { cast: true });
       add(roofs.geo(), M.roofs || (M.roofs = std({ vertexColors: true, roughness: 0.8, normalMap: T.has('concrete_n') ? T.photo('concrete_n', 1, false) : null })), { cast: true });
       const VMc = venueMats(), kindMat = { office: VMc.office, glass: VMc.glass, glasslit: VMc.lit };

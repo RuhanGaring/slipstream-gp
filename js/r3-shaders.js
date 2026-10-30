@@ -93,7 +93,7 @@
     '  c *= mix(vec3(1.0), vec3(1.09, 1.06, 0.80), poa);',
     '  c *= mix(vec3(1.0), vec3(0.88, 0.95, 1.03), fes);',
     '  c *= mix(vec3(1.0), vec3(0.96, 1.07, 0.93), clov);',
-    '  c *= mix(vec3(1.0), vec3(0.86, 0.93, 0.90), wet * 0.75);',
+    '  c *= mix(vec3(1.0), vec3(0.88, 0.94, 0.91), wet * 0.45);',
     '  vec3 stress = mix(vec3(1.10, 1.05, 0.76), vec3(1.32, 1.12, 0.62), smoothstep(0.55, 1.0, dry));',
     '  c *= mix(vec3(1.0), stress, smoothstep(0.12, 0.75, dry));',
     // yellow patches: warped cells of about 6 m, only the highest few percent, and only where a
@@ -111,8 +111,8 @@
     // the worn strip at the edge of the track: wheels running wide and the mower turning there
     // leave a ragged band, under a metre to two wide, of thin tired grass over sandy soil
     '  float sdE = site.b * 255.0;',
-    '  float ew = (1.0 - smoothstep(0.1, 0.8 + 1.2 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
-    '  c *= mix(vec3(1.0), vec3(1.03, 0.86, 0.6), ew * 0.6);',
+    '  float ew = (1.0 - smoothstep(0.1, 1.4 + 1.6 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
+    '  c *= mix(vec3(1.0), vec3(1.04, 0.86, 0.58), ew * 0.75);',
     '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
     // mowing stripes: the mower runs alongside the track, so the bands lie at constant distances
     // from its edge (site.b, metres from the tarmac, 255 = far away), 4 m wide; light along the

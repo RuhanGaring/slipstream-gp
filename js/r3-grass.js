@@ -416,7 +416,7 @@
     // and the ground's large-scale macro variation is applied per clump here
     '  vGWp = transformed.xz;',
     '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
-    '  vGShade = mix(0.78, 1.22, gM) * (0.96 + 0.08 * gHash(gBase + 11.3));',
+    '  vGShade = mix(0.93, 1.07, gM) * (0.96 + 0.08 * gHash(gBase + 11.3));',
     '  }',
   ].join('\n');
   // the modelled blades: placed like the cards (snapped grid, hashed jitter and turn, ground
@@ -455,7 +455,7 @@
     '  transformed += vec3(gWp.x, gH + 0.005, gWp.y);',
     '  vGWp = transformed.xz; vBT = bT; vGView = transformed - cameraPosition;',
     '  float gM = textureLod(uGMacro, gWp / 140.0, 0.0).r * 0.6 + textureLod(uGMacro, gWp / 29.4, 0.0).g * 0.4;',
-    '  vGShade *= mix(0.86, 1.14, gM) * (0.95 + 0.1 * gHash(gBase + 11.3));',
+    '  vGShade *= mix(0.95, 1.05, gM) * (0.95 + 0.1 * gHash(gBase + 11.3));',
     '  }',
   ].join('\n');
   // anything dropped by the screen check is sent off screen whole
