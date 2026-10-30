@@ -289,6 +289,7 @@
         const side = k % 2 ? 1 : -1, kick = new THREE.Vector3(-sh * side * 6, 0, ch * side * 6);
         launch(scene, wheel, outer, c, kick, true);
         bu.wheels[k] = new THREE.Group(); bu.wheels[k].userData = { spin: new THREE.Group(), front: k < 2, lods: [], stripes: [] }; // a stand-in the renderer can still turn
+        bu.lod = -1; // re-pick the detail level: the merged low-detail wheels can no longer stand in
       } else if (!dm.soft && REGIONS[key]) {
         const piece = cut(body, REGIONS[key]);
         if (!piece) continue;

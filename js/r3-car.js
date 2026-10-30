@@ -570,6 +570,37 @@
     return G;
   }
 
+  // The low-detail wheels of all four corners merged into one mesh per material (tyre, rim),
+  // shared by every car. Used at the low detail level, where a wheel's turn and steer cannot
+  // be seen: two draw calls instead of eight.
+  let wheelsLow = null;
+  function wheelsLowGeo() {
+    if (wheelsLow) return wheelsLow;
+    const MD = model(), L = MD.lods[MD.lods.length - 1], by = {};
+    for (const key of ['FL', 'FR', 'RL', 'RR']) {
+      const c = MD.lods[0].wheels[key].c;
+      for (const [id, G] of Object.entries(L.wheels[key].parts)) {
+        const b = by[id] || (by[id] = { pos: [], nor: [], uv: [], idx: [] }), p = G.attributes.position, n = G.attributes.normal, t = G.attributes.uv, base = b.pos.length / 3;
+        // read through the attributes: the model's normals are packed (normalised bytes)
+        for (let i = 0; i < p.count; i++) {
+          b.pos.push(p.getX(i) + c[0], p.getY(i) + c[1], p.getZ(i) + c[2]);
+          if (n) b.nor.push(n.getX(i), n.getY(i), n.getZ(i)); else b.nor.push(0, 1, 0);
+          if (t) b.uv.push(t.getX(i), t.getY(i)); else b.uv.push(0, 0);
+        }
+        if (G.index) for (let i = 0; i < G.index.count; i++) b.idx.push(base + G.index.getX(i)); else for (let i = 0; i < p.count; i++) b.idx.push(base + i);
+      }
+    }
+    wheelsLow = Object.entries(by).map(([id, b]) => {
+      const G = new THREE.BufferGeometry();
+      G.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+      G.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+      G.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+      G.setIndex(b.idx); G.computeBoundingSphere();
+      return [id, G];
+    });
+    return wheelsLow;
+  }
+
   function makeModelCar(team, num, comp) {
     const MD = model();
     const root = new THREE.Group();
@@ -619,6 +650,9 @@
     const nose = new THREE.Mesh(ng, numMat);
     nose.position.set(1.95, 0.71, 0);
     root.add(nose);
+    const wl = new THREE.Group();
+    for (const [id, G] of wheelsLowGeo()) { const m = new THREE.Mesh(G, twoSided(modelMat(id, team))); m.castShadow = m.receiveShadow = true; wl.add(m); }
+    wl.visible = false;
     const far = new THREE.Mesh(farGeo(team), farMat());
     far.castShadow = true; far.visible = false;
     root.add(far);
@@ -644,7 +678,7 @@
     { const e = G.__helmetEye || [-0.12, 1.46, -6.2]; hEye.position.set(e[0], e[1], 0); hLook.position.set(30, e[2], 0); }
     root.add(hEye, hLook); // bolted to the chassis, not the head
     root.add(tcamEye, tcamLook);
-    root.userData = { wheels, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, far, nose, helmet: cockpit.helmet, model: true, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
+    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, far, nose, helmet: cockpit.helmet, model: true, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
     updateCockpit(root, 0);
     return root;
   }
@@ -662,8 +696,11 @@
     const far = lod === 2 && !!u.far, L = far ? -1 : Math.min(lod, u.lodGroups.length - 1);
     const put = (g, on, par) => { g.visible = on; if (on && !g.parent) par.add(g); else if (!on && g.parent) g.parent.remove(g); };
     u.lodGroups.forEach((g, k) => put(g, k === L, root));
-    // the compound rings on the sidewalls are a centimetre wide: full detail only
-    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = lod === 0; }); }
+    // the compound rings on the sidewalls are a centimetre wide: full detail only. At low
+    // detail the four wheels are the merged pair of meshes (unless one has come off in a crash)
+    const merged = L === 1 && !!u.wheelsLow && u.wheels.every(w => w.userData.lods.length);
+    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L && !merged, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = lod === 0; }); }
+    if (u.wheelsLow) put(u.wheelsLow, merged, root);
     if (u.far) u.far.visible = far;
     if (u.nose) u.nose.visible = !far;
     const ck = u.cockpit;
