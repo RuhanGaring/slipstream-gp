@@ -47,6 +47,28 @@
     speckle(g, 512, 512, 40000, ['#b7a07a', '#dbc8a3', '#a88f6a', '#e6d6b6', '#9a8463'], 1, 3, r);
     return tex(c);
   });
+  // worn verge: sandy soil showing through thinned turf, solid at the track edge (v = 0) and
+  // breaking up into tufts and bare spots toward the grass (v = 1); tiles along the edge (u)
+  T.wear = () => get('wear', () => {
+    const w = 512, h = 64, c = cv(w, h), g = c.getContext('2d'), r = U.rng(29);
+    const img = g.createImageData(w, h), d = img.data;
+    const n1 = new Float32Array(w * h);
+    // value noise wrapped in u, a few octaves
+    const grid = (gx, gy) => { const a = new Float32Array(gx * gy); for (let k = 0; k < a.length; k++) a[k] = r(); return (x, y) => {
+      const fx = x * gx, fy = y * (gy - 1), i0 = Math.floor(fx), j0 = Math.min(gy - 2, Math.floor(fy)), tx = fx - i0, ty = fy - j0, i1 = (i0 + 1) % gx;
+      const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty), A = a[j0 * gx + i0 % gx], B = a[j0 * gx + i1], C = a[(j0 + 1) * gx + i0 % gx], D = a[(j0 + 1) * gx + i1];
+      return (A * (1 - sx) + B * sx) * (1 - sy) + (C * (1 - sx) + D * sx) * sy; }; };
+    const o = [grid(16, 4), grid(48, 6), grid(160, 14)];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const u = x / w, v = y / (h - 1);
+      const n = o[0](u, v) * 0.5 + o[1](u, v) * 0.3 + o[2](u, v) * 0.2;
+      const a = Math.max(0, Math.min(1, (n - v * 0.85) * 3.2 + 0.25 - v * 0.4));
+      const k = (y * w + x) * 4, t = 0.85 + o[2](u, v) * 0.3;
+      d[k] = 178 * t; d[k + 1] = 158 * t; d[k + 2] = 120 * t; d[k + 3] = a * 255;
+    }
+    g.putImageData(img, 0, 0);
+    const t = tex(c); t.wrapT = THREE.ClampToEdgeWrapping; return t;
+  });
   T.runoff = col => get('runoff' + col, () => {
     const c = cv(256, 256), g = c.getContext('2d'), r = U.rng(9);
     g.fillStyle = col; g.fillRect(0, 0, 256, 256);

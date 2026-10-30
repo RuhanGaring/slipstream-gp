@@ -127,7 +127,7 @@
     '}',
     'float lawnBreak(sampler2D tex, vec2 w) {',
     '  vec3 s = texture2D(tex, mat2(0.8, -0.6, 0.6, 0.8) * w / 11.3).rgb;',
-    '  return mix(1.0, dot(s, vec3(0.2126, 0.7152, 0.0722)) / 0.0921, 0.4);',
+    '  return mix(1.0, dot(s, vec3(0.2126, 0.7152, 0.0722)) / 0.0921, 0.15);',
     '}'].join('\n');
 
   const FOG_VERT_PARS = 'varying vec3 vFogWorld;\n';

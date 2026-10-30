@@ -131,7 +131,7 @@
     // iridium visor: thin-film interference gives the blue-gold shift
     shared.visor = new THREE.MeshPhysicalMaterial({ color: 0x0b0d10, roughness: 0.06, metalness: 0.7, iridescence: 1, iridescenceIOR: 1.6, iridescenceThicknessRange: [250, 550] });
     shared.mirror = new THREE.MeshStandardMaterial({ color: 0x9aa4ae, roughness: 0.05, metalness: 1 });
-    shared.cockpit = new THREE.MeshStandardMaterial({ color: 0x050506, roughness: 0.9 });
+    shared.cockpit = new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.9 });
     return shared;
   }
 
@@ -824,7 +824,7 @@
       _tubMat = new THREE.MeshPhysicalMaterial({ map: wm, normalMap: wn, normalScale: new THREE.Vector2(0.3, 0.3), color: 0xb4b7bc, roughness: 0.5, metalness: 0, clearcoat: 0.45, clearcoatRoughness: 0.25, envMapIntensity: 3, side: THREE.DoubleSide });
       // energy-absorbing padding covered in black suede (the open cockpit is lit mostly by sky
       // bounce, so these take a little more of the environment than the bodywork)
-      _padMat = new THREE.MeshPhysicalMaterial({ color: 0x2b2d31, roughness: 0.9, metalness: 0, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x7a7e88), envMapIntensity: 3 });
+      _padMat = new THREE.MeshPhysicalMaterial({ color: 0x3b3e44, roughness: 0.9, metalness: 0, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x7a7e88), envMapIntensity: 3 });
       // harness webbing
       _beltMat = new THREE.MeshPhysicalMaterial({ color: 0x24262b, roughness: 0.8, sheen: 0.6, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x5a5e66), side: THREE.DoubleSide });
     }

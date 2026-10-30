@@ -24,7 +24,7 @@
       ridge: ['#8fa3b0', '#73889a', '#5d7385'], ridgeH: 70, jag: 3 },
     sierra: { sunEl: 18, sunAz: 220, sun: '#ffd9a8', sunI: 3.2, top: '#3c6fb8', hor: '#e8d8bf', bot: '#9c8a68', fog: '#dcd2c0', fogN: 500, fogF: 5600, cloud: 0.1, haze: 1.0, exp: 0.95, env: 0.9,
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
-    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
+    bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, lawnDesat: 0.16, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
     nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.45, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
@@ -644,7 +644,7 @@
     {
       // turf under a clear sky is lighter and more yellow-green; under cloud, greyer and more olive
       const L0 = LOOKS[Tracks.lookOf(tr)] || LOOKS.kestrel, oc = U.smooth((L0.cloud - 0.42) / 0.3);
-      F1.R3S.U.uLawnGrade.value.set(1.12 - 0.12 * oc, 1.12 - 0.16 * oc, 0.9, 0.4 * oc);
+      F1.R3S.U.uLawnGrade.value.set(1.12 - 0.12 * oc, 1.12 - 0.16 * oc, 0.9, Math.max(0.4 * oc, L0.lawnDesat || 0));
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
@@ -817,10 +817,11 @@
             // a gravel trap's outer edge is raked by hand, not cut by a ruler: it wanders by half
             // a metre and the trap rounds off at its ends instead of stopping square
             const gw = k => {
-              const w = tr.runW[side][k];
-              if (t !== SURF.GRAVEL) return w;
-              const e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds, h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
-              return w * (0.3 + 0.7 * U.smooth(Math.min(1, e / 14))) + (Math.sin(k * 0.9 + side) * 0.35 + (h - Math.floor(h) - 0.5) * 0.5) * Math.min(1, e / 6);
+              const w = tr.runW[side][k], e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds;
+              const taper = w * (0.3 + 0.7 * U.smooth(Math.min(1, e / 14)));
+              if (t !== SURF.GRAVEL) return taper;
+              const h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
+              return taper + (Math.sin(k * 0.9 + side) * 0.35 + (h - Math.floor(h) - 0.5) * 0.5) * Math.min(1, e / 6);
             };
             const fa = k => (sg < 0 ? -(hw + gw(k)) : hw - 0.3);
             const fb = k => (sg < 0 ? -hw + 0.3 : hw + gw(k));
@@ -834,6 +835,30 @@
         }
       }
       add(gr.geo(), M.gravel);
+      // worn verges: a strip of sandy soil and thinned turf where the grass meets the track or
+      // the run-off, 0.5 to 1.5 m wide and broken up toward the grass (a decal over the lawn)
+      if (style !== 'street') {
+        const wa = new Acc();
+        for (const side of [0, 1]) {
+          const sg = side ? 1 : -1;
+          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw : hw + tr.runW[side][k];
+          let prev = -1, len = 0, px = 0, pz = 0;
+          for (let i = 0; i <= N; i++) {
+            const k = mod(i, N), e0 = edge(k), wd = 0.5 + 1.0 * (0.5 + 0.5 * Math.sin(k * 0.37 + side * 2.1) * Math.sin(k * 0.071 + 1.3));
+            if (prev >= 0 && Math.abs(e0 - edge(mod(i - 1, N))) > 1.5) prev = -1; // a step in the edge (run-off starts): start a new strip
+            const ax = tr.x[k] + tr.nx[k] * sg * (e0 - 0.05), az = tr.y[k] + tr.ny[k] * sg * (e0 - 0.05);
+            const bx = tr.x[k] + tr.nx[k] * sg * (e0 + wd), bz = tr.y[k] + tr.ny[k] * sg * (e0 + wd);
+            if (prev >= 0) len += Math.hypot(ax - px, az - pz);
+            px = ax; pz = az;
+            const a = wa.v(ax, Tracks.surfZ(tr, k, sg * e0) + 0.02, az, 0, 1, 0, len / 9, 0);
+            wa.v(bx, Tracks.surfZ(tr, k, sg * (e0 + wd)) + 0.02, bz, 0, 1, 0, len / 9, 1);
+            if (prev >= 0) { if (side) wa.t(prev, a, prev + 1), wa.t(prev + 1, a, a + 1); else wa.t(prev, prev + 1, a), wa.t(prev + 1, a + 1, a); }
+            prev = a;
+          }
+        }
+        if (!M.wear) { M.wear = std({ map: T.wear(), transparent: true, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); M.wear.userData.maskK = 0.5; }
+        add(wa.geo(), M.wear, { order: 1 });
+      }
       { const tm = std({ map: T.runoff(th.runoff), roughness: 0.85 }); tm.userData.wetK = [1, 1]; add(ta.geo(), tm); }
       add(ve.geo(), T.has('grass') ? macro(pbr('grass', 10 / 3.2), 140, 0.1, 0.1, true) : std({ map: T.grass(th.grassA, th.grassB), roughness: 0.97 }));
     }
@@ -1070,13 +1095,17 @@
       const walls = new Batch(true), roofs = new Batch(true), relief = new Batch(true), ub = new THREE.BoxGeometry(1, 1, 1);
       const awn = ['#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a', '#3d3f44', '#8a6a3a'];
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
-      const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2'];
+      const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2', '#eec2a4', '#f1ddb0', '#e6b9a6', '#f3e3c8'];
       for (const it of W2.decor) {
         if (it.type !== 'building') continue;
         const r = U.rng(it.seed);
         const hgt = 10 + r() * 26 + (r() < 0.12 ? 25 : 0);
         const pick = r();
-        if (kinds.length && pick > 0.45) {
+        // the blocks facing the circuit are the old town's stone and stucco (glass and office
+        // towers stand further back, as at Monaco)
+        let front = false;
+        tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
+        if (kinds.length && pick > (front ? 0.88 : 0.45)) {
           // modern blocks: office bands or glass, the taller ones more often glass
           const [, tile, bt] = kinds[pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0];
           const gy0 = Tracks.groundAt(tr, it.x, it.y) - 3;
@@ -1099,8 +1128,6 @@
         // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
         // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
         // dark glazing under fabric awnings
-        let front = false;
-        tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
         if (front) {
           const balc = r() < 0.65, stone = col('#e9e2d6'), rail = col('#2b2d31');
           for (const [fx, fz, len, rot] of [[0, it.h / 2, it.w, 0], [0, -it.h / 2, it.w, 0], [it.w / 2, 0, it.h, 1], [-it.w / 2, 0, it.h, 1]]) {

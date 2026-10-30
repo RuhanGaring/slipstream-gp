@@ -167,7 +167,9 @@
       const skip = cat === 'trees' || cat === 'boards' || o.isInstancedMesh || (o.geometry && o.geometry.isInstancedBufferGeometry);
       saved.push([o, o.material, o.renderOrder, o.visible]);
       if (skip) { o.visible = false; return; }
-      const isGround = o.material === ground;
+      const isGround = o.material === ground, mk = o.material.userData && o.material.userData.maskK;
+      // a decal over the lawn (the worn verge) thins the grass under it instead of clearing it
+      if (mk != null) { o.material = new THREE.MeshBasicMaterial({ color: new THREE.Color(mk, mk, mk), depthTest: false, depthWrite: false, side: THREE.DoubleSide }); o.renderOrder = 0; return; }
       o.material = isGround ? white : black; o.renderOrder = isGround ? -1000 : 1000;
     });
     const sc = new THREE.Scene(), parent = root.parent;
