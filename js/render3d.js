@@ -465,7 +465,7 @@
   }
 
   const grassOn = () => (GFX.grass != null ? !!GFX.grass : !GFX.lite);
-  const grassQ = () => ({ density: GFX.grassDensity || 0.85, near: GFX.grassLod || 13, far: GFX.grassDist || 56 });
+  const grassQ = () => ({ density: GFX.grassDensity || 0.85, near: GFX.grassLod || 13, far: GFX.grassDist || 120 });
   // View distance: the far plane, with the sky dome kept inside it and the fog thickened to
   // hide its edge (about 90 per cent at the far plane). Potato and rock draw with a plain
   // depth buffer, which loses precision far out, so they keep within 3 km.

@@ -60,12 +60,12 @@
   //   physLod / physLodDist   distant AI cars step their physics at half rate past this many metres
   //   catchup     most physics steps run in one frame before the game slows instead (8 = 30 fps)
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
-    trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 56, grassLod: 13, viewDist: 14000, carNear: 50, carFar: 300, carDraw: 0, dispHz: 12,
+    trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 50, carFar: 300, carDraw: 0, dispHz: 12,
     particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40 };
   const ADV_P = {
-    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 70, grassLod: 17 },
+    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17 },
     high: {},
-    medium: { aoSamples: 8, grassDensity: 0.6, grassDist: 40, grassLod: 9 },
+    medium: { aoSamples: 8, grassDensity: 0.6, grassDist: 70, grassLod: 9 },
     low: { dprCap: 1, aniso: 4, grass: false, trees: 0.6, carNear: 22, carFar: 90, particles: 500, skids: 4500, dispHz: 8 },
     potato: { dprCap: 1, aniso: 2, grass: false, trees: 0.33, boards: false, viewDist: 3000, carNear: 12, carFar: 40, carDraw: 350, particles: 300, skids: 3000, debris: 20, dispHz: 6, catchup: 8 },
     rock: { dprCap: 1, aniso: 1, grass: false, trees: 0.12, treeDist: 700, boards: false, backdrop: false, viewDist: 1600, carNear: 2.5, carFar: 9, carDraw: 250, particles: 150, skids: 1500, debris: 10, dispHz: 4, rainK: 0.4, physLod: true, catchup: 8 },

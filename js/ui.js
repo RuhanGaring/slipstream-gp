@@ -709,7 +709,7 @@
     ['grass', '3D grass', 'Blades around the camera on parkland circuits', [true, false], onOffF],
     ['grassDensity', 'Grass density', 'Share of the 28 blades in each clump', [0.3, 0.45, 0.6, 0.75, 0.85, 1], pctF],
     ['grassLod', 'Grass detail distance', 'How far every blade is modelled; cards beyond', [6, 9, 13, 17, 22], mF],
-    ['grassDist', 'Grass draw distance', 'How far 3D grass reaches at all', [25, 40, 56, 70, 90], mF],
+    ['grassDist', 'Grass draw distance', 'How far 3D grass reaches at all (wider cards past 45 m)', [25, 40, 56, 70, 90, 120, 150, 180, 220], mF],
     ['boards', 'Trackside boards', 'Marker boards before the corners', [true, false], onOffF],
     ['backdrop', 'Distant hills', 'Needs a long view distance', [true, false], onOffF],
     ['CARS'],

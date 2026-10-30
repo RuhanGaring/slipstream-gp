@@ -43,16 +43,27 @@
   // - wear: the strip beside the track, where cars run wide, is scuffed toward soil.
   // - mowing stripes: blades laid in alternate directions read light along their lay and dark
   //   against it, as from a grandstand.
+  // lawnFar (the ground only): past the 3D grass the ground stands in for it. Tufts at two
+  // scales lighten and darken it and tilt its normal (so the sun picks out their lit and
+  // shaded sides), and at low angles the blades' upper parts hide the soil, so it reads a
+  // little lighter and greener toward the horizon. It grows in with distance and grazing
+  // angle, which is where the 3D grass fades out, so the two meet without a seam.
   // lawnBreak: the ground photo again at 11.3 m and rotated, as brightness only, so its
   // 3.2 m tile stops repeating visibly across a field.
   const LAWN_ROUGH = 0.78;
   const LAWN = [
     'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK;',
-    // a hash that holds up at world coordinates of kilometres (no sin), value noise and fbm
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
     'float tfN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
     '  return mix(mix(tfH(i), tfH(i + vec2(1.0, 0.0)), f.x), mix(tfH(i + vec2(0.0, 1.0)), tfH(i + vec2(1.0, 1.0)), f.x), f.y); }',
     'float tfF(vec2 p) { return tfN(p) * 0.5 + tfN(p * 2.03 + 7.1) * 0.3 + tfN(p * 4.07 + 3.3) * 0.2; }',
+    'float lawnFarK(vec3 wp, vec3 eye) { vec3 v = normalize(eye - wp); return smoothstep(5.0, 32.0, distance(wp.xz, eye.xz)) * (0.45 + 0.55 * (1.0 - clamp(v.y, 0.0, 1.0))); }',
+    'float lawnTuft(vec2 w) { return tfN(w * 1.7) * 0.4 + tfN(w * 3.9 + 2.0) * 0.35 + tfN(w * 8.3 + 5.1) * 0.25; }',
+    'vec3 lawnFar(vec2 w, vec3 wp, vec3 eye) {',
+    '  float k = lawnFarK(wp, eye), graze = 1.0 - clamp(normalize(eye - wp).y, 0.0, 1.0);',
+    '  float tf = mix(0.86, 1.1, lawnTuft(w));',
+    '  return mix(vec3(1.0), tf * mix(vec3(1.0), vec3(1.05, 1.08, 0.93), graze), k);',
+    '}',
     'vec3 lawnTint(sampler2D mm, vec2 w, vec3 eye) {',
     '  vec2 site = texture2D(uTurf, clamp((w - uTurfB.xy) / uTurfB.zw, 0.0, 1.0)).rg;',
     // water: drainage of the site plus warped soil variation (positive wet, negative dry)
@@ -190,11 +201,20 @@
         .replace('#include <map_fragment>', '#include <map_fragment>\n' +
           `  float mcr = texture2D(macroMap, vMacroW / ${f(mac.scale)}).r * 0.6 + texture2D(macroMap, vMacroW / ${f(mac.scale * 0.21)}).g * 0.4;\n` +
           `  diffuseColor.rgb *= mix(${f(1 - mac.amt)}, ${f(1 + mac.amt)}, mcr);` +
-          (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW);' : ''))
+          (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW) * lawnFar(vMacroW, vFogWorld, cameraPosition);' : ''))
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' +
           `  roughnessFactor = clamp(roughnessFactor * mix(${f(1 - mac.ramt)}, ${f(1 + mac.ramt)}, 1.0 - mcr), 0.04, 1.0);` +
           // turf is a matte tangle of blades: the photo's own 0.55 left a glassy sky sheen on it
           (mac.lawn ? `\n  roughnessFactor = max(roughnessFactor, ${f(LAWN_ROUGH)});` : ''));
+      if (mac.lawn) {
+        // the tufts tilt the surface: the gradient of the tuft field, in world space, into the view-space normal
+        sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', [
+          '#include <normal_fragment_maps>',
+          '  { float lk = lawnFarK(vFogWorld, cameraPosition);',
+          '    if (lk > 0.01) { vec2 lw = vMacroW; float e = 0.12, t0 = lawnTuft(lw);',
+          '      vec3 lg = vec3(t0 - lawnTuft(lw + vec2(e, 0.0)), 0.0, t0 - lawnTuft(lw + vec2(0.0, e))) / e * 0.22 * lk;',
+          '      normal = normalize(normal + (viewMatrix * vec4(lg, 0.0)).xyz); } }'].join('\n'));
+      }
     }
   }
 

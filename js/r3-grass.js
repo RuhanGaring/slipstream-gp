@@ -22,6 +22,9 @@
   // (INNER m) blades are single segments, two triangles instead of six. Under them all, a few
   // millimetre-thin shell layers (SHELLS of them, over SRADIUS m) give the sward its dense
   // carpet of short growth for very little.
+  // Far ring: past MIDR the cards continue on a coarser grid (FCELL) with cards widened to
+  // match (FSIZE), out to the draw distance, so the field keeps its texture to the horizon.
+  const MIDR = 45, FCELL = 1.1, FSIZE = 2.2;
   const INNER = 5, SHELLS = 8, SHELL_H = 0.0055, SCELL = 0.5, SRADIUS = 5.5;
   // Settings (setQuality): density keeps a share of each clump's NBLADES blades; LOD is the
   // radius of modelled blades; draw distance the radius of the whole field. Both grids are
@@ -233,6 +236,7 @@
       uGCell: { value: CELL },
       uGR: { value: RADIUS },
       uGNear: { value: NRADIUS }, // where the modelled blades hand over to these cards
+      uGSize: { value: 1 }, // card width multiplier (the far ring's are wider)
       uGTime: { value: 0 },
       uGMask: { value: grassMap(tr, W2, ext, extra) },
       uGMaskB: { value: new THREE.Vector4(ext.x0, ext.z0, ext.w, ext.h) },
@@ -268,9 +272,17 @@
     sm.userData.grass = su;
     const shells = new THREE.Mesh(shellGeometry(), sm);
     shells.frustumCulled = false; shells.receiveShadow = true; shells.castShadow = false;
+    // the far ring: the same cards on a coarser grid, widened
+    const fgeo = clumpGeometry();
+    const fu = Object.assign({}, uniforms, { uGOrigin: { value: new THREE.Vector2() }, uGCell: { value: FCELL }, uGR: { value: 120 }, uGNear: { value: MIDR }, uGSize: { value: FSIZE } });
+    // (a fresh material: clone() would deep-copy userData through JSON, textures and all)
+    const fm = new THREE.MeshStandardMaterial({ map: bladeTexture(), alphaTest: 0.4, side: THREE.DoubleSide, roughness: F1.R3S.LAWN_ROUGH, metalness: 0, color: '#ffffff' });
+    fm.alphaToCoverage = true; fm.userData.grass = fu;
+    const far = new THREE.Mesh(fgeo, fm);
+    far.frustumCulled = false; far.receiveShadow = true; far.castShadow = false;
     const grp = new THREE.Group();
-    grp.add(mesh, ring, blades, shells);
-    grp.userData.parts = [mesh, blades, ring, shells];
+    grp.add(far, mesh, ring, blades, shells);
+    grp.userData.parts = [mesh, blades, ring, shells, far];
     return grp;
   }
 
@@ -287,11 +299,18 @@
   // o: { density (share of blades, 0.2 to 1), near (m of modelled blades), far (m of grass) }
   function setQuality(grp, o) {
     if (!grp || !grp.userData.parts) return;
-    const [cards, blades, ring] = grp.userData.parts;
+    const [cards, blades, ring, , farRing] = grp.userData.parts;
     const near = Math.max(3, o.near || NRADIUS), far = Math.max(near + 4, o.far || RADIUS), inner = Math.min(INNER, near * 0.6);
     const dens = Math.min(1, Math.max(0.1, o.density || 0.85));
     const cu = cards.material.userData.grass, bu = blades.material.userData.grass, ru = ring.material.userData.grass;
-    regrid(cards.geometry, far, CELL); cu.uGR.value = far; cu.uGNear.value = near;
+    // the fine cards out to MIDR (or the whole distance if that is shorter), the far ring beyond
+    const mid = Math.min(far, MIDR);
+    regrid(cards.geometry, mid, CELL); cu.uGR.value = far > MIDR ? mid / 0.8 : mid; cu.uGNear.value = near;
+    if (farRing) {
+      farRing.visible = far > MIDR + 5;
+      const fu = farRing.material.userData.grass;
+      if (farRing.visible) { regrid(farRing.geometry, far, FCELL); fu.uGR.value = far; fu.uGNear.value = mid; }
+    }
     regrid(blades.geometry, inner, NCELL); bu.uGR.value = inner; bu.uGDens.value = dens;
     regrid(ring.geometry, near, NCELL); ru.uGR.value = near; ru.uGIn.value = inner; ru.uGDens.value = dens;
   }
@@ -309,7 +328,7 @@
   // shader injection used by F1.R3S.patch when a material carries userData.grass
   const VERT_PARS = [
     'attribute vec2 gOff;',
-    'uniform vec2 uGOrigin; uniform float uGCell; uniform float uGR; uniform float uGTime; uniform float uGNear; uniform float uGDens; uniform float uGIn;',
+    'uniform vec2 uGOrigin; uniform float uGCell; uniform float uGR; uniform float uGTime; uniform float uGNear; uniform float uGDens; uniform float uGIn; uniform float uGSize;',
     'uniform sampler2D uGMask; uniform vec4 uGMaskB; uniform sampler2D uGHeight; uniform vec4 uGHeightB;',
     'uniform sampler2D uGMacro;',
     'varying vec2 vGWp; varying float vGShade;',
@@ -322,18 +341,18 @@
     '  vec2 gBase = uGOrigin + gOff * uGCell;',
     '  vec2 gWp = gBase + (vec2(gHash(gBase), gHash(gBase + 3.17)) - 0.5) * uGCell * 1.1;',
     '  float gH = texture2D(uGHeight, (gWp - uGHeightB.xy) / uGHeightB.zw).r;',
-    '  bool gCull = !gOnScreen(vec3(gWp.x, gH + 0.1, gWp.y), 0.4);',
+    '  bool gCull = !gOnScreen(vec3(gWp.x, gH + 0.1, gWp.y), 0.4 * uGSize);',
     '  vGWp = gWp; vGShade = 1.0;',
     '  if (!gCull) {',
     '  float gDens = clamp((texture2D(uGMask, (gWp - uGMaskB.xy) / uGMaskB.zw).r - 0.2) / 0.8, 0.0, 1.0);',
     '  float gDist = distance(gWp, cameraPosition.xz);',
-    '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7), gDens) * (1.0 - smoothstep(uGR * 0.55, uGR, gDist));',
+    '  float gKeep = step(0.05, gDens) * step(gHash(gBase + 7.7), gDens) * (1.0 - smoothstep(uGR * (uGSize > 1.0 ? 0.75 : 0.55), uGR, gDist));',
     // the cards start where the modelled blades fade (they cross over between 8 and 12 m)
     '  gKeep *= smoothstep(uGNear * 0.6, uGNear * 0.92, gDist);',
     '  float gSc = gKeep * (0.75 + 0.5 * gHash(gBase + 5.3));',
     '  float gA = gHash(gBase + 9.1) * 6.2831;',
     '  transformed.xz = mat2(cos(gA), -sin(gA), sin(gA), cos(gA)) * transformed.xz;',
-    '  transformed *= vec3(gSc, gSc * (0.75 + 0.45 * gDens), gSc);',
+    '  transformed *= vec3(gSc * uGSize, gSc * (0.75 + 0.45 * gDens), gSc * uGSize);',
     '  transformed.xz += vec2(sin(uGTime * 1.8 + gWp.x * 0.33 + gWp.y * 0.21), cos(uGTime * 1.4 + gWp.y * 0.29)) * 0.04 * transformed.y / 0.26;',
     '  transformed += vec3(gWp.x, gH + 0.02, gWp.y);',
     // the turf takes the ground's own colour: the fragment shader projects the ground photo
