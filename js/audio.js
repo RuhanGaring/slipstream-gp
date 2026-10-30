@@ -90,10 +90,9 @@
     const out = ctx.createGain(); out.gain.value = 0;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 16000; lp.Q.value = 0.5;
     const eq = ctx.createBiquadFilter(); eq.type = 'peaking'; eq.frequency.value = 1800; eq.Q.value = 0.8; eq.gain.value = 0;
-    // less bass than a studio microphone would give: onboard cameras carry small dynamic or
-    // electret capsules that roll off the low end, and so does a TV boom at a distance
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 75; hp.Q.value = 0.6;
-    const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = 240; shelf.gain.value = -4;
+    // a little less bass than a studio microphone would give: onboard cameras carry small
+    // capsules that are lighter in the low end (a gentle shelf, nothing removed)
+    const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = 240; shelf.gain.value = -2;
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
     if (A.worklet) {
@@ -102,7 +101,7 @@
     } else {
       legacy = legacyEngine(cheap); node = legacy.out;
     }
-    node.connect(hp); hp.connect(shelf); shelf.connect(eq); eq.connect(lp); lp.connect(out);
+    node.connect(shelf); shelf.connect(eq); eq.connect(lp); lp.connect(out);
     if (pan) { out.connect(pan); pan.connect(dest || A.sfx); } else out.connect(dest || A.sfx);
     out.connect(A.verbIn);
     const roomSend = ctx.createGain(); roomSend.gain.value = 0.1;
@@ -347,7 +346,7 @@
     const engLvl = (onboard ? 0.95 : 0.82) * far;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
     R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
-    R.engine.shelf.gain.setTargetAtTime(onboard ? -7 : -4, t, 0.2);
+    R.engine.shelf.gain.setTargetAtTime(onboard ? -3 : -2, t, 0.2);
     // the engine's faint room: a touch more on board, where the dry low end is closest
     R.engine.roomSend.gain.setTargetAtTime(onboard ? 0.14 : 0.1, t, 0.3);
     const air = onboard ? (mode === 'tcam' ? 15000 : 9000) : Math.max(1500, 15000 / (1 + me.d / 60)) * (me.fwd < -0.3 ? 0.75 : 1);
