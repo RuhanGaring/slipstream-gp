@@ -251,7 +251,7 @@
     '  vec2 d = vUv - 0.5;',
     '  vec3 c;',
     '  if (uLens > 0.5) {', // lateral chromatic aberration, strongest toward the corners
-    '    vec2 ca = d * dot(d, d) * 0.012;',
+    '    vec2 ca = d * dot(d, d) * 0.0045;',
     '    c = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
     '  } else c = texture2D(tScene, vUv).rgb;',
     // AO is sky light being blocked, so it scales only the share of the light that is not
@@ -268,7 +268,7 @@
     '  c = toSRGB(c);',
     // grain doubles as dither, which also hides 8-bit banding in skies and fog
     '  float g = hash(vUv * uRes + fract(uTime) * 61.0) - 0.5;',
-    '  c += g * (uLens > 0.5 ? 0.028 : 0.006) * uGrain;',
+    '  c += g * (uLens > 0.5 ? 0.016 : 0.006) * uGrain;',
     '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a);', // debug views (window.__postDbg)
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {

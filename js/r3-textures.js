@@ -163,7 +163,7 @@
     return tex(c, true, false);
   };
   // distant ridge line for the horizon band
-  T.ridge = (cols, seed, jag) => get('ridge' + seed, () => {
+  T.ridge = (cols, seed, jag, canopy) => get('ridge' + seed + (canopy ? 'c' : ''), () => {
     const c = cv(2048, 256), g = c.getContext('2d'), r = U.rng(seed);
     g.clearRect(0, 0, 2048, 256);
     // layered silhouettes from summed sine octaves (seamless around the ring),
@@ -172,16 +172,38 @@
       const oct = [];
       for (let k = 0; k < 5; k++) oct.push([2 + Math.floor(r() * (3 << k)), r() * 6.283, 1 / (1 + k * k * 1.6)]);
       const top = 40 + layer * 34, amp = Math.min(1, jag / 14) * (70 - layer * 12);
-      const gr = g.createLinearGradient(0, top, 0, 256);
+      // each layer on its own canvas, so its texture stays inside its own outline
+      const lc = cv(2048, 256), lg = lc.getContext('2d');
+      const gr = lg.createLinearGradient(0, top, 0, 256);
       gr.addColorStop(0, col); gr.addColorStop(1, cols[0]);
-      g.fillStyle = gr;
-      g.beginPath(); g.moveTo(0, 256);
-      for (let x = 0; x <= 2048; x += 4) {
+      lg.fillStyle = gr;
+      lg.beginPath(); lg.moveTo(0, 256);
+      for (let x = 0; x <= 2048; x += canopy ? 2 : 4) {
         let v = 0;
         for (const [f, ph, a] of oct) v += Math.sin(x / 2048 * 6.283 * f + ph) * a;
-        g.lineTo(x, U.clamp(top + 40 - v * amp * 0.45, 8, 250));
+        // forested hills: the skyline is a row of crowns a few metres high, not a smooth curve
+        const crowns = canopy ? Math.abs(Math.sin(x * 0.9 + layer * 1.7)) * (2.4 - layer * 0.5) + r() * 1.2 : 0;
+        lg.lineTo(x, U.clamp(top + 40 - v * amp * 0.45 - crowns, 8, 250));
       }
-      g.lineTo(2048, 256); g.closePath(); g.fill();
+      lg.lineTo(2048, 256); lg.closePath(); lg.fill();
+      if (canopy) {
+        // canopy texture: crowns lit on top and shaded below, denser and finer on far layers,
+        // plus the odd lighter field or clearing on the slopes
+        lg.globalCompositeOperation = 'source-atop';
+        const n = 9000 + layer * 3000, rad = 1.1 + layer * 0.55;
+        for (let k = 0; k < n; k++) {
+          const x = r() * 2048, y = top - 20 + r() * (256 - top + 20), q = r();
+          lg.fillStyle = q < 0.5 ? 'rgba(10,22,12,' + (0.12 + layer * 0.06) + ')' : 'rgba(225,235,200,' + (0.05 + layer * 0.03) + ')';
+          lg.beginPath(); lg.ellipse(x, y, rad * (0.8 + r()), rad * (0.6 + r() * 0.6), 0, 0, 6.283); lg.fill();
+        }
+        for (let k = 0; k < 10 + layer * 4; k++) {
+          const x = r() * 2048, y = top + 40 + r() * 120, w = 20 + r() * 70, h = 4 + r() * 10;
+          lg.fillStyle = 'rgba(190,200,140,' + (0.12 + r() * 0.12) + ')';
+          lg.beginPath(); lg.ellipse(x, y, w, h, (r() - 0.5) * 0.3, 0, 6.283); lg.fill();
+        }
+        lg.globalCompositeOperation = 'source-over';
+      }
+      g.drawImage(lc, 0, 0);
     });
     const t = tex(c); t.wrapT = THREE.ClampToEdgeWrapping; return t;
   });

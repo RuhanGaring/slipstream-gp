@@ -81,7 +81,7 @@
     '  vec4 site = texture2D(uTurf, clamp((w - uTurfB.xy) / uTurfB.zw, 0.0, 1.0));',
     // water: drainage of the site plus warped soil variation (positive wet, negative dry)
     '  vec2 wq = w + (vec2(tfN(w / 37.0), tfN(w / 37.0 + 5.2)) - 0.5) * 22.0;',
-    '  float moist = (0.5 - site.r) * 1.6 + (tfF(wq / 26.0) - 0.5) * 1.2;',
+    '  float moist = (0.5 - site.r) * 1.6 + (tfF(wq / 26.0) - 0.5) * 1.5;',
     '  float wet = clamp(moist, 0.0, 1.0), dry = clamp(-moist, 0.0, 1.0);',
     // species clumps: warped, then cut at thresholds so each clump has an edge
     '  vec2 sq = w / 1.7 + (vec2(tfN(w / 5.3), tfN(w / 5.3 + 9.7)) - 0.5) * 2.4;',
@@ -100,10 +100,10 @@
     // coarser field allows (so they cluster in some areas and are absent from others)
     '  vec2 yq = w / 3.2 + (vec2(tfN(w / 1.7 + 2.0), tfN(w / 1.7 + 6.3)) - 0.5) * 1.4;',
     '  float yv = tfN(yq) * 0.7 + tfN(yq * 2.6 + 1.9) * 0.3;',
-    '  float ya = smoothstep(0.3, 0.7, tfN(w / 45.0 + 3.7));',
+    '  float ya = smoothstep(0.25, 0.6, tfN(w / 45.0 + 3.7));',
     // the patch is broken up by green growing through it, at a few centimetres
     '  float ybr = smoothstep(0.3, 0.62, tfN(w * 4.3 + 1.1) * 0.6 + tfN(w * 11.0) * 0.4);',
-    '  float yp = smoothstep(0.74, 0.8, yv) * ya * ybr;',
+    '  float yp = smoothstep(0.70, 0.77, yv) * ya * ybr;',
     '  c *= mix(vec3(1.0), vec3(1.16, 1.0, 0.62), yp * 0.85);',
     // wear beside the track: patchy, toward bare soil
     '  float wr = site.g * smoothstep(0.4, 0.75, tfF(w / 1.3 + 4.4));',
@@ -114,7 +114,7 @@
     // lay, dark against it, strongest seen at a low angle
     '  float sd = site.b * 255.0, sband = smoothstep(-0.25, 0.25, sin(sd * 3.14159 / 4.0)) * 2.0 - 1.0;',
     '  vec2 vd0 = w - eye.xz; float vgl = clamp(length(vd0) / max(abs(eye.y - 0.0) + 1.0, 1.0), 0.0, 6.0);',
-    '  c *= 1.0 + 0.075 * sband * step(sd, 240.0) * smoothstep(0.0, 1.2, sd);',
+    '  { float sk = sband * step(sd, 240.0) * smoothstep(0.0, 1.2, sd); c *= 1.0 + sk * vec3(0.125, 0.11, 0.06); }',
     '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',

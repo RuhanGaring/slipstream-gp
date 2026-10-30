@@ -337,6 +337,32 @@
           addDecor(W, th.palms ? { type: 'palm', x, y, r: 4 + rnd() * 2, a: rnd() * 6 } : { type: 'tree', x, y, r: 3.5 + rnd() * 4, c: th.tree[Math.floor(rnd() * th.tree.length)] });
         }
       }
+      // conifer venues sit in forest, like Spa or the Nurburgring: a closed wall of trees a
+      // few tens of metres behind the barriers, broken by clearings, instead of scattered clumps
+      if (Tracks.treesOf(tr) === 'fir' && Tracks.lookOf(tr) !== 'sierra') {
+        const taken = new Set(), cell = 6.5;
+        const vn = (x, y) => { // smooth value noise, 0..1
+          const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+          const h = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+          const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+          return (h(ix, iy) * (1 - sx) + h(ix + 1, iy) * sx) * (1 - sy) + (h(ix, iy + 1) * (1 - sx) + h(ix + 1, iy + 1) * sx) * sy;
+        };
+        for (let i = 0; i < tr.N; i += Math.max(1, Math.round(5 / tr.ds))) for (let side = 0; side < 2; side++) {
+          const sg = side ? 1 : -1, b0 = tr.barr[side][i];
+          for (let o = 0; o < 120; o += 4 + rnd() * 3) {
+            const x0 = tr.x[i] + tr.nx[i] * sg * (b0 + 12 + o), y0 = tr.y[i] + tr.ny[i] * sg * (b0 + 12 + o);
+            const x = x0 + (rnd() - 0.5) * 5, y = y0 + (rnd() - 0.5) * 5;
+            // clearings and a ragged forest edge: the wall starts 12 to 40 m back
+            const n = vn(x / 140, y / 140) * 0.7 + vn(x / 40, y / 40) * 0.3;
+            if (n < 0.33 || o < (1 - n) * 28) continue;
+            const k = Math.floor(x / cell) + ',' + Math.floor(y / cell);
+            if (taken.has(k)) continue;
+            if (!clearance(tr, x, y, 12, W)) continue;
+            taken.add(k);
+            addDecor(W, { type: 'tree', x, y, r: 3.2 + rnd() * 3.6, c: th.tree[Math.floor(rnd() * th.tree.length)] });
+          }
+        }
+      }
       // car parks / service roads for the modern venue
       if (th.palms) {
         for (let k = 0; k < 14; k++) {

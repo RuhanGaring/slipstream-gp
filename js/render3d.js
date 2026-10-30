@@ -26,7 +26,7 @@
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
     bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 4400, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
-    nordwald: { sunEl: 25, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#8a98a8', hor: '#d3d8dc', bot: '#6d7864', fog: '#c8ced2', fogN: 240, fogF: 2600, cloud: 0.8, haze: 0.8, exp: 1.05, env: 0.95,
+    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 3800, fogK: 0.62, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
     lonestar: { sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
       ridge: ['#b3a07c', '#9a8a68', '#7f7258'], ridgeH: 45, jag: 3 },
@@ -146,7 +146,7 @@
       if (prev >= 0) len += Math.hypot(x - px, z - pz);
       px = x; pz = z;
       const nx = -tr.nx[k] * sg, nz = -tr.ny[k] * sg; // faces the track
-      const u = len / uLen;
+      const u = (sg > 0 ? -len : len) / uLen; // reads left to right from the track on either side
       const g0 = Tracks.surfZ(tr, k, d);
       const a = acc.v(x, y0 + g0 - (y0 <= 0 ? 0.25 : 0), z, nx, 0, nz, u, 0, c);
       acc.v(x, y1 + g0, z, nx, 0, nz, u, (y1 - y0) / vLen, c);
@@ -229,6 +229,7 @@
     MATS.tyres = std({ map: T.tyres(), roughness: 0.85, side: THREE.DoubleSide });
     if (ph) { MATS.tyres.normalMap = T.photo('rubber_n', 2, false); MATS.tyres.roughnessMap = T.photo('rubber_arm', 2, false); }
     MATS.fence = std({ map: T.fence(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.45, metalness: 1, color: '#a7adb3' });
+    MATS.fence.alphaToCoverage = true; // thin wire against MSAA: smooth instead of crawling moire
     MATS.steel = ph ? pbr('metal', 1, { metalness: 1, color: '#c4c9ce' }) : std({ color: '#5b6067', roughness: 0.45, metalness: 0.7 });
     // the metal photo's mean luminance (linear) is 0.0347; times each material's colour
     if (ph) for (const m of [MATS.armco, MATS.steel]) {
@@ -532,7 +533,8 @@
       const e = H0.sunE, lum = e[0] * 0.2126 + e[1] * 0.7152 + e[2] * 0.0722;
       sun.color.setRGB(e[0] / lum, e[1] / lum, e[2] / lum, THREE.LinearSRGBColorSpace); sun.intensity = lum;
       hemi.intensity = 0;
-      scene.fog.color.setRGB(H0.fog[0], H0.fog[1], H0.fog[2], THREE.LinearSRGBColorSpace);
+      // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
+      const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
       state.exposure = { kestrel: 1.0, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
@@ -642,7 +644,7 @@
     {
       // turf under a clear sky is lighter and more yellow-green; under cloud, greyer and more olive
       const L0 = LOOKS[Tracks.lookOf(tr)] || LOOKS.kestrel, oc = U.smooth((L0.cloud - 0.42) / 0.3);
-      F1.R3S.U.uLawnGrade.value.set(1.12 - 0.14 * oc, 1.12 - 0.12 * oc, 0.9 - 0.02 * oc, 0.28 * oc);
+      F1.R3S.U.uLawnGrade.value.set(1.12 - 0.12 * oc, 1.12 - 0.16 * oc, 0.9, 0.4 * oc);
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
@@ -1414,7 +1416,7 @@
     const g = new THREE.CylinderGeometry(bd.R, bd.R, H0, 96, 1, true);
     g.translate(bd.cx, H0 / 2 - 30, bd.cz);
     const uv = g.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * 3);
-    const m = new THREE.MeshBasicMaterial({ map: T.ridge(L.ridge, id.length * 13 + 7, L.jag), transparent: true, alphaTest: 0.5, side: THREE.BackSide, fog: false, depthWrite: false });
+    const m = new THREE.MeshBasicMaterial({ map: T.ridge(L.ridge, id.length * 13 + 7, L.jag, !['rimal', 'lonestar', 'sierra'].includes(id)), transparent: true, alphaTest: 0.5, side: THREE.BackSide, fog: false, depthWrite: false });
     m.color.set('#ffffff').lerp(col(L.fog), 0.25);
     if (state.hdr) { const f = state.hdr.fog; m.color.multiplyScalar((f[0] * 0.2126 + f[1] * 0.7152 + f[2] * 0.0722) / 0.55); }
     const mesh = new THREE.Mesh(g, m);
