@@ -9,7 +9,7 @@
 
   // Per-venue light: sun position (degrees), sky gradient, fog, horizon backdrop.
   const LOOKS = {
-    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 4200, skyK: 1.8, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
+    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, skyK: 1.8, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
       ridge: ['#7f9076', '#5f7356', '#4b5f45'], ridgeH: 90, jag: 5 },
     varenna: { sunEl: 21, sunAz: 235, sun: '#ffcf96', sunI: 3.2, top: '#3f78c0', hor: '#f1d4ab', bot: '#8d8a6a', fog: '#e3d2b6', fogN: 500, fogF: 4800, cloud: 0.32, haze: 1.2, exp: 0.95, env: 0.85,
       ridge: ['#a7a58e', '#7d8768', '#5f6d4c'], ridgeH: 110, jag: 7 },
@@ -26,7 +26,7 @@
       ridge: ['#b7a993', '#9a8d78', '#7c7262'], ridgeH: 760, jag: 30 },
     bahia: { sunEl: 24, sunAz: 250, sun: '#ffd8a0', sunI: 3.0, top: '#4f86c6', hor: '#f0dcc0', bot: '#7f8a62', fog: '#e4d6bd', fogN: 450, fogF: 6000, fogK: 0.85, skyK: 1.12, lawnDesat: 0.16, cloud: 0.35, haze: 1.1, exp: 0.95, env: 0.9,
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
-    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 4600, fogK: 0.32, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
+    nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 4600, fogK: 0.32, shaftK: 0.4, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
     lonestar: { sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
       ridge: ['#b3a07c', '#9a8a68', '#7f7258'], ridgeH: 45, jag: 3 },
@@ -229,7 +229,6 @@
     MATS.tyres = std({ map: T.tyres(), roughness: 0.85, side: THREE.DoubleSide });
     if (ph) { MATS.tyres.normalMap = T.photo('rubber_n', 2, false); MATS.tyres.roughnessMap = T.photo('rubber_arm', 2, false); }
     MATS.fence = std({ map: T.fence(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.45, metalness: 1, color: '#a7adb3' });
-    MATS.fence.alphaToCoverage = true; // thin wire against MSAA: smooth instead of crawling moire
     MATS.steel = ph ? pbr('metal', 1, { metalness: 1, color: '#c4c9ce' }) : std({ color: '#5b6067', roughness: 0.45, metalness: 0.7 });
     // the metal photo's mean luminance (linear) is 0.0347; times each material's colour
     if (ph) for (const m of [MATS.armco, MATS.steel]) {
@@ -2104,12 +2103,21 @@
     // and with the tone mapping the frame will use (the post stack does its own)
     const tm = renderer.toneMapping;
     renderer.toneMapping = F1.R3Post.Q.on ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
-    // compile walks only visible objects: show the hidden ones (car LOD levels, spares) for it
-    const hid = [];
-    scene.traverse(o => { if (!o.visible && o !== state.grass) { hid.push(o); o.visible = true; } });
-    let p;
-    try { p = renderer.compileAsync(scene, camera); } catch (e) { p = Promise.resolve(); }
-    hid.forEach(o => { o.visible = false; });
+    // compile walks only visible objects in the scene: show the hidden ones (spares), and since
+    // a car's unused detail levels and its cockpit interior are detached from it (not just
+    // hidden), attach each level in turn with the interior. Otherwise the first switch to the
+    // cockpit view, or the first car to come close, compiles its programs mid-race.
+    const bodies = [];
+    for (const m of live.values()) { const b = m.userData && m.userData.body; if (b && b.userData.lodGroups) bodies.push(b); }
+    const ps = [];
+    for (const L of bodies.length ? [2, 1, 0] : [0]) {
+      bodies.forEach(b => F1.R3Car.setLod(b, L, true));
+      const hid = [];
+      scene.traverse(o => { if (!o.visible && o !== state.grass) { hid.push(o); o.visible = true; } });
+      try { ps.push(renderer.compileAsync(scene, camera)); } catch (e) { /* compile is best effort */ }
+      hid.forEach(o => { o.visible = false; });
+    }
+    const p = Promise.all(ps);
     renderer.toneMapping = tm;
     renderer.setRenderTarget(prev);
     return Promise.all([p.catch(() => {}), F1.R3Post.Q.on ? F1.R3Post.precompile() : null]).then(() => rt.dispose());
@@ -2168,7 +2176,7 @@
       renderer.toneMapping = THREE.NoToneMapping;
       const mode = C.mode;
       F1.R3Post.render(scene, camera, {
-        exposure, dt: o.dt || 0, sunDir: state.sunDir, sunCol: sun.color,
+        exposure, dt: o.dt || 0, sunDir: state.sunDir, sunCol: sun.color, shaftK: state.look && state.look.shaftK != null ? state.look.shaftK : 1,
         motionNear: mode === 'tv' || mode === 'load' || mode === 'orbit' ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
       });

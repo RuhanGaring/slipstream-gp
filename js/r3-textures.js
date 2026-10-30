@@ -64,7 +64,7 @@
       const n = o[0](u, v) * 0.5 + o[1](u, v) * 0.3 + o[2](u, v) * 0.2;
       const a = Math.max(0, Math.min(1, (n - v * 0.85) * 3.2 + 0.25 - v * 0.4));
       const k = (y * w + x) * 4, t = 0.85 + o[2](u, v) * 0.3;
-      d[k] = 178 * t; d[k + 1] = 158 * t; d[k + 2] = 120 * t; d[k + 3] = a * 255;
+      d[k] = 206 * t; d[k + 1] = 186 * t; d[k + 2] = 146 * t; d[k + 3] = a * 255;
     }
     g.putImageData(img, 0, 0);
     const t = tex(c); t.wrapT = THREE.ClampToEdgeWrapping; return t;

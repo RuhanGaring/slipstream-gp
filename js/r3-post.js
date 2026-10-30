@@ -399,7 +399,7 @@
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0;
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
-    u.uShaft.value = shaftK * Q.shaftK; if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
+    u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
     u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
     u.uLens.value = Q.lens ? 1 : 0; u.uTime.value = performance.now() / 1000; u.uTone.value = Q.tone === 'aces' ? 1 : 0;
     u.uRes.value.set(R.domElement.width, R.domElement.height);
