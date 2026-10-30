@@ -37,6 +37,8 @@
     // tiny timing spread of real combustion
     const BANK = [0, 1, 0, 1, 0, 1];
     const CYL = [1.0, 0.972, 1.018, 0.986, 1.01, 0.978];
+    // on board, the cylinders differ more: each has its own intake runner length to the plenum
+    const VAR = [0.0, 0.5, -0.6, 0.2, 0.55, -0.4];
     const TWO_PI = 6.283185307;
     class EngineVoice extends AudioWorkletProcessor {
       constructor(opts) {
@@ -52,7 +54,13 @@
         this.tph = 0; this.hph = 0; this.kph = 0; this.giph = 0; this.goph = 0;
         this.lastShift = 0; this.cut = 0; this.bark = 0; this.crackle = 0; this.lastThr = 0; this.flutter = 0;
         this.seed = Math.random() * 1e9 | 0; this.si = 0;
-        if (opts && opts.processorOptions) Object.assign(this.p, opts.processorOptions);
+        this.menv = 0; this.mb1 = [0, 0, 0, 0]; this.mb2 = [0, 0, 0, 0]; this.mlp = 0; this.mhb = [0, 0, 0, 0]; this.ml1 = 0; this.ml2 = 0;
+        // the on-board microphone's voicing, fitted to a T-cam recording of a 2026 car at full
+        // throttle (10,600 to 11,800 rpm) by matching its engine-order profile and octave balance;
+        // see ONB below. The fit settled on the far bank inaudible (asym 1): from the airbox the
+        // near bank's firings, the 1.5 order, carry the note
+        this.T = { jit: 0.04, asym: 1.0, vary: 0.4, mDecay: 0.00412, plF: 299, plQ: 1.89, plG: 0.555, p2F: 240, p2Q: 3.44, p2G: 0.571, lpF: 2490, lpG: 0, hiF: 1676, hiQ: 0.4, hiG: 0.3755, mix: 0.85, mGain: 1, oLP: 761 };
+        if (opts && opts.processorOptions) { Object.assign(this.p, opts.processorOptions); if (opts.processorOptions.tune) Object.assign(this.T, opts.processorOptions.tune); }
         this.port.onmessage = e => Object.assign(this.p, e.data);
       }
       rnd() { this.seed = (this.seed * 1664525 + 1013904223) >>> 0; return this.seed / 4294967296; }
@@ -113,13 +121,14 @@
         const kLvl = 0.018 * S.kers + 0.04 * S.harv, tLvl = 0.02 + 0.03 * S.load;
         // output low-pass corner: about 7 kHz outside, 5.5 kHz in the helmet
         const olp = 1 - Math.exp(-TWO_PI * (7000 - 1500 * view) / sr);
+        const mdec = Math.exp(-1 / (sr * this.T.mDecay)), mlpK = 1 - Math.exp(-TWO_PI * this.T.lpF / sr), oK = 1 - Math.exp(-TWO_PI * this.T.oLP / sr);
         for (let i = 0; i < n; i++) {
           // crank: fire the next cylinder every 120 degrees (a sixth of the 720 degree cycle)
           this.ph += fireHz / sr;
           if (this.ph >= 1) {
             this.ph -= 1;
             this.cyl = (this.cyl + 1) % 6;
-            let a = (0.16 + 0.84 * S.load + 0.12 * thr) * CYL[this.cyl] * (0.94 + 0.12 * this.rnd());
+            let a = (0.16 + 0.84 * S.load + 0.12 * thr) * CYL[this.cyl] * (1 - this.T.jit / 2 + this.T.jit * this.rnd()); // combustion varies firing to firing
             if (this.cut > 0) a *= 0.08;                // upshift ignition cut
             if (thr < 0.08) {
               a *= 0.32;                                 // fuel cut on the overrun: just the pumping
@@ -128,6 +137,12 @@
             if (this.bark > 0.05) a *= 1 + 0.35 * this.bark; // the blip or the gear taking drive
             if (P.on < 0.5 && this.rnd() < 0.8) a *= 0.05;  // limiter or engine off
             this.env[BANK[this.cyl]] = Math.max(this.env[BANK[this.cyl]], a);
+            // ONB: what a microphone on the airbox hears. The nearer bank's induction and the
+            // plenum dominate: the far bank comes through much weaker (asym), which puts the
+            // 1.5 engine order (one bank's firings) on top, and the runners' differences (vary)
+            // fill in the half orders between
+            const Tn = this.T, mb = (BANK[this.cyl] ? 1 - Tn.asym : 1) * Math.max(0, 1 + Tn.vary * VAR[this.cyl]);
+            this.menv = Math.max(this.menv, a * mb);
           }
           if (this.cut > 0) this.cut--;
           // the two banks' primaries into the collector (each pulse plus a weak reflection)
@@ -149,6 +164,18 @@
           // radiation from the pipe mouth: rises with frequency (a first difference)
           const radO = pipe - this.rad * 0.82; this.rad = pipe;
           let y = (pipe * 0.7 + radO * 0.35) * (1 - 0.55 * view);
+          if (!cheap && view > 0.01) {
+            // the on-board mix: the plenum's two resonances over the mic pulse train, its low-passed
+            // body, and the bright intake hiss the pulses modulate
+            const Tn = this.T, me = this.menv; this.menv *= mdec;
+            this.mlp += (me - this.mlp) * mlpK;
+            const hissM = (this.rnd() * 2 - 1) * me;
+            let body = this.bp(this.mb1, me, Tn.plF, Tn.plQ) * Tn.plG + this.bp(this.mb2, me, Tn.p2F, Tn.p2Q) * Tn.p2G + this.mlp * Tn.lpG;
+            // the airbox walls and the camera pod: a steep roll-off above the plenum's band
+            this.ml1 += (body - this.ml1) * oK; this.ml2 += (this.ml1 - this.ml2) * oK; body = this.ml2;
+            const onb = body + this.bp(this.mhb, hissM, Tn.hiF, Tn.hiQ) * Tn.hiG;
+            y = y * (1 - Tn.mix * view) + onb * Tn.mGain * view * 3;
+          }
           // the airbox: induction pulses through the plenum's resonance, and intake roar
           if (!cheap) {
             const ind = e0 + e1;

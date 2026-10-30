@@ -266,15 +266,16 @@
     if (p.limiter && p.u > p.limitSpeed - 1) { R.limT += dt; on = Math.sin(R.limT * 2 * Math.PI * 9) > -0.2 ? 1 : 0.15; }
     R.onboard = onboard;
     // --- the player's engine ---
-    // view: 1 on board (the airbox, MGU-K, gears and seat close), 0 outside (the exhaust leads);
-    // the T-cam sits on the airbox, between the two
-    const view = mode === 'tcam' ? 0.7 : onboard ? 1 : 0;
+    // view: 1 on board, 0 outside (the exhaust leads). On board uses the voicing fitted to a
+    // T-cam microphone recording (js/audio-engine-worklet.js); the T-cam, cockpit and helmet
+    // views all sit at the airbox, the cockpit and helmet a little duller (lp below)
+    const view = onboard ? 1 : 0;
     const harv = (p.harvest || 0) * Math.min(1, v / 30);
     setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: 1, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
     const engLvl = onboard ? 0.95 : mode === 'far' ? 0.7 : 0.82;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
     R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
-    R.engine.lp.frequency.setTargetAtTime(onboard ? 11000 : 15000, t, 0.2);
+    R.engine.lp.frequency.setTargetAtTime(mode === 'tcam' ? 15000 : onboard ? 9000 : 15000, t, 0.2);
     // --- tyres ---
     const W = p.wheels || [];
     const lock = W.reduce((a, w) => Math.max(a, w.lock || 0), 0), spin = W.reduce((a, w) => Math.max(a, w.spin || 0), 0);
