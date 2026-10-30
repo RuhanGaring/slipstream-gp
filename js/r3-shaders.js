@@ -119,7 +119,7 @@
     // lay, dark against it, strongest seen at a low angle
     '  float sd = site.b * 63.75, sband = smoothstep(-0.25, 0.25, sin(sd * 3.14159 / 4.0)) * 2.0 - 1.0;',
     '  vec2 vd0 = w - eye.xz; float vgl = clamp(length(vd0) / max(abs(eye.y - 0.0) + 1.0, 1.0), 0.0, 6.0);',
-    '  { float sk = sband * step(sd, 60.0) * smoothstep(0.0, 1.2, sd) * (1.0 - smoothstep(40.0, 60.0, sd)); c *= 1.0 + sk * vec3(0.125, 0.11, 0.06); }',
+    '  { float sk = sband * step(sd, 60.0) * smoothstep(0.0, 1.2, sd) * (1.0 - smoothstep(40.0, 60.0, sd)); c *= 1.0 + sk * vec3(0.05, 0.045, 0.025); }',
     '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',

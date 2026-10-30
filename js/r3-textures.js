@@ -50,7 +50,7 @@
   // worn verge: sandy soil showing through thinned turf, solid at the track edge (v = 0) and
   // breaking up into tufts and bare spots toward the grass (v = 1); tiles along the edge (u)
   T.wear = () => get('wear', () => {
-    const w = 512, h = 64, c = cv(w, h), g = c.getContext('2d'), r = U.rng(29);
+    const w = 2048, h = 64, c = cv(w, h), g = c.getContext('2d'), r = U.rng(29);
     const img = g.createImageData(w, h), d = img.data;
     const n1 = new Float32Array(w * h);
     // value noise wrapped in u, a few octaves
@@ -58,11 +58,12 @@
       const fx = x * gx, fy = y * (gy - 1), i0 = Math.floor(fx), j0 = Math.min(gy - 2, Math.floor(fy)), tx = fx - i0, ty = fy - j0, i1 = (i0 + 1) % gx;
       const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty), A = a[j0 * gx + i0 % gx], B = a[j0 * gx + i1], C = a[(j0 + 1) * gx + i0 % gx], D = a[(j0 + 1) * gx + i1];
       return (A * (1 - sx) + B * sx) * (1 - sy) + (C * (1 - sx) + D * sx) * sy; }; };
-    const o = [grid(16, 4), grid(48, 6), grid(160, 14)];
+    const o = [grid(40, 4), grid(120, 6), grid(400, 14)], og = grid(4, 2);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const u = x / w, v = y / (h - 1);
       const n = o[0](u, v) * 0.5 + o[1](u, v) * 0.3 + o[2](u, v) * 0.2;
-      const a = Math.max(0, Math.min(1, (n - v * 0.85) * 3.2 + 0.25 - v * 0.4));
+      const run = Math.max(0, Math.min(1, (og(u, 0.3) - 0.38) * 4)); // stretches of clean edge between worn ones
+      const a = Math.max(0, Math.min(1, (n - v * 0.85) * 3.2 + 0.25 - v * 0.4)) * run;
       const k = (y * w + x) * 4, t = 0.85 + o[2](u, v) * 0.3;
       d[k] = 206 * t; d[k + 1] = 186 * t; d[k + 2] = 146 * t; d[k + 3] = a * 255;
     }

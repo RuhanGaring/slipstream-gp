@@ -647,7 +647,7 @@
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
-    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 10, 0); }
+    { const hx = tr.x[3] - tr.x[0], hz = tr.y[3] - tr.y[0], l = Math.hypot(hx, hz) || 1; F1.R3S.U.uLawn.value.set(hx / l, hz / l, 5, 0.035); }
     scene.add(built.root);
     applyLook(Tracks.lookOf(tr));
     backdropFor(Tracks.lookOf(tr), built.root);
@@ -859,8 +859,8 @@
             const bx = tr.x[k] + tr.nx[k] * sg * (e0 + wd), bz = tr.y[k] + tr.ny[k] * sg * (e0 + wd);
             if (prev >= 0) len += Math.hypot(ax - px, az - pz);
             px = ax; pz = az;
-            const a = wa.v(ax, Tracks.surfZ(tr, k, sg * e0) + 0.02, az, 0, 1, 0, len / 9, 0);
-            wa.v(bx, Tracks.surfZ(tr, k, sg * (e0 + wd)) + 0.02, bz, 0, 1, 0, len / 9, 1);
+            const a = wa.v(ax, Tracks.surfZ(tr, k, sg * e0) + 0.02, az, 0, 1, 0, len / 30, 0);
+            wa.v(bx, Tracks.surfZ(tr, k, sg * (e0 + wd)) + 0.02, bz, 0, 1, 0, len / 30, 1);
             if (prev >= 0) { if (side) wa.t(prev, a, prev + 1), wa.t(prev + 1, a, a + 1); else wa.t(prev, prev + 1, a), wa.t(prev + 1, a + 1, a); }
             prev = a;
           }
@@ -1004,7 +1004,11 @@
             wallRun(hoard, tr, i0, i1, k => d(k) + sg * 0.9, 0.12, 1.12, 9, 1.12, 0.05);
             for (let i = i0; i <= i1; i += 4) { const k = mod(i, N), dd = d(k) + sg * 0.98; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 0.55, tr.y[k] + tr.ny[k] * dd, 0, 0.7, 1.1, 0.7)); }
           }
-          // catch fence behind gravel traps
+          // catch fence: behind gravel traps, and behind the hoardings everywhere else
+          for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] !== SURF.GRAVEL)) {
+            wallRun(fen, tr, i0, i1, k => d(k) + sg * 1.6, 0, fenceH * 0.85, 1.6, 1.6, 0);
+            for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 1.65; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + fenceH * 0.425, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH * 0.85, 1)); }
+          }
           for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] === SURF.GRAVEL)) {
             wallRun(fen, tr, i0, i1, k => d(k) + sg * 1.4, 0, fenceH, 1.6, 1.6, 0);
             for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 1.45; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + fenceH / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH, 1)); }

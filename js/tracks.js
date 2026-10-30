@@ -83,7 +83,7 @@
         [640, -520, 25], [380, -420, 30], [160, -640, 35], [-200, -560, 160], [-320, -220, 250], [-340, 0, 150]],
     },
     {
-      id: 'nordwald', name: 'Nordwald Ring', country: 'Germany', flag: 'DE', trees: 'fir',
+      id: 'nordwald', name: 'Nordwald Ring', country: 'Germany', flag: 'DE', trees: 'fir', banks: 11,
       blurb: 'Deep in the pine forest. A long run out through the trees, chicanes to break the slipstream, the great far curve, and a tight stadium in front of the stands.',
       width: 15, style: 'park', seed: 73,
       startAt: 0.5, pit: { side: 1, entry: -330, exit: 240, offset: 22, lane: 12 },
@@ -557,8 +557,12 @@
     const side = d > 0 ? 1 : 0;
     const edge = Math.max(tr.barr[side][best], Math.abs(tr.pit.off[best]) + tr.pit.lane || 0) + 6;
     const road = tr.z[best] + crossZ(tr, best, d);
-    const w = U.smooth((Math.abs(d) - edge) / 60);
-    return U.lerp(road, Ht, w);
+    const e = Math.abs(d) - edge, w = U.smooth(e / 60);
+    // def.banks (m): the circuit runs in a cutting through wooded hills, as at Spa or the old
+    // Nurburgring: earth banks climb from just past the barriers, higher in some stretches
+    // than others, and ease back into the terrain further out
+    const bank = tr.def.banks ? tr.def.banks * (0.35 + 0.65 * (0.5 + 0.5 * vnoise(best * tr.ds / 260 + side * 17))) * U.smooth(e / 28) * (1 - U.smooth((e - 70) / 110)) : 0;
+    return U.lerp(road, Ht, w) + bank;
   }
 
   // ---------- queries ----------
