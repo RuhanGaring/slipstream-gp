@@ -447,7 +447,7 @@
   // How far each car's driver opens the fist (fingerOpen, radians at the middle joints, or 'side':
   // until the middle segments run along the wheel's side). The W17's handles are deeper than the
   // grip the glove was posed round, and the clenched fist sank into them.
-  const FINGER_OPEN = { w17: 'side' };
+  const FINGER_OPEN = { w17: 1.05 }; // about 60 degrees (opening only to the wheel's side, 32, was too little)
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
