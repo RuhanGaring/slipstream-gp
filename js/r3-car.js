@@ -370,19 +370,27 @@
   // the outer edge and the grip's back face near that edge; the hand's grip axis goes a bar's
   // half thickness inside both.
   function gripOf(parts) {
-    let outer = 0;
-    const pts = [], v = new THREE.Vector3();
+    // the grip bar runs the height of the hand; a knob or a thumbwheel beside it sticks out over
+    // a few centimetres only. So the outer edge is the median, over 5 mm slices from 6 cm below
+    // the middle to 3 cm above it, of each slice's outermost point
+    const S0 = -0.06, S = 0.005, NS = 18, slice = new Float32Array(NS), pts = [], v = new THREE.Vector3();
     for (const p of parts) {
       const a = p.G.attributes.position;
       for (let i = 0; i < a.count; i++) {
         v.fromBufferAttribute(a, i);
-        // just below the middle: above it the shift paddles and lamps stick out past the grips
-        if (v.y > -0.042 && v.y < 0 && Math.abs(v.x) > 0.07) { outer = Math.max(outer, Math.abs(v.x)); pts.push(Math.abs(v.x), v.z); }
+        const x = Math.abs(v.x), k = Math.floor((v.y - S0) / S);
+        if (x < 0.07 || k < 0 || k >= NS) continue;
+        slice[k] = Math.max(slice[k], x);
+        pts.push(x, v.y, v.z);
       }
     }
-    if (pts.length < 40) return null;
+    const filled = Array.from(slice).filter(x => x > 0).sort((a, b) => a - b);
+    if (filled.length < 6) return null;
+    const outer = filled[Math.floor(filled.length / 2)];
+    // the grip's back face, toward the driver, just inside that edge at the hands' height
     const zs = [];
-    for (let i = 0; i < pts.length; i += 2) if (pts[i] > outer - 0.035) zs.push(pts[i + 1]);
+    for (let i = 0; i < pts.length; i += 3) if (pts[i] > outer - 0.035 && pts[i] <= outer + 0.003 && pts[i + 1] > -0.042 && pts[i + 1] < 0) zs.push(pts[i + 2]);
+    if (zs.length < 10) return null;
     zs.sort((a, b) => a - b);
     const back = zs[Math.floor(zs.length * 0.9)];
     return [outer - 0.018, -0.01, back - 0.022];
@@ -502,8 +510,13 @@
   // little in front of the grip's axis). The hole lies about halfway along the thumb, so the thumb
   // passes through it and its tip comes out beyond. Only the curl changes: a turn about any other
   // axis twists the thumb's mesh and folds it. The angle stays within a natural thumb's range.
+  // A wheel whose openings beside the grip are too small for a thumb (under 1.4 cm across; the
+  // W17's grips are solid there) gets the thumb resting on the front of the grip instead, curled
+  // a little back so it lies over the face rather than into the wheel.
+  const THUMB_REST = -0.22;
   function thumbFor(MD) {
-    if (!MD || !MD.hole || !armData()) return THUMB;
+    if (!MD || !armData()) return THUMB;
+    if (!MD.hole || MD.hole[2] < 0.014 || MD.hole[3] < 0.014) return [THUMB[0], THUMB[1], THUMB[2], THUMB_REST];
     const [gx, gy, gz] = MD.grip;
     const tgt = new THREE.Vector3(MD.hole[0], MD.hole[1], gz - 0.006).applyMatrix4(handMatrix(1, gx, gy, gz).invert());
     const root = new THREE.Vector3(...TH_ROOT), tip = new THREE.Vector3(...TH_TIP), ax = new THREE.Vector3(THUMB[0], THUMB[1], THUMB[2]).normalize();
