@@ -375,7 +375,7 @@
             if (taken.has(k)) continue;
             if (!clearance(tr, x, y, 12, W)) continue;
             taken.add(k);
-            addDecor(W, { type: 'tree', x, y, r: 2.4 + Math.pow(rnd(), 0.8) * 6, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: o > 30 });
+            addDecor(W, { type: 'tree', x, y, r: 2.4 + Math.pow(rnd(), 0.8) * 6, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: o > 14, forest: 1 });
           }
         }
       }

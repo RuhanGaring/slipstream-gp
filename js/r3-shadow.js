@@ -50,11 +50,11 @@
   // shadow texels, draw each car as a one-mesh stand-in (its merged far model) instead of its
   // twenty-odd detailed parts, cockpit and skinned arms (the swap is made in js/render3d.js,
   // which renders the slices one at a time). The outer
-  // slices are also re-rendered less often: the middle one every other frame and the far one
-  // every third, staggered so no frame pays for both; between renders each keeps sampling its
+  // slices are also re-rendered less often: the middle one on even frames and the far one on
+  // every other odd frame (every fourth), so no frame pays for both; between renders each keeps sampling its
   // last map through the matrix it was drawn with, so the shadows stay put. Any jump (a camera
   // cut, a quality change) re-renders everything at once.
-  const EVERY = [1, 2, 3], PHASE = [0, 0, 1];
+  const EVERY = [1, 2, 4], PHASE = [0, 0, 1];
   let frame = 0, force = true;
   const lastPos = [new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0)];
   const lastSun = new THREE.Vector3();

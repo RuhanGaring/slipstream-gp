@@ -120,11 +120,133 @@
     return g;
   }
 
+  // The deep forest as a wall. Seen from the track, rows of impostors behind the first few
+  // only add layers of alpha-tested quads over the same pixels (each shaded, then hidden),
+  // which is what made dense forest expensive. Instead, everything beyond the front rows is
+  // two long curtains that follow the track, cut out by a texture of the same baked fir views
+  // stamped edge to edge in three rows (back rows darker, crowns peeking between). A pixel of
+  // forest is then shaded about once. The stamped normals are view space, which for a curtain
+  // facing the viewer is tangent space, so the wall takes the sun like the impostors do.
+  const SH_PER = 120, SH_H = 30, SH_W = 2048, SH_TH = 512; // texture: metres along, metres high, pixels
+  let shellMats = null;
+  function shellMaterials(names, set) {
+    if (shellMats) return shellMats;
+    const mapC = document.createElement('canvas'), nrmC = document.createElement('canvas');
+    mapC.width = nrmC.width = SH_W; mapC.height = nrmC.height = SH_TH;
+    const map = new THREE.CanvasTexture(mapC), nrm = new THREE.CanvasTexture(nrmC);
+    map.colorSpace = THREE.SRGBColorSpace; nrm.colorSpace = THREE.NoColorSpace;
+    for (const t of [map, nrm]) { t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.anisotropy = 8; }
+    const img = uri => new Promise(ok => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = uri; });
+    Promise.all(names.map(n => Promise.all([img(A()[n].color), img(A()[n].normal)]))).then(ims => {
+      const g = mapC.getContext('2d'), gn = nrmC.getContext('2d'), rnd = U.rng(57), pxm = SH_TH / SH_H;
+      const tmp = document.createElement('canvas'), gt = tmp.getContext('2d');
+      // under the crowns: dark trunks and undergrowth, so the wall has no daylight at its foot
+      const foot = (ctx, col) => {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, SH_TH);
+        for (let x = 0; x <= SH_W; x += 16) ctx.lineTo(x, SH_TH - pxm * (6 + 2.5 * Math.sin(x * 0.013) + rnd() * 2));
+        ctx.lineTo(SH_W, SH_TH); ctx.closePath(); ctx.fill();
+      };
+      foot(g, '#1c2418'); foot(gn, 'rgb(128,128,255)');
+      const stamp = (k, x, hPx, bright) => {
+        const [ci, ni] = ims[k], s = A()[names[k]];
+        if (!ci || !ni) return;
+        const v = Math.floor(rnd() * 8), cw = ci.width / 4, ch = ci.height / 2, nw = ni.width / 4, nh = ni.height / 2;
+        const w = hPx * s.W / s.H;
+        for (const dx of [0, -SH_W, SH_W]) {
+          const x0 = x - w / 2 + dx;
+          if (x0 > SH_W || x0 + w < 0) continue;
+          g.filter = 'brightness(' + bright.toFixed(3) + ') saturate(' + (0.85 + rnd() * 0.3).toFixed(3) + ')';
+          g.drawImage(ci, (v % 4) * cw, Math.floor(v / 4) * ch, cw, ch, x0, SH_TH - hPx, w, hPx);
+          g.filter = 'none';
+          // the normal view, masked by the colour view's alpha
+          tmp.width = Math.ceil(w); tmp.height = Math.ceil(hPx);
+          gt.globalCompositeOperation = 'source-over';
+          gt.drawImage(ni, (v % 4) * nw, Math.floor(v / 4) * nh, nw, nh, 0, 0, w, hPx);
+          gt.globalCompositeOperation = 'destination-in';
+          gt.drawImage(ci, (v % 4) * cw, Math.floor(v / 4) * ch, cw, ch, 0, 0, w, hPx);
+          gn.drawImage(tmp, x0, SH_TH - hPx);
+        }
+      };
+      // back row first: darker (deeper in the wood), then the middle row, then the front
+      for (const [bright, gap] of [[0.55, 0.36], [0.72, 0.4], [0.9, 0.46]]) {
+        for (let x = rnd() * 40; x < SH_W;) {
+          const r = 2.4 + Math.pow(rnd(), 0.8) * 6, hm = Math.min(SH_H - 1, set.h(r) * (0.72 + rnd() * 0.56));
+          const k = Math.floor(rnd() * names.length), s = A()[names[k]], hPx = hm * pxm;
+          stamp(k, x, hPx, bright * (0.88 + rnd() * 0.24));
+          x += hPx * s.W / s.H * gap * (0.7 + rnd() * 0.6);
+        }
+      }
+      map.needsUpdate = nrm.needsUpdate = true;
+    });
+    const lit = new THREE.MeshStandardMaterial({ map, normalMap: nrm, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, metalness: 0 });
+    return (shellMats = { lit });
+  }
+
+  // curtains along both sides at fixed depths into the forest; a vertex stands at full height
+  // only where the deep trees it replaces stood (so clearings and gaps stay open), and sinks
+  // underground where the offset line folds over itself on the inside of a bend
+  const CURTAINS = [{ o: 18, k: 1, du: 0 }, { o: 44, k: 1.12, du: 0.37 }];
+  function buildShell(root, tr, deep, names, set) {
+    const cell = 10, grid = new Map();
+    for (const it of deep) { const key = Math.floor(it.x / cell) + ',' + Math.floor(it.y / cell); grid.set(key, (grid.get(key) || 0) + 1); }
+    const occAt = (x, y) => {
+      let n = 0;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) n += grid.get((Math.floor(x / cell) + a) + ',' + (Math.floor(y / cell) + b)) || 0;
+      return U.smooth((n - 1) / 4);
+    };
+    const nearest = (x, y) => { let bd = 1e9; tr.hash.near(x, y, 160, i => { bd = Math.min(bd, (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2); }); return Math.sqrt(bd); };
+    const st = Math.max(1, Math.round(4 / tr.ds)), win = Math.max(1, Math.round(20 / tr.ds));
+    const pos = [], nor = [], uv = [], idx = [];
+    for (const c of CURTAINS) for (let side = 0; side < 2; side++) {
+      const sg = side ? 1 : -1, b = tr.barr[side];
+      // which way along the track is "right" for someone on it looking out at this side
+      const dir = Math.sign(sg * (-tr.ny[0] * tr.tx[0] + tr.nx[0] * tr.ty[0])) || 1;
+      let cum = 0, px = null, pz = null, first = pos.length / 3;
+      const nv = Math.ceil(tr.N / st) + 1;
+      for (let q = 0; q < nv; q++) {
+        const i = (q * st) % tr.N;
+        let bs = 0; for (let k = -win; k <= win; k++) bs += b[(i + k + tr.N) % tr.N];
+        const off = bs / (2 * win + 1) + 12 + c.o;
+        const x = tr.x[i] + tr.nx[i] * sg * off, z = tr.y[i] + tr.ny[i] * sg * off;
+        if (px !== null) cum += Math.hypot(x - px, z - pz);
+        px = x; pz = z;
+        let occ = occAt(x, z);
+        if (occ > 0 && nearest(x, z) < off * 0.85) occ = 0;
+        const f = c.k * (0.92 + 0.16 * (0.5 + 0.5 * Math.sin(cum * 0.021 + c.du * 9))), gy = Tracks.groundAt(tr, x, z) - 2;
+        const u = dir * cum / SH_PER + c.du, top = gy + (SH_H * f + 2) * occ;
+        pos.push(x, gy, z, x, top, z);
+        const nx = -sg * tr.nx[i], nz = -sg * tr.ny[i], l = Math.hypot(nx, 0.2, nz);
+        nor.push(nx / l, 0.2 / l, nz / l, nx / l, 0.2 / l, nz / l);
+        uv.push(u, -2 / (SH_H * f), u, 1);
+        if (q > 0) {
+          const a0 = first + (q - 1) * 2, a1 = a0 + 2; // bottom, top of the previous and this column
+          // wound counter-clockwise as seen from the track, the side the normals face
+          if (dir > 0) idx.push(a0, a1, a0 + 1, a0 + 1, a1, a1 + 1); else idx.push(a1, a0, a1 + 1, a1 + 1, a0, a0 + 1);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    const M = shellMaterials(names, set), mesh = new THREE.Mesh(g, M.lit);
+    mesh.customDepthMaterial = M.depth;
+    // no shadow pass: the curtains span the whole lap, so they would fill every cascade, and the
+    // front rows of real trees already throw the forest's shade onto the verge
+    mesh.castShadow = false; mesh.receiveShadow = true;
+    root.add(mesh);
+  }
+
   // add the circuit's trees to root; items are decor entries of type 'tree'
   function build(root, tr, items) {
     const set = SETS[Tracks.treesOf(tr)] || SETS.broad;
     const names = set.names.filter(n => getSpecies(n));
     if (!names.length) return false;
+    // the deep rows of a conifer forest become the wall above; only the front rows stay trees
+    const deep = items.filter(it => it.forest && it.deep);
+    if (deep.length && set === SETS.fir) { buildShell(root, tr, deep, names, set); items = items.filter(it => !(it.forest && it.deep)); }
     const rnd = U.rng(91), tiles = new Map();
     for (const it of items) {
       const sp = names[Math.floor(rnd() * names.length)];
