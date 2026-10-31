@@ -1261,7 +1261,11 @@
   // about the joint's axis, parallel to the bar, by u radians outward; a short blend across the
   // joint keeps the glove whole. The knuckles and the palm stay put; the thumb keeps its own bend.
   // G.__fingerOpen overrides u (then rebuild the arms).
-  const MID = 2.35, MID_BLEND = 0.18;
+  // the middle joints: the proximal bones (about 4.5 cm) run on from the knuckles (about 1.1 rad
+  // round from the palm) on a ring about 3 cm from the bar's axis, so the joints sit near 2.6 rad;
+  // the blend across them is kept short, or the glove stretches there and the middle segments
+  // look too long
+  const MID = 2.6, MID_BLEND = 0.08;
   // 'side': open the middle joints just until the middle segments run parallel to the wheel's
   // side (the grip's outer face, running from the driver toward the nose): the angle between the
   // segments as posed (a line through the points between the middle and the end joint, round the
