@@ -2,7 +2,8 @@
 // usage (from a folder with @gltf-transform/core, /extensions, meshoptimizer and sharp installed):
 //   node car_prep26.mjs SRC.glb OUT_DIR ID ["Display name"]
 // writes OUT_DIR/ID.car (geometry, materials, layout) and OUT_DIR/tex/<hash>.webp (textures,
-// shared between cars when the source images are the same).
+// shared between cars when the source images are the same). OUT_DIR is assets-src/cars; then
+// run tools/car_pack.py to pack them into the script files the game loads.
 //
 // What is kept: every material of the model with its own textures (paint, decals, carbon,
 // tyres, steering wheel), so the cars look as their authors made them. What is changed:
