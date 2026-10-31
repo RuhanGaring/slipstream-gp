@@ -185,7 +185,7 @@ with sync_playwright() as p:
         for ti in teams: print(json.dumps(pg.evaluate(SEARCH_JS, [ti])))
         teams = []
     for ti in teams:
-        r = pg.evaluate(JS, [ti, [0, 0.25, -0.25], bool(OUT)])
+        r = pg.evaluate(JS, [ti, json.loads(os.environ.get('STEERS', '[0, 0.25, -0.25]')), bool(OUT)])
         line = ' | '.join(f"steer {x['steer']:+.2f}: {x['total']:3d} ({', '.join(f'{k} {v}' for k, v in x['by'].items())})" for x in r['results'])
         print(f"{r['car']:6s} {line}   [glove tris {r['glove']}, wheel tris {r['wheel']}]")
         for i, s in enumerate(r['shots']):
