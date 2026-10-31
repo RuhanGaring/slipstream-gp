@@ -1582,6 +1582,8 @@
   function velShadowGeo() { if (!_vsg) { _vsg = new THREE.PlaneGeometry(8, 3.9); _vsg.rotateX(-Math.PI / 2); _vsg.translate(0, 0.03, 0); } return _vsg; }
 
   let frameNo = 0;
+  const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
+  let focusCar = null, camMode = '';
   function updateCars(cars, dt, hideHelmet) {
     frameNo++;
     for (const c of cars) {
@@ -1635,8 +1637,17 @@
         // full detail close up, the low-detail model further out, then the merged far mesh
         // (one draw call); in Rock even the player's car is low detail outside the cockpit
         const n0 = GFX.carNear || 50, n1 = Math.max(n0, GFX.carFar || 300);
+        // The level switches with a margin either side of each distance, so a car sitting at
+        // one does not flicker between models; and the car the camera rides on (T-cam, nose,
+        // sidepod, helmet, cockpit) is always full detail: the camera is placed after this, so
+        // at speed the distance here is a frame stale, a metre or more out
+        const prev = ud.lodL == null ? 1 : ud.lodL, h = 1.12;
+        const up = (n, L) => (prev > L ? n / h : n * h); // easier to stay at the level it has
+        let L = d2 > up(n1, 1) ** 2 ? 2 : d2 > up(n0, 0) ** 2 ? 1 : 0;
+        if (c === focusCar && ONBOARD.has(camMode)) L = 0;
+        ud.lodL = L;
         // the cockpit interior only within 10 m (or for the car being driven from inside)
-        RC.setLod(body, d2 > n1 * n1 ? 2 : d2 > n0 * n0 ? 1 : 0, d2 < 100 || c === hideHelmet);
+        RC.setLod(body, L, d2 < 100 || c === hideHelmet);
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
         RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel
@@ -2183,6 +2194,7 @@
     const dt = o.dt || 0.016;
     clock += dt;
     state.lastCars = o.cars;
+    focusCar = o.focus || null; camMode = o.mode || '';
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null);
     // tree draw distance (advanced graphics; 700 m in Rock): tiles whose nearest edge is further are skipped
     if (GFX.treeDist > 0 && state.dens) for (const m of state.dens) {

@@ -861,11 +861,12 @@
     if (race.aeroT <= 0) { race.aeroT = 1 / 20; aeroMods(race); }
 
     // Physics detail (race.physLod, the Rock graphics preset for the slowest phones): an AI car
-    // more than 150 m round the lap from the player, and out of the pits, steps every other
+    // more than 150 m round the lap from the player (or the car being watched), out of the pits, steps every other
     // tick with twice the time step, alternating cars so the work stays even. Nobody close
     // enough to see or touch it is affected; it halves most of the field's physics.
     race.tickN = (race.tickN || 0) + 1;
-    const dt1 = dt, dt2 = dt * 2, P = race.player, L = tr.L;
+    // (round the car being watched when spectating or in a replay, not the player's own)
+    const dt1 = dt, dt2 = dt * 2, P = race.lodFocus || race.player, L = tr.L;
     for (const c of race.cars) {
       if (c.retired) continue;
       let half = false;

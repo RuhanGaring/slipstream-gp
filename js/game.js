@@ -663,11 +663,14 @@
       assist = { tr: race.track, car: p, mode: lineMode, prof: race.assistProf, marks: race.cornerMarks };
     }
     const vw = mode === 'view' ? F1.Viewer.view(race) : null;
+    // in a replay, a car not yet damaged at this moment is drawn clean (js/replay.js)
+    const RP = Game.state === 'replay' && Game.replay;
+    if (vw && RP) vw.focus = RP.view(vw.focus);
     const camMode = vw ? vw.mode : mode === 'tv' || mode === 'show' ? mode : Game.settings.camera;
     const focus = vw ? vw.focus : mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
     const step = ZOOM_STEPS[Game.settings.zoomStep == null ? 1 : Game.settings.zoomStep] || ZOOM_STEPS[1];
     R3.render({
-      cars: race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: cam.shake, fx: FX,
+      cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: cam.shake, fx: FX,
       assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
       lightsOn: Game.state === 'replay' ? race.lightsOn : race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
       weather: race, sc: race.sc, free: vw && vw.free, snap: vw && vw.snap,
@@ -1442,6 +1445,7 @@
     if (race && Game.state === 'race' && Game.spectate) {
       // spectating: the viewer follows whoever it likes; the race ends with the last car home
       const focus = F1.Viewer.focus(race);
+      race.lodFocus = focus;
       if (!Game.paused) {
         F1.Viewer.update(race, dt);
         handleEvents(race);

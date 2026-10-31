@@ -63,17 +63,25 @@
     A.roomIn = ctx.createGain(); A.roomIn.gain.value = 1;
     A.roomIn.connect(A.room); A.room.connect(A.sfx);
     A.on = true;
-    // the engine worklet, from source in memory (works from file://)
+    // The engine worklet. Three ways in, as browsers differ: the file itself from the site
+    // (Safari and some mobile browsers refuse in-memory modules), then a blob URL, then a
+    // data: URL (opened from file://, an opaque origin, Chrome refuses blob worklets). Which
+    // one worked, or why none did, is kept in A.engineInfo (shown in Settings).
+    A.engineInfo = 'basic (no AudioWorklet in this browser)';
     if (ctx.audioWorklet && F1.EngineWorklet) {
-      // a blob URL first; opened as a local file (file://, an opaque origin) Chrome refuses
-      // blob worklets, so then the same source goes in as a data: URL, which it accepts
       const src = '(' + F1.EngineWorklet.toString() + ')();';
-      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-      const dataUrl = () => 'data:application/javascript;base64,' + btoa(unescape(encodeURIComponent(src)));
-      A.workletReady = ctx.audioWorklet.addModule(url)
-        .catch(() => ctx.audioWorklet.addModule(dataUrl()))
-        .then(() => { A.worklet = true; })
-        .catch(e => { console.warn('engine worklet unavailable', e); });
+      const tag = document.querySelector('script[src*="audio-engine-worklet.js"]');
+      const fileUrl = tag ? tag.src : null;
+      const tries = [];
+      if (fileUrl && /^https?:/.test(fileUrl)) tries.push(['file', () => fileUrl]);
+      tries.push(['blob', () => URL.createObjectURL(new Blob([src], { type: 'application/javascript' }))]);
+      tries.push(['data', () => 'data:application/javascript;base64,' + btoa(unescape(encodeURIComponent(src)))]);
+      let errs = [];
+      A.workletReady = tries.reduce((p, [name, url]) => p.then(done => done || ctx.audioWorklet.addModule(url()).then(() => name, e => { errs.push(name + ': ' + (e && e.message || e)); return null; })), Promise.resolve(null))
+        .then(name => {
+          if (name) { A.worklet = true; A.engineInfo = 'realistic (' + name + ')'; }
+          else { A.engineInfo = 'basic (engine worklet refused: ' + errs.join('; ') + ')'; console.warn('engine worklet unavailable', errs); }
+        });
     } else A.workletReady = Promise.resolve();
   }
 
@@ -96,9 +104,14 @@
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
     if (A.worklet) {
-      node = new AudioWorkletNode(ctx, 'engine-voice', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
-      node.port.postMessage({ cheap: cheap ? 1 : 0 });
-    } else {
+      try {
+        node = new AudioWorkletNode(ctx, 'engine-voice', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+        node.port.postMessage({ cheap: cheap ? 1 : 0 });
+        // a voice whose processor fails (an exception on the audio thread) falls silent: say so
+        node.onprocessorerror = () => { A.engineInfo = 'basic (engine worklet crashed on this device)'; A.worklet = false; };
+      } catch (e) { node = null; A.worklet = false; A.engineInfo = 'basic (engine voice refused: ' + (e && e.message || e) + ')'; }
+    }
+    if (!node) {
       legacy = legacyEngine(cheap); node = legacy.out;
     }
     node.connect(shelf); shelf.connect(eq); eq.connect(lp); lp.connect(out);
@@ -244,7 +257,10 @@
         if (pn) { pn.pan.value = k ? 0.75 : -0.75; g.connect(pn); pn.connect(A.sfx); } else g.connect(A.sfx);
         return { dl, f, g };
       });
-      for (let k = 0; k < N_OTHERS; k++) R.others.push(makeVoice(true));
+      // phones and tablets: fewer cars' engines on the audio thread, which a phone's CPU may not
+      // keep up with (it would break up or fall silent); the two nearest still carry the race
+      const mobile = F1.Game && F1.Game.mobile && F1.Game.mobile();
+      for (let k = 0; k < (mobile ? Math.min(2, N_OTHERS) : N_OTHERS); k++) R.others.push(makeVoice(true));
       R.loops = {
         squeal: loop({ f: [['bandpass', 1500, 9]] }),
         squeal2: loop({ f: [['bandpass', 2400, 12]] }),

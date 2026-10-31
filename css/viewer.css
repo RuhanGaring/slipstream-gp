@@ -74,6 +74,7 @@
 .vw-evs .ev-pit { background: var(--blue); }
 .vw-evs .ev-fastest { background: var(--purple); }
 .vw-evs .ev-sc { background: var(--yellow); }
+.vw-evs .ev-damage { background: #ff8a1f; }
 .vw-time { min-width: 110px; text-align: right; font-weight: 700; font-size: 13px; color: var(--ink-2); }
 .vw-help { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 10px; letter-spacing: .14em; font-weight: 700; color: rgba(244, 246, 248, .55); text-shadow: 0 1px 2px #000; }
 
@@ -88,6 +89,7 @@
 .vw-li .ev-pit { border-left-color: var(--blue); }
 .vw-li .ev-fastest { border-left-color: var(--purple); }
 .vw-li .ev-sc { border-left-color: var(--yellow); }
+.vw-li .ev-damage { border-left-color: #ff8a1f; }
 .vw-li .none { color: var(--ink-3); cursor: default; }
 
 .vw-note { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--yellow); padding: 10px 20px; font-weight: 900; font-style: italic; letter-spacing: .1em; font-size: 16px; opacity: 0; transition: opacity .3s; white-space: nowrap; }

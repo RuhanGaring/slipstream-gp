@@ -1,6 +1,7 @@
 // The engine voice of a current (2014 to 2025 rules) Formula 1 power unit, run on the audio
-// thread (an AudioWorklet). The whole worklet is the body of F1.EngineWorklet: js/audio.js
-// turns its source into a blob and loads that, so it works offline from file:// as well.
+// thread (an AudioWorklet). The whole worklet is the body of F1.EngineWorklet. js/audio.js
+// loads this file straight into the worklet (it registers itself there), or, where that is
+// refused (opened from file://), the same source as a blob or a data: URL.
 //
 // What is modelled, from the hardware the regulations fix:
 // - A 1.6 litre 90 degree V6, four-stroke, crankshaft with split pins so it fires evenly every
@@ -212,4 +213,6 @@
     }
     registerProcessor('engine-voice', EngineVoice);
   };
+  // loaded straight into an AudioWorklet as a file (js/audio.js tries that first): register now
+  if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 'function') G.F1.EngineWorklet();
 })(typeof window !== 'undefined' ? window : globalThis);

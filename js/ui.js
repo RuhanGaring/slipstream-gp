@@ -647,6 +647,8 @@
     add(optRow('Master volume', '', vols, () => st.master, v => { st.master = v; touched(); }, pct), 'AUDIO');
     add(optRow('Effects volume', '', vols, () => st.sfx, v => { st.sfx = v; touched(); }, pct));
     add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; touched(); }, pct));
+    // which engine sound this browser runs (the realistic worklet, or the basic stand-in and why)
+    { const info = h('div', 'opt info', `<div class="on">Engine sound<small>${(F1.Audio && F1.Audio.A.engineInfo) || 'starts with the first key or tap'}</small></div><div></div>`); col.appendChild(info); }
     add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; touched(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; touched(); }, v => v.toUpperCase()));

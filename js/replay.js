@@ -20,6 +20,7 @@
   // race: 0 time, 1 lights, 2 rain, 3 wet, 4 sc.x, 5 sc.y, 6 sc.h, 7 sc.vis, 8 leader lap
   const NR = 9;
   const SMOOTH = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15, 16, 21, 22]; // interpolated (h and s wrap)
+  const SOFT = [6, 7, 8, 9, 10]; // and softened over the neighbouring samples
   const COMP = ['S', 'M', 'H', 'I', 'W'];
   const F_DRS = 1, F_LIM = 2, F_RET = 4, F_HID = 8, F_PIT = 16;
 
@@ -30,6 +31,7 @@
     this.frames = 0; this.first = 0; // frames recorded, index of the oldest still kept
     this.next = 0; // race time of the next sample
     // events for the timeline: { f: frame, type, car: id, other: id, label }
+    this.dmgT = new Map(); // car id: the race time it was first damaged
     this.events = []; this.prevPos = new Map(); this.prevPit = new Map(); this.fastest = null; this.scVis = false; this.lastHit = new Map();
   }
   Recorder.prototype.event = function (type, car, other, label) {
@@ -63,6 +65,11 @@
       }
     }
     for (const c of race.cars) this.prevPos.set(c.id, c.pos);
+    for (const c of race.cars) {
+      const dm = c.dm;
+      if (!dm || this.dmgT.has(c.id)) continue;
+      if (dm.hits.length || Object.keys(dm.off).length || (dm.soft && dm.soft.ver > 0)) { this.dmgT.set(c.id, race.time); this.event('damage', c, null, 'DAMAGE  ' + c.driver.code); }
+    }
     const fl = race.fastest;
     if (fl && fl.car && (!this.fastest || fl.t < this.fastest)) { this.fastest = fl.t; this.event('fastest', fl.car, null, `FASTEST LAP  ${fl.car.driver.code}  ${U.fmtTime(fl.t)}`); }
     const vis = !!(race.sc && race.sc.vis);
@@ -107,7 +114,12 @@
   function Player(rec) {
     this.rec = rec; this.race = rec.race;
     this.f0 = rec.first; this.f1 = rec.frames - 1; // playable frame range
-    this.t = 0; // frame position (float, absolute)
+    this.t = 0; // frame position (float, absolute), found from the race time T
+    // Samples are taken on the first frame after each twentieth of a second, so they are not
+    // evenly spaced; playback runs on the race time each one carries (else the car surges
+    // and drops back, worst seen from the cockpit)
+    this.clean = new Map();
+    this.T0 = rec.raceAt(this.f0, 0); this.T1 = rec.raceAt(this.f1, 0); this.T = this.T0;
     this.rate = 1; this.playing = true;
     // the live state, to put back afterwards
     this.saved = this.race.cars.map(c => {
@@ -117,27 +129,47 @@
     const r = this.race, sc = r.sc;
     this.savedRace = { time: r.time, lightsOn: r.lightsOn, rain: r.rain, wet: r.wet, sc: sc ? { x: sc.x, y: sc.y, h: sc.h, vis: sc.vis } : null };
     // events still inside the buffer, and the leader's lap starts for the timeline
-    this.events = rec.events.filter(e => e.f >= this.f0 && e.f <= this.f1).map(e => Object.assign({ at: (e.f - this.f0) / HZ }, e));
+    this.events = rec.events.filter(e => e.f >= this.f0 && e.f <= this.f1).map(e => Object.assign({ at: e.t - this.T0 }, e));
     this.lapMarks = [];
     let lastLap = null;
-    for (let f = this.f0; f <= this.f1; f += 2) { const l = rec.raceAt(f, 8); if (lastLap != null && l > lastLap && l > 1) this.lapMarks.push({ t: (f - this.f0) / HZ, lap: l }); lastLap = l; }
+    for (let f = this.f0; f <= this.f1; f += 2) { const l = rec.raceAt(f, 8); if (lastLap != null && l > lastLap && l > 1) this.lapMarks.push({ t: rec.raceAt(f, 0) - this.T0, lap: l }); lastLap = l; }
     this.seek(this.f0);
   }
+  // Damage: the 3D model only knows a car's damage as it stands now, so before the moment a
+  // car was first hit the replay draws a clean stand-in for it (a view of the same car with
+  // no damage); from that moment it is the car itself, and its dents and lost parts appear
+  Player.prototype.view = function (c) {
+    const t = this.rec.dmgT.get(c.id);
+    if (t == null || this.T >= t) return c;
+    let v = this.clean.get(c);
+    if (!v) { v = Object.create(c); v.dm = null; v.wingDmg = 0; this.clean.set(c, v); }
+    return v;
+  };
+  Player.prototype.cars = function () { return this.race.cars.map(c => this.view(c)); };
   // the event after / before the current moment (with a few seconds of lead-in)
   Player.prototype.nextEvent = function (dir) {
     const at = this.pos(), lead = 3;
     const list = dir > 0 ? this.events.filter(e => e.at - lead > at + 0.5) : this.events.filter(e => e.at - lead < at - 1.5).reverse();
     return list[0] || null;
   };
-  Player.prototype.length = function () { return Math.max(0, this.f1 - this.f0) / HZ; };
-  Player.prototype.pos = function () { return (this.t - this.f0) / HZ; };
-  Player.prototype.seek = function (f) { this.t = U.clamp(f, this.f0, this.f1); };
-  Player.prototype.seekTime = function (s) { this.seek(this.f0 + s * HZ); };
+  Player.prototype.length = function () { return Math.max(0, this.T1 - this.T0); };
+  Player.prototype.pos = function () { return this.T - this.T0; };
+  // the frame position for race time T: the last sample at or before it, plus the fraction
+  Player.prototype.locate = function () {
+    const rec = this.rec, T = this.T;
+    let lo = this.f0, hi = this.f1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (rec.raceAt(m, 0) <= T) lo = m; else hi = m; }
+    const ta = rec.raceAt(lo, 0), tb = rec.raceAt(Math.min(this.f1, lo + 1), 0);
+    this.t = lo + (tb > ta ? U.clamp((T - ta) / (tb - ta), 0, 1) : 0);
+  };
+  Player.prototype.seek = function (f) { f = U.clamp(Math.round(f), this.f0, this.f1); this.T = this.rec.raceAt(f, 0); this.t = f; };
+  Player.prototype.seekTime = function (s) { this.T = U.clamp(this.T0 + s, this.T0, this.T1); this.locate(); };
   Player.prototype.advance = function (dt) {
     if (!this.playing) return;
-    this.t += dt * HZ * this.rate;
-    if (this.t >= this.f1) { this.t = this.f1; this.playing = false; }
-    if (this.t <= this.f0) { this.t = this.f0; if (this.rate < 0) this.playing = false; }
+    this.T += dt * this.rate;
+    if (this.T >= this.T1) { this.T = this.T1; this.playing = false; }
+    if (this.T <= this.T0) { this.T = this.T0; if (this.rate < 0) this.playing = false; }
+    this.locate();
   };
   // write the sample at the current position onto the cars and the race
   Player.prototype.apply = function () {
@@ -149,6 +181,12 @@
       const v = new Float32Array(NF);
       for (let i = 0; i < NF; i++) v[i] = A[oa + i];
       for (const i of SMOOTH) v[i] = A[oa + i] + (B[ob + i] - A[oa + i]) * a;
+      // heave, pitch, roll and the accelerations (which move the cockpit camera's head) are
+      // softened over the samples either side: twenty a second alias the suspension's fast
+      // motion into a judder
+      const Pm = rec.at(Math.max(this.f0, fa - 1)), Qp = rec.at(Math.min(this.f1, fb + 1));
+      const om = (Pm.k * rec.n + j) * NF, op = (Qp.k * rec.n + j) * NF;
+      for (const i of SOFT) v[i] = 0.5 * v[i] + 0.25 * Pm.A[om + i] + 0.25 * Qp.A[op + i];
       v[2] = A[oa + 2] + U.wrapAngle(B[ob + 2] - A[oa + 2]) * a;
       let ds = B[ob + 13] - A[oa + 13];
       if (ds < -tr.L / 2) ds += tr.L; else if (ds > tr.L / 2) ds -= tr.L;

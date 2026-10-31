@@ -279,20 +279,25 @@
       for (let k = dm.hits.length - 1; k >= 0 && dm.hits[k] !== st.last; k--) dent(body, dm.hits[k]);
       st.last = dm.hits[dm.hits.length - 1];
     }
+    // (a part that already came off on an earlier model of this car, which a replay or a
+    // detail switch rebuilt, is just left off: it does not fly off a second time)
+    const flown = dm.flown || (dm.flown = new Set());
     for (const key of Object.keys(dm.off)) {
       if (st.off[key]) continue;
       st.off[key] = true;
-      const ch = Math.cos(c.h), sh = Math.sin(c.h);
+      const ch = Math.cos(c.h), sh = Math.sin(c.h), again = flown.has(key);
+      flown.add(key);
       if (key.startsWith('wheel')) {
         const k = +key.slice(5), wheel = bu.wheels[k];
         if (!wheel) continue;
         const side = k % 2 ? 1 : -1, kick = new THREE.Vector3(-sh * side * 6, 0, ch * side * 6);
-        launch(scene, wheel, outer, c, kick, true);
+        if (again) { if (wheel.parent) wheel.parent.remove(wheel); } else launch(scene, wheel, outer, c, kick, true);
         bu.wheels[k] = new THREE.Group(); bu.wheels[k].userData = { spin: new THREE.Group(), front: k < 2, lods: [], stripes: [] }; // a stand-in the renderer can still turn
         bu.lod = -1; // re-pick the detail level: the merged low-detail wheels can no longer stand in
       } else if (!dm.soft && REGIONS[key]) {
         const piece = cut(body, REGIONS[key]);
         if (!piece) continue;
+        if (again) continue; // cut away, not thrown
         body.add(piece); piece.updateMatrixWorld(true);
         launch(scene, piece, outer, c, new THREE.Vector3(ch * -3, 0, sh * -3), false);
       }
