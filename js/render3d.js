@@ -964,7 +964,12 @@
             const d = sg * (hw + dd);
             kb.v(tr.x[kk] + tr.nx[kk] * d, Tracks.surfZ(tr, kk, d) + (yy > 0 ? 0.004 : 0.002), tr.y[kk] + tr.ny[kk] * d, 0, 1, 0, u, dd / 1.5, c);
           }
-          for (let q = 0; q < 3; q++) { kb.t(base + q, base + q + 1, base + 4 + q); kb.t(base + q + 1, base + 5 + q, base + 4 + q); }
+          // (the left kerb is the right one mirrored, which turns its faces round: wound the
+          // other way there, or it is culled and the left kerbs never show)
+          for (let q = 0; q < 3; q++) {
+            if (side) { kb.t(base + q, base + q + 1, base + 4 + q); kb.t(base + q + 1, base + 5 + q, base + 4 + q); }
+            else { kb.t(base + q, base + 4 + q, base + q + 1); kb.t(base + q + 1, base + 4 + q, base + 5 + q); }
+          }
         }
       }
       const g = kb.geo();
