@@ -199,6 +199,7 @@ const isSwMat = n => /steer|_sw|^sw_|lcd|led|kers|indicator|revs|whitelight|tag_
 // ---------- classify every component: body, a wheel, or the steering wheel ----------
 // FLh etc: parts in a wheel's space that do not turn with it (brake ducts, upright ends): they
 // steer with the wheel but do not spin
+const swCand = [];
 const parts = { body: new Map(), sw: new Map(), FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map(), FLh: new Map(), FRh: new Map(), RLh: new Map(), RRh: new Map() };
 // a part spins with its wheel only if it is round about the axle: its middle on the axle and as
 // tall as it is long, seen along the axle (tyre, rim, disc, nut)
@@ -220,10 +221,23 @@ for (const [mat, g] of groups) {
   }
   for (const c of components(g)) {
     let dest = 'body';
-    if (mat === lcd.mat || (!isSwExcluded(n) && inBox(c.b, SWB) && (isSwMat(n) || c.b[3] - Lc[0] < 0.075))) dest = 'sw';
-    if (dest === 'sw' && process.env.SWDEBUG) console.log('  sw', n.padEnd(24), String(c.tris.length).padStart(5), 'x', (c.b[0] - Lc[0]).toFixed(3), (c.b[3] - Lc[0]).toFixed(3), 'y', (c.b[1] - Lc[1]).toFixed(3), (c.b[4] - Lc[1]).toFixed(3), 'z', c.b[2].toFixed(3), c.b[5].toFixed(3));
-    else for (const [k, W] of Object.entries(wheels)) if (inBox(c.b, W.box)) { dest = spinsWith(W, g, c) ? k : k + 'h'; break; }
+    if (mat === lcd.mat || (!isSwExcluded(n) && inBox(c.b, SWB) && (isSwMat(n) || c.b[3] - Lc[0] < 0.075))) { swCand.push({ mat, g, c, n }); continue; }
+    for (const [k, W] of Object.entries(wheels)) if (inBox(c.b, W.box)) { dest = spinsWith(W, g, c) ? k : k + 'h'; break; }
     push(parts[dest], mat, g, c.tris);
+  }
+}
+
+// The steering wheel is its body (the wheel's own materials) and whatever lies against it. A
+// part grouped with it that stands clear of the body by more than a centimetre (a bracket on the
+// column, a piece of the dash) would turn in mid air with the wheel: it stays with the car.
+{
+  const core = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9], isCore = n => /steer|_sw(_|\.|$)|^sw_|lcd/i.test(n);
+  for (const q of swCand) if (q.mat === lcd.mat || isCore(q.n)) for (let j = 0; j < 3; j++) { core[j] = Math.min(core[j], q.c.b[j]); core[j + 3] = Math.max(core[j + 3], q.c.b[j + 3]); }
+  const near = b => b[0] >= core[0] - 0.01 && b[1] >= core[1] - 0.01 && b[2] >= core[2] - 0.01 && b[3] <= core[3] + 0.01 && b[4] <= core[4] + 0.01 && b[5] <= core[5] + 0.01;
+  for (const q of swCand) {
+    const keep = q.mat === lcd.mat || isCore(q.n) || near(q.c.b);
+    if (!keep && process.env.SWDEBUG) console.log('  left with the car:', q.n, q.c.tris.length, 'tris, x', (q.c.b[0] - Lc[0]).toFixed(3), (q.c.b[3] - Lc[0]).toFixed(3), 'y', (q.c.b[1] - Lc[1]).toFixed(3), (q.c.b[4] - Lc[1]).toFixed(3), 'z', q.c.b[2].toFixed(3), q.c.b[5].toFixed(3));
+    push(parts[keep ? 'sw' : 'body'], q.mat, q.g, q.c.tris);
   }
 }
 
