@@ -444,10 +444,9 @@
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
-  // How far each car's driver opens the fist (fingerOpen, radians at the middle joints, or 'side':
-  // until the middle segments run along the wheel's side). The W17's handles are deeper than the
-  // grip the glove was posed round, and the clenched fist sank into them.
-  const FINGER_OPEN = { w17: 1.48 }; // about 85 degrees (opening only to the wheel's side, 32, was too little)
+  // Each car's finger pose (fingerOpen): inside angles of the knuckles and of the joint after
+  // them, in degrees. The W17's handles are deeper than the grip the glove was posed round.
+  const FINGER_OPEN = { w17: [145, 90] };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
@@ -1254,49 +1253,19 @@
       p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
     }
   }
-  // Loosen the fist for a thicker grip by straightening the fingers' middle joints. Round the
-  // grip (grip frame: z along the bar, the palm on the -x side) each finger runs from the palm
-  // over its knuckle and bends at its middle joint, MID radians round from the palm. Everything
-  // beyond that joint (the middle and end segments, with the end joint's own bend kept) turns
-  // about the joint's axis, parallel to the bar, by u radians outward; a short blend across the
-  // joint keeps the glove whole. The knuckles and the palm stay put; the thumb keeps its own bend.
-  // G.__fingerOpen overrides u (then rebuild the arms).
-  // the middle joints: the proximal bones (about 4.5 cm) run on from the knuckles (about 1.1 rad
-  // round from the palm) on a ring about 3 cm from the bar's axis, so the joints sit near 2.6 rad;
-  // the blend across them is kept short, or the glove stretches there and the middle segments
-  // look too long
-  const MID = 2.6, MID_BLEND = 0.08;
-  // 'side': open the middle joints just until the middle segments run parallel to the wheel's
-  // side (the grip's outer face, running from the driver toward the nose): the angle between the
-  // segments as posed (a line through the points between the middle and the end joint, round the
-  // grip) and the wheel's front-to-back axis seen in the grip frame
-  let _sideOpen = null;
-  function sideOpen() {
-    if (_sideOpen != null) return _sideOpen;
-    const A = armData(), root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length(), pts = [];
-    tax.divideScalar(TL);
-    const v = new THREE.Vector3(), d = new THREE.Vector3();
-    for (let i = 0; i < A.n; i++) {
-      if (A.w[i * 5 + 4] < 100 || (A.zone[i] !== 1 && A.zone[i] !== 3)) continue;
-      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(A.RF0inv); d.subVectors(v, root);
-      const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
-      if (t > 0.05 && r0 < 0.02) continue;
-      let ang = Math.atan2(v.y, -v.x); if (ang < -1) ang += Math.PI * 2;
-      if (Math.hypot(v.x, v.y) < 0.07 && ang > MID + 0.1 && ang < MID + 0.75) pts.push([v.x, v.y, ang]);
-    }
-    if (pts.length < 8) return (_sideOpen = 0);
-    pts.sort((p1, p2) => p1[2] - p2[2]);
-    const n = Math.floor(pts.length / 4), mean = l => [l.reduce((s, q) => s + q[0], 0) / l.length, l.reduce((s, q) => s + q[1], 0) / l.length];
-    const p0 = mean(pts.slice(0, n)), p1 = mean(pts.slice(-n)), seg = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
-    // the wheel's axis toward the nose (its -z) in the right hand's grip frame
-    const fwd = new THREE.Vector3(0, 0, -1).transformDirection(handMatrix(1, 0, 0, 0).invert());
-    const turn = Math.atan2(Math.sin(Math.atan2(fwd.y, fwd.x) - seg), Math.cos(Math.atan2(fwd.y, fwd.x) - seg));
-    return (_sideOpen = Math.max(0, Math.min(1.2, turn)));
-  }
-  function fingerOpen(p, sd, u0) {
-    let u = G.__fingerOpen != null ? G.__fingerOpen : u0 || 0;
-    if (u === 'side') u = sideOpen();
-    if (!u) return;
+  // The fingers' pose round a thicker grip, set by the inside angles of two joints (180 degrees
+  // is straight): the knuckles and the joint after them. Round the grip (grip frame: z along the
+  // bar, the palm on the -x side) the fingers run from the palm over the knuckles (where the hand
+  // is widest, about 1.6 rad round from the palm) to the next joint (about 2.45 rad). Each
+  // joint's present angle is read off the posed hand (the direction of the finger's centre line
+  // either side of it); everything beyond a joint then turns about it, parallel to the bar, to
+  // the angle wanted: the knuckles first, then the next joint about where it has moved to. The
+  // end joints keep their bend; a short blend at each joint keeps the glove whole.
+  // pose: [knuckle, next joint] in degrees. G.__fingerPose overrides it (then rebuild the arms).
+  const J_KNUCKLE = 1.6, J_NEXT = 2.45, J_BLEND = 0.08;
+  function fingerOpen(p, sd, pose0) {
+    const pose = G.__fingerPose || pose0;
+    if (!pose) return;
     const A = armData(), inv = A.RF0inv, fwd = inv.clone().invert();
     const root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length();
     tax.divideScalar(TL);
@@ -1307,39 +1276,51 @@
       d.subVectors(v, root);
       const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
       if (t > 0.05 && r0 < 0.02) continue; // the thumb
-      const r = Math.hypot(v.x, v.y);
-      if (r > 0.07 || r < 1e-4) continue;
+      if (Math.hypot(v.x, v.y) > 0.09) continue;
       let ang = Math.atan2(v.y, -v.x);
-      if (ang < -1) ang += Math.PI * 2; // fingertips curled past the far side
-      pts.push([i, v.clone(), r, ang]);
+      if (ang < -1.2) ang += Math.PI * 2; // fingertips curled past the far side
+      pts.push({ i, v: v.clone(), ang });
     }
-    // the joint's axis: on the fingers' middle line (the median radius of the finger at the joint)
-    const rs = pts.filter(q => Math.abs(q[3] - MID) < 0.15).map(q => q[2]).sort((x, y) => x - y);
-    if (!rs.length) return;
-    const rj = rs[Math.floor(rs.length / 2)], jx = -Math.cos(MID) * rj, jy = Math.sin(MID) * rj;
-    for (const [i, w, , ang] of pts) {
-      const k = THREE.MathUtils.smoothstep(ang, MID - MID_BLEND, MID + MID_BLEND);
-      if (k <= 0) continue;
-      // the curl runs clockwise in x-y; opening turns the far segments back, anticlockwise
-      const a = u * k, c = Math.cos(a), s2 = Math.sin(a), dx = w.x - jx, dy = w.y - jy;
-      w.x = jx + dx * c - dy * s2; w.y = jy + dx * s2 + dy * c;
-      w.applyMatrix4(fwd);
-      p[i * 3] = w.x; p[i * 3 + 1] = w.y; p[i * 3 + 2] = sd < 0 ? -w.z : w.z;
-    }
+    const mean = (a0, a1) => { const s = pts.filter(q => q.ang >= a0 && q.ang < a1); return s.length ? [s.reduce((t, q) => t + q.v.x, 0) / s.length, s.reduce((t, q) => t + q.v.y, 0) / s.length] : null; };
+    const heading = (a0, a1) => { const m0 = mean(a0, a0 + 0.12), m1 = mean(a1 - 0.12, a1); return m0 && m1 ? Math.atan2(m1[1] - m0[1], m1[0] - m0[0]) : null; };
+    const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+    // the finger's direction before the knuckles, between the joints, and after the next joint
+    const hPalm = heading(J_KNUCKLE - 0.6, J_KNUCKLE - 0.05), hProx = heading(J_KNUCKLE + 0.1, J_NEXT - 0.08), hMid = heading(J_NEXT + 0.08, J_NEXT + 0.55);
+    if (hPalm == null || hProx == null || hMid == null) return;
+    const inner = (h0, h1) => Math.PI - Math.abs(wrap(h1 - h0));
+    const R = Math.PI / 180;
+    // a turn that opens the joint is anticlockwise (the curl runs clockwise in x-y)
+    const turns = [[J_KNUCKLE, pose[0] * R - inner(hPalm, hProx)], [J_NEXT, pose[1] * R - inner(hProx, hMid)]];
+    const pivot = a => { const m = mean(a - 0.08, a + 0.08); return m ? { x: m[0], y: m[1] } : null; };
+    G.__fingerLast = { knuckleWas: +(inner(hPalm, hProx) / R).toFixed(1), nextWas: +(inner(hProx, hMid) / R).toFixed(1), turnDeg: turns.map(t => +(t[1] / R).toFixed(1)) }; // for tools/handclip.py
+    const pivots = turns.map(([a]) => pivot(a));
+    if (pivots.some(q => !q)) return;
+    turns.forEach(([ja, u], j) => {
+      const P = pivots[j], c = Math.cos(u), s2 = Math.sin(u);
+      const turn = q => { const dx = q.x - P.x, dy = q.y - P.y; q.x = P.x + dx * c - dy * s2; q.y = P.y + dx * s2 + dy * c; };
+      for (const q of pts) {
+        const k = THREE.MathUtils.smoothstep(q.ang, ja - J_BLEND, ja + J_BLEND);
+        if (k <= 0) continue;
+        if (k >= 1) turn(q.v);
+        else { const w = q.v.clone(); turn(w); q.v.lerp(w, k); }
+      }
+      for (let jj = j + 1; jj < pivots.length; jj++) turn(pivots[jj]); // the later joint moves with the finger
+    });
+    for (const q of pts) { const w = q.v.clone().applyMatrix4(fwd); p[q.i * 3] = w.x; p[q.i * 3 + 1] = w.y; p[q.i * 3 + 2] = sd < 0 ? -w.z : w.z; }
   }
   // debug: rebuild the arms' geometry after changing G.__thumb
   function rebuildArms() {
     for (const key of Object.keys(_armGeo)) {
       const G0 = _armGeo[key], [sd, ...T] = key.split(',').map(Number);
       delete _armGeo[key];
-      const G1 = armGeo(sd, T.slice(0, 4), T[4]);
+      const G1 = armGeo(sd, T.slice(0, 4), T[4] || T[5] ? [T[4], T[5]] : null);
       G0.attributes.position.array.set(G1.attributes.position.array); G0.attributes.position.needsUpdate = true; G0.computeVertexNormals();
       _armGeo[key] = G0;
     }
   }
   // one geometry per side and thumb bend (each car's wheel has its own thumb hole)
   function armGeo(sd, T, open) {
-    const key = [sd].concat(T || THUMB, [open === 'side' ? sideOpen() : open || 0]).map(x => +x.toFixed(4)).join(',');
+    const key = [sd].concat(T || THUMB, open || [0, 0]).map(x => +x.toFixed(4)).join(',');
     if (_armGeo[key]) return _armGeo[key];
     const A = armData(), G = new THREE.BufferGeometry(), n = A.n;
     const p = new Float32Array(A.car);
