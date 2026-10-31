@@ -446,7 +446,7 @@
   }
   // Each car's finger pose (fingerOpen): inside angles of the knuckles and of the joint after
   // them, in degrees. The W17's handles are deeper than the grip the glove was posed round.
-  const FINGER_OPEN = { w17: [145, 90] };
+  const FINGER_OPEN = { w17: [160, 130] };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
