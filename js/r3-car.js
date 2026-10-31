@@ -357,7 +357,7 @@
       body: Object.fromEntries(Object.entries(L.body).map(([k, g]) => [k, geo(g)])),
       wheels: Object.fromEntries(Object.entries(L.wheels).map(([k, w]) => [k, { c: w.c, r: w.r, w: w.w, parts: Object.fromEntries(Object.entries(w.parts).map(([m, g]) => [m, geo(g).G])) }])),
     })) };
-    for (const L of MODEL.lods) splitHalo(L.body);
+    for (const L of MODEL.lods) { splitHalo(L.body); rebuildPillar(L.body); }
     cutCockpit(MODEL.lods[0].body);
     // carbon and paint parts get box-projected UVs so the weave has somewhere to live
     for (const L of MODEL.lods) for (const id of [ID.carbon, ID.carbonGloss, ID.paint]) if (L.body[id]) boxUV(L.body[id].G, 1);
@@ -408,6 +408,49 @@
     H.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     H.setIndex(ind); H.computeBoundingSphere();
     body[ID.halo] = { G: H, zone: null };
+  }
+  // The halo's centre pillar, as the source model has it, is a few lumpy faces in the halo
+  // mesh plus a painted fairing that runs some 20 cm along the nose, so from the cockpit it
+  // reads as a strut that thickens toward its foot. On the car the pillar is a slim titanium
+  // strut of even width from the hoop down to a small mount on the chassis. Everything in the
+  // pillar's space below the hoop is cut from both meshes and a clean pillar put in: a gentle
+  // curve, 40 mm across and 40 mm deep all the way down, its top inside the hoop's underside
+  // and its foot sunk into the top of the chassis.
+  const PILLAR = [[0.918, 0.958], [0.968, 0.912], [1.022, 0.858], [1.078, 0.806], [1.125, 0.762]];
+  function rebuildPillar(body) {
+    const H = body[ID.halo];
+    if (!H) return;
+    const inside = (G, v) => { const p = G.attributes.position, x = p.getX(v), y = p.getY(v), z = Math.abs(p.getZ(v)); return x > 0.86 && x < 1.26 && z < 0.066 && y > 0.778 && y < 0.93; };
+    for (const id of [ID.halo, ID.paint]) {
+      const part = body[id]; if (!part) continue;
+      const G = part.G, idx = G.index.array, keep = [];
+      for (let t = 0; t < idx.length; t += 3) if (!(inside(G, idx[t]) && inside(G, idx[t + 1]) && inside(G, idx[t + 2]))) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+      G.setIndex(keep);
+    }
+    // the new pillar: an elliptical section swept down a smooth curve
+    const curve = new THREE.CatmullRomCurve3(PILLAR.map(([x, y]) => new THREE.Vector3(x, y, 0)));
+    const SEG = 24, RAD = 14, AZ = 0.02, AN = 0.02;
+    const G = H.G, pos = Array.from(G.attributes.position.array), nor = Array.from(G.attributes.normal.array), ind = Array.from(G.index.array);
+    const base = pos.length / 3;
+    for (let i = 0; i <= SEG; i++) {
+      const u = i / SEG, c = curve.getPointAt(u), t = curve.getTangentAt(u);
+      const n = new THREE.Vector3(-t.y, t.x, 0).normalize(); // in the car's centre plane, across the strut
+      for (let k = 0; k < RAD; k++) {
+        const a = k / RAD * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        pos.push(c.x + n.x * AN * ca, c.y + n.y * AN * ca, AZ * sa);
+        const nx = n.x * ca / AN, ny = n.y * ca / AN, nz = sa / AZ, l = Math.hypot(nx, ny, nz);
+        nor.push(nx / l, ny / l, nz / l);
+      }
+    }
+    for (let i = 0; i < SEG; i++) for (let k = 0; k < RAD; k++) {
+      const a = base + i * RAD + k, b = base + i * RAD + (k + 1) % RAD, c2 = a + RAD, d = b + RAD;
+      ind.push(a, c2, b, b, c2, d);
+    }
+    const N = new THREE.BufferGeometry();
+    N.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    N.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    N.setIndex(ind); N.computeBoundingSphere();
+    H.G = N;
   }
   function boxUV(G, size) {
     const p = G.attributes.position, n = G.attributes.normal, uv = new Float32Array(p.count * 2);
@@ -723,7 +766,10 @@
   // the top of the view and the centre pillar runs down to the nose (as on a real onboard);
   // the wheel is about 40 cm ahead and 15 cm below it, with the hands at quarter to three.
   const EYE = new THREE.Vector3(0.52, 0.81, 0), WHEEL_C = new THREE.Vector3(0.85, 0.68, 0);
-  const STEER_RATIO = 4.2; // steering wheel turn per unit of road-wheel angle (about +-100 degrees at full lock)
+  // steering wheel turn per unit of road-wheel angle: an F1 wheel turns about one full turn
+  // lock to lock (about +-180 degrees; a little more at Monaco) for some 20 degrees of front
+  // wheel, so full lock here (0.36 rad) is half a turn of the wheel
+  const STEER_RATIO = Math.PI / 0.36;
   const GRIP_X = 0.131; // grip centres from the wheel's centre line (the U grips' outer bars)
 
   // ---------- the wheel's screen: live data for the car being driven ----------
@@ -1568,7 +1614,7 @@
       const hz = F1.R3 && F1.R3.GFX.dispHz != null ? F1.R3.GFX.dispHz : 12;
       if ((hz > 0 && now - ck.disp.last > 1000 / hz) || !ck.disp.drawn) { ck.disp.last = now; ck.disp.drawn = true; drawDisplay(ck.disp, car); }
     }
-    let a = Math.max(-1.75, Math.min(1.75, -(steer || 0) * STEER_RATIO));
+    let a = Math.max(-Math.PI, Math.min(Math.PI, -(steer || 0) * STEER_RATIO));
     // From the driver's seat the wheel never sits dead still: the engine and the road come up
     // the column as a small, quick rotational buzz that grows with speed and turns into
     // sharp kicks over a kerb, and the hands, gripping it, shake with it. About a tenth of a
@@ -1689,5 +1735,5 @@
     scene.traverse(o => { const ck = o.userData && o.userData.cockpit; if (ck && ck.arms) { ck.steer = null; updateCockpit(o, 0); } });
   }
 
-  F1.R3Car = { armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, setCompound, setLod, updateCockpit, velHull, hasModel: () => !!model(), loft, box, beam, merge };
+  F1.R3Car = { model: () => model(), armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, setCompound, setLod, updateCockpit, velHull, hasModel: () => !!model(), loft, box, beam, merge };
 })(typeof window !== 'undefined' ? window : globalThis);
