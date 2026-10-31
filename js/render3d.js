@@ -681,6 +681,8 @@
       if (T.has('grass')) {
         const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);
         gm = macro(pbr(key, rep, { color: style === 'modern' ? '#f3dcc0' : '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
+        // desert sand: the photo drawn without a visible repeat, with relief from its own grains
+        if (style === 'modern') F1.R3S.noTile(gm, 1.4);
       } else gm = std({ map: style === 'park' ? T.grass(th.grassA, th.grassB) : T.ground(th.ground, th.groundN), roughness: 0.97 });
       gm.userData.wetK = [0.55, 0.25];
       MATS['ground_' + style] = gm;

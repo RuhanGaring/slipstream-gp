@@ -388,5 +388,42 @@
     });
   }
 
-  F1.R3S = { U, patch, patchTree, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
+  // ---------- photo tiles that do not repeat ----------
+  // A photo tile repeated over a field shows its blotches in a grid however good the photo. Here
+  // every sample is taken twice, from two copies of the tile shifted by amounts picked by a slow
+  // noise over the surface, and the two are blended where the noise moves from one pick to the
+  // next (favouring whichever is darker, so the seam follows the grains instead of a soft fade);
+  // the texture's own gradients are kept so filtering stays sharp (after Inigo Quilez,
+  // "texture repetition", technique 3). bump: relief from the photo itself (its brightness as
+  // height), sampled the same way, for a photo that comes without a normal map.
+  const NOTILE = [
+    'float ntH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+    'float ntN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+    '  return mix(mix(ntH(i), ntH(i + vec2(1.0, 0.0)), f.x), mix(ntH(i + vec2(0.0, 1.0)), ntH(i + vec2(1.0, 1.0)), f.x), f.y); }',
+    'vec4 noTile(sampler2D s, vec2 uv) {',
+    '  float k = ntN(uv * 0.55) * 0.65 + ntN(uv * 1.9 + 5.3) * 0.35;',
+    '  vec2 gx = dFdx(uv), gy = dFdy(uv);',
+    '  float l = k * 9.0, f = fract(l), ia = floor(l);',
+    '  vec2 oa = sin(vec2(3.0, 7.0) * ia), ob = sin(vec2(3.0, 7.0) * (ia + 1.0));',
+    '  vec4 a = textureGrad(s, uv + oa, gx, gy), b = textureGrad(s, uv + ob, gx, gy);',
+    '  return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * dot(a - b, vec4(1.0))));',
+    '}'].join('\n');
+  function noTile(m, bump) {
+    const prev = m.userData.patchExtra || null, key = m.userData.patchKey || '';
+    if (bump) { m.bumpMap = m.map; m.bumpScale = bump; }
+    m.userData.patchKey = key + '_nt' + (bump || '');
+    m.userData.patchExtra = sh => {
+      if (prev) prev(sh);
+      const C = THREE.ShaderChunk, swap = (chunk, from, to) => C[chunk].split(from).join(to);
+      sh.fragmentShader = NOTILE + '\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', swap('map_fragment', 'texture2D( map,', 'noTile( map,'))
+        .replace('#include <roughnessmap_fragment>', swap('roughnessmap_fragment', 'texture2D( roughnessMap,', 'noTile( roughnessMap,'))
+        .replace('#include <normal_fragment_maps>', swap('normal_fragment_maps', 'texture2D( normalMap,', 'noTile( normalMap,'))
+        .replace('#include <bumpmap_pars_fragment>', swap('bumpmap_pars_fragment', 'texture2D( bumpMap,', 'noTile( bumpMap,'));
+    };
+    m.needsUpdate = true;
+    return m;
+  }
+
+  F1.R3S = { U, patch, patchTree, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
 })(typeof window !== 'undefined' ? window : globalThis);

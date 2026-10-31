@@ -121,6 +121,54 @@ for (const [k, b] of Object.entries(WB)) {
   wheels[k] = { c: [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2], r, w: b[5] - b[2], box: [(b[0] + b[3]) / 2 - r * 1.03, (b[1] + b[4]) / 2 - r * 1.03, b[2] - 0.03, (b[0] + b[3]) / 2 + r * 1.03, (b[1] + b[4]) / 2 + r * 1.03, b[5] + 0.03] };
 }
 if (Object.keys(wheels).length !== 4) throw new Error('expected four wheels, found ' + Object.keys(wheels));
+// Each wheel's true axle. The models' front wheels stand at 3 to 5 degrees of camber: spun about a
+// straight axle, a tilted wheel wobbles like a buckled one. The axle is the direction in which the
+// tyre is thinnest (the smallest spread of its vertices); each wheel's geometry is stored turned so
+// that axle is its z, and the game tilts it back (q) before spinning it.
+{
+  const pts = { FL: [], FR: [], RL: [], RR: [] }, nrm = { FL: [], FR: [], RL: [], RR: [] };
+  for (const g of tyreTris) for (let t = 0; t < g.idx.length; t += 3) {
+    const i0 = g.idx[t] * 3, key = corner(g.pos[i0], g.pos[i0 + 2]);
+    for (let k = 0; k < 3; k++) { const i = g.idx[t + k] * 3; pts[key].push(g.pos[i], g.pos[i + 1], g.pos[i + 2]); nrm[key].push(g.nor[i], g.nor[i + 1], g.nor[i + 2]); }
+  }
+  // the smallest eigenvector of a 3x3 covariance, by power iteration on (trace I - C)
+  const smallest = (C, v0) => {
+    const tr = C[0][0] + C[1][1] + C[2][2];
+    let v = v0;
+    for (let it = 0; it < 400; it++) {
+      const w = [0, 1, 2].map(i => tr * v[i] - C[i][0] * v[0] - C[i][1] * v[1] - C[i][2] * v[2]), l = Math.hypot(...w);
+      v = w.map(x => x / l);
+    }
+    return v;
+  };
+  for (const [k, W] of Object.entries(wheels)) {
+    const P = pts[k], n = P.length / 3, m = [0, 0, 0], C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < P.length; i++) m[i % 3] += P[i] / n;
+    for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a][b] += (P[i * 3 + a] - m[a]) * (P[i * 3 + b] - m[b]) / n;
+    // a first guess from the tyre's shape, then the exact axle from the tread: every tread
+    // surface faces straight out from the axle, so the axle is the one direction none of the
+    // tread's normals has any of (the sidewalls, whose normals run along the axle, are left out)
+    let v = smallest(C, [0, 0, 1]);
+    const N = nrm[k], D = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < N.length; i += 3) {
+      const nx = N[i], ny = N[i + 1], nz = N[i + 2];
+      if (Math.abs(nx * v[0] + ny * v[1] + nz * v[2]) > 0.35) continue;
+      const a = [nx, ny, nz];
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) D[r][c] += a[r] * a[c];
+    }
+    v = smallest(D, v);
+    if (v[2] < 0) v = v.map(x => -x);
+    W.axle = v;
+    // R turns the axle onto z (geometry into the wheel frame); q, its inverse, is what the game applies
+    const ax = [v[1], -v[0], 0], s = Math.hypot(ax[0], ax[1]), c = v[2];
+    if (s < 1e-9) { W.R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]; W.q = [0, 0, 0, 1]; continue; }
+    const u = [ax[0] / s, ax[1] / s, 0], K = [[0, -u[2], u[1]], [u[2], 0, -u[0]], [-u[1], u[0], 0]];
+    W.R = [0, 1, 2].map(i => [0, 1, 2].map(j => (i === j ? 1 : 0) + s * K[i][j] + (1 - c) * [0, 1, 2].reduce((acc, k2) => acc + K[i][k2] * K[k2][j], 0)));
+    const qv = [-v[1], v[0], 0], qw = 1 + v[2], ql = Math.hypot(qv[0], qv[1], qw); // z onto the axle
+    W.q = [qv[0] / ql, qv[1] / ql, 0, qw / ql];
+  }
+}
+const toWheel = (W, p) => { const d = [p[0] - W.c[0], p[1] - W.c[1], p[2] - W.c[2]]; return W.R.map(r => r[0] * d[0] + r[1] * d[1] + r[2] * d[2]); };
 const groundY = Math.min(...Object.values(WB).map(b => b[1]));
 
 // ---------- the steering wheel: everything round the dash screen ----------
@@ -149,7 +197,16 @@ const isSwExcluded = n => /glass|cinture|number/i.test(n);
 const isSwMat = n => /steer|_sw|^sw_|lcd|led|kers|indicator|revs|whitelight|tag_|chrome|black|plastic|button|handle/i.test(n);
 
 // ---------- classify every component: body, a wheel, or the steering wheel ----------
-const parts = { body: new Map(), sw: new Map(), FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map() };
+// FLh etc: parts in a wheel's space that do not turn with it (brake ducts, upright ends): they
+// steer with the wheel but do not spin
+const parts = { body: new Map(), sw: new Map(), FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map(), FLh: new Map(), FRh: new Map(), RLh: new Map(), RRh: new Map() };
+// a part spins with its wheel only if it is round about the axle: its middle on the axle and as
+// tall as it is long, seen along the axle (tyre, rim, disc, nut)
+function spinsWith(W, g, c) {
+  const b = [1e9, 1e9, -1e9, -1e9];
+  for (const t of c.tris) for (let k = 0; k < 3; k++) { const i = g.idx[t + k] * 3, q = toWheel(W, [g.pos[i], g.pos[i + 1], g.pos[i + 2]]); b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); }
+  return Math.abs((b[0] + b[2]) / 2) < 0.012 && Math.abs((b[1] + b[3]) / 2) < 0.012 && Math.abs((b[2] - b[0]) - (b[3] - b[1])) < 0.025;
+}
 const push = (bucket, mat, g, tris) => { const a = bucket.get(mat) || []; bucket.set(mat, a); for (const t of tris) a.push(g.idx[t], g.idx[t + 1], g.idx[t + 2]); };
 for (const [mat, g] of groups) {
   const n = mname(mat);
@@ -165,7 +222,7 @@ for (const [mat, g] of groups) {
     let dest = 'body';
     if (mat === lcd.mat || (!isSwExcluded(n) && inBox(c.b, SWB) && (isSwMat(n) || c.b[3] - Lc[0] < 0.075))) dest = 'sw';
     if (dest === 'sw' && process.env.SWDEBUG) console.log('  sw', n.padEnd(24), String(c.tris.length).padStart(5), 'x', (c.b[0] - Lc[0]).toFixed(3), (c.b[3] - Lc[0]).toFixed(3), 'y', (c.b[1] - Lc[1]).toFixed(3), (c.b[4] - Lc[1]).toFixed(3), 'z', c.b[2].toFixed(3), c.b[5].toFixed(3));
-    else for (const [k, W] of Object.entries(wheels)) if (inBox(c.b, W.box)) { dest = k; break; }
+    else for (const [k, W] of Object.entries(wheels)) if (inBox(c.b, W.box)) { dest = spinsWith(W, g, c) ? k : k + 'h'; break; }
     push(parts[dest], mat, g, c.tris);
   }
 }
@@ -267,7 +324,9 @@ function compact(G) {
   return Object.assign({}, G, { pos, nor, uv, idx: Uint32Array.from(G.idx, i => map[i]) });
 }
 const shiftTf = (p, n) => [[p[0] + DX, p[1] + DY, p[2]], n];
-const wheelTf = W => (p, n) => [[p[0] - W.c[0], p[1] - W.c[1], p[2] - W.c[2]], n];
+// spinning parts: in the wheel's own frame (axle along z); steer-only parts: offset from the centre
+const wheelTf = W => (p, n) => [toWheel(W, p), W.R.map(r => r[0] * n[0] + r[1] * n[1] + r[2] * n[2])];
+const hubTf = W => (p, n) => [[p[0] - W.c[0], p[1] - W.c[1], p[2] - W.c[2]], n];
 const swTf = (p, n) => [toW(p[0], p[1], p[2]), dirW(n[0], n[1], n[2])];
 
 // interior and small cockpit-only parts are left out of the low detail level
@@ -309,7 +368,13 @@ function lod(level) {
       if (!G) continue;
       triCount[level] += G.idx.length / 3; ps.push(pack(G));
     }
-    W[k] = { c, r: w.r, w: w.w, parts: ps };
+    const hub = [];
+    for (const [mat, ix] of parts[k + 'h']) {
+      const G = simplify(sub(mat, ix, hubTf(w)), level === 0 ? 0.45 : 0.1, level === 0 ? 0.001 : 0.008, level > 0);
+      if (!G) continue;
+      triCount[level] += G.idx.length / 3; hub.push(pack(G));
+    }
+    W[k] = { c, r: w.r, w: w.w, q: w.q, parts: ps, hub };
   }
   return { body, wheels: W };
 }
@@ -346,7 +411,7 @@ function sample(mat, u, v) {
   }
   for (const k of ['FL', 'FR', 'RL', 'RR']) {
     const w = wheels[k];
-    for (const [mat, ix] of parts[k]) addG(simplify(sub(mat, ix, wheelTf(w)), 0.05, 0.04, true), mat, [w.c[0] + DX, w.c[1] + DY, w.c[2]]);
+    for (const bucket of [parts[k], parts[k + 'h']]) for (const [mat, ix] of bucket) addG(simplify(sub(mat, ix, shiftTf), 0.05, 0.04, true), mat, [0, 0, 0]);
   }
   const G = { mat: null, pos: Float32Array.from(pos), nor: Float32Array.from(nor), uv: new Float32Array(pos.length / 3 * 2), idx: Uint32Array.from(idx) };
   triCount[2] = idx.length / 3;

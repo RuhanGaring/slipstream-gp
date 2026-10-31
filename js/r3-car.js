@@ -350,7 +350,7 @@
       id, C, meta, mats,
       lods: meta.lods.map(L => ({
         body: L.body.map(part),
-        wheels: Object.fromEntries(Object.entries(L.wheels).map(([k, w]) => [k, { c: w.c, r: w.r, w: w.w, parts: w.parts.map(part) }])),
+        wheels: Object.fromEntries(Object.entries(L.wheels).map(([k, w]) => [k, { c: w.c, r: w.r, w: w.w, q: w.q || [0, 0, 0, 1], parts: w.parts.map(part), hub: (w.hub || []).map(part) }])),
       })),
       far: C.geo(meta.far),
       sw: meta.sw, swParts: meta.sw.parts.map(part),
@@ -497,18 +497,24 @@
     }
     return best && best.slice(0, 5);
   }
-  // The thumb's bend for a car's wheel: the posed thumb turned about its root, along the shortest
-  // arc, so it points from its root to the middle of that wheel's thumb hole (a little in front of
-  // the grip's axis, into the hole). The same bend as the earlier wheel's, aimed at this hole.
+  // The thumb's bend for a car's wheel: the posed thumb curled about its root, as on the earlier
+  // wheel (THUMB), by the angle that runs it through the middle of that wheel's thumb hole (a
+  // little in front of the grip's axis). The hole lies about halfway along the thumb, so the thumb
+  // passes through it and its tip comes out beyond. Only the curl changes: a turn about any other
+  // axis twists the thumb's mesh and folds it. The angle stays within a natural thumb's range.
   function thumbFor(MD) {
     if (!MD || !MD.hole || !armData()) return THUMB;
     const [gx, gy, gz] = MD.grip;
     const tgt = new THREE.Vector3(MD.hole[0], MD.hole[1], gz - 0.006).applyMatrix4(handMatrix(1, gx, gy, gz).invert());
-    const root = new THREE.Vector3(...TH_ROOT), d0 = new THREE.Vector3(...TH_TIP).sub(root).normalize(), d1 = tgt.sub(root).normalize();
-    const ax = new THREE.Vector3().crossVectors(d0, d1), ang = Math.acos(Math.max(-1, Math.min(1, d0.dot(d1))));
-    if (ax.lengthSq() < 1e-8) return THUMB;
-    ax.normalize();
-    return [ax.x, ax.y, ax.z, Math.min(ang, 1.7)];
+    const root = new THREE.Vector3(...TH_ROOT), tip = new THREE.Vector3(...TH_TIP), ax = new THREE.Vector3(THUMB[0], THUMB[1], THUMB[2]).normalize();
+    const seg = new THREE.Line3(root, new THREE.Vector3()), near = new THREE.Vector3();
+    let best = THUMB[3], bestD = 1e9;
+    for (let a = 0.4; a <= 1.3; a += 0.01) {
+      seg.end.copy(tip).sub(root).applyAxisAngle(ax, a).add(root);
+      const d = seg.closestPointToPoint(tgt, true, near).distanceTo(tgt);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return [ax.x, ax.y, ax.z, best];
   }
   // a model material as a three.js material
   function carMat(o, C, hue) {
@@ -555,15 +561,19 @@
   function wheelsLowGeo(MD) {
     if (MD.wl) return MD.wl;
     const L = MD.lods[MD.lods.length - 1], by = new Map();
+    const v = new THREE.Vector3(), nv = new THREE.Vector3(), q = new THREE.Quaternion(), q0 = new THREE.Quaternion();
     for (const key of ['FL', 'FR', 'RL', 'RR']) {
-      const c = MD.lods[0].wheels[key].c;
-      for (const { G: Gw, m } of L.wheels[key].parts) {
+      const W = L.wheels[key], c = MD.lods[0].wheels[key].c;
+      q.fromArray(W.q);
+      for (const { G: Gw, m, hub } of W.parts.map(x => Object.assign({ hub: false }, x)).concat(W.hub.map(x => Object.assign({ hub: true }, x)))) {
         const b = by.get(m) || { pos: [], nor: [], uv: [], idx: [] }, p = Gw.attributes.position, n = Gw.attributes.normal, t = Gw.attributes.uv, base = b.pos.length / 3;
         by.set(m, b);
+        const qq = hub ? q0 : q;
         // read through the attributes: the normals are packed (normalised bytes)
         for (let i = 0; i < p.count; i++) {
-          b.pos.push(p.getX(i) + c[0], p.getY(i) + c[1], p.getZ(i) + c[2]);
-          b.nor.push(n.getX(i), n.getY(i), n.getZ(i));
+          v.fromBufferAttribute(p, i).applyQuaternion(qq); nv.fromBufferAttribute(n, i).applyQuaternion(qq);
+          b.pos.push(v.x + c[0], v.y + c[1], v.z + c[2]);
+          b.nor.push(nv.x, nv.y, nv.z);
           b.uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
         }
         for (let i = 0; i < Gw.index.count; i++) b.idx.push(base + Gw.index.getX(i));
@@ -609,14 +619,23 @@
       const W0 = MD.lods[0].wheels[key];
       const pivot = new THREE.Group();
       pivot.position.set(W0.c[0], W0.c[1], W0.c[2]);
+      // the wheel's camber: the spinning group turns about the wheel's own (tilted) axle
+      const tilt = new THREE.Group();
+      tilt.quaternion.fromArray(W0.q);
+      pivot.add(tilt);
       const spin = new THREE.Group();
-      pivot.add(spin);
-      const lodMeshes = [];
+      tilt.add(spin);
+      const lodMeshes = [], hubs = [];
       MD.lods.forEach((L, lod) => {
         const grp = new THREE.Group();
         for (const p of L.wheels[key].parts) if (wheelPart(p)) grp.add(meshOf(p.G, p.m));
         grp.visible = lod === 0;
         spin.add(grp); lodMeshes.push(grp);
+        // brake ducts and upright ends: they steer with the wheel but do not spin
+        const hg = new THREE.Group();
+        for (const p of L.wheels[key].hub) hg.add(meshOf(p.G, p.m));
+        hg.visible = lod === 0;
+        pivot.add(hg); hubs.push(hg);
       });
       // compound marking on both sidewalls
       const stripes = [];
@@ -626,7 +645,7 @@
         spin.add(t); stripes.push(t);
       }
       root.add(pivot);
-      pivot.userData = { spin, front: key[0] === 'F', stripes, lods: lodMeshes };
+      pivot.userData = { spin, front: key[0] === 'F', stripes, lods: lodMeshes, hubs };
       wheels.push(pivot);
     }
     // the driver's number on the nose (the model's own race numbers were left out), lying on
@@ -691,7 +710,11 @@
     // the compound rings on the sidewalls are a centimetre wide: full detail only. At low
     // detail the four wheels are the merged pair of meshes (unless one has come off in a crash)
     const merged = L === 1 && !!u.wheelsLow && u.wheels.every(w => w.userData.lods.length);
-    for (const w of u.wheels) { w.userData.lods.forEach((g, k) => put(g, k === L && !merged, w.userData.spin)); w.userData.stripes.forEach(m => { m.visible = lod === 0; }); }
+    for (const w of u.wheels) {
+      w.userData.lods.forEach((g, k) => put(g, k === L && !merged, w.userData.spin));
+      if (w.userData.hubs) w.userData.hubs.forEach((g, k) => put(g, k === L && !merged, w));
+      w.userData.stripes.forEach(m => { m.visible = lod === 0; });
+    }
     if (u.wheelsLow) put(u.wheelsLow, merged, root);
     if (u.far) u.far.visible = far;
     if (u.nose) u.nose.visible = !far;
