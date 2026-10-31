@@ -359,6 +359,7 @@
     };
     MD.grip = gripOf(MD.swParts);
     MD.hole = HOLE_AT[id] || (MD.grip ? holeOf(MD.swParts, MD.grip) : null);
+    if (MD.grip && GRIP_FIT[id]) MD.grip = MD.grip.map((g, i) => g + GRIP_FIT[id][i]);
     MD.thumb = thumbFor(MD);
     built.set(key, MD);
     return MD;
@@ -444,6 +445,15 @@
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
+  // Each car's hand placement, fitted to its wheel: the glove was posed round a slim tube, and on
+  // wheels whose grips are deep or whose face stands out behind the grip the fingers went into
+  // the grip. Found by a search (the wheel voxelised, the glove's four fingers posed at shifts
+  // of the grip point) for the least depth of finger inside the wheel while the hand keeps at
+  // least 85 per cent of its contact with it. [x, y, z] in metres, added to the measured grip.
+  const GRIP_FIT = {
+    mac26: [-0.016, 0.015, -0.03], sf26: [-0.016, 0.015, -0.015], w17: [-0.016, 0.015, -0.045], mcl40: [0, -0.015, 0.01],
+    amr26: [0, 0, -0.055], fw48: [0.016, 0, -0.01], vf26: [0.016, 0, -0.01], rb22: [0, 0, 0.015], r26: [0.004, 0.015, -0.005],
+  };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
@@ -875,7 +885,8 @@
   // forearm toward the wrist (down and back toward the elbow in the tub), z = x * y. The
   // left is the mirror image.
   // gx, gy: the grip's centre in the wheel's frame (each car's own wheel has its own span)
-  function handMatrix(sd, gx = GRIP_X, gy = -0.019, gz = 0) {
+  // k: the hand's size about the grip (a car whose grips are bigger than the fist was posed round)
+  function handMatrix(sd, gx = GRIP_X, gy = -0.019, gz = 0, k = 1) {
     // x is the palm's normal: inboard onto the grip, turned a little toward the nose so the
     // back of the glove faces out and back toward the driver
     const X = new THREE.Vector3(...(G.__handX || [-0.9, 0, -0.45])).normalize();
@@ -888,6 +899,7 @@
     const M = new THREE.Matrix4().makeTranslation(gx, gy, gz)
       .multiply(new THREE.Matrix4().makeRotationZ(0.06))
       .multiply(new THREE.Matrix4().makeBasis(X, Y, Z));
+    if (k !== 1) M.multiply(new THREE.Matrix4().makeScale(k, k, k));
     return sd > 0 ? M : new THREE.Matrix4().makeScale(-1, 1, 1).multiply(M);
   }
   // The driver's tub: a deep carbon well inside the cockpit opening, wide enough for the elbows.
@@ -1501,7 +1513,7 @@
     // straight, as in onboard footage. Turning about the handle keeps the palm wrapped on it:
     // a roll in the wheel's plane instead swings the heel of the hand into the wheel body.
     // A small part of the turn is still taken up in the wheel's plane.
-    const H = handMatrix(1, ck.grip[0], ck.grip[1], ck.grip[2]), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
+    const H = handMatrix(1, ck.grip[0], ck.grip[1], ck.grip[2], ck.grip[3] || 1), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
     if (kn > 0) {
       _gp.setFromMatrixPosition(H);
       const twist = (G.__handTip != null ? G.__handTip : -0.9) * kn * Math.sign(sp), roll = (G.__handRoll != null ? G.__handRoll : 0.2) * kn;
