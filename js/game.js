@@ -145,7 +145,7 @@
   };
   tl.addEventListener('pointerup', lift); tl.addEventListener('pointercancel', lift);
   function showTouch() {
-    const on = Game.mobile() && Game.state === 'race' && !Game.paused;
+    const on = Game.mobile() && Game.state === 'race' && !Game.paused && !Game.spectate;
     tl.classList.toggle('show', on);
     tl.classList.toggle('tilt', useTilt());
     // sim races: the pit-strategy button, and shift buttons when the gears are manual
@@ -1106,7 +1106,7 @@
             if (Game.spectate) {
               // nobody to drive: the player's car races itself, the director picks the shots
               race.autoPlayer = true;
-              F1.Viewer.start('spectate', race, { director: true, mode: 'tv', focusId: race.cars[0].id });
+              F1.Viewer.start('spectate', race, { director: true, mode: 'tv', focusId: race.cars[0].id, onExit: () => pause() });
             } else if (F1.Viewer) F1.Viewer.stop();
             document.getElementById('hud').classList.toggle('off', !Game.hudOn || Game.spectate);
             const p = race.player;
@@ -1210,14 +1210,16 @@
     document.getElementById('shade').className = 'pause';
     unlockMouse();
     setBlur(true);
+    if (F1.Viewer) F1.Viewer.hide(true);
     UIm.go('pause', { race: Game.race });
   }
   Game.showPause = () => UIm.go('pause', { race: Game.race });
   // the pause screen again, after a replay watched from it
-  Game.backToPause = () => { Game.paused = true; document.getElementById('shade').className = 'pause'; setBlur(true); UIm.go('pause', { race: Game.race }); };
+  Game.backToPause = () => { if (F1.Viewer) F1.Viewer.hide(true); Game.paused = true; document.getElementById('shade').className = 'pause'; setBlur(true); UIm.go('pause', { race: Game.race }); };
   Game.backToResults = screen => { document.getElementById('shade').className = 'full'; screen(); };
   Game.resume = () => {
     setBlur(false);
+    if (F1.Viewer) F1.Viewer.hide(false);
     Game.paused = false;
     if (mouse.on) { mouse.v = 0; lockMouse(); }
     UIm.hide();
@@ -1242,7 +1244,7 @@
     document.getElementById('pitpanel').classList.remove('show');
     if (Game.replayFrom !== 'race') Audio.startRace();
     const me = race.player;
-    F1.Viewer.start('replay', race, { player: Game.replay, mode: Game.spectate ? 'tv' : Game.settings.camera, focusId: me ? me.id : race.cars[0].id, director: false });
+    F1.Viewer.start('replay', race, { player: Game.replay, mode: Game.spectate ? 'tv' : Game.settings.camera, focusId: me ? me.id : race.cars[0].id, director: false, onExit: () => exitReplay() });
   };
   function exitReplay() {
     const P = Game.replay;
@@ -1250,7 +1252,7 @@
     P.restore();
     Game.replay = null;
     F1.Viewer.stop();
-    if (Game.spectate && Game.replayFrom === 'race') F1.Viewer.start('spectate', Game.race, { director: true, mode: 'tv' });
+    if (Game.spectate && Game.replayFrom === 'race') F1.Viewer.start('spectate', Game.race, { director: true, mode: 'tv', onExit: () => pause() });
     if (Game.replayFrom !== 'race') Audio.stopRace();
     Game.state = Game.replayFrom === 'race' ? 'race' : 'results';
     if (Game.replayBack) Game.replayBack();

@@ -23,7 +23,35 @@
   ];
 
   // ---------- generic screen plumbing ----------
+  // Compact layout for phones (mobile mode, or any small screen): screens scroll instead of
+  // being laid out for a monitor, the keyboard hints give way to a bar of real buttons along
+  // the bottom (back, and the screen's main action), and a tap on a circuit, team or driver
+  // shows it first; SELECT, or a second tap, takes it.
+  const compact = () => !!((F1.Game && F1.Game.mobile && F1.Game.mobile()) || innerWidth < 900 || innerHeight < 520);
+  function applyCompact() { document.body.classList.toggle('compact', compact()); }
+  addEventListener('resize', applyCompact);
+  function actionBar(scr) {
+    if (!scr.back && !scr.primary && !scr.pickable) return;
+    const bar = h('div', 'm-bar');
+    if (scr.back) {
+      const b = h('button', 'm-btn m-back', '<span class="a">&#8592;</span>BACK');
+      b.addEventListener('click', () => { if (UI.cur !== scr) return; Audio.ui.back(); scr.back(); });
+      bar.appendChild(b);
+    }
+    const label = scr.primary ? scr.primary.label : scr.pickable ? 'SELECT' : null;
+    if (label) {
+      const b = h('button', 'm-btn m-go', label + '<span class="a">&#8594;</span>');
+      b.addEventListener('click', () => {
+        if (UI.cur !== scr) return;
+        Audio.ui.select();
+        if (scr.primary) scr.primary.fn(); else { const it = UI.items[UI.focus]; if (it && it.activate) it.activate(); }
+      });
+      bar.appendChild(b);
+    }
+    scr.el.appendChild(bar);
+  }
   function show(id, build, opts = {}) {
+    applyCompact();
     const root = UI.root;
     const old = UI.cur;
     if (old) {
@@ -35,15 +63,21 @@
     scr.id = id;
     scr.el.id = 'scr-' + id;
     scr.el.classList.add('scr');
+    // screens whose items preview on focus (circuits, teams, drivers) pick with SELECT on a phone
+    scr.pickable = scr.pickable != null ? scr.pickable : (scr.items || []).some(it => it.onFocus && it.activate);
+    actionBar(scr);
     root.appendChild(scr.el);
     UI.cur = scr;
     UI.items = scr.items || [];
     UI.focus = scr.focus || 0;
     requestAnimationFrame(() => requestAnimationFrame(() => scr.el.classList.add('on')));
     UI.items.forEach((it, k) => {
-      it.el.addEventListener('mouseenter', () => { if (UI.cur === scr && UI.focus !== k) { setFocus(k); } });
+      // (not on a phone: a tap fires a hover first, which would make every first tap a pick)
+      it.el.addEventListener('mouseenter', () => { if (UI.cur === scr && UI.focus !== k && !document.body.classList.contains('compact')) { setFocus(k); } });
       it.el.addEventListener('click', ev => {
         if (UI.cur !== scr) return;
+        // on a phone the first tap on a previewable item only shows it
+        if (document.body.classList.contains('compact') && scr.pickable && it.onFocus && UI.focus !== k && !it.right) { setFocus(k); return; }
         setFocus(k);
         if (it.right && ev.target.classList.contains('ar-l')) { it.left(); return; }
         if (it.right && ev.target.classList.contains('ar-r')) { it.right(); return; }
@@ -549,7 +583,8 @@
       if (cv) requestAnimationFrame(() => drawTrackMap(cv, F1.Race.getTrack(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
     }
     updSummary();
-    return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1 };
+    return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1, pickable: false,
+      primary: { label: kind === 'tt' ? 'START SESSION' : kind === 'champ' ? 'START CHAMPIONSHIP' : kind === 'weekend' ? 'START WEEKEND' : kind === 'spectate' ? 'START WATCHING' : 'START RACE', fn: () => F1.Game.startFromFlow() } };
   };
 
   // ---------- settings draft and APPLY ----------
@@ -882,7 +917,7 @@
     if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('results', o))));
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h', back: () => {} };
+    return { el, items, nav: 'h' };
   };
 
   S.standings = o => {
@@ -910,7 +945,7 @@
     else { mk('NEXT ROUND  ' + F1.Tracks.DEFS[ch.round + 1].name.toUpperCase(), () => F1.Game.champNext()); mk('QUIT TO MENU', () => F1.Game.quitToMenu()); }
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h', back: () => {} };
+    return { el, items, nav: 'h' };
   };
 
   // qualifying session classification, with the knockout line
@@ -937,7 +972,7 @@
     mk(o.round ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu());
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h', back: () => {} };
+    return { el, items, nav: 'h' };
   };
 
   function go(id, opts) { return show(id, S[id], opts); }

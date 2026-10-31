@@ -1,0 +1,134 @@
+/* Phones: the compact layout (body.compact, set by js/ui.js in mobile mode or on a small
+   screen). Every menu screen becomes one scrolling column, sized for a thumb, with a bar of
+   real buttons along the bottom (back, and the screen's main action) in place of the
+   keyboard hints. */
+
+/* the bottom action bar */
+.m-bar { display: none; }
+body.compact .m-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 10px;
+  padding: 18px max(12px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(8, 8, 12, 0), rgba(8, 8, 12, .9) 40%); pointer-events: none; }
+.m-btn { pointer-events: auto; height: 50px; border: 0; padding: 0 18px; display: flex; align-items: center; gap: 10px; font: 900 italic 16px/1 var(--font); letter-spacing: .08em;
+  text-transform: uppercase; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.m-btn .a { font-style: normal; font-size: 20px; }
+.m-back { background: var(--carbon-2); color: #fff; }
+.m-go { flex: 1; justify-content: space-between; background: var(--f1); color: #fff; }
+.m-btn:active { transform: scale(.98); filter: brightness(1.15); }
+body.compact .foot { display: none; }
+body.compact .scr .btn.go { display: none; } /* the bar carries it */
+
+/* screens scroll as one column */
+body.compact .scr { overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
+body.compact .scr::-webkit-scrollbar { display: none; }
+body.compact .wk-body, body.compact #scr-setup .wk-body, body.compact #scr-mode .wk-body, body.compact .tm .wk-body { position: relative; left: auto; right: auto; top: auto; bottom: auto; width: auto;
+  padding: 62px max(14px, env(safe-area-inset-right)) 92px max(14px, env(safe-area-inset-left)); }
+body.compact .menu-wrap, body.compact #scr-settings .menu-wrap, body.compact #scr-controls .menu-wrap, body.compact #scr-gfxadv .menu-wrap,
+body.compact #scr-results .menu-wrap, body.compact #scr-standings .menu-wrap, body.compact #scr-pause .menu-wrap {
+  position: relative; left: auto; top: auto; bottom: auto; width: auto; overflow: visible; justify-content: flex-start;
+  padding: calc(20px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 92px max(16px, env(safe-area-inset-left)); }
+body.compact .pg-t { font-size: 28px; margin-bottom: 14px; }
+body.compact .h1, body.compact #scr-pause .h1 { font-size: 34px; margin-bottom: 14px; }
+
+/* the header: event name and the current step only */
+body.compact .hdr { position: fixed; height: 48px; padding: 0 max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); gap: 10px; z-index: 20;
+  background: rgba(8, 8, 12, .88); backdrop-filter: blur(6px); }
+body.compact .hdr-ev { gap: 10px; font-size: 11px; min-width: 0; }
+body.compact .hdr-ev .mark { font-size: 13px; }
+body.compact .hdr-ev .mark i { width: 18px; height: 9px; }
+body.compact .hdr-ev .ev { padding-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.compact .hdr-ev .ev.dim { display: none; }
+body.compact .steps li { display: none; }
+body.compact .steps li.cur { display: flex; font-size: 11px; height: 26px; padding: 0 16px 0 12px; }
+
+/* title and main menu */
+body.compact .brand .w1 { font-size: clamp(36px, 11vw, 64px); }
+body.compact .brand .w2 { font-size: 13px; letter-spacing: .4em; }
+body.compact #scr-title .stage { left: max(18px, env(safe-area-inset-left)); right: 18px; }
+body.compact #scr-title .press { margin-top: 30px; }
+body.compact #scr-title .legal { left: 18px; right: 18px; bottom: calc(14px + env(safe-area-inset-bottom)); font-size: 10px; }
+body.compact #scr-main .brand { margin-bottom: 18px !important; }
+body.compact #scr-main .brand .w1 { font-size: 40px !important; }
+body.compact .mi { font-size: 21px; padding: 10px 0 10px 18px; transform: none !important; }
+body.compact .mi small { max-height: none; opacity: .8; transform: none; font-size: 12px; margin-top: 2px; }
+body.compact .mi.f small { opacity: 1; }
+
+/* handling cards: side by side in landscape, stacked in portrait */
+body.compact .cards { gap: 10px; }
+body.compact .card { min-height: 0; padding: 18px 18px 16px; transform: none !important; }
+body.compact .card h3 { font-size: 30px; }
+body.compact .card .tag { margin: 4px 0 10px; font-size: 11px; }
+body.compact .card p { font-size: 13px; margin-bottom: 10px; }
+body.compact .card ul { font-size: 12px; gap: 5px; }
+body.compact .keys-big { display: none; }
+@media (orientation: portrait) { body.compact .cards { flex-direction: column; } }
+
+/* circuits: the card, then the calendar as a swipeable strip */
+body.compact .trk { display: block; }
+body.compact .trk-map { display: none; }
+body.compact .trk-name { font-size: clamp(30px, 8vw, 46px); }
+body.compact .trk-meta { margin-top: 8px; font-size: 11px; gap: 8px; flex-wrap: wrap; }
+body.compact .trk-blurb { font-size: 13px; margin: 8px 0 12px; }
+body.compact .trk-stats { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); width: auto; }
+body.compact .trk-stats div { padding: 8px 12px; }
+body.compact .trk-stats b { font-size: 19px; }
+body.compact .rail { position: relative; left: auto; right: auto; bottom: auto; height: 150px; margin: -78px 0 0; padding: 14px max(14px, env(safe-area-inset-left)) 6px; scroll-snap-type: x proximity;
+  -webkit-mask-image: none; mask-image: none; }
+body.compact .tile { flex-basis: 150px; height: 124px; scroll-snap-align: start; }
+body.compact .tile.f { transform: translateY(-6px); }
+
+/* teams and drivers: the list, then the team card below it */
+body.compact .tr-row { height: 48px; transform: none !important; }
+body.compact .tr-row .nm { font-size: 16px; }
+body.compact .tm-card { position: relative; right: auto; bottom: auto; width: auto; margin: -80px max(14px, env(safe-area-inset-right)) 96px max(14px, env(safe-area-inset-left)); padding: 16px 16px 14px; }
+body.compact .tc-icon { max-height: 90px; object-fit: contain; }
+body.compact .tc-name { font-size: 26px; }
+body.compact .mtr { grid-template-columns: 96px 1fr; }
+body.compact .dr-card { height: auto; min-height: 92px; padding: 12px 16px; column-gap: 14px; transform: none !important; }
+body.compact .dr-card .no { font-size: 62px; min-width: 72px; }
+body.compact .dr-card .dn { font-size: 22px; }
+body.compact .dr-card .meta { margin-top: 4px; font-size: 11px; }
+body.compact #shade.on.show { background: rgba(8, 8, 12, .72); }
+
+/* race setup and settings: option rows a thumb can work */
+body.compact .two, body.compact #scr-setup .two { display: flex; flex-direction: column; gap: 14px; height: auto; }
+body.compact #scr-setup .opts { overflow: visible; padding: 0; -webkit-mask-image: none; mask-image: none; }
+body.compact .opt { grid-template-columns: minmax(0, 1fr) minmax(150px, 46%); min-height: 54px; padding: 6px 6px 6px 14px; }
+body.compact .opt .on { font-size: 14px; }
+body.compact .opt .on small { font-size: 11px; }
+body.compact .opt .val { grid-template-columns: 44px 1fr 44px; font-size: 13px; }
+body.compact .opt .ar { height: 40px; display: grid; place-items: center; font-size: 15px; }
+body.compact .weekend { width: 100%; }
+body.compact .wk-trk { grid-template-columns: 1fr 110px; padding: 14px 16px 10px; }
+body.compact .wk-trk canvas { width: 110px; height: 70px; }
+body.compact .wk-drv { padding: 10px 16px; }
+body.compact .wk-grid div { padding: 8px 16px; }
+body.compact #scr-settings .two, body.compact #scr-gfxadv .two { display: flex; flex-direction: column; }
+body.compact .ctl-grid { grid-template-columns: 1fr; gap: 0; }
+body.compact .ctl { font-size: 14px; padding: 9px 10px; }
+
+/* pause, results, qualifying */
+body.compact .pause-info { position: relative; right: auto; top: auto; transform: none; width: auto; margin: 0 max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left)); }
+body.compact .podium { gap: 6px; margin-bottom: 10px; }
+body.compact .pod { padding: 10px 10px; }
+body.compact .pod .pp { font-size: 26px; }
+body.compact .pod .pd { font-size: 14px; }
+body.compact .pod .pt { font-size: 10px; }
+body.compact table.res { font-size: 12px; }
+body.compact table.res th, body.compact table.res td { padding: 6px 7px; }
+body.compact .menu-wrap > div[style*="max-height"] { max-height: none !important; overflow-x: auto !important; }
+body.compact .res-actions { flex-wrap: wrap; }
+body.compact .res-actions .btn { flex: 1 1 160px; height: 50px; font-size: 15px; }
+@media (orientation: portrait) {
+  body.compact table.res th:nth-child(3), body.compact table.res td:nth-child(3), body.compact table.res th:nth-child(7), body.compact table.res td:nth-child(7) { display: none; }
+}
+
+/* loading: the title card fits the screen */
+body.compact #scr-loading .ld-num { font-size: 26vh; }
+body.compact #scr-loading .ld-left { left: max(18px, env(safe-area-inset-left)); right: 18px; top: calc(14px + env(safe-area-inset-top)); width: auto; gap: 8px; }
+body.compact #scr-loading .ld-track { font-size: clamp(30px, 8vw, 52px); }
+body.compact #scr-loading .ld-blurb, body.compact #scr-loading .ld-tip { display: none; }
+body.compact #scr-loading .ld-stats b { font-size: 16px; }
+body.compact #scr-loading .ld-stats div { padding: 6px 10px; }
+body.compact #scr-loading .ld-foot { left: 18px; right: 18px; bottom: calc(16px + env(safe-area-inset-bottom)); }
+body.compact #scr-loading .ld-prog { width: 100%; }
+body.compact #scr-loading .ld-learn { font-size: 10px; }

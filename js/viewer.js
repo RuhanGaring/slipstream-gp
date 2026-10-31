@@ -95,9 +95,9 @@
       <div class="vw-tower"></div>
       <div class="vw-card"><div class="vw-pos"></div><div class="vw-who"><div class="vw-name"></div><div class="vw-team"></div></div>
         <div class="vw-tel"><div class="vw-spd"><b></b><small>KM/H</small></div><div class="vw-gear"></div><div class="vw-ped"><i class="vw-thr"></i><i class="vw-brk"></i></div><div class="vw-drs">DRS</div></div><div class="vw-gaps"></div></div>
-      <div class="vw-cam"><span class="vw-camn"></span><span class="vw-dir">DIRECTOR</span></div>
+      <div class="vw-cam"><span class="vw-dir" title="Director (D)">DIRECTOR</span><span class="vw-camn" title="Next camera (C)"></span><button class="vw-x" title="Esc"></button></div>
       <div class="vw-bar">
-        <div class="vw-ctl"><button class="vw-b vw-back" title="5 s back (J)">&#9664;&#9664;</button><button class="vw-b vw-play" title="Play / pause (Space)"></button><button class="vw-b vw-fwd" title="5 s on (L)">&#9654;&#9654;</button><span class="vw-rate"></span></div>
+        <div class="vw-ctl"><button class="vw-b vw-pev" title="Previous event (B)">&#8676;</button><button class="vw-b vw-back" title="5 s back (J)">&#9664;&#9664;</button><button class="vw-b vw-play" title="Play / pause (Space)"></button><button class="vw-b vw-fwd" title="5 s on (L)">&#9654;&#9654;</button><button class="vw-b vw-nev" title="Next event (N)">&#8677;</button><button class="vw-b vw-rate" title="Speed ([ and ])"></button></div>
         <div class="vw-tl"><div class="vw-laps"></div><div class="vw-evs"></div><div class="vw-fill"></div><div class="vw-head"></div></div>
         <div class="vw-time"></div>
       </div>
@@ -115,6 +115,12 @@
     refs.tl.addEventListener('pointermove', e => { if (V.scrub) seekTo(e); });
     refs.tl.addEventListener('pointerup', () => { V.scrub = false; });
     refs.play.addEventListener('click', () => key('Space'));
+    // buttons for a touch screen (no keyboard): events, speed, the director, leaving
+    q('.vw-pev').addEventListener('click', () => key('KeyB'));
+    q('.vw-nev').addEventListener('click', () => key('KeyN'));
+    refs.rate.addEventListener('click', () => { const P = V.player; if (!P) return; const k = RATES.indexOf(P.rate); P.rate = RATES[k >= RATES.length - 1 || k < 0 ? 2 : k + 1]; P.playing = true; });
+    refs.dir.addEventListener('click', () => key('KeyD'));
+    q('.vw-x').addEventListener('click', () => { if (V.onExit) V.onExit(); });
     // on a touch screen: tap the camera name for the next camera, the car card for the next car
     refs.camn.addEventListener('click', () => key('KeyC'));
     refs.card.addEventListener('click', () => key('ArrowRight'));
@@ -159,6 +165,7 @@
     refs.camn.textContent = NAMES[V.mode] || V.mode.toUpperCase();
     refs.camn.parentNode.classList.toggle('lit', flashT > 0);
     refs.dir.classList.toggle('on', V.director);
+    el.querySelector('.vw-x').innerHTML = V.kind === 'replay' ? 'EXIT' : '&#10073;&#10073;';
     // the timing tower, a few times a second
     towerT -= dt;
     refs.tower.classList.toggle('off', !V.tower);
@@ -288,6 +295,7 @@
     build();
     V.on = true; V.kind = kind; raceRef = race; V.player = o.player || null;
     V.director = !!o.director;
+    V.onExit = o.onExit || null;
     if (o.focusId != null) V.focusId = o.focusId;
     if (o.mode) V.mode = o.mode;
     V.snap = true; V.keys.clear();
@@ -315,5 +323,8 @@
     return o;
   }
 
-  F1.Viewer = { V, MODES, NAMES, start, stop, update, view, key, focus, afterRender, keyDown: c => V.keys.add(c), keyUp: c => V.keys.delete(c) };
+  // tucked away while a menu (pause) is over the picture
+  function hide(on) { if (el) el.classList.toggle('show', V.on && !on); }
+
+  F1.Viewer = { V, MODES, NAMES, start, stop, update, view, key, focus, afterRender, hide, keyDown: c => V.keys.add(c), keyUp: c => V.keys.delete(c) };
 })(typeof window !== 'undefined' ? window : globalThis);

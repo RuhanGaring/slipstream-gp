@@ -49,8 +49,10 @@
 .vw-camn, .vw-card { pointer-events: auto; cursor: pointer; }
 .vw-cam > span { background: var(--panel); border: 1px solid var(--line); padding: 7px 14px; font-weight: 900; letter-spacing: .14em; font-size: 13px; transition: background .3s, color .3s; }
 .vw-cam.lit .vw-camn { background: var(--ink); color: #0b0d10; }
-.vw-dir { display: none; color: var(--yellow); }
-.vw-dir.on { display: block; }
+.vw-dir { color: var(--ink-3); pointer-events: auto; cursor: pointer; }
+.vw-dir.on { color: var(--yellow); }
+.vw-x { pointer-events: auto; cursor: pointer; background: var(--panel); border: 1px solid var(--line); color: var(--ink); font: 900 13px var(--font); letter-spacing: .12em; padding: 0 14px; min-width: 44px; }
+.vw-x:hover { background: rgba(255, 255, 255, .12); }
 
 .vw-bar { position: absolute; left: 24px; right: 24px; bottom: 34px; display: none; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; pointer-events: auto; }
 #viewer.replay .vw-bar { display: flex; }
@@ -90,6 +92,37 @@
 
 .vw-note { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--yellow); padding: 10px 20px; font-weight: 900; font-style: italic; letter-spacing: .1em; font-size: 16px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
 .vw-note.on { opacity: 1; }
+
+/* phones (body.compact, see css/mobile.css): smaller panels, no key hints, thumb-sized buttons */
+body.compact .vw-help { display: none; }
+body.compact .vw-top { left: max(10px, env(safe-area-inset-left)); top: max(8px, env(safe-area-inset-top)); gap: 6px; }
+body.compact .vw-badge { padding: 4px 10px; gap: 7px; }
+body.compact .vw-badge b { font-size: 12px; }
+body.compact .vw-trk { display: none; }
+body.compact .vw-lap { padding: 4px 10px; font-size: 11px; }
+body.compact .vw-lap b { font-size: 14px; }
+body.compact .vw-tower { left: max(10px, env(safe-area-inset-left)); top: calc(max(8px, env(safe-area-inset-top)) + 36px); width: 132px; max-height: calc(100% - 190px); overflow-y: auto; }
+body.compact .vw-row { grid-template-columns: 18px 3px 36px 1fr; gap: 5px; height: 21px; font-size: 11px; padding-right: 6px; }
+body.compact .vw-row .g { font-size: 10px; }
+body.compact .vw-cam { right: max(10px, env(safe-area-inset-right)); top: max(8px, env(safe-area-inset-top)); gap: 5px; }
+body.compact .vw-cam > span, body.compact .vw-x { padding: 0 10px; height: 34px; display: flex; align-items: center; font-size: 11px; }
+body.compact .vw-card { left: auto; right: max(10px, env(safe-area-inset-right)); transform: none; bottom: 70px; min-width: 0; }
+body.compact .vw-pos { font-size: 22px; padding: 0 10px; }
+body.compact .vw-who { padding: 6px 10px; min-width: 0; }
+body.compact .vw-name { font-size: 14px; }
+body.compact .vw-team { font-size: 9px; }
+body.compact .vw-tel { gap: 8px; padding: 6px 10px; }
+body.compact .vw-spd b, body.compact .vw-gear { font-size: 20px; }
+body.compact .vw-spd b { min-width: 40px; }
+body.compact .vw-ped { height: 24px; }
+body.compact .vw-drs { display: none; }
+body.compact .vw-gaps { padding: 4px 10px 5px; font-size: 9px; gap: 10px; }
+body.compact .vw-bar { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: max(6px, env(safe-area-inset-bottom)); padding: 4px 8px; gap: 8px; }
+body.compact .vw-b { width: 38px; height: 38px; }
+body.compact .vw-rate { min-width: 54px; }
+body.compact .vw-time { min-width: 0; font-size: 11px; }
+body.compact .vw-list { right: max(10px, env(safe-area-inset-right)); top: 52px; width: min(300px, 60vw); max-height: calc(100% - 140px); }
+body.compact .vw-note { top: 16%; font-size: 13px; padding: 8px 14px; }
 
 @media (max-width: 760px) {
   .vw-tower { display: none; }
