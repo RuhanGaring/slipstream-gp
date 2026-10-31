@@ -1549,8 +1549,18 @@
   // in steps, each in its own task, so the boot screen shows what is happening before the next
   // step holds the page (building the first circuit and its 3D world takes a few seconds)
   {
-    const boot = (p, t) => { if (G.__boot) G.__boot(p, t); };
+    const boot = (p, t, n) => { if (G.__boot) G.__boot(p, t, n); };
+    const MB = b => (b / 1048576).toFixed(1);
     const steps = [
+      // every file of the game into the offline cache (js/offline.js), then the cars decoded
+      [0.88, 'Checking game files', () => F1.Offline.sync((done, total, left) => {
+        boot(0.88 * done / Math.max(1, total), left ? 'Downloading game files for offline play' : 'Game files ready for offline play', MB(done) + ' / ' + MB(total) + ' MB');
+      }).then(r => {
+        // new code was downloaded: run it (once; the cache now holds it)
+        if (r && r.codeChanged && !sessionStorage.getItem('sgpReloaded')) { sessionStorage.setItem('sgpReloaded', '1'); location.reload(); return new Promise(() => {}); }
+        sessionStorage.removeItem('sgpReloaded');
+      }, () => {})],
+      [0.89, 'Preparing the cars', () => F1.CarModels.loadAll([...new Set(F1.Data.TEAMS.map(t => t.car).filter(Boolean))], (n, of) => boot(0.89, 'Preparing the cars', n + ' / ' + of))],
       [0.9, 'Building the circuit', () => { HUD.init(); UIm.init(); startAttract(); }],
       [0.93, 'Preparing the scene', () => { document.getElementById('shade').className = 'on'; UIm.go('title'); Game.applySettings(); }],
       // the GPU compiles the shaders in the background while this screen keeps moving

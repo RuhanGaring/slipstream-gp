@@ -1556,7 +1556,7 @@
     // blur's velocity pass (layer 5), so the shadow is not smeared as if it were scenery
     // (both live in their own small scene, velScene, so that pass does not walk the world)
     const sp = new THREE.Mesh(velShadowGeo(), MATS.shadowBlob);
-    const hull = new THREE.Mesh(RC.velHull(), MATS.shadowBlob);
+    const hull = new THREE.Mesh(RC.velHull(car.team), MATS.shadowBlob);
     for (const q of [sp, hull]) { q.matrixAutoUpdate = false; q.visible = false; q.frustumCulled = false; velScene.add(q); }
     outer.userData = { body, spin: 0, flap: 0, seen: 0, ground, gy: 0, velOn: false, velParts: [sp, hull] };
     // every part of the car takes shadow, the scanned body and the cockpit included: the halo
@@ -1945,7 +1945,7 @@
       } else onboard(car, -0.95, 1.22, 30, 0.75);
       setFov(62, dt, true);
     } else if (mode === 'cockpit') {
-      const hm = RC.hasModel();
+      const hm = RC.hasModel(car.team);
       const ov = G.__cockpitEye; // debug override [x, y, lookY]
       const om = live.get(car), bu = om && om.userData.body.userData;
       if (bu && bu.eyeA && !ov) {

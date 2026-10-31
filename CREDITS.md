@@ -1,17 +1,32 @@
 # Credits
 
-## Car model
+## Car models
 
-"Aston Martin F1 AMR23 2023" by **Redgrund**
-(https://sketchfab.com/3d-models/aston-martin-f1-amr23-2023-f6ba825a43b146a9b669934a4e1fd529),
-licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
-Obtained via https://github.com/Ron2509/Ron2509.github.io (`public/models/car.glb`), where the textures had
-already been removed and the parts split.
+The ten teams race nine 2026 car models by **Dave Love SketchFab (@Tyler_Dave)**, each listed on Sketchfab
+under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/):
 
-Changes made for this game (`tools/car_prep.mjs`): rescaled to the game's car and re-axed, simplified into
-two levels of detail, tyres split from rims with generated sidewall UVs, materials reassigned, and every
-livery painted in code in the game's fictional team colours. No original logos or sponsor marks are used.
-The teams, drivers and circuits in the game are fictional.
+| File | Model | Source |
+|---|---|---|
+| `assets/cars/sf26.car` | 2026 Ferrari SF-26 | https://sketchfab.com/3d-models/e5ca6cecdc42449283f4bed27360f2a7 |
+| `assets/cars/w17.car` | 2026 Mercedes W17 | https://sketchfab.com/3d-models/b806f1e70aa343219e7158169549b97b |
+| `assets/cars/mcl40.car` | 2026 McLaren MCL40 | https://sketchfab.com/3d-models/96214ad5624f42a0861f77008f8d29e7 |
+| `assets/cars/rb22.car` | 2026 Redbull RB22 | https://sketchfab.com/3d-models/0a3d24a58e0549d591a5a48c22eec383 |
+| `assets/cars/amr26.car` | 2026 Aston Martin AMR26 | https://sketchfab.com/3d-models/a50d1c7bc086455c9412470d93fc3fc7 |
+| `assets/cars/r26.car` | 2026 Audi R26 | https://sketchfab.com/3d-models/32bf228264b047669b100b0f1b8769ac |
+| `assets/cars/mac26.car` | 2026 Cadillac MAC-26 | https://sketchfab.com/3d-models/95bcd37aa7c649779efc33b90b6c023e |
+| `assets/cars/vf26.car` | 2026 Haas VF-26 | https://sketchfab.com/3d-models/1f41e03886724bc6acd16c92402989bc |
+| `assets/cars/fw48.car` | 2026 Williams FW48 | https://sketchfab.com/3d-models/4efa51e6d64a4192a83418f1b715c671 |
+
+Changes made for this game (`tools/car_prep26.mjs`): re-axed and placed so each car's steering wheel sits at
+the driver's hands, wheels and steering wheel split out so they turn, simplified into two levels of detail
+plus a far mesh with baked colours, the models' race numbers removed (the game draws its own), and textures
+resized and re-encoded as WebP. The models' own materials and textures are otherwise kept as made. One team
+(Tessera) runs the FW48 with its colours turned in the shader.
+
+The liveries carry the real teams' and sponsors' names and logos, which are trademarks of their owners; the
+game is not affiliated with or endorsed by any of them. The source files' texture names suggest parts of
+them came from earlier community mods, so check the provenance before any commercial use. The teams,
+drivers and circuits in the game are fictional.
 
 ## Textures, skies and foliage (CC0, no attribution required, credited with thanks)
 

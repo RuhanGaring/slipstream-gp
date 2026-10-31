@@ -10,3 +10,20 @@ s, n1 = re.subn(r'(<script src="(?:js|vendor)/[^"?]+)(\?v=\w+)?"', lambda m: f'{
 s, n2 = re.subn(r'(<link[^>]*href="(?:css|assets)/[^"?]+\.css)(\?v=\w+)?"', lambda m: f'{m.group(1)}?v={v}"', s)
 p.write_text(s, encoding='utf-8')
 print(f'stamped {n1} scripts and {n2} stylesheets with v={v}')
+
+# The offline manifest (js/offline.js): every file the game loads, with its size and a hash of
+# its content, so a browser downloads each file once and again only when it changes.
+import hashlib, json
+root = p.parent
+files = [p]
+for d in ('css', 'js', 'assets'):
+    files += sorted(f for f in (root / d).rglob('*') if f.is_file())
+skip = {root / 'assets' / 'manifest.json'}
+out = []
+for f in files:
+    if f in skip or f.suffix in ('.md', '.py', '.map') or f.name.startswith('.'):
+        continue
+    b = f.read_bytes()
+    out.append({'p': f.relative_to(root).as_posix(), 's': len(b), 'h': hashlib.sha1(b).hexdigest()[:12]})
+(root / 'assets' / 'manifest.json').write_text(json.dumps({'v': v, 'files': out}, separators=(',', ':')), encoding='utf-8')
+print(f'manifest: {len(out)} files, {sum(f["s"] for f in out) / 1048576:.1f} MB')

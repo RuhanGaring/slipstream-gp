@@ -212,7 +212,7 @@
   S.title = () => {
     const el = h('div');
     el.innerHTML = `<div class="stage"><div class="brand"><span class="w1">SLIPSTREAM</span><span class="w2">GRAND PRIX</span></div><div class="press">${F1.Game.mobile && F1.Game.mobile() ? 'TAP TO START' : 'PRESS ENTER'}</div></div>
-      <div class="legal">A fictional championship. All teams, drivers and circuits are original. Car model: "Aston Martin F1 AMR23 2023" by Redgrund, CC BY 4.0, modified. Textures and skies: Poly Haven, ambientCG (CC0). See CREDITS.md.</div>`;
+      <div class="legal">A fictional championship: teams, drivers and circuits are original. 2026 car models by Dave Love SketchFab (@Tyler_Dave), CC BY 4.0, modified; liveries and logos belong to their owners, no affiliation. Textures and skies: Poly Haven, ambientCG (CC0). See CREDITS.md.</div>`;
     return { el, items: [], onKey: c => { if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') { Audio.init(); Audio.ui.select(); F1.Game.menuMusic(); go('main'); return true; } return false; }, click: true };
   };
 
