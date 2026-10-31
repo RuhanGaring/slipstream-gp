@@ -38,16 +38,44 @@
     return lineFromOffsets(tr, off);
   }
 
-  // Where the car centre may go on each side. Apex and exit kerbs may be used (car
-  // centre on the white line puts the outer wheels 0.8 m up the kerb, still legal);
-  // elsewhere the car stays on the asphalt.
+  // Where the car centre may go on each side. Where there is a kerb the line may put two
+  // wheels right over it, as F1 drivers do through chicanes and at apexes: the car centre
+  // up to 0.6 m past the white line leaves the other two wheels inside it (the car is off
+  // the track only with all four out), the outer pair still on the kerb. That much only in
+  // slow corners and chicanes (under 100 km/h); by 140 km/h it is back to the outer wheels
+  // on the kerb, since from there a car drifts over half a metre wide of its line on exit.
+  // Whether a kerb pays is the optimiser's call: kerbGrip() below charges for it.
+  // Elsewhere the car stays on the asphalt.
   function lineLimits(tr) {
     const N = tr.N, L = new Float64Array(N), R = new Float64Array(N);
+    const over0 = Math.max(-0.05, Math.min(0.6, tr.kerbW - 1.0));
     for (let i = 0; i < N; i++) {
-      L[i] = tr.kerbL[i] ? tr.hw - 0.05 : tr.hw - 0.55;
-      R[i] = tr.kerbR[i] ? tr.hw - 0.05 : tr.hw - 0.55;
+      // corner speed back from the kerb height prepare() set from it (230 km/h - 120 per unit)
+      const kmh = tr.kerbH ? 230 - 120 * (tr.kerbH[i] - 0.012) / 0.023 : 999;
+      const slow = U.clamp((140 - kmh) / 40, 0, 1);
+      const over = -0.05 + (over0 + 0.05) * slow;
+      L[i] = tr.kerbL[i] ? tr.hw + over : tr.hw - 0.55;
+      R[i] = tr.kerbR[i] ? tr.hw + over : tr.hw - 0.55;
     }
     return { L, R, clamp: (i, o) => (o < -L[i] ? -L[i] : o > R[i] ? R[i] : o) };
+  }
+
+  // Grip left with the car centre at offset o: the wheels on a kerb have less grip
+  // (painted concrete, a tenth less) and the ridges unsettle the car, more so on the tall
+  // kerbs of slow corners. The loss counts by the share of the load those wheels carry:
+  // over an apex kerb they are the light inside pair, over an exit kerb the loaded outer
+  // pair. kap is the line's curvature there (positive: a right-hander, inside on the right).
+  // Used by the line optimiser so kerbs are only taken where they save time.
+  const HALF_TRACK = 0.8;
+  function kerbGrip(tr, i, o, kap) {
+    const a = Math.abs(o), kb = o > 0 ? tr.kerbR[i] : tr.kerbL[i];
+    if (!kb) return 1;
+    const fo = U.clamp((a + HALF_TRACK - tr.hw) / 0.35, 0, 1), fi = U.clamp((a - HALF_TRACK - tr.hw) / 0.35, 0, 1);
+    const h = tr.kerbH ? tr.kerbH[i] / 0.035 : 1;
+    const inside = kap != null && Math.abs(kap) > 1 / 1500 && Math.sign(kap) === Math.sign(o);
+    const share = kap == null || Math.abs(kap) <= 1 / 1500 ? 0.5 : inside ? 0.35 : 0.65;
+    const loss = 0.1 + 0.06 * h;
+    return 1 - loss * (share * fo + (1 - share) * fi);
   }
 
   // Corners of the circuit from centreline curvature: start, end, peak, direction,
@@ -428,5 +456,5 @@
     return tr;
   }
 
-  F1.Raceline = { computeLine, cornerMarks, lineFromOffsets, lineLimits, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
+  F1.Raceline = { computeLine, cornerMarks, lineFromOffsets, lineLimits, kerbGrip, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
 })(typeof window !== 'undefined' ? window : globalThis);

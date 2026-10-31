@@ -17,19 +17,22 @@
   const F1 = G.F1;
   const U = F1.U;
   const DT = 1 / 240;
-  const VERSION = 2;     // bump when physics or AI changes make stored results stale
+  const VERSION = 3;     // bump when physics or AI changes make stored results stale
   const STRIDE_LINE = 2, STRIDE_GRIP = 5;
   const G_MIN = 0.8, G_MAX = 1.4;
 
   // ---------- 1. racing line ----------
   // the same move as tools/optline.js: a smooth lateral bump, kept if the lap gets quicker
   function lineEval(tr, lim, grip) {
-    const N = tr.N;
+    const N = tr.N, g = new Float64Array(N);
     return off => {
       const line = F1.Raceline.lineFromOffsets(tr, off);
       let rough = 0;
       for (let i = 0; i < N; i++) { const d2 = off[(i + 1) % N] - 2 * off[i] + off[(i - 1 + N) % N]; rough += d2 * d2; }
-      return F1.Raceline.lapTime(tr, line, F1.Car.SPEC, { pace: 1, grip }) + rough * 0.02;
+      // wheels over a kerb cost grip: the line takes a kerb only where the shorter or
+      // straighter path more than pays for it
+      for (let i = 0; i < N; i++) g[i] = (grip ? grip[i] : 1) * F1.Raceline.kerbGrip(tr, i, off[i], line.kap[i]);
+      return F1.Raceline.lapTime(tr, line, F1.Car.SPEC, { pace: 1, grip: g }) + rough * 0.02;
     };
   }
   function bump(off, lim, N, c, sig, amp) {

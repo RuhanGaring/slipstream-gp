@@ -78,8 +78,12 @@
   function plan(race, car, dt) {
     const b = car.brain, tr = race.track, i = car.loc.i;
     const lineOff = tr.line.off[i];
-    const lim = tr.hw - 1.25;
+    const lim = tr.hw - 1.25; // where another car's lane may be aimed for when passing
+    // the corridor reaches out as far as the racing line does over the next stretch, so the
+    // line is never trimmed where it uses a kerb (see Raceline.lineLimits), while a car
+    // squeezed by another is not pushed past the asphalt where there is no kerb
     let lo = -lim, hi = lim;
+    for (let q = 0, n = Math.round(60 / tr.ds); q <= n; q += 2) { const o = tr.line.off[(i + q) % tr.N]; if (o > hi) hi = o; else if (o < lo) lo = o; }
     const v = Math.max(0, car.u);
     const sinceStart = race.time - race.startTime;
     const br = brakeRoom(tr, car);
@@ -89,40 +93,87 @@
     for (let k = 0; k < b.near.length; k++) b.nds[k] = relS(tr, car, b.near[k]);
     const dsOf = o => { const k = b.near.indexOf(o); return k < 0 ? relS(tr, car, o) : b.nds[k]; };
 
-    // attack: a car in our lane that we are catching
-    if (b.mode !== 'pass' && sinceStart > 1.5) {
+    // attack. On a straight that runs to a braking zone, a car catching another first sits
+    // in its tow (straight behind it, closing up), then pulls out late enough to keep the
+    // tow's speed and early enough to be alongside before the braking point. Elsewhere a
+    // pass is only tried with a real run on the car ahead. The side: the inside of the next
+    // corner; the outside only out of the braking zone and when it pays, either because the
+    // corner after bends the other way (the outside of one is the inside of the next) or
+    // because the run is so big the car will be past before the turn-in.
+    b.coolT = Math.max(0, (b.coolT || 0) - dt);
+    if ((b.mode === 'race' || b.mode === 'tow') && sinceStart > 1.5 && !b.coolT) {
       let o = null, ods = 1e9;
       for (let k = 0; k < b.near.length; k++) {
         const c = b.near[k], ds = b.nds[k];
-        if (ds > 0 && ds < 30 && Math.abs(c.loc.d - car.loc.d) < 2.6 && ds < ods) { o = c; ods = ds; }
+        if (ds > 0 && ds < 45 && Math.abs(c.loc.d - car.loc.d) < 2.6 && ds < ods) { o = c; ods = ds; }
       }
+      if (b.mode === 'tow' && b.target !== o) { b.mode = 'race'; b.target = null; }
       if (o) {
         const closing = v - o.speed;
         const theirProf = o.brain ? o.brain.prof[i] : o.speed;
         const fasterPace = b.prof[i] > theirProf + 0.4;
-        if (closing > 1.0 || (fasterPace && ods < 14)) {
+        // flat out all the way to the braking zone (or no braking zone in range at all): kinks
+        // taken flat count as straight
+        let straight = true;
+        for (let q = 0; straight && q * tr.ds < Math.min(br.room, 400); q += 2) if (Math.abs(tr.line.kap[(i + q) % tr.N]) > 1 / 300 || tr.brk[(i + q) % tr.N]) straight = false;
+        const braking = br.room < v * v / (2 * 38) + 30 || tr.brk[i];
+        let go = false;
+        if (straight && !braking && (closing > -1 || fasterPace)) {
+          // into the tow; pull out when the rest of the straight is just enough to get by
+          if (b.mode !== 'tow') { b.mode = 'tow'; b.target = o; }
+          // the run it will really have once out of the tow: most of the closing speed, plus DRS
+          const gain = ods + 2, run = Math.max(0, closing) * 0.8 + (car.drsOpen ? 2.5 : 0);
+          const travel = run > 0.1 ? v * gain / run : 1e9;
+          // out when the remaining straight just covers it; right on the gearbox it has to go
+          // anyway (or lift), and then aims to be overlapped down the inside by the braking point
+          // (from further back the tow is still doing its work, so it waits for the last moment)
+          go = (run > 0.6 && travel < br.room - 15 && (ods < 12 || travel > br.room - 90)) || ods - car.spec.len < 1.2 || (br.room > 1e8 && ods < 10 && run > 0.5);
+          if (!go && br.room < 70) { b.mode = 'race'; b.target = null; b.coolT = 1; } // ran out of straight
+        } else if (b.mode === 'tow') { b.mode = 'race'; b.target = null; }
+        else {
+          // through the twisty parts: any real run on the car ahead
+          go = ods < 30 && (closing > 1.0 || (fasterPace && ods < 14));
+        }
+        if (go) {
           const inside = nextCornerSign(tr, i, 260) || (lineOff > 0 ? -1 : 1);
+          const after = nextCornerSign(tr, (i + Math.round(260 / tr.ds)) % tr.N, 260);
           const latIn = o.loc.d + inside * SEP, latOut = o.loc.d - inside * SEP;
           const okIn = Math.abs(latIn) < lim && laneFree(b, car, latIn, o, ods + 25);
-          // once in the braking zone only a move down the inside is on; the outside is a crash
-          const braking = br.room < v * v / (2 * 38) + 30 || tr.brk[i];
-          const okOut = !braking && Math.abs(latOut) < lim && laneFree(b, car, latOut, o, ods + 25) && b.rng() < 0.35 + 0.6 * b.aggr;
+          const pays = after === -inside || closing > 5 || br.room > 1e8;
+          const okOut = !braking && pays && b.aggr > 0.35 && Math.abs(latOut) < lim && laneFree(b, car, latOut, o, ods + 25);
           b.side = okIn ? inside : okOut ? -inside : 0;
           // set passes up on the approach: never ask for a big sidestep mid-corner
           const midCorner = Math.abs(tr.line.kap[i]) > 1 / 250;
           if (b.side && midCorner && Math.abs((b.side === inside ? latIn : latOut) - car.loc.d) > 2.5) b.side = 0;
-          if (b.side) { b.mode = 'pass'; b.passT = 0; b.target = o; }
+          if (b.side) { b.mode = 'pass'; b.passT = 0; b.target = o; b.passDs = ods; b.inside = inside; b.flipped = false; }
         }
       }
+      else if (b.mode === 'tow') { b.mode = 'race'; b.target = null; }
+    }
+    if (b.mode === 'tow') {
+      // straight behind the car ahead, for the most tow
+      const o = b.target, t = U.clamp(o.loc.d, -lim, lim);
+      lo = Math.max(lo, t - 0.8); hi = Math.min(hi, t + 0.8);
     }
     if (b.mode === 'pass') {
       const o = b.target;
       b.passT += dt;
       const ds = o ? dsOf(o) : -99;
-      const lat = o ? o.loc.d + b.side * SEP : 0;
+      let lat = o ? o.loc.d + b.side * SEP : 0;
       const needBrake = v * v / (2 * 38) * (1 - (br.z ? br.z.vOut * br.z.vOut / Math.max(1, v * v) : 1));
-      const late = br.room < needBrake + 15 && ds > 2.5;
-      if (!o || ds < -7 || ds > 45 || b.passT > 9 || Math.abs(lat) > lim + 0.3 || late || !laneFree(b, car, lat, o, Math.max(5, ds + 8))) {
+      // a run that has died: back in line rather than sitting out of the tow
+      const stalled = b.passT > 2.5 && ds > b.passDs + 2;
+      // the door shut on this side (the car ahead moved across to cover it): switch to the
+      // other side if that one is open and there is still road before the braking point
+      if (o && !b.flipped && ds > 3 && (Math.abs(lat) > lim + 0.3 || !laneFree(b, car, lat, o, Math.max(5, ds + 8))) && br.room > needBrake + 60) {
+        const lat2 = o.loc.d - b.side * SEP;
+        if (Math.abs(lat2) < lim && laneFree(b, car, lat2, o, ds + 25)) { b.side = -b.side; b.flipped = true; b.passT = Math.min(b.passT, 4); lat = lat2; }
+      }
+      // into the braking zone: overlapped down the inside the move is on (the car ahead must
+      // leave room); otherwise not far enough up to stay there
+      const late = br.room < needBrake + 15 && ds > (b.side === b.inside ? 4.5 : 2.5);
+      if (!o || ds < -7 || ds > 45 || b.passT > 9 || Math.abs(lat) > lim + 0.3 || late || stalled || !laneFree(b, car, lat, o, Math.max(5, ds + 8))) {
+        if (o && ds > -7) b.coolT = 1.5; // not past: no fresh lunge straight away
         b.mode = 'race'; b.target = null;
       } else if (b.side > 0) lo = Math.max(lo, Math.min(lim, lat));
       else hi = Math.min(hi, Math.max(-lim, lat));
@@ -139,11 +190,21 @@
         let k = 0;
         for (let q = -15; q <= 15; q++) k += tr.line.kap[(apex + q + tr.N) % tr.N];
         b.defended = z.s0;
-        if (Math.abs(k) > 0.002) { b.mode = 'defend'; b.defSide = Math.sign(k); b.defZone = z; }
+        if (Math.abs(k) > 0.002) { b.mode = 'defend'; b.defSide = Math.sign(k); b.defZone = z; b.defLat = null; }
+      }
+    }
+    // cover: an attacker with a run who pulls out of the tow gets the door shut on the side
+    // he picked, once, while he is still behind (moving across a car already alongside is a crash)
+    if (b.mode === 'race' && b.behind && b.aggr > 0.3 && sinceStart > 4 && br.z && b.defended !== br.z.s0) {
+      const a = b.behind, rel = a.loc.d - car.loc.d;
+      if (b.gapBehind > car.spec.len + 1.5 && b.gapBehind < 14 && Math.abs(rel) > 1.5 && a.speed > v + 0.5 && br.room > 60 && br.room < 450) {
+        b.defended = br.z.s0;
+        b.mode = 'defend'; b.defSide = Math.sign(rel); b.defZone = br.z; b.defLat = U.clamp(a.loc.d, -lim, lim);
       }
     }
     if (b.mode === 'defend') {
       if (b.alongside && Math.sign(b.alongside.loc.d - car.loc.d) === b.defSide) b.mode = 'race';
+      else if (b.defLat != null) { lo = Math.max(lo, b.defLat - 0.8); hi = Math.min(hi, b.defLat + 0.8); }
       else if (b.defSide > 0) lo = Math.max(lo, tr.hw - 3.4); else hi = Math.min(hi, -(tr.hw - 3.4));
       // hold the inside until the braking point, then drive the corner normally
       const toZone = Tracks.fwd(tr, car.loc.s, b.defZone.s0);
@@ -413,7 +474,8 @@
     }
     // running out of road on the exit: lift
     const kNow = tr.line.kap[i];
-    if (Math.abs(kNow) > 1 / 400 && Math.sign(car.loc.d) === -Math.sign(kNow) && Math.abs(car.loc.d) > tr.hw - 0.4) vt = Math.min(vt, v * 0.96);
+    // (past where the line itself goes: it may use the exit kerb on purpose)
+    if (Math.abs(kNow) > 1 / 400 && Math.sign(car.loc.d) === -Math.sign(kNow) && Math.abs(car.loc.d) > Math.max(tr.hw - 0.4, Math.abs(tr.line.off[i]) + 0.35)) vt = Math.min(vt, v * 0.96);
 
     // follow / avoid: the nearest car ahead that sits in our lane (now or where we are heading)
     if (b.near) {
@@ -431,12 +493,15 @@
         const gap = bds - car.spec.len;
         // more room into a braking zone: dirty air costs braking grip and the car ahead may brake early
         const nearBrake = tr.brk[i] || tr.brk[(i + Math.round(60 / tr.ds)) % tr.N];
-        const want = 1.5 + 0.09 * v + (nearBrake ? 0.08 * v : 0);
+        // (sitting in a tow on a straight, a driver closes right up to the gearbox)
+        const want = b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + 0.09 * v + (nearBrake ? 0.08 * v : 0);
         const closing = v - blk.speed;
         if (blk.ctl.brake > 0.25 && gap < want + 25) vt = Math.min(vt, blk.speed + Math.max(0, gap - want) * 0.5);
+        // (in a tow the run is the point: it may close right up before easing off)
+        const towing = b.mode === 'tow' && blk === b.target && !nearBrake;
         if (closing > 0) {
           const need = closing * closing / (2 * Math.max(0.5, gap - want));
-          if (need > 3) vt = Math.min(vt, blk.speed - 0.3);
+          if (need > (towing ? 9 : 3)) vt = Math.min(vt, blk.speed - 0.3);
         }
         if (gap < want) vt = Math.min(vt, blk.speed - (want - gap) * 1.2);
         b.closeFollow = gap < want + 6;
