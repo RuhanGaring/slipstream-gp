@@ -444,6 +444,9 @@
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
+  // How far each car's driver opens the fist (fingerOpen): the W17's handles are deeper than the
+  // grip the glove was posed round, and a closed fist sinks into them.
+  const FINGER_OPEN = { w17: 0.3 };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
@@ -1248,19 +1251,49 @@
       p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
     }
   }
+  // Loosen the fist for a thicker grip: the fingers (glove, not the thumb) are eased outward from
+  // the grip's axis, by nothing at the palm and more the further round the grip a point lies (to
+  // k times its distance at the fingertips), so the curl opens round a bigger handle while the
+  // palm stays where it is. Grip frame as in thumbBend: z runs along the bar, the palm faces +x.
+  // G.__fingerOpen overrides k (then rebuild the arms).
+  function fingerOpen(p, sd, k0) {
+    const k = G.__fingerOpen != null ? G.__fingerOpen : k0 || 0;
+    if (!k) return;
+    const A = armData(), inv = A.RF0inv, fwd = inv.clone().invert();
+    const root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length();
+    tax.divideScalar(TL);
+    const v = new THREE.Vector3(), d = new THREE.Vector3();
+    for (let i = 0; i < A.n; i++) {
+      if (A.w[i * 5 + 4] < 100 || A.zone[i] !== 1) continue;
+      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(inv);
+      // the thumb keeps its own bend
+      d.subVectors(v, root);
+      const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
+      if (t > 0.05 && r0 < 0.02) continue;
+      const r = Math.hypot(v.x, v.y);
+      if (r > 0.07) continue;
+      const round = Math.abs(Math.atan2(v.y, -v.x)); // 0 at the palm, about pi on the far side of the grip
+      const w = THREE.MathUtils.smoothstep(round, 0.7, 2.6);
+      if (w <= 0) continue;
+      const s = 1 + k * w;
+      v.x *= s; v.y *= s;
+      v.applyMatrix4(fwd);
+      p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
+    }
+  }
   // debug: rebuild the arms' geometry after changing G.__thumb
   function rebuildArms() {
     for (const key of Object.keys(_armGeo)) {
       const G0 = _armGeo[key], [sd, ...T] = key.split(',').map(Number);
       delete _armGeo[key];
-      const G1 = armGeo(sd, T.length === 4 ? T : null);
+      const G1 = armGeo(sd, T.slice(0, 4), T[4]);
       G0.attributes.position.array.set(G1.attributes.position.array); G0.attributes.position.needsUpdate = true; G0.computeVertexNormals();
       _armGeo[key] = G0;
     }
   }
   // one geometry per side and thumb bend (each car's wheel has its own thumb hole)
-  function armGeo(sd, T) {
-    const key = [sd].concat(T || THUMB).map(x => +x.toFixed(4)).join(',');
+  function armGeo(sd, T, open) {
+    const key = [sd].concat(T || THUMB, [open || 0]).map(x => +x.toFixed(4)).join(',');
     if (_armGeo[key]) return _armGeo[key];
     const A = armData(), G = new THREE.BufferGeometry(), n = A.n;
     const p = new Float32Array(A.car);
@@ -1276,6 +1309,7 @@
       col.set(z === 0 ? [1, 0, 0] : z === 3 ? [0, 0, 1] : [0, 1, 0], i * 3);
     }
     thumbBend(p, sd, T);
+    fingerOpen(p, sd, open);
     G.setAttribute('position', new THREE.BufferAttribute(p, 3));
     G.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     G.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
@@ -1399,11 +1433,11 @@
     };
     return m;
   }
-  function makeArm(sd, team, T) {
+  function makeArm(sd, team, T, open) {
     if (!armData()) return null;
     const bones = [0, 1, 2, 3, 4].map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
     const skel = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
-    const mesh = new THREE.SkinnedMesh(armGeo(sd, T), armMaterial(team, sd));
+    const mesh = new THREE.SkinnedMesh(armGeo(sd, T, open), armMaterial(team, sd));
     mesh.bindMode = THREE.DetachedBindMode;
     mesh.bind(skel, new THREE.Matrix4());
     mesh.frustumCulled = false; mesh.castShadow = true;
@@ -1580,7 +1614,7 @@
     // arms: the scanned, dressed arms (makeArm), shoulders low in the tub
     const arms = [];
     for (const sd of [-1, 1]) {
-      const arm = makeArm(sd, team, MD && MD.thumb);
+      const arm = makeArm(sd, team, MD && MD.thumb, MD && FINGER_OPEN[MD.id]);
       if (!arm) continue;
       arm.shoulder = new THREE.Vector3(0.34, 0.66, 0.115); // the right one; the left is solved mirrored
       group.add(arm.mesh);
