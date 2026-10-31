@@ -444,9 +444,10 @@
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
-  // How far each car's driver opens the fist (fingerOpen): the W17's handles are deeper than the
-  // grip the glove was posed round, and a closed fist sinks into them.
-  const FINGER_OPEN = { w17: 0.3 };
+  // How far each car's driver opens the fist (fingerOpen, radians at the middle joints, or 'side':
+  // until the middle segments run along the wheel's side). The W17's handles are deeper than the
+  // grip the glove was posed round, and the clenched fist sank into them.
+  const FINGER_OPEN = { w17: 'side' };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
@@ -878,7 +879,8 @@
   // forearm toward the wrist (down and back toward the elbow in the tub), z = x * y. The
   // left is the mirror image.
   // gx, gy: the grip's centre in the wheel's frame (each car's own wheel has its own span)
-  function handMatrix(sd, gx = GRIP_X, gy = -0.019, gz = 0) {
+  // k: a wider fist round a thicker grip (the hand scaled across the grip, not along the bar)
+  function handMatrix(sd, gx = GRIP_X, gy = -0.019, gz = 0, k = 1) {
     // x is the palm's normal: inboard onto the grip, turned a little toward the nose so the
     // back of the glove faces out and back toward the driver
     const X = new THREE.Vector3(...(G.__handX || [-0.9, 0, -0.45])).normalize();
@@ -891,6 +893,7 @@
     const M = new THREE.Matrix4().makeTranslation(gx, gy, gz)
       .multiply(new THREE.Matrix4().makeRotationZ(0.06))
       .multiply(new THREE.Matrix4().makeBasis(X, Y, Z));
+    if (k !== 1) M.multiply(new THREE.Matrix4().makeScale(k, k, 1));
     return sd > 0 ? M : new THREE.Matrix4().makeScale(-1, 1, 1).multiply(M);
   }
   // The driver's tub: a deep carbon well inside the cockpit opening, wide enough for the elbows.
@@ -1251,34 +1254,73 @@
       p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
     }
   }
-  // Loosen the fist for a thicker grip: the fingers (glove, not the thumb) are eased outward from
-  // the grip's axis, by nothing at the palm and more the further round the grip a point lies (to
-  // k times its distance at the fingertips), so the curl opens round a bigger handle while the
-  // palm stays where it is. Grip frame as in thumbBend: z runs along the bar, the palm faces +x.
-  // G.__fingerOpen overrides k (then rebuild the arms).
-  function fingerOpen(p, sd, k0) {
-    const k = G.__fingerOpen != null ? G.__fingerOpen : k0 || 0;
-    if (!k) return;
-    const A = armData(), inv = A.RF0inv, fwd = inv.clone().invert();
-    const root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length();
+  // Loosen the fist for a thicker grip by straightening the fingers' middle joints. Round the
+  // grip (grip frame: z along the bar, the palm on the -x side) each finger runs from the palm
+  // over its knuckle and bends at its middle joint, MID radians round from the palm. Everything
+  // beyond that joint (the middle and end segments, with the end joint's own bend kept) turns
+  // about the joint's axis, parallel to the bar, by u radians outward; a short blend across the
+  // joint keeps the glove whole. The knuckles and the palm stay put; the thumb keeps its own bend.
+  // G.__fingerOpen overrides u (then rebuild the arms).
+  const MID = 2.35, MID_BLEND = 0.18;
+  // 'side': open the middle joints just until the middle segments run parallel to the wheel's
+  // side (the grip's outer face, running from the driver toward the nose): the angle between the
+  // segments as posed (a line through the points between the middle and the end joint, round the
+  // grip) and the wheel's front-to-back axis seen in the grip frame
+  let _sideOpen = null;
+  function sideOpen() {
+    if (_sideOpen != null) return _sideOpen;
+    const A = armData(), root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length(), pts = [];
     tax.divideScalar(TL);
     const v = new THREE.Vector3(), d = new THREE.Vector3();
     for (let i = 0; i < A.n; i++) {
-      if (A.w[i * 5 + 4] < 100 || A.zone[i] !== 1) continue;
-      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(inv);
-      // the thumb keeps its own bend
-      d.subVectors(v, root);
+      if (A.w[i * 5 + 4] < 100 || (A.zone[i] !== 1 && A.zone[i] !== 3)) continue;
+      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(A.RF0inv); d.subVectors(v, root);
       const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
       if (t > 0.05 && r0 < 0.02) continue;
+      let ang = Math.atan2(v.y, -v.x); if (ang < -1) ang += Math.PI * 2;
+      if (Math.hypot(v.x, v.y) < 0.07 && ang > MID + 0.1 && ang < MID + 0.75) pts.push([v.x, v.y, ang]);
+    }
+    if (pts.length < 8) return (_sideOpen = 0);
+    pts.sort((p1, p2) => p1[2] - p2[2]);
+    const n = Math.floor(pts.length / 4), mean = l => [l.reduce((s, q) => s + q[0], 0) / l.length, l.reduce((s, q) => s + q[1], 0) / l.length];
+    const p0 = mean(pts.slice(0, n)), p1 = mean(pts.slice(-n)), seg = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
+    // the wheel's axis toward the nose (its -z) in the right hand's grip frame
+    const fwd = new THREE.Vector3(0, 0, -1).transformDirection(handMatrix(1, 0, 0, 0).invert());
+    const turn = Math.atan2(Math.sin(Math.atan2(fwd.y, fwd.x) - seg), Math.cos(Math.atan2(fwd.y, fwd.x) - seg));
+    return (_sideOpen = Math.max(0, Math.min(1.2, turn)));
+  }
+  function fingerOpen(p, sd, u0) {
+    let u = G.__fingerOpen != null ? G.__fingerOpen : u0 || 0;
+    if (u === 'side') u = sideOpen();
+    if (!u) return;
+    const A = armData(), inv = A.RF0inv, fwd = inv.clone().invert();
+    const root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length();
+    tax.divideScalar(TL);
+    const v = new THREE.Vector3(), d = new THREE.Vector3(), pts = [];
+    for (let i = 0; i < A.n; i++) {
+      if (A.w[i * 5 + 4] < 100 || (A.zone[i] !== 1 && A.zone[i] !== 3)) continue;
+      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(inv);
+      d.subVectors(v, root);
+      const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
+      if (t > 0.05 && r0 < 0.02) continue; // the thumb
       const r = Math.hypot(v.x, v.y);
-      if (r > 0.07) continue;
-      const round = Math.abs(Math.atan2(v.y, -v.x)); // 0 at the palm, about pi on the far side of the grip
-      const w = THREE.MathUtils.smoothstep(round, 0.7, 2.6);
-      if (w <= 0) continue;
-      const s = 1 + k * w;
-      v.x *= s; v.y *= s;
-      v.applyMatrix4(fwd);
-      p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
+      if (r > 0.07 || r < 1e-4) continue;
+      let ang = Math.atan2(v.y, -v.x);
+      if (ang < -1) ang += Math.PI * 2; // fingertips curled past the far side
+      pts.push([i, v.clone(), r, ang]);
+    }
+    // the joint's axis: on the fingers' middle line (the median radius of the finger at the joint)
+    const rs = pts.filter(q => Math.abs(q[3] - MID) < 0.15).map(q => q[2]).sort((x, y) => x - y);
+    if (!rs.length) return;
+    const rj = rs[Math.floor(rs.length / 2)], jx = -Math.cos(MID) * rj, jy = Math.sin(MID) * rj;
+    for (const [i, w, , ang] of pts) {
+      const k = THREE.MathUtils.smoothstep(ang, MID - MID_BLEND, MID + MID_BLEND);
+      if (k <= 0) continue;
+      // the curl runs clockwise in x-y; opening turns the far segments back, anticlockwise
+      const a = u * k, c = Math.cos(a), s2 = Math.sin(a), dx = w.x - jx, dy = w.y - jy;
+      w.x = jx + dx * c - dy * s2; w.y = jy + dx * s2 + dy * c;
+      w.applyMatrix4(fwd);
+      p[i * 3] = w.x; p[i * 3 + 1] = w.y; p[i * 3 + 2] = sd < 0 ? -w.z : w.z;
     }
   }
   // debug: rebuild the arms' geometry after changing G.__thumb
@@ -1293,7 +1335,7 @@
   }
   // one geometry per side and thumb bend (each car's wheel has its own thumb hole)
   function armGeo(sd, T, open) {
-    const key = [sd].concat(T || THUMB, [open || 0]).map(x => +x.toFixed(4)).join(',');
+    const key = [sd].concat(T || THUMB, [open === 'side' ? sideOpen() : open || 0]).map(x => +x.toFixed(4)).join(',');
     if (_armGeo[key]) return _armGeo[key];
     const A = armData(), G = new THREE.BufferGeometry(), n = A.n;
     const p = new Float32Array(A.car);
@@ -1535,7 +1577,7 @@
     // straight, as in onboard footage. Turning about the handle keeps the palm wrapped on it:
     // a roll in the wheel's plane instead swings the heel of the hand into the wheel body.
     // A small part of the turn is still taken up in the wheel's plane.
-    const H = handMatrix(1, ck.grip[0], ck.grip[1], ck.grip[2]), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
+    const H = handMatrix(1, ck.grip[0], ck.grip[1], ck.grip[2], ck.grip[3] || 1), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
     if (kn > 0) {
       _gp.setFromMatrixPosition(H);
       const twist = (G.__handTip != null ? G.__handTip : -0.9) * kn * Math.sign(sp), roll = (G.__handRoll != null ? G.__handRoll : 0.2) * kn;
