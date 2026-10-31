@@ -62,11 +62,11 @@
       const slow = U.clamp((90 - 1 / Math.max(1e-6, kmax[i])) / 50, 0, 1);
       const over = -0.05 + (over0 + 0.05) * slow;
       // (off the kerbs the wheels stay on the asphalt: next to grass or gravel the car centre
-      // keeps 1.2 m in from the edge, so the outer tyre stays inside it even running a little
-      // wide; next to paved run-off or a street wall the old 0.55 m)
+      // keeps 1.45 m in from the edge, so the whole outer tyre stays inside the painted white
+      // line even running a little wide; next to paved run-off or a street wall 0.55 m)
       const soft = side => { const t = tr.runT && tr.runT[side] ? tr.runT[side][i] : SURF.GRASS; return t === SURF.GRASS || t === SURF.GRAVEL; };
-      L[i] = under(tr.kerbL, i) ? tr.hw + over : tr.hw - (soft(0) ? 1.2 : 0.55);
-      R[i] = under(tr.kerbR, i) ? tr.hw + over : tr.hw - (soft(1) ? 1.2 : 0.55);
+      L[i] = under(tr.kerbL, i) ? tr.hw + over : tr.hw - (soft(0) ? 1.45 : 0.55);
+      R[i] = under(tr.kerbR, i) ? tr.hw + over : tr.hw - (soft(1) ? 1.45 : 0.55);
     }
     return { L, R, clamp: (i, o) => (o < -L[i] ? -L[i] : o > R[i] ? R[i] : o) };
   }

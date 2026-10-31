@@ -17,7 +17,7 @@
   const F1 = G.F1;
   const U = F1.U;
   const DT = 1 / 240;
-  const VERSION = 5;     // bump when physics or AI changes make stored results stale
+  const VERSION = 6;     // bump when physics or AI changes make stored results stale
   const STRIDE_LINE = 2, STRIDE_GRIP = 5;
   const G_MIN = 0.8, G_MAX = 1.4;
 

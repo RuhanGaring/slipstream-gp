@@ -24,6 +24,7 @@
     // wet track: the share of the tyres' grip the plan uses, a margin on top, and how far in from
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
+    dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
   };
 
   function makeBrain(car, prof, opts) {
@@ -268,6 +269,9 @@
       if (Math.abs(dd) > 4.8) continue;
       if (dd > 0) hi = Math.min(hi, o.loc.d - SEP); else lo = Math.max(lo, o.loc.d + SEP);
     }
+    // never past the edge of the road here, whoever is alongside: a squeezed car lifts (below)
+    // rather than being pushed onto the grass
+    { const E = edgeOf(tr); lo = Math.max(lo, -E.L[i]); hi = Math.min(hi, E.R[i]); }
     if (lo > hi) { const m = (lo + hi) / 2; lo = hi = U.clamp(m, -lim, lim); b.squeezed = true; }
     // the lane can only move so fast: no decision may yank the car across the track
     const lrate = 5 * dt;
@@ -505,7 +509,7 @@
     // drive to the conditions: tyre temperature / wear and dirty air cost grip (beyond what the
     // plan already allows for, see above)
     if (tr.brk[leadIdx] || kl > 1 / 500) {
-      const gf = (car.grip == null ? 0.972 : car.grip) / 0.972 / (b.profK || 1) * (1 - (1 - car.dfMul) * 0.5);
+      const gf = (car.grip == null ? 0.972 : car.grip) / 0.972 / (b.profK || 1) * (1 - (1 - car.dfMul) * P.dirtyK);
       if (gf < 1) vt *= Math.sqrt(gf);
       if (car.wetness > 0.05) vt *= 1 - P.wetMargin * Math.min(1, car.wetness * 1.2); // a careful margin on a slippery road
     }
