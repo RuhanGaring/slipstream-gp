@@ -734,7 +734,9 @@
   const LED_OFF = [new THREE.Color(0.1, 0.09, 0), new THREE.Color(0.01, 0.07, 0.015), new THREE.Color(0.1, 0.01, 0.01)];
   function makeDisplay() {
     const c = document.createElement('canvas'); c.width = DISP_PX[0] * DISP_K; c.height = DISP_PX[1] * DISP_K;
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    // uploaded as plain RGBA and decoded from sRGB in the screen's shader: Chrome copies a 2D
+    // canvas into an sRGB texture by a slow path that cost the GPU about 20 ms on every redraw
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4;
     const d = { c, g: c.getContext('2d'), t, last: 0, key: '' };
     drawDisplay(d, null);
     return d;
@@ -1091,6 +1093,15 @@
     // the screen with its shift lights, set into the bezel
     // a lit screen: unlit material, brighter than white so it glows against the dark tub
     const screen = new THREE.MeshBasicMaterial({ map: disp.t, color: new THREE.Color(1.8, 1.8, 1.8), toneMapped: true });
+    screen.onBeforeCompile = sh => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
+        '  vec4 sampledDiffuseColor = texture2D(map, vMapUv);',
+        '  vec3 dS = sampledDiffuseColor.rgb;',
+        '  sampledDiffuseColor.rgb = mix(dS / 12.92, pow((dS + 0.055) / 1.055, vec3(2.4)), step(0.04045, dS));',
+        '  diffuseColor *= sampledDiffuseColor;',
+      ].join('\n'));
+    };
+    screen.customProgramCacheKey = () => 'wheelScreen';
     const scr = mesh(new THREE.PlaneGeometry(DISP_PX[0] * WS, DISP_PX[1] * WS), screen, false);
     scr.position.set(WX(DISP_PX[2] + DISP_PX[0] / 2), WY(DISP_PX[3] + DISP_PX[1] / 2), WF + 0.0006);
     spin.add(scr);
