@@ -143,6 +143,10 @@ let zW;
 }
 const SWB = [Lc[0] - 0.035, Lc[1] - 0.16, -0.175, Lc[0] + 0.17, Lc[1] + 0.09, 0.175];
 const isSwExcluded = n => /glass|cinture|number/i.test(n);
+// the wheel's own materials (its body, buttons, lamps, screen, quick release); a part in any other
+// material (dash panels, bodywork, the column's mounting behind the wheel) belongs to the wheel
+// only if it lies against the wheel's face, or it would turn with the wheel in mid air
+const isSwMat = n => /steer|_sw|^sw_|lcd|led|kers|indicator|revs|whitelight|tag_|chrome|black|plastic|button|handle/i.test(n);
 
 // ---------- classify every component: body, a wheel, or the steering wheel ----------
 const parts = { body: new Map(), sw: new Map(), FL: new Map(), FR: new Map(), RL: new Map(), RR: new Map() };
@@ -159,7 +163,8 @@ for (const [mat, g] of groups) {
   }
   for (const c of components(g)) {
     let dest = 'body';
-    if (mat === lcd.mat || (!isSwExcluded(n) && inBox(c.b, SWB))) dest = 'sw';
+    if (mat === lcd.mat || (!isSwExcluded(n) && inBox(c.b, SWB) && (isSwMat(n) || c.b[3] - Lc[0] < 0.075))) dest = 'sw';
+    if (dest === 'sw' && process.env.SWDEBUG) console.log('  sw', n.padEnd(24), String(c.tris.length).padStart(5), 'x', (c.b[0] - Lc[0]).toFixed(3), (c.b[3] - Lc[0]).toFixed(3), 'y', (c.b[1] - Lc[1]).toFixed(3), (c.b[4] - Lc[1]).toFixed(3), 'z', c.b[2].toFixed(3), c.b[5].toFixed(3));
     else for (const [k, W] of Object.entries(wheels)) if (inBox(c.b, W.box)) { dest = k; break; }
     push(parts[dest], mat, g, c.tris);
   }

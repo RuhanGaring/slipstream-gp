@@ -358,6 +358,8 @@
       rear: meta.mats.findIndex(o => /rear_light|rtt_light/i.test(o.n)),
     };
     MD.grip = gripOf(MD.swParts);
+    MD.hole = MD.grip ? holeOf(MD.swParts, MD.grip) : null;
+    MD.thumb = thumbFor(MD);
     built.set(key, MD);
     return MD;
   }
@@ -433,6 +435,80 @@
       '#include <aomap_fragment>',
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
+  }
+  // The thumb hole beside each grip: an opening through the wheel between the grip bar and the
+  // wheel's body. Every triangle of the wheel at the grips' depth (the shift paddles behind it
+  // would fill the holes in) is drawn into a grid on the wheel's face (x across, y up; the right
+  // side, the left is its mirror); a hole is an empty patch the grid's open border cannot reach.
+  // The thumb's is the one right inboard of the grip, the upper one where there are two.
+  // Returns its centre and size [x, y, w, h, cells].
+  function holeOf(parts, grip) {
+    const C = 0.003, x0 = 0.03, x1 = grip[0] + 0.03, y0 = grip[1] - 0.08, y1 = grip[1] + 0.08;
+    const nx = Math.ceil((x1 - x0) / C), ny = Math.ceil((y1 - y0) / C), full = new Uint8Array(nx * ny);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    for (const p of parts) {
+      const P = p.G.attributes.position, ix = p.G.index.array;
+      for (let t = 0; t < ix.length; t += 3) {
+        a.fromBufferAttribute(P, ix[t]); b.fromBufferAttribute(P, ix[t + 1]); c.fromBufferAttribute(P, ix[t + 2]);
+        const cz = (a.z + b.z + c.z) / 3;
+        if (cz < grip[2] - 0.03 || cz > grip[2] + 0.045) continue;
+        // both sides of the wheel count: fold the left onto the right
+        a.x = Math.abs(a.x); b.x = Math.abs(b.x); c.x = Math.abs(c.x);
+        const minX = Math.min(a.x, b.x, c.x), maxX = Math.max(a.x, b.x, c.x), minY = Math.min(a.y, b.y, c.y), maxY = Math.max(a.y, b.y, c.y);
+        if (maxX < x0 || minX > x1 || maxY < y0 || minY > y1) continue;
+        // cells whose centre lies inside the triangle (projected on the face), plus its corners
+        const i0 = Math.max(0, Math.floor((minX - x0) / C)), i1 = Math.min(nx - 1, Math.floor((maxX - x0) / C));
+        const j0 = Math.max(0, Math.floor((minY - y0) / C)), j1 = Math.min(ny - 1, Math.floor((maxY - y0) / C));
+        const d = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+        for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+          const px = x0 + (i + 0.5) * C, py = y0 + (j + 0.5) * C;
+          const w1 = ((b.x - px) * (c.y - py) - (c.x - px) * (b.y - py)) / d, w2 = ((c.x - px) * (a.y - py) - (a.x - px) * (c.y - py)) / d;
+          if (Math.abs(d) < 1e-12 ? false : (w1 >= -0.05 && w2 >= -0.05 && 1 - w1 - w2 >= -0.05)) full[i + j * nx] = 1;
+        }
+        for (const v of [a, b, c]) { const i = Math.floor((v.x - x0) / C), j = Math.floor((v.y - y0) / C); if (i >= 0 && i < nx && j >= 0 && j < ny) full[i + j * nx] = 1; }
+      }
+    }
+    // flood the empty cells from the border: what it cannot reach is enclosed
+    const seen = new Uint8Array(nx * ny), st = [];
+    for (let i = 0; i < nx; i++) for (const j of [0, ny - 1]) st.push(i + j * nx);
+    for (let j = 0; j < ny; j++) for (const i of [0, nx - 1]) st.push(i + j * nx);
+    while (st.length) {
+      const k = st.pop(); if (seen[k] || full[k]) continue; seen[k] = 1;
+      const i = k % nx, j = (k / nx) | 0;
+      if (i > 0) st.push(k - 1); if (i < nx - 1) st.push(k + 1); if (j > 0) st.push(k - nx); if (j < ny - 1) st.push(k + nx);
+    }
+    // the enclosed empty patches; the hole is the biggest one reaching close to the grip
+    let best = null;
+    const mark = new Uint8Array(nx * ny);
+    for (let k0 = 0; k0 < nx * ny; k0++) {
+      if (full[k0] || seen[k0] || mark[k0]) continue;
+      const cells = [k0]; mark[k0] = 1;
+      for (let q = 0; q < cells.length; q++) {
+        const k = cells[q], i = k % nx, j = (k / nx) | 0;
+        for (const n of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, j > 0 ? k - nx : -1, j < ny - 1 ? k + nx : -1]) if (n >= 0 && !full[n] && !mark[n]) { mark[n] = 1; cells.push(n); }
+      }
+      if (cells.length < 12) continue; // a few millimetres: a gap between two parts, not a hole
+      let sx = 0, sy = 0, bx = [1e9, -1e9], by = [1e9, -1e9];
+      for (const k of cells) { const x = x0 + ((k % nx) + 0.5) * C, y = y0 + (((k / nx) | 0) + 0.5) * C; sx += x; sy += y; bx[0] = Math.min(bx[0], x); bx[1] = Math.max(bx[1], x); by[0] = Math.min(by[0], y); by[1] = Math.max(by[1], y); }
+      const h = [sx / cells.length, sy / cells.length, bx[1] - bx[0] + C, by[1] - by[0] + C, cells.length];
+      if (grip[0] - bx[1] > 0.04) continue; // too far inboard of the grip to be its hole
+      h[5] = h[4] * (h[1] > grip[1] - 0.015 ? 3 : 1); // the upper hole first
+      if (!best || h[5] > best[5]) best = h;
+    }
+    return best && best.slice(0, 5);
+  }
+  // The thumb's bend for a car's wheel: the posed thumb turned about its root, along the shortest
+  // arc, so it points from its root to the middle of that wheel's thumb hole (a little in front of
+  // the grip's axis, into the hole). The same bend as the earlier wheel's, aimed at this hole.
+  function thumbFor(MD) {
+    if (!MD || !MD.hole || !armData()) return THUMB;
+    const [gx, gy, gz] = MD.grip;
+    const tgt = new THREE.Vector3(MD.hole[0], MD.hole[1], gz - 0.006).applyMatrix4(handMatrix(1, gx, gy, gz).invert());
+    const root = new THREE.Vector3(...TH_ROOT), d0 = new THREE.Vector3(...TH_TIP).sub(root).normalize(), d1 = tgt.sub(root).normalize();
+    const ax = new THREE.Vector3().crossVectors(d0, d1), ang = Math.acos(Math.max(-1, Math.min(1, d0.dot(d1))));
+    if (ax.lengthSq() < 1e-8) return THUMB;
+    ax.normalize();
+    return [ax.x, ax.y, ax.z, Math.min(ang, 1.7)];
   }
   // a model material as a three.js material
   function carMat(o, C, hue) {
@@ -1115,8 +1191,8 @@
   // to the full angle past the middle joint, and fading out sideways so the palm stays put.
   // THUMB: [axis x, y, z, angle (radians)]; G.__thumb overrides it (then rebuild the arms).
   const THUMB = [1, 0, 0, 1.0], TH_ROOT = [0.012, 0.008, 0.008], TH_TIP = [0.02, 0, 0.072];
-  function thumbBend(p, sd) {
-    const A = armData(), T = G.__thumb || THUMB, inv = A.RF0inv, fwd = inv.clone().invert();
+  function thumbBend(p, sd, T0) {
+    const A = armData(), T = G.__thumb || T0 || THUMB, inv = A.RF0inv, fwd = inv.clone().invert();
     const root = new THREE.Vector3(...TH_ROOT), tip = new THREE.Vector3(...TH_TIP), ax = tip.clone().sub(root), L = ax.length();
     ax.divideScalar(L);
     const q = new THREE.Quaternion(), axis = new THREE.Vector3(T[0], T[1], T[2]).normalize(), v = new THREE.Vector3(), d = new THREE.Vector3();
@@ -1132,18 +1208,20 @@
       p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
     }
   }
-  // debug: rebuild both arms' geometry after changing G.__thumb
+  // debug: rebuild the arms' geometry after changing G.__thumb
   function rebuildArms() {
-    for (const k of [1, -1]) {
-      const G0 = _armGeo[k]; if (!G0) continue;
-      delete _armGeo[k];
-      const G1 = armGeo(k);
+    for (const key of Object.keys(_armGeo)) {
+      const G0 = _armGeo[key], [sd, ...T] = key.split(',').map(Number);
+      delete _armGeo[key];
+      const G1 = armGeo(sd, T.length === 4 ? T : null);
       G0.attributes.position.array.set(G1.attributes.position.array); G0.attributes.position.needsUpdate = true; G0.computeVertexNormals();
-      _armGeo[k] = G0;
+      _armGeo[key] = G0;
     }
   }
-  function armGeo(sd) {
-    if (_armGeo[sd]) return _armGeo[sd];
+  // one geometry per side and thumb bend (each car's wheel has its own thumb hole)
+  function armGeo(sd, T) {
+    const key = [sd].concat(T || THUMB).map(x => +x.toFixed(4)).join(',');
+    if (_armGeo[key]) return _armGeo[key];
     const A = armData(), G = new THREE.BufferGeometry(), n = A.n;
     const p = new Float32Array(A.car);
     if (sd < 0) for (let i = 0; i < n; i++) p[i * 3 + 2] = -p[i * 3 + 2];
@@ -1157,14 +1235,14 @@
       const z = A.zone[i]; // 0 sleeve, 1 glove, 2 gauntlet, 3 knuckle panel
       col.set(z === 0 ? [1, 0, 0] : z === 3 ? [0, 0, 1] : [0, 1, 0], i * 3);
     }
-    thumbBend(p, sd);
+    thumbBend(p, sd, T);
     G.setAttribute('position', new THREE.BufferAttribute(p, 3));
     G.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     G.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     G.setAttribute('color', new THREE.BufferAttribute(col, 3));
     G.setIndex(new THREE.BufferAttribute(ix, 1));
     G.computeVertexNormals();
-    return (_armGeo[sd] = G);
+    return (_armGeo[key] = G);
   }
   // Cloth relief, 1024 px for a 5 cm tile (about 50 px per millimetre), as heights:
   // R the suit's Nomex twill, G the glove backs' fine knit, B the palms' suede nap.
@@ -1281,11 +1359,11 @@
     };
     return m;
   }
-  function makeArm(sd, team) {
+  function makeArm(sd, team, T) {
     if (!armData()) return null;
     const bones = [0, 1, 2, 3, 4].map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
     const skel = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
-    const mesh = new THREE.SkinnedMesh(armGeo(sd), armMaterial(team, sd));
+    const mesh = new THREE.SkinnedMesh(armGeo(sd, T), armMaterial(team, sd));
     mesh.bindMode = THREE.DetachedBindMode;
     mesh.bind(skel, new THREE.Matrix4());
     mesh.frustumCulled = false; mesh.castShadow = true;
@@ -1462,7 +1540,7 @@
     // arms: the scanned, dressed arms (makeArm), shoulders low in the tub
     const arms = [];
     for (const sd of [-1, 1]) {
-      const arm = makeArm(sd, team);
+      const arm = makeArm(sd, team, MD && MD.thumb);
       if (!arm) continue;
       arm.shoulder = new THREE.Vector3(0.34, 0.66, 0.115); // the right one; the left is solved mirrored
       group.add(arm.mesh);
