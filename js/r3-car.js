@@ -357,42 +357,113 @@
       // the tail light (flashes with the pit limiter and in the rain)
       rear: meta.mats.findIndex(o => /rear_light|rtt_light/i.test(o.n)),
     };
+    MD.grip = gripOf(MD.swParts);
     built.set(key, MD);
     return MD;
   }
-  // a model material as three.js material: the glTF metal/rough values and textures as authored
+  // Where the hands close on this car's own steering wheel (wheel frame: x right, y up, z toward
+  // the driver). The grips are the outer bars at the wheel's middle height and they stand back
+  // toward the driver from the wheel's centre, by a different amount on every car; a hand put on
+  // the centre plane sinks into the wheel body. From the vertices in a band at the grips' height:
+  // the outer edge and the grip's back face near that edge; the hand's grip axis goes a bar's
+  // half thickness inside both.
+  function gripOf(parts) {
+    let outer = 0;
+    const pts = [], v = new THREE.Vector3();
+    for (const p of parts) {
+      const a = p.G.attributes.position;
+      for (let i = 0; i < a.count; i++) {
+        v.fromBufferAttribute(a, i);
+        // just below the middle: above it the shift paddles and lamps stick out past the grips
+        if (v.y > -0.042 && v.y < 0 && Math.abs(v.x) > 0.07) { outer = Math.max(outer, Math.abs(v.x)); pts.push(Math.abs(v.x), v.z); }
+      }
+    }
+    if (pts.length < 40) return null;
+    const zs = [];
+    for (let i = 0; i < pts.length; i += 2) if (pts[i] > outer - 0.035) zs.push(pts[i + 1]);
+    zs.sort((a, b) => a - b);
+    const back = zs[Math.floor(zs.length * 0.9)];
+    return [outer - 0.018, -0.01, back - 0.022];
+  }
+  // What a model material is, from its name: the surface values these models came with were
+  // set for another renderer's shading (painted bodywork 50 to 100 per cent metallic, mirror
+  // carbon, metal tyre sidewalls), so each kind of surface gets physically sound values here.
+  // The textures (liveries, logos, carbon weave, tyre lettering) are kept as they are.
+  function surface(n) {
+    if (/mirror|^glass/i.test(n)) return 'mirror';
+    if (/chrome(?!_ao)/i.test(n)) return 'chrome';
+    if (/tyre|tire|tread|sidewall/i.test(n)) return 'tyre';
+    if (/wheel_hub|_wheel(\.|$)/i.test(n)) return 'rim';
+    if (/disc/i.test(n)) return 'disc';
+    if (/lcd|led|kers|indicator|revs|whitelight|tag_|light/i.test(n)) return 'lamp';
+    if (/cinture|cockpit|black_s|^black|negro|plastic|foam|chrome_ao/i.test(n)) return 'trim';
+    if (/carbon|steeringwhee|_sw(\.|$)|^sw_/i.test(n)) return 'carbon';
+    return 'paint'; // liveries, decals, details, generics, numbers, the T-cam pod
+  }
+  const SURF = {
+    // gloss livery: a dielectric base coat under a clear coat
+    paint: { metalness: 0, roughness: 0.42, clearcoat: 1, clearcoatRoughness: 0.06 },
+    // carbon fibre: resin-filled weave under a clear resin coat
+    carbon: { metalness: 0, roughness: 0.45, clearcoat: 0.6, clearcoatRoughness: 0.18 },
+    tyre: { metalness: 0, roughness: 0.86 },
+    rim: { metalness: 0.75, roughness: 0.36, clearcoat: 0.3, clearcoatRoughness: 0.3 },
+    disc: { metalness: 0.6, roughness: 0.55 },
+    chrome: { metalness: 1, roughness: 0.28 },
+    mirror: { metalness: 1, roughness: 0.04 },
+    trim: { metalness: 0, roughness: 0.82 },
+    lamp: { metalness: 0, roughness: 0.4 },
+  };
+  // The cockpit opening, in the car frame (the cars are placed so their steering wheels line up,
+  // so their cockpits do too): the driver sits in a deep, narrow well that the sky and the sun's
+  // bounce barely reach. Inside it the light from the sky and the surroundings fades with depth
+  // below the rim, and the inboard faces of the painted bodywork read as the bare, matte carbon
+  // of a real tub, as on the earlier car.
+  const CK_REGION = 'step(-0.12, cP.x) * step(cP.x, 1.15) * step(abs(cP.z), 0.34) * step(0.16, cP.y) * step(cP.y, 0.83)';
+  function cockpitPatch(sh, paint) {
+    sh.vertexShader = 'varying vec3 cP; varying vec3 cN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  cP = position; cN = normal;');
+    sh.fragmentShader = 'varying vec3 cP; varying vec3 cN;\n' + sh.fragmentShader;
+    if (paint) sh.fragmentShader = sh.fragmentShader
+      .replace('#include <color_fragment>', [
+        '#include <color_fragment>',
+        '  float ckIn = ' + CK_REGION + ' * step(normalize(cN).z * sign(cP.z), 0.25);',
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.014, 0.015, 0.017), ckIn);'].join('\n'))
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.6, ckIn);')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= 1.0 - ckIn;\n#endif');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', [
+      '#include <aomap_fragment>',
+      '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
+      '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
+  }
+  // a model material as a three.js material
   function carMat(o, C, hue) {
-    const T = i => (i >= 0 ? C.tex[i] : null);
-    const p = {
-      color: new THREE.Color().setRGB(o.c[0], o.c[1], o.c[2]), map: T(o.map), normalMap: T(o.nmap),
+    const T = i => (i >= 0 ? C.tex[i] : null), kind = surface(o.n);
+    const p = Object.assign({
+      color: new THREE.Color().setRGB(o.c[0], o.c[1], o.c[2]), map: T(o.map), normalMap: o.ns ? T(o.nmap) : null,
       emissiveMap: T(o.emap), emissive: new THREE.Color().setRGB(o.e[0], o.e[1], o.e[2]),
-      metalness: o.m, roughness: o.r, side: THREE.DoubleSide,
-      transparent: o.a === 'B', opacity: o.c[3], alphaTest: o.a === 'M' ? o.cut : 0,
-    };
+      side: THREE.DoubleSide, transparent: o.a === 'B', opacity: o.c[3], alphaTest: o.a === 'M' ? o.cut : 0,
+    }, SURF[kind]);
     if (p.normalMap) p.normalScale = new THREE.Vector2(o.ns, o.ns);
-    const physical = !!o.spec;
-    if (o.spec) { p.specularIntensity = o.spec[0]; p.specularColor = new THREE.Color().setRGB(o.spec[1], o.spec[2], o.spec[3]); }
-    const m = physical ? new THREE.MeshPhysicalMaterial(p) : new THREE.MeshStandardMaterial(p);
+    if (o.spec) { p.specularIntensity = Math.min(1, o.spec[0] * 2.5); p.specularColor = new THREE.Color().setRGB(o.spec[1], o.spec[2], o.spec[3]); }
+    const m = new THREE.MeshPhysicalMaterial(p);
     if (p.transparent) {
       // decals lie on the paint: drawn after it, pulled toward the eye so they never fight it
       m.depthWrite = false; m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2;
     }
     m.name = o.n;
-    if (hue && p.map) {
+    const a = (hue * Math.PI) / 180, turn = hue && p.map;
+    m.userData.patchKey = 'ck' + (kind === 'paint' ? 'p' : '') + (turn ? '_hue' + hue : '');
+    m.userData.patchExtra = sh => {
+      cockpitPatch(sh, kind === 'paint');
       // a team running this car in its own colours: the base colour's hue turned (luma kept)
-      const a = (hue * Math.PI) / 180;
-      m.userData.patchKey = 'hue' + hue;
-      m.userData.patchExtra = sh => {
-        sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
-          '#include <map_fragment>',
-          '  { const mat3 toY = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);',
-          '    const mat3 toR = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);',
-          `    vec3 yiq = toY * diffuseColor.rgb; float c = ${Math.cos(a).toFixed(5)}, s = ${Math.sin(a).toFixed(5)};`,
-          '    yiq.yz = vec2(yiq.y * c - yiq.z * s, yiq.y * s + yiq.z * c);',
-          '    diffuseColor.rgb = max(toR * yiq, 0.0); }',
-        ].join('\n'));
-      };
-    }
+      if (turn) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
+        '#include <map_fragment>',
+        '  { const mat3 toY = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);',
+        '    const mat3 toR = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);',
+        `    vec3 yiq = toY * diffuseColor.rgb; float c = ${Math.cos(a).toFixed(5)}, s = ${Math.sin(a).toFixed(5)};`,
+        '    yiq.yz = vec2(yiq.y * c - yiq.z * s, yiq.y * s + yiq.z * c);',
+        '    diffuseColor.rgb = max(toR * yiq, 0.0); }',
+      ].join('\n'));
+    };
     return m;
   }
 
@@ -688,7 +759,7 @@
   // forearm toward the wrist (down and back toward the elbow in the tub), z = x * y. The
   // left is the mirror image.
   // gx, gy: the grip's centre in the wheel's frame (each car's own wheel has its own span)
-  function handMatrix(sd, gx = GRIP_X, gy = -0.019) {
+  function handMatrix(sd, gx = GRIP_X, gy = -0.019, gz = 0) {
     // x is the palm's normal: inboard onto the grip, turned a little toward the nose so the
     // back of the glove faces out and back toward the driver
     const X = new THREE.Vector3(...(G.__handX || [-0.9, 0, -0.45])).normalize();
@@ -698,7 +769,7 @@
     // comes up from below.
     const Y = new THREE.Vector3(...(G.__handY || [0, -0.45, 1])); Y.addScaledVector(X, -Y.dot(X)).normalize();
     const Z = new THREE.Vector3().crossVectors(X, Y);
-    const M = new THREE.Matrix4().makeTranslation(gx, gy, 0)
+    const M = new THREE.Matrix4().makeTranslation(gx, gy, gz)
       .multiply(new THREE.Matrix4().makeRotationZ(0.06))
       .multiply(new THREE.Matrix4().makeBasis(X, Y, Z));
     return sd > 0 ? M : new THREE.Matrix4().makeScale(-1, 1, 1).multiply(M);
@@ -1312,7 +1383,7 @@
     // straight, as in onboard footage. Turning about the handle keeps the palm wrapped on it:
     // a roll in the wheel's plane instead swings the heel of the hand into the wheel body.
     // A small part of the turn is still taken up in the wheel's plane.
-    const H = handMatrix(1, ck.grip[0], ck.grip[1]), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
+    const H = handMatrix(1, ck.grip[0], ck.grip[1], ck.grip[2]), kn = THREE.MathUtils.smoothstep(Math.abs(sp), 0.5, 1.6);
     if (kn > 0) {
       _gp.setFromMatrixPosition(H);
       const twist = (G.__handTip != null ? G.__handTip : -0.9) * kn * Math.sign(sp), roll = (G.__handRoll != null ? G.__handRoll : 0.2) * kn;
@@ -1403,7 +1474,7 @@
     const bar = mesh(new THREE.BoxGeometry(0.075, 0.05, 0.2), K.pod); bar.position.set(-0.5, 1.2, 0);
     const lens = mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 14), K.M.visor, false); lens.rotation.z = Math.PI / 2; lens.position.set(-0.462, 1.205, 0);
     if (!MD) group.add(mast, bar, lens); // (a car model has its own T-cam pod)
-    const grip = MD ? [MD.sw.grip, MD.sw.gripY != null ? MD.sw.gripY : -0.01] : [GRIP_X, -0.019];
+    const grip = (MD && MD.grip) || [GRIP_X, -0.019, 0];
     return { group, pivot, spin, arms, grip, steer: null, helmet, povOnly: inner.povOnly, disp, head, neck: NECK, hs: { y: 0, p: 0, r: 0, vy: 0, vp: 0, vr: 0, t: 0, ph: Math.random() * 6.28 } };
   }
 
