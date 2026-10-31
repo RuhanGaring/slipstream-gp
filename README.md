@@ -17,10 +17,14 @@ Then open http://localhost:8931. There is also an `f1-racing` entry in the paren
 - **Arcade**: drive with W A S D only. Automatic gears, traction and stability help, extra grip, a full racing line that turns red where you need to brake, no tyre wear, damage, pits or penalties. R resets the car.
 - **Simulation**: tyre temperature and wear, soft, medium and hard compounds, fuel burn, front wing damage, track limits strikes and penalties, DRS (Space), pit strategy (P, then 1, 2 or 3) with a pit-lane autopilot. ABS, traction control, gearbox (E and Q for manual) and steering assist are options.
 - **Quick Race**, **Championship** (5 rounds, points to P10 plus fastest lap) and **Time Trial** (ghost of your best lap, saved per circuit).
+- **Spectate**: an all-AI race to watch, with a TV director that cuts between battles and cameras.
+- **Replays** of every session (race, weekend sessions, time trial, spectating): from the pause menu or the results. Timeline with lap and event markers (overtakes, contacts, pit stops, fastest laps, safety car), event list, highlights, slow motion and rewind, frame stepping, any car, any camera, and photos.
 
 ## Controls
 
 W or Up: throttle. S or Down: brake, and reverse when stopped. A and D: steer. Space: DRS. P: pit strategy. E and Q: shift. C: camera (chase, far chase, T-cam, cockpit, TV). Z: chase distance (near, standard, far). Right click: mouse steering on or off (the mouse turns a virtual wheel; tune sensitivity, deadzone, curve, self-centring, smoothing and invert in Settings). H: hide HUD. M: mute. Esc: pause. Gamepads work too.
+
+Replays and spectating: Left and Right (or , and .) change car, Up and Down jump to the leader or the last car, C and V cycle 14 cameras (chase, far chase, T-cam, cockpit, helmet, nose, sidepod, TV, helicopter, blimp, top down, map, orbit, free), 1 to 0 pick one directly, F free camera (W A S D, Q and E for height, drag or arrows to look, Shift for speed, wheel to zoom), T top down, G map, D director, Tab timing tower, H hide the overlay. In a replay: Space play or pause, J and L skip 5 s, U and I step a frame, [ and ] speed (down into rewind), N and B next or previous event, E event list, Y highlights, P photo, Home and End, or click and drag the timeline. Esc leaves.
 
 ## Under the hood
 

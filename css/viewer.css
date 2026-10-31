@@ -1,0 +1,102 @@
+/* Broadcast viewer: replays and spectating (js/viewer.js) */
+#viewer { position: fixed; inset: 0; pointer-events: none; z-index: 20; display: none; font-family: var(--font); color: var(--ink); font-variant-numeric: tabular-nums; }
+#viewer.show { display: block; }
+#viewer.off > *:not(.vw-note) { opacity: 0; pointer-events: none; }
+#viewer > * { transition: opacity .25s; }
+.vw-top { position: absolute; left: 24px; top: 20px; display: flex; gap: 10px; align-items: stretch; }
+.vw-badge { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); padding: 6px 14px 6px 12px; }
+.vw-badge i { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: vwBlink 1.2s infinite; }
+#viewer.replay .vw-badge i { background: var(--yellow); animation: none; }
+#viewer.replay .vw-badge { border-left-color: var(--yellow); }
+@keyframes vwBlink { 50% { opacity: .25; } }
+.vw-badge b { font-weight: 900; font-style: italic; letter-spacing: .14em; font-size: 15px; }
+.vw-trk { color: var(--ink-2); font-weight: 700; letter-spacing: .12em; font-size: 12px; }
+.vw-lap { background: var(--panel); border: 1px solid var(--line); padding: 6px 14px; font-weight: 700; letter-spacing: .1em; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+.vw-lap b { color: var(--ink); font-size: 18px; font-weight: 900; }
+
+.vw-tower { position: absolute; left: 24px; top: 66px; width: 196px; background: var(--panel); border: 1px solid var(--line); pointer-events: auto; max-height: calc(100vh - 230px); overflow: hidden; }
+.vw-tower.off { display: none; }
+.vw-row { display: grid; grid-template-columns: 24px 4px 46px 1fr; align-items: center; gap: 7px; height: 25px; padding-right: 9px; font-size: 13px; font-weight: 700; cursor: pointer; border-bottom: 1px solid var(--line); }
+.vw-row:hover { background: rgba(255, 255, 255, .06); }
+.vw-row .p { text-align: center; color: var(--ink-2); }
+.vw-row .sw { height: 15px; }
+.vw-row .c { letter-spacing: .08em; }
+.vw-row .g { text-align: right; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.vw-row.me { background: var(--ink); color: #0b0d10; }
+.vw-row.me .p, .vw-row.me .g { color: #333a44; }
+
+.vw-card { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); display: grid; grid-template-columns: auto auto auto; grid-template-rows: auto auto; align-items: stretch; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--tc, var(--accent)); min-width: 520px; }
+.vw-pos { grid-row: span 2; display: flex; align-items: center; padding: 0 16px; font-size: 34px; font-weight: 900; font-style: italic; background: rgba(255, 255, 255, .05); }
+.vw-pos:empty { display: none; }
+.vw-who { padding: 8px 16px; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 210px; }
+.vw-name { font-size: 20px; font-weight: 900; line-height: 1.1; white-space: nowrap; }
+.vw-team { font-size: 11px; letter-spacing: .14em; color: var(--ink-3); font-weight: 700; white-space: nowrap; }
+.vw-tel { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-left: 1px solid var(--line); }
+.vw-spd { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+.vw-spd b { font-size: 30px; font-weight: 900; min-width: 62px; text-align: right; }
+.vw-spd small { font-size: 10px; letter-spacing: .14em; color: var(--ink-3); font-weight: 700; margin-top: 3px; }
+.vw-gear { font-size: 30px; font-weight: 900; width: 26px; text-align: center; color: var(--yellow); }
+.vw-ped { display: flex; gap: 4px; height: 36px; align-items: flex-end; }
+.vw-ped i { width: 8px; background: var(--green); display: block; height: 0; transition: height .06s linear; }
+.vw-ped i.vw-brk { background: var(--accent); }
+.vw-drs { font-size: 11px; font-weight: 900; letter-spacing: .1em; padding: 3px 6px; border: 1px solid var(--line-2); color: var(--ink-3); }
+.vw-drs.on { background: var(--green); color: #04130a; border-color: var(--green); }
+.vw-gaps { grid-column: 2 / span 2; display: flex; gap: 18px; padding: 5px 16px 7px; border-top: 1px solid var(--line); font-size: 11px; letter-spacing: .1em; color: var(--ink-3); font-weight: 700; }
+.vw-gaps:empty { display: none; }
+.vw-gaps b { color: var(--ink); margin-left: 4px; }
+
+.vw-cam { position: absolute; right: 24px; top: 20px; display: flex; gap: 8px; }
+.vw-camn, .vw-card { pointer-events: auto; cursor: pointer; }
+.vw-cam > span { background: var(--panel); border: 1px solid var(--line); padding: 7px 14px; font-weight: 900; letter-spacing: .14em; font-size: 13px; transition: background .3s, color .3s; }
+.vw-cam.lit .vw-camn { background: var(--ink); color: #0b0d10; }
+.vw-dir { display: none; color: var(--yellow); }
+.vw-dir.on { display: block; }
+
+.vw-bar { position: absolute; left: 24px; right: 24px; bottom: 34px; display: none; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; pointer-events: auto; }
+#viewer.replay .vw-bar { display: flex; }
+.vw-ctl { display: flex; align-items: center; gap: 4px; }
+.vw-b { background: none; border: 1px solid var(--line-2); color: var(--ink); font: 700 12px var(--font); width: 36px; height: 30px; cursor: pointer; }
+.vw-b:hover { background: rgba(255, 255, 255, .1); }
+.vw-play { width: 44px; font-size: 13px; }
+.vw-rate { min-width: 78px; text-align: center; font-weight: 900; font-size: 13px; letter-spacing: .06em; color: var(--yellow); }
+.vw-tl { position: relative; flex: 1; height: 30px; cursor: pointer; touch-action: none; }
+.vw-tl::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 4px; background: rgba(255, 255, 255, .14); }
+.vw-fill { position: absolute; left: 0; top: 13px; height: 4px; background: var(--yellow); }
+.vw-head { position: absolute; top: 5px; width: 4px; height: 20px; margin-left: -2px; background: var(--ink); box-shadow: 0 0 0 2px rgba(0, 0, 0, .5); }
+.vw-laps i { position: absolute; top: 9px; width: 1px; height: 12px; background: rgba(255, 255, 255, .35); }
+.vw-laps em { position: absolute; top: -10px; left: 3px; font-size: 9px; font-style: normal; font-weight: 700; color: var(--ink-3); letter-spacing: .06em; }
+.vw-evs i { position: absolute; top: 19px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); cursor: pointer; z-index: 2; }
+.vw-evs i:hover { transform: rotate(45deg) scale(1.5); }
+.vw-evs .ev-pass { background: var(--green); }
+.vw-evs .ev-contact { background: var(--accent); }
+.vw-evs .ev-pit { background: var(--blue); }
+.vw-evs .ev-fastest { background: var(--purple); }
+.vw-evs .ev-sc { background: var(--yellow); }
+.vw-time { min-width: 110px; text-align: right; font-weight: 700; font-size: 13px; color: var(--ink-2); }
+.vw-help { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 10px; letter-spacing: .14em; font-weight: 700; color: rgba(244, 246, 248, .55); text-shadow: 0 1px 2px #000; }
+
+.vw-list { position: absolute; right: 24px; top: 66px; width: 330px; max-height: calc(100vh - 230px); overflow: auto; background: var(--panel); border: 1px solid var(--line); display: none; pointer-events: auto; }
+.vw-list.on { display: block; }
+.vw-lt { padding: 8px 12px; font-weight: 900; letter-spacing: .16em; font-size: 12px; border-bottom: 1px solid var(--line); }
+.vw-li > div { padding: 6px 12px 6px 14px; font-size: 12px; font-weight: 700; letter-spacing: .04em; cursor: pointer; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; }
+.vw-li > div:hover { background: rgba(255, 255, 255, .06); }
+.vw-li > div span { color: var(--ink-3); margin-right: 10px; }
+.vw-li .ev-pass { border-left-color: var(--green); }
+.vw-li .ev-contact { border-left-color: var(--accent); }
+.vw-li .ev-pit { border-left-color: var(--blue); }
+.vw-li .ev-fastest { border-left-color: var(--purple); }
+.vw-li .ev-sc { border-left-color: var(--yellow); }
+.vw-li .none { color: var(--ink-3); cursor: default; }
+
+.vw-note { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--yellow); padding: 10px 20px; font-weight: 900; font-style: italic; letter-spacing: .1em; font-size: 16px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+.vw-note.on { opacity: 1; }
+
+@media (max-width: 760px) {
+  .vw-tower { display: none; }
+  .vw-card { min-width: 0; width: calc(100% - 32px); bottom: 104px; grid-template-columns: auto 1fr; }
+  .vw-tel { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
+  .vw-gaps { grid-column: 1 / -1; }
+  .vw-bar { left: 12px; right: 12px; gap: 8px; }
+  .vw-time { min-width: 0; font-size: 11px; }
+  .vw-help { display: none; }
+}

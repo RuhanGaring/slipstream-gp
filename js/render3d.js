@@ -1840,7 +1840,8 @@
 
   // ---------- cameras ----------
   const C = { yaw: 0, mode: '', look: V(0, 0, 0), tv: null, fov: 60, last: null };
-  const MODES = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'tv', 'orbit', 'show'];
+  // (free, top, map, heli, blimp, orbit, nose and side are the replay and spectator cameras)
+  const MODES = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'tv', 'orbit', 'show', 'free', 'top', 'map', 'heli', 'blimp', 'nose', 'side'];
   const V2S = new THREE.Vector2();
   function setFov(f, dt, snap) {
     C.fov = snap ? f : C.fov + (f - C.fov) * Math.min(1, dt * 4);
@@ -1896,13 +1897,13 @@
     const car = o.focus, dt = o.dt || 0.016;
     let mode = o.mode;
     if (!MODES.includes(mode) && mode !== 'load') mode = 'chase';
-    const snap = C.mode !== mode || C.last !== car || (car && Math.hypot(camera.position.x - car.x, camera.position.z - car.y) > 200 && mode !== 'tv');
+    const snap = C.mode !== mode || C.last !== car || o.snap || (car && Math.hypot(camera.position.x - car.x, camera.position.z - car.y) > 200 && !['tv', 'free', 'map', 'blimp', 'heli'].includes(mode));
     C.mode = mode; C.last = car;
     if (mode !== 'show' && camera.view && camera.view.enabled) camera.clearViewOffset();
     if (mode !== 'tcam' && mode !== 'cockpit' && mode !== 'helmet') camera.up.set(0, 1, 0);
     camera.near = POT ? (mode === 'cockpit' || mode === 'helmet' ? 0.1 : 0.3) : mode === 'cockpit' || mode === 'helmet' ? 0.05 : 0.2;
     if (mode === 'load') { loadCam(o.load, dt); return; }
-    if (!car) return;
+    if (!car && mode !== 'free') return;
     if (mode === 'chase' || mode === 'far') {
       const k = o.zoomK || 1;
       const dist = (mode === 'far' ? 9.5 : 6.4) / k + Math.min(1.5, car.speed * 0.014);
@@ -1966,12 +1967,57 @@
       setFov(36, dt, true);
       const sz = renderer.getSize(V2S);
       camera.setViewOffset(sz.x, sz.y, -sz.x * 0.14, 0, sz.x, sz.y);
-    } else if (mode === 'orbit') { // debug: turntable around the car
-      const a = (G.__orbit || 0) + car.h, r = G.__orbitR || 6.5;
+    } else if (mode === 'orbit') {
+      // a slow turntable round the car (G.__orbit pins the angle for tests)
+      C.orbA = (C.orbA || 0) + dt * 0.35;
+      const a = (G.__orbit != null ? G.__orbit : C.orbA) + car.h, r = G.__orbitR || 7.5;
       const g0 = carY(car);
-      camera.position.set(car.x + Math.cos(a) * r, (G.__orbitY || 1.5) + g0, car.y + Math.sin(a) * r);
+      camera.position.set(car.x + Math.cos(a) * r, (G.__orbitY || 1.6) + g0, car.y + Math.sin(a) * r);
       C.look.set(car.x, 0.45 + g0, car.y); camera.lookAt(C.look);
-      setFov(40, dt, true);
+      setFov(42, dt, true);
+    } else if (mode === 'top' || mode === 'map') {
+      // straight down: 'top' close above the car with its nose up the screen, 'map' high
+      // overhead with north up, the car drifting through the frame of the circuit around it
+      const g0 = carY(car), ht = mode === 'top' ? 34 / (o.zoomK || 1) : 260 / (o.zoomK || 1);
+      if (snap) C.yaw = car.h; else C.yaw += U.wrapAngle(car.h - C.yaw) * (1 - Math.exp(-3 * dt));
+      const yaw = mode === 'top' ? C.yaw : -Math.PI / 2;
+      camera.position.set(car.x, g0 + ht, car.y);
+      camera.up.set(Math.cos(yaw), 0, Math.sin(yaw));
+      C.look.set(car.x, g0, car.y); camera.lookAt(C.look);
+      setFov(mode === 'top' ? 50 : 40, dt, true);
+    } else if (mode === 'heli' || mode === 'blimp') {
+      // a helicopter following high behind, or the blimp far above the circuit
+      const g0 = carY(car), k = o.zoomK || 1;
+      const dist = (mode === 'heli' ? 42 : 150) / k, ht = (mode === 'heli' ? 24 : 170) / k;
+      if (snap) C.yaw = car.h; else C.yaw += U.wrapAngle(car.h - C.yaw) * (1 - Math.exp(-(mode === 'heli' ? 1.6 : 0.4) * dt));
+      const cx = Math.cos(C.yaw), cz = Math.sin(C.yaw);
+      const want = V(car.x - cx * dist, g0 + ht, car.y - cz * dist);
+      if (snap) camera.position.copy(want); else camera.position.lerp(want, Math.min(1, dt * 2.5));
+      const tl = V(car.x + Math.cos(car.h) * car.speed * 0.3, g0, car.y + Math.sin(car.h) * car.speed * 0.3);
+      if (snap) C.look.copy(tl); else C.look.lerp(tl, Math.min(1, dt * 4));
+      camera.lookAt(C.look);
+      setFov(mode === 'heli' ? 38 : 30, dt, snap);
+    } else if (mode === 'nose') {
+      // on the nose, just above the front wing, looking down the road
+      onboard(car, 2.05, 0.82, 40, 0.45);
+      setFov(70, dt, true);
+    } else if (mode === 'side') {
+      // a camera on the sidepod, looking forward along the car's flank
+      const ch = Math.cos(car.h), sh = Math.sin(car.h), g0 = carY(car), sx = -sh * 0.95, sz = ch * 0.95;
+      camera.position.set(car.x - ch * 0.4 + sx, g0 + 0.72, car.y - sh * 0.4 + sz);
+      C.look.set(car.x + ch * 25 + sx * 0.4, g0 + 0.45, car.y + sh * 25 + sz * 0.4);
+      camera.up.set(0, 1, 0); camera.lookAt(C.look);
+      setFov(68, dt, true);
+    } else if (mode === 'free') {
+      // the free camera: position and aim come from the viewer (js/viewer.js)
+      const f = o.free;
+      if (f) {
+        camera.position.set(f.x, f.y, f.z);
+        camera.up.set(0, 1, 0);
+        C.look.set(f.x + Math.cos(f.yaw) * Math.cos(f.pitch), f.y + Math.sin(f.pitch), f.z + Math.sin(f.yaw) * Math.cos(f.pitch));
+        camera.lookAt(C.look);
+        setFov(f.fov || 60, dt, true);
+      }
     }
     if (o.shake > 0 && mode !== 'tcam') {
       camera.position.x += (Math.random() - 0.5) * o.shake * 0.12;
@@ -2181,7 +2227,7 @@
       const mode = C.mode;
       F1.R3Post.render(scene, camera, {
         exposure, dt: o.dt || 0, sunDir: state.sunDir, sunCol: sun.color, shaftK: state.look && state.look.shaftK != null ? state.look.shaftK : 1,
-        motionNear: mode === 'tv' || mode === 'load' || mode === 'orbit' ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' ? 3.5 : 9.5,
+        motionNear: ['tv', 'load', 'orbit', 'free', 'top', 'map', 'heli', 'blimp'].includes(mode) ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' || mode === 'nose' || mode === 'side' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
       });
     } else {

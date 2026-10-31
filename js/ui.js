@@ -192,6 +192,7 @@
       ['GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
       ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
+      ['SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }],
       ['SETTINGS', 'Audio, camera, units and HUD.', () => go('settings', { back: 'main' })],
       ['CONTROLS', 'Keyboard and gamepad layout.', () => go('controls', { back: 'main' })],
     ];
@@ -209,9 +210,9 @@
   // ---------- race-weekend chrome ----------
   // The selection screens share a broadcast-style frame: a header strip with the event and a
   // step tracker (where you are in the flow), the page title, and the prompts bar at the foot.
-  const KIND = { race: 'QUICK RACE', weekend: 'GRAND PRIX WEEKEND', champ: 'CHAMPIONSHIP', tt: 'TIME TRIAL' };
+  const KIND = { race: 'QUICK RACE', weekend: 'GRAND PRIX WEEKEND', champ: 'CHAMPIONSHIP', tt: 'TIME TRIAL', spectate: 'SPECTATE' };
   const STEP_NAME = { mode: 'HANDLING', track: 'CIRCUIT', team: 'TEAM', driver: 'DRIVER', setup: 'SETUP' };
-  function steps(kind) { return kind === 'champ' ? ['mode', 'team', 'driver', 'setup'] : ['mode', 'track', 'team', 'driver', 'setup']; }
+  function steps(kind) { return kind === 'champ' ? ['mode', 'team', 'driver', 'setup'] : kind === 'spectate' ? ['mode', 'track', 'setup'] : ['mode', 'track', 'team', 'driver', 'setup']; }
   function header(cur) {
     const flow = F1.Game.flow, list = steps(flow.kind), at = list.indexOf(cur);
     const e = h('div', 'hdr');
@@ -298,7 +299,7 @@
           F1.Game.previewTrack(d.id);
           requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true, w: 6, pad: 30 }));
         },
-        activate: () => { flow.track = d.id; go('team'); },
+        activate: () => { flow.track = d.id; go(flow.kind === 'spectate' ? 'setup' : 'team'); },
       };
     });
     // procedural circuits: a new layout from any seed
@@ -402,7 +403,7 @@
       return false;
     };
     const items = [
-      { el: race, activate: () => go('team') },
+      { el: race, activate: () => go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team') },
       { el: roll, activate: () => setSeed(F1.TrackGen.randomSeed()) },
       { el: seedRow, left: () => setSeed(flow.genSeed - 1), right: () => setSeed(flow.genSeed + 1) },
     ];
@@ -502,7 +503,7 @@
     if (kind !== 'tt') {
       add(optRow('Race distance', '', [2, 3, 5, 8, 12, 20], () => R.laps, v => { R.laps = v; updSummary(); }, v => v + ' LAPS'), 'Race');
       add(optRow('AI difficulty', 'Legend drives at the limit the AI learned for each circuit', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
-      if (kind !== 'champ' && kind !== 'weekend') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
+      if (kind !== 'champ' && kind !== 'weekend' && kind !== 'spectate') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
       add(optRow('Field size', '', [10, 16, 20], () => R.field, v => { R.field = v; updSummary(); }, v => v + ' CARS'));
       if (kind === 'weekend') add(optRow('Weekend format', 'Practice is a longer solo session before qualifying', ['full', 'quali'], () => R.wkFmt || 'full', v => { R.wkFmt = v; updSummary(); }, v => FMT[v]));
       if (kind === 'champ') add(optRow('Round format', 'Each round as a race only, or with qualifying for the grid', ['race', 'quali', 'full'], () => R.chFmt || 'race', v => { R.chFmt = v; updSummary(); }, v => FMT[v]));
@@ -512,14 +513,14 @@
       if (kind !== 'tt') add(optRow('Weather', 'Dry, light or heavy rain, or a changeable day', ['dry', 'light', 'heavy', 'mixed'], () => R.weather || 'dry', v => { R.weather = v; updSummary(); }, v => v.toUpperCase()), 'Conditions');
       if (kind !== 'tt') add(optRow('Safety car', 'A crash can bring it out', ['on', 'off', 'always'], () => R.safetyCar || 'on', v => { R.safetyCar = v; }, v => v.toUpperCase()));
       if (kind !== 'tt') add(optRow('Mandatory pit stop', 'Use two compounds in races of 5 laps or more', [true, false], () => R.mandatory !== false, v => { R.mandatory = v; }, v => (v ? 'ON' : 'OFF')));
-      add(optRow('ABS', 'Prevents wheel lock under braking', [true, false], () => R.abs, v => { R.abs = v; }, v => (v ? 'ON' : 'OFF')), 'Assists');
-      add(optRow('Traction control', '', [0, 1, 2], () => R.tc, v => { R.tc = v; }, v => ['OFF', 'MEDIUM', 'FULL'][v]));
-      add(optRow('Gearbox', '', [true, false], () => R.autoGear, v => { R.autoGear = v; }, v => (v ? 'AUTOMATIC' : 'MANUAL  E / Q')));
-      add(optRow('Steering assist', 'Limits lock to the grip available', [true, false], () => R.steerAssist, v => { R.steerAssist = v; }, v => (v ? 'ON' : 'OFF')));
+      if (kind !== 'spectate') add(optRow('ABS', 'Prevents wheel lock under braking', [true, false], () => R.abs, v => { R.abs = v; }, v => (v ? 'ON' : 'OFF')), 'Assists');
+      if (kind !== 'spectate') add(optRow('Traction control', '', [0, 1, 2], () => R.tc, v => { R.tc = v; }, v => ['OFF', 'MEDIUM', 'FULL'][v]));
+      if (kind !== 'spectate') add(optRow('Gearbox', '', [true, false], () => R.autoGear, v => { R.autoGear = v; }, v => (v ? 'AUTOMATIC' : 'MANUAL  E / Q')));
+      if (kind !== 'spectate') add(optRow('Steering assist', 'Limits lock to the grip available', [true, false], () => R.steerAssist, v => { R.steerAssist = v; }, v => (v ? 'ON' : 'OFF')));
     }
     add(optRow('Damage', 'Full: soft-body crashes, parts break off, punctures, engine and gearbox failures', sim ? ['full', 'limited', 'off'] : ['full', 'off'], () => (R.damage === true ? 'limited' : R.damage === false ? 'off' : R.damage || 'full'), v => { R.damage = v; }, v => ({ full: 'FULL', limited: 'FRONT WING ONLY', off: 'OFF' })[v]), sim ? '' : 'Assists');
-    add(optRow('Racing line', 'Red bar: brake. Yellow: turn in. Blue: apex. Green: track out.', ['full', 'brake', 'off'], () => (sim ? R.lineSim : R.lineArcade), v => { if (sim) R.lineSim = v; else R.lineArcade = v; }, v => ({ full: 'FULL', brake: 'BRAKING ONLY', off: 'OFF' })[v]));
-    const btn = h('div', 'btn go', `<span>${kind === 'tt' ? 'Start session' : kind === 'champ' ? 'Start championship' : kind === 'weekend' ? 'Start weekend' : 'Start race'}</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>`);
+    if (kind !== 'spectate') add(optRow('Racing line', 'Red bar: brake. Yellow: turn in. Blue: apex. Green: track out.', ['full', 'brake', 'off'], () => (sim ? R.lineSim : R.lineArcade), v => { if (sim) R.lineSim = v; else R.lineArcade = v; }, v => ({ full: 'FULL', brake: 'BRAKING ONLY', off: 'OFF' })[v]));
+    const btn = h('div', 'btn go', `<span>${kind === 'tt' ? 'Start session' : kind === 'champ' ? 'Start championship' : kind === 'weekend' ? 'Start weekend' : kind === 'spectate' ? 'Start watching' : 'Start race'}</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>`);
     const sum = h('div', 'weekend');
     two.appendChild(opts); two.appendChild(sum);
     wrap.appendChild(two);
@@ -536,11 +537,11 @@
       const wx = { dry: 'Dry', light: 'Light rain', heavy: 'Heavy rain', mixed: 'Changeable' }[R.weather || 'dry'];
       info.innerHTML = `${def ? `<div class="wk-trk"><div><div class="wk-nm">${def.name}</div><div class="wk-ct">${def.flag && FLAGS[def.flag] ? flag(def.flag) : ''}<span>${def.country.toUpperCase()}</span></div></div><canvas></canvas></div>`
           : `<div class="wk-trk"><div><div class="wk-nm">${F1.Tracks.DEFS.length} rounds</div><div class="wk-ct"><span>${F1.Tracks.DEFS.map(x => x.name).join('  /  ').toUpperCase()}</span></div></div></div>`}
-        <div class="wk-drv"><span class="no">${d[3]}</span><span class="dn"><small>${d[0]}</small>${d[1].toUpperCase()}<em>${t.name}</em></span></div>
+        ${kind === 'spectate' ? '<div class="wk-drv"><span class="dn"><small>From the stands</small>SPECTATING<em>Every car, every camera</em></span></div>' : `<div class="wk-drv"><span class="no">${d[3]}</span><span class="dn"><small>${d[0]}</small>${d[1].toUpperCase()}<em>${t.name}</em></span></div>`}
         <div class="wk-grid">
           <div><span>Handling</span><b>${sim ? 'Simulation' : 'Arcade'}</b></div>
           ${kind === 'weekend' || kind === 'champ' ? `<div><span>Format</span><b>${{ race: 'Race only', quali: 'Qualifying, race', full: 'Practice, qualifying, race' }[kind === 'champ' ? R.chFmt || 'race' : R.wkFmt || 'full']}</b></div>` : ''}
-          ${kind !== 'tt' ? `<div><span>Distance</span><b>${R.laps} laps</b></div><div><span>Opponents</span><b>${R.field - 1}, ${Data.DIFFICULTY[R.difficulty].name.toLowerCase()}</b></div>` : ''}
+          ${kind !== 'tt' ? `<div><span>Distance</span><b>${R.laps} laps</b></div><div><span>${kind === 'spectate' ? 'Field' : 'Opponents'}</span><b>${kind === 'spectate' ? R.field : R.field - 1}, ${Data.DIFFICULTY[R.difficulty].name.toLowerCase()}</b></div>` : ''}
           ${sim ? `<div><span>Tyre</span><b class="c-${R.compound}">${F1.Car.COMPOUNDS[R.compound].name.toLowerCase()}</b></div>` : ''}
           ${sim && kind !== 'tt' ? `<div><span>Weather</span><b>${wx}</b></div>` : ''}
         </div>`;
@@ -548,7 +549,7 @@
       if (cv) requestAnimationFrame(() => drawTrackMap(cv, F1.Race.getTrack(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
     }
     updSummary();
-    return { el, items, back: () => go('driver'), focus: items.length - 1 };
+    return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1 };
   };
 
   // ---------- settings draft and APPLY ----------
@@ -824,7 +825,7 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
+    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
     const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: fn }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
@@ -877,7 +878,8 @@
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     if (champ) mk('CONTINUE', () => F1.Game.champContinue());
-    else { mk('RACE AGAIN', () => F1.Game.restart()); mk('MAIN MENU', () => F1.Game.quitToMenu()); }
+    else { mk(F1.Game.flow.kind === 'spectate' ? 'WATCH ANOTHER' : 'RACE AGAIN', () => F1.Game.restart()); mk('MAIN MENU', () => F1.Game.quitToMenu()); }
+    if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('results', o))));
     wrap.appendChild(acts);
     el.appendChild(wrap);
     return { el, items, nav: 'h', back: () => {} };
@@ -931,6 +933,7 @@
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     mk(o.next.label, o.next.fn);
+    if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('quali', o))));
     mk(o.round ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu());
     wrap.appendChild(acts);
     el.appendChild(wrap);

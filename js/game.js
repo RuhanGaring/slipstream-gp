@@ -191,10 +191,11 @@
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
     if (e.repeat && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) return;
     keys.add(e.code);
+    if (F1.Viewer) F1.Viewer.keyDown(e.code);
     Audio.init();
     onKey(e.code, e.repeat);
   });
-  window.addEventListener('keyup', e => keys.delete(e.code));
+  window.addEventListener('keyup', e => { keys.delete(e.code); if (F1.Viewer) F1.Viewer.keyUp(e.code); });
   window.addEventListener('blur', () => { keys.clear(); if (Game.state === 'race' && !Game.paused) pause(); });
   window.addEventListener('pointerdown', e => {
     Audio.init();
@@ -290,6 +291,18 @@
   function onKey(code, repeat) {
     if (code === 'F9') { graphicsReport(); return; }
     if (code === 'KeyM') { Game.muted = !Game.muted; Audio.setVolumes({ master: Game.muted ? 0 : Game.settings.master }); return; }
+    // watching a replay: Esc goes back, everything else is the viewer's
+    if (Game.state === 'replay') {
+      if (code === 'Escape' || code === 'Backspace') { exitReplay(); return; }
+      F1.Viewer.key(code);
+      return;
+    }
+    // spectating: the viewer has the keys; Esc pauses as in a race
+    if (Game.state === 'race' && !Game.paused && Game.spectate) {
+      if (code === 'Escape') { pause(); return; }
+      F1.Viewer.key(code);
+      return;
+    }
     if (Game.state === 'race' && !Game.paused) {
       const race = Game.race, p = race.player;
       if (code === 'Escape' || code === 'KeyP' && !race.sim) { pause(); return; }
@@ -618,7 +631,7 @@
     if (!Game.world || !race) return;
     const p = race.player;
     let assist = null;
-    if (p && mode !== 'tv' && mode !== 'show') {
+    if (p && mode !== 'tv' && mode !== 'show' && mode !== 'view') {
       const lineMode = race.mode === 'arcade' ? Game.raceDefaults.lineArcade : Game.raceDefaults.lineSim;
       if (!race.assistProf) {
         const handling = race.handling === 'arcade' || race.mode === 'arcade' ? 'arcade' : 'sim';
@@ -627,22 +640,25 @@
       if (!race.cornerMarks) race.cornerMarks = F1.Raceline.cornerMarks(race.track, race.track.line, race.assistProf);
       assist = { tr: race.track, car: p, mode: lineMode, prof: race.assistProf, marks: race.cornerMarks };
     }
-    const camMode = mode === 'tv' || mode === 'show' ? mode : Game.settings.camera;
-    const focus = mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
+    const vw = mode === 'view' ? F1.Viewer.view(race) : null;
+    const camMode = vw ? vw.mode : mode === 'tv' || mode === 'show' ? mode : Game.settings.camera;
+    const focus = vw ? vw.focus : mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
     const step = ZOOM_STEPS[Game.settings.zoomStep == null ? 1 : Game.settings.zoomStep] || ZOOM_STEPS[1];
     R3.render({
       cars: race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: cam.shake, fx: FX,
-      assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: ghostPose(race),
-      lightsOn: race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
-      weather: race, sc: race.sc,
+      assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
+      lightsOn: Game.state === 'replay' ? race.lightsOn : race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
+      weather: race, sc: race.sc, free: vw && vw.free, snap: vw && vw.snap,
     });
+    if (vw) F1.Viewer.afterRender();
     // name tags over the other cars
-    if (Game.settings.tags && mode !== 'tv' && mode !== 'show' && p) {
+    if (Game.settings.tags && mode !== 'tv' && mode !== 'show' && p && !(vw && F1.Viewer.V.overlay === false)) {
       ctx.font = '700 11px Titillium Web, Segoe UI, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const me = vw ? vw.focus : p;
       for (const c of race.cars) {
-        if (c === p) continue;
-        const d = Math.hypot(c.x - p.x, c.y - p.y);
+        if (c === me) continue;
+        const d = Math.hypot(c.x - me.x, c.y - me.y);
         if (d > 140) continue;
         const q = R3.project(c.x, c.y, 1.7);
         if (!q) continue;
@@ -886,7 +902,7 @@
       return;
     }
     if (f.kind === 'weekend') { weekendStart({ track: f.track, fp: (R.wkFmt || 'full') === 'full' }); return; }
-    launch({ track: f.track, mode: f.kind === 'tt' ? 'tt' : f.mode, ttHandling: f.mode });
+    launch({ track: f.track, mode: f.kind === 'tt' ? 'tt' : f.mode, ttHandling: f.mode, spectate: f.kind === 'spectate' });
   };
 
   // ---------- grand prix weekend ----------
@@ -976,6 +992,7 @@
     const race = Game.race, W = Game.weekend;
     if (!race || !sessionOf(race) || Game.state !== 'race') return;
     if (mouse.on) setMouseSteer(false, true);
+    if (F1.Viewer) F1.Viewer.stop();
     Game.state = 'results'; Game.paused = false;
     Audio.stopRace();
     setBlur(false);
@@ -1083,7 +1100,15 @@
             UIm.hide();
             document.getElementById('shade').className = '';
             HUD.setup(race, Game.settings);
-            document.getElementById('hud').classList.toggle('off', !Game.hudOn);
+            // every session is recorded for its replay
+            race.rec = F1.Replay ? new F1.Replay.Recorder(race) : null;
+            Game.spectate = !!o.spectate;
+            if (Game.spectate) {
+              // nobody to drive: the player's car races itself, the director picks the shots
+              race.autoPlayer = true;
+              F1.Viewer.start('spectate', race, { director: true, mode: 'tv', focusId: race.cars[0].id });
+            } else if (F1.Viewer) F1.Viewer.stop();
+            document.getElementById('hud').classList.toggle('off', !Game.hudOn || Game.spectate);
             const p = race.player;
             cam.mode = Game.settings.camera; cam.x = p.x; cam.y = p.y; cam.angle = p.h + Math.PI / 2; cam.zoom = H / 1080 * 10;
             inp.steer = inp.thr = inp.brk = 0;
@@ -1109,7 +1134,8 @@
         const show = s => {
           if (!el || s.id !== def.id) return;
           el.style.setProperty('--p', s.p || 0);
-          el.textContent = s.state === 'failed' ? 'AI LEARNING FAILED: THEY WILL DRIVE CAUTIOUSLY' : `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round((s.p || 0) * 100)}%   /   ENTER: RACE NOW WITH CAUTIOUS AI`;
+          el.textContent = s.state === 'failed' ? 'AI LEARNING FAILED: THEY WILL DRIVE CAUTIOUSLY'
+            : `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round((s.p || 0) * 100)}%   /   ENTER: RACE NOW ${s.lineReady ? '(RACING LINE READY)' : 'WITH CAUTIOUS AI'}`;
           el.classList.add('on');
         };
         const off = F1.LearnJob.onChange(show);
@@ -1132,6 +1158,7 @@
 
   Game.restart = () => {
     setBlur(false);
+    if (F1.Viewer) F1.Viewer.stop();
     if (mouse.on) setMouseSteer(false, true);
     Audio.stopRace();
     if (Game.flow.kind === 'champ' && Game.champ && !(Game.lastLaunch && Game.lastLaunch.weekend)) launchRound();
@@ -1140,6 +1167,8 @@
 
   Game.quitToMenu = () => {
     setBlur(false);
+    if (F1.Viewer) F1.Viewer.stop();
+    Game.spectate = false; Game.replay = null;
     if (mouse.on) setMouseSteer(false, true);
     Audio.stopRace();
     const fade = document.getElementById('fade');
@@ -1184,6 +1213,9 @@
     UIm.go('pause', { race: Game.race });
   }
   Game.showPause = () => UIm.go('pause', { race: Game.race });
+  // the pause screen again, after a replay watched from it
+  Game.backToPause = () => { Game.paused = true; document.getElementById('shade').className = 'pause'; setBlur(true); UIm.go('pause', { race: Game.race }); };
+  Game.backToResults = screen => { document.getElementById('shade').className = 'full'; screen(); };
   Game.resume = () => {
     setBlur(false);
     Game.paused = false;
@@ -1192,9 +1224,43 @@
     document.getElementById('shade').className = '';
   };
 
+  // ---------- replay ----------
+  // back: reopens the screen the replay was started from
+  Game.canReplay = () => !!(Game.race && Game.race.rec && Game.race.rec.count() > F1.Replay.HZ * 2);
+  Game.watchReplay = back => {
+    const race = Game.race;
+    if (!Game.canReplay()) return;
+    if (mouse.on) setMouseSteer(false, true);
+    Game.replayBack = back;
+    Game.replayFrom = Game.state;
+    Game.replay = new F1.Replay.Player(race.rec);
+    Game.state = 'replay';
+    UIm.hide();
+    setBlur(false);
+    document.getElementById('shade').className = '';
+    document.getElementById('hud').classList.add('off');
+    document.getElementById('pitpanel').classList.remove('show');
+    if (Game.replayFrom !== 'race') Audio.startRace();
+    const me = race.player;
+    F1.Viewer.start('replay', race, { player: Game.replay, mode: Game.spectate ? 'tv' : Game.settings.camera, focusId: me ? me.id : race.cars[0].id, director: false });
+  };
+  function exitReplay() {
+    const P = Game.replay;
+    if (!P) return;
+    P.restore();
+    Game.replay = null;
+    F1.Viewer.stop();
+    if (Game.spectate && Game.replayFrom === 'race') F1.Viewer.start('spectate', Game.race, { director: true, mode: 'tv' });
+    if (Game.replayFrom !== 'race') Audio.stopRace();
+    Game.state = Game.replayFrom === 'race' ? 'race' : 'results';
+    if (Game.replayBack) Game.replayBack();
+  }
+  Game.exitReplay = exitReplay;
+
   function showResults() {
     const race = Game.race;
     if (mouse.on) setMouseSteer(false, true);
+    if (F1.Viewer) F1.Viewer.stop();
     Game.state = 'results';
     Audio.stopRace();
     document.getElementById('hud').classList.add('off');
@@ -1331,12 +1397,14 @@
       // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
       const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.catchup || 40;
       while (acc >= DT && n < maxSteps) {
-        if (Game.state === 'race') applyInput(race.player, DT, pad);
+        if (Game.state === 'race' && !Game.spectate) applyInput(race.player, DT, pad);
         snapPoses(race);
         Race.step(race, DT);
         acc -= DT; n++;
       }
       if (n >= maxSteps) acc = Game.state === 'menu' ? acc % DT : 0;
+      // the replay recorder: every car, twenty times a second
+      if (Game.state === 'race' && race.rec) { race.rec.capture(); for (const f of race.fx) race.rec.contact(f); }
       // effects
       for (const c of race.cars) carEffects(c, dt);
       for (const f of race.fx) {
@@ -1347,7 +1415,22 @@
       race.fx.length = 0;
       stepFx(dt);
     }
-    if (race && Game.state === 'race') {
+    if (race && Game.state === 'race' && Game.spectate) {
+      // spectating: the viewer follows whoever it likes; the race ends with the last car home
+      const focus = F1.Viewer.focus(race);
+      if (!Game.paused) {
+        F1.Viewer.update(race, dt);
+        handleEvents(race);
+        if (race.done) showResults();
+      }
+      Audio.updateRace(race, focus, { mode: F1.Viewer.V.mode }, Game.paused);
+    } else if (race && Game.state === 'replay' && Game.replay) {
+      const P = Game.replay;
+      P.advance(dt);
+      P.apply();
+      F1.Viewer.update(race, dt);
+      Audio.updateRace(race, F1.Viewer.focus(race), { mode: F1.Viewer.V.mode }, !P.playing || Math.abs(P.rate) < 0.2);
+    } else if (race && Game.state === 'race') {
       const p = race.player;
       if (!Game.paused) {
         handleEvents(race);
@@ -1407,7 +1490,8 @@
       // last step left them: the number of steps per frame varies, and so would the motion
       const live = race && (Game.state === 'race' && !Game.paused || Game.state === 'menu');
       if (live) blendPoses(race, acc / DT);
-      render(race, dt, Game.state === 'menu' ? (Game.show ? 'show' : 'tv') : 'chase');
+      const viewing = Game.state === 'replay' || (Game.state === 'race' && Game.spectate);
+      render(race, Game.state === 'replay' ? (Game.replay.playing ? dt * Math.abs(Game.replay.rate) : 0) : dt, Game.state === 'menu' ? (Game.show ? 'show' : 'tv') : viewing ? 'view' : 'chase');
       if (live) restorePoses(race);
     }
   }
