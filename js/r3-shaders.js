@@ -204,8 +204,8 @@
         'float wxN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(wxH(i), wxH(i + vec2(1.0, 0.0)), f.x), mix(wxH(i + vec2(0.0, 1.0)), wxH(i + vec2(1.0, 1.0)), f.x), f.y); }',
       ].join('\n');
       sh.fragmentShader = WF + '\n' + sh.fragmentShader
-        .replace('#include <map_fragment>', '#include <map_fragment>\n  float wxP = smoothstep(0.42, 0.72, wxN(vFogWorld.xz * 0.28) * 0.6 + wxN(vFogWorld.xz * 1.1) * 0.4);\n  diffuseColor.rgb *= 1.0 - uWet * ' + wk[0].toFixed(2) + ' * (0.28 + 0.2 * wxP);')
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(roughnessFactor * 0.4, 0.05, wxP), clamp(uWet * ' + wk[1].toFixed(2) + ' * 1.4, 0.0, 1.0));');
+        .replace('#include <map_fragment>', '#include <map_fragment>\n  float wxP = smoothstep(0.5 - 0.14 * uWet, 0.74, wxN(vFogWorld.xz * 0.28) * 0.6 + wxN(vFogWorld.xz * 1.1) * 0.4);\n  diffuseColor.rgb *= 1.0 - uWet * ' + wk[0].toFixed(2) + ' * (0.36 + 0.24 * wxP);')
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(roughnessFactor * 0.32, 0.03, wxP), clamp(uWet * ' + wk[1].toFixed(2) + ' * 1.4, 0.0, 1.0));');
     }
     if (ao) {
       // skylight occlusion near the road: height above the car's own ground (the mesh's origin

@@ -21,6 +21,9 @@
     aCap0: 33.24, aCapV: 0.0047, brkOn: 0.7192, brkFull: 0.9499, errBrk: 0.22, bleed: 2.878,
     trailOn: 0.25, trailA: 1.2, trailB: 1.163, thr0: 0.2568, thrErr: 0.5, rearThr: 1.4,
     thrRamp: 1.997, thrLoad: 0.2654, leadT: 0.09159,
+    // wet track: the share of the tyres' grip the plan uses, a margin on top, and how far in from
+    // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
+    wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
   };
 
   function makeBrain(car, prof, opts) {
@@ -96,6 +99,12 @@
     // squeezed by another is not pushed past the asphalt where there is no kerb
     let lo = -lim, hi = lim;
     for (let q = 0, n = Math.round(60 / tr.ds); q <= n; q += 2) { const o = tr.line.off[(i + q) % tr.N]; if (o > hi) hi = o; else if (o < lo) lo = o; }
+    // in the wet, off the painted kerbs (near ice) and a metre clear of the edge: the car runs
+    // wide on less grip, and a wheel on the grass or in the gravel there is a spin
+    if (car.wetness > 0.05) {
+      const wl = tr.hw - 0.55 - P.wetEdge * Math.min(1, car.wetness * 1.5);
+      lo = Math.max(lo, -wl); hi = Math.min(hi, wl);
+    }
     const v = Math.max(0, car.u);
     const sinceStart = race.time - race.startTime;
     const br = brakeRoom(tr, car);
@@ -453,6 +462,15 @@
 
     const i = car.loc.i;
     const v = Math.max(0, car.u);
+    // Conditions: on a wet track the speed plan is remade for
+    // the grip the tyres have now, in steps of 4 per cent, so the braking points move back and
+    // the corner speeds come down as the physics has them (with downforce, a wet corner is
+    // slower than the square root of the grip lost). The dry plan comes back as it dries.
+    if (race.profFor && car.profPace) {
+      const gk = car.grip == null ? 1 : car.grip / 0.972;
+      const want = car.wetness > 0.05 ? U.clamp(Math.round(gk * (1 - (1 - P.wetK) * Math.min(1, car.wetness * 1.5)) / 0.04) * 0.04, 0.2, 1) : 1;
+      if (want !== (b.profK || 1)) { b.profK = want; b.prof = race.profFor(car.team, car.profPace, want); }
+    }
     // per-lap braking noise: small variations so AI lap times are not identical
     b.noiseT -= dt;
     if (b.noiseT <= 0) { b.noiseT = 2 + b.rng() * 3; b.noise = 1 + (b.rng() - 0.5) * 0.012 * (1.4 - b.aggr); }
@@ -478,11 +496,12 @@
     }
     // tyre saving: a slightly earlier lift and gentler corner speed when told to manage
     if (b.manage && b.manage < 1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= b.manage;
-    // drive to the conditions: tyre temperature / wear and dirty air cost grip
+    // drive to the conditions: tyre temperature / wear and dirty air cost grip (beyond what the
+    // plan already allows for, see above)
     if (tr.brk[leadIdx] || kl > 1 / 500) {
-      const gf = (car.grip == null ? 0.972 : car.grip) / 0.972 * (1 - (1 - car.dfMul) * 0.5);
+      const gf = (car.grip == null ? 0.972 : car.grip) / 0.972 / (b.profK || 1) * (1 - (1 - car.dfMul) * 0.5);
       if (gf < 1) vt *= Math.sqrt(gf);
-      if (car.wetness > 0.05) vt *= 1 - 0.2 * Math.min(1, car.wetness * 1.2); // a careful margin on a slippery road
+      if (car.wetness > 0.05) vt *= 1 - P.wetMargin * Math.min(1, car.wetness * 1.2); // a careful margin on a slippery road
     }
     // running out of road on the exit: lift
     const kNow = tr.line.kap[i];
@@ -586,7 +605,9 @@
     // lost = well off the circuit (not merely far from the racing line: on a wide straight a
     // car passing on the other side is 12 m from it and perfectly fine)
     const lost = Math.abs(car.loc.d) > tr.hw + 4;
-    if ((car.speed < 2.5 || wrongWay || lost) && !car.finished) b.stuckT += dt; else b.stuckT = Math.max(0, b.stuckT - dt);
+    // (a car waiting in a queue, behind another that is stopped or crawling, is not stuck)
+    const queued = car.speed < 2.5 && !wrongWay && !lost && b.ahead && b.gapAhead < 22 && b.ahead.speed < 5;
+    if ((car.speed < 2.5 || wrongWay || lost) && !car.finished && !queued) b.stuckT += dt; else b.stuckT = Math.max(0, b.stuckT - dt);
     // a car stopped on the racing line is a hazard: clear it quickly
     const onLine = Math.abs(car.loc.d) < tr.hw;
     if (b.stuckT > (car.speed < 1.5 && onLine ? 1.2 : 3)) { race.recover(car); b.stuckT = 0; }

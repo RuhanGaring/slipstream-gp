@@ -139,15 +139,20 @@
     makeSafetyCar(race, cfg);
     // F1's two-compound rule for simulation races of five laps or more
     race.mandatory = sim && mode !== 'tt' && race.laps >= 5 && race.laps <= 80 && cfg.mandatory !== false;
+    // a speed plan per team and pace; k scales the learned grip (a wet track: the plan is
+    // made for the grip there really is, so braking points and corner speeds both move,
+    // and the downforce speed gain shrinks with the grip as it does on the car)
     const profCache = new Map();
-    const profFor = (team, pace) => {
-      const key = team.id + ':' + pace.toFixed(4);
+    const profFor = (team, pace, k = 1) => {
+      const key = team.id + ':' + pace.toFixed(4) + ':' + k.toFixed(2);
       if (!profCache.has(key)) {
-        const spec = Object.assign({}, Car.SPEC, teamSpec(team));
-        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, { pace, grip: learnedGrip(tr, sim ? 'sim' : 'arcade') }));
+        const spec = Object.assign({}, Car.SPEC, teamSpec(team)), g0 = learnedGrip(tr, sim ? 'sim' : 'arcade');
+        const grip = k === 1 ? g0 : Float64Array.from({ length: tr.N }, (_, i) => (g0 ? g0[i] : 1) * k);
+        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, { pace, grip }));
       }
       return profCache.get(key);
     };
+    race.profFor = profFor;
 
     // roster
     const roster = [];
@@ -179,7 +184,8 @@
         startComp = isPlayer && cfg.compound ? cfg.compound : startPlan.seq[0];
       } else if (sim) startComp = cfg.compound || 'M';
       // a wet track at the start: the AI starts on inters or full wets
-      if (sim && !isPlayer && race.wet > 0.22) { startComp = race.wet > 0.65 ? 'W' : 'I'; startPlan = null; }
+      // (the player's car too when it drives itself, spectating)
+      if (sim && (!isPlayer || cfg.spectate) && race.wet > 0.22) { startComp = race.wet > 0.65 ? 'W' : 'I'; startPlan = null; }
       const car = Car.makeCar({ id: race.cars.length, spec, assist: assists, compound: startComp, fuel: !sim ? 0 : mode === 'tt' ? 10 : Math.min(Car.SPEC.fuelMax * 2.5, 12 + race.laps * 1.6) });
       car.isPlayer = isPlayer;
       car.team = r.team;
@@ -190,7 +196,8 @@
       const pace = isPlayer ? 0.9 : diff.pace * (0.97 + (r.d[4] - 0.95) * 0.75) / 0.9875 * (r.team.rating > 0 ? 1 : 1);
       // arcade cars carry extra grip, so their target speeds scale with it
       const gripK = sim ? 1 : 1.12;
-      car.brain = AI.makeBrain(car, profFor(r.team, U.clamp(pace, 0.5, 1.0) * gripK), {
+      car.profPace = U.clamp(pace, 0.5, 1.0) * gripK;
+      car.brain = AI.makeBrain(car, profFor(r.team, car.profPace), {
         pace: 1, aggr: diff.aggr * (0.8 + rng() * 0.4), seed: 100 + race.cars.length * 7, react: 0.18 + rng() * 0.25 + (1 - diff.pace) * 0.6,
       });
       Object.assign(car, {
@@ -507,7 +514,7 @@
       }
       // pit strategy for AI (decided at the line)
       if (race.sim && race.mode !== 'tt' && lapNo >= 1) c.stintLaps = (c.stintLaps || 0) + 1;
-      if (!c.isPlayer && race.sim && !c.finished) aiStrategy(race, c, lapNo);
+      if ((!c.isPlayer || race.autoPlayer) && race.sim && !c.finished) aiStrategy(race, c, lapNo);
       if (c.isPlayer && race.sim && race.mode !== 'tt' && !c.finished && lapNo >= 1) engineer(race, c, lapNo);
     }
   }
@@ -699,12 +706,14 @@
     for (const c of race.cars) { c.wetness = race.wet; c.ambient = 32 - 12 * r; }
     // AI: check the tyres every few seconds, so a change in the weather is answered mid-lap
     if (race.sim && race.green && (race.wet > 0.05 || race.rainOn)) for (const c of race.cars) {
-      if (c.isPlayer || c.retired || c.finished || c.inPit || c.brain.pit || c.incident) continue;
+      if ((c.isPlayer && !race.autoPlayer) || c.retired || c.finished || c.inPit || c.brain.pit || c.incident) continue;
       c.wxT = (c.wxT == null ? 2 + race.rng() * 5 : c.wxT) - dt;
       if (c.wxT > 0) continue;
       c.wxT = 3 + race.rng() * 4;
       const want = tyreFor(race, c);
-      if (want && race.laps - c.lap >= 0 && race.rng() < 0.4) {
+      // the wrong tyres by a long way (slicks in standing water, wets on a dry line): box now
+      const severe = (!c.compound.wet && race.wet > 0.4) || (c.compound.wet && race.wet < 0.05);
+      if (want && race.laps - c.lap >= 0 && race.rng() < (severe ? 0.95 : 0.4)) {
         c.brain.pit = { phase: 'approach', service: 2.2 + race.rng() * 0.8, served: false };
         c.pitPlan = { compound: want };
       }
@@ -713,7 +722,8 @@
   // the tyre a car should be on now, or null to stay as it is (with a margin both ways so
   // nobody boxes back and forth on the edge of a threshold)
   function tyreFor(race, c) {
-    const w = race.wet, id = c.compound.id;
+    // a downpour soaks the track within a lap: count it as wetter than it is yet
+    const w = Math.max(race.wet, race.rain > 0.3 ? Math.min(1, race.wet + 0.3) : 0), id = c.compound.id;
     if (id === 'W') return w < 0.1 ? 'M' : w < 0.42 ? 'I' : null;
     if (id === 'I') return w > 0.8 ? 'W' : w < 0.08 ? 'M' : null;
     return w > 0.65 ? 'W' : w > 0.24 ? 'I' : null;
@@ -765,11 +775,12 @@
       event(race, 'sc', null, 'SAFETY CAR DEPLOYED');
       // the AI uses the slow lap: those with tired tyres or a rain mismatch come in
       if (race.sim) for (const c of race.cars) {
-        if (c.isPlayer || c.retired || c.finished || c.inPit || c.brain.pit || c.incident || race.laps - c.lap < 2) continue;
+        if ((c.isPlayer && !race.autoPlayer) || c.retired || c.finished || c.inPit || c.brain.pit || c.incident || race.laps - c.lap < 2) continue;
         const worst = Math.max(...c.wheels.map(w => w.wear)), want = race.wet > 0.05 || c.compound.wet ? tyreFor(race, c) : null;
         if (want || worst > 0.3 || race.rng() < 0.25) {
           c.brain.pit = { phase: 'approach', service: 2.2 + race.rng() * 0.8, served: false };
-          c.pitPlan = { compound: want || (c.compound.id === 'M' ? 'H' : 'M') };
+          // (fresh rain tyres of the same kind when it is wet: never slicks into standing water)
+          c.pitPlan = { compound: want || (c.compound.wet ? c.compound.id : c.compound.id === 'M' ? 'H' : 'M') };
         }
       }
     }

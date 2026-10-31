@@ -5,7 +5,7 @@
   'use strict';
   const F1 = G.F1, THREE = G.THREE;
 
-  const N = 6000, BOX = [44, 20, 44], FALL = 9.5;
+  const N = 14000, BOX = [56, 24, 56], FALL = 9.5;
 
   const RAIN_VS = [
     '#include <common>',
@@ -19,9 +19,12 @@
     '  vec3 p = uCam + mod(b - uCam + uBox * 0.5, uBox) - uBox * 0.5;',
     // streak: where the drop was a few milliseconds ago, in the camera's frame
     '  vec3 rel = vec3(0.0, -uFall, 0.0) - uCamV;',
-    '  p -= rel * 0.022 * (1.0 - aEnd);',
+    '  p -= rel * 0.018 * (1.0 - aEnd);',
     '  float dc = length(p - uCam);',
-    '  vA = (0.25 + 0.75 * aEnd) * (1.0 - smoothstep(14.0, 24.0, dc)) * smoothstep(0.6, 2.0, dc);',
+    // a drop smeared over a long streak by a fast camera is fainter all along it (its light
+    // is spread over more of the frame), so a fast car does not see a bright starfield
+    '  float len = length(rel) * 0.018;',
+    '  vA = (0.15 + 0.85 * aEnd) * (1.0 - smoothstep(10.0, 28.0, dc)) * smoothstep(0.8, 2.5, dc) / (1.0 + len * 1.6);',
     '  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);',
     '  #include <logdepthbuf_vertex>',
     '}'].join('\n');
@@ -30,7 +33,7 @@
     'uniform float uAlpha; varying float vA;',
     'void main(){',
     '  #include <logdepthbuf_fragment>',
-    '  gl_FragColor = vec4(vec3(0.82, 0.88, 1.0) * 1.6, vA * uAlpha);',
+    '  gl_FragColor = vec4(vec3(0.78, 0.82, 0.88) * 0.85, vA * uAlpha);',
     '}'].join('\n');
 
   const STORM_FS = [
@@ -89,7 +92,7 @@
         else if (!have) vel.set(0, 0, 0);
         have = true; lastCam.copy(cam.position);
         const u = m.uniforms;
-        u.uCam.value.copy(cam.position); u.uCamV.value.copy(vel); u.uTime.value = time; u.uAlpha.value = 0.14 + 0.42 * k;
+        u.uCam.value.copy(cam.position); u.uCamV.value.copy(vel); u.uTime.value = time; u.uAlpha.value = 0.1 + 0.3 * k;
         g.setDrawRange(0, Math.floor(N * (0.25 + 0.75 * k) * Math.min(1, this.density == null ? 1 : this.density)) * 2); // density: advanced graphics
         storm.position.copy(cam.position);
         sm.uniforms.uRain.value = k; sm.uniforms.uTime.value = time; if (fog) sm.uniforms.uFog.value.copy(fog).multiplyScalar(0.8);

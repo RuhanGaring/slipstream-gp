@@ -492,10 +492,32 @@
     if (FX.parts.length >= Game.settings.gfx.particles) return;
     FX.parts.push({ x, y, z: fxZ, vx, vy, life: 0.22 + Math.random() * 0.2, t: 0, kind: 1 });
   }
+  // Spray on a wet track: the rear tyres throw a plume up behind the car that grows with
+  // speed and with the water on the road, and a fine mist hangs on in the car's wake. Only
+  // for the nearer cars, and limited by the particle budget, so the cost stays fixed.
+  function spray(c, dt, wet) {
+    if (wet < 0.08 || c.speed < 12 || c.inPit) return;
+    fxZ = c.zRoad || 0;
+    const k = Math.min(1, (wet - 0.08) * 1.4) * Math.min(1, (c.speed - 12) / 55);
+    const ch = Math.cos(c.h), sh = Math.sin(c.h);
+    for (const side of [-1, 1]) {
+      if (Math.random() < dt * 34 * k) {
+        const x = c.x - ch * 2.3 - sh * side * 0.78, y = c.y - sh * 2.3 + ch * side * 0.78;
+        puff(x, y, c.vx * 0.55 + (Math.random() - 0.5) * 2.5, c.vy * 0.55 + (Math.random() - 0.5) * 2.5, 0.5, 2.6 + Math.random() * 1.6, 0.55 + Math.random() * 0.35, '214,220,226', 0.34 * k + 0.08);
+      }
+    }
+    if (Math.random() < dt * 9 * k) {
+      const x = c.x - ch * 5, y = c.y - sh * 5;
+      puff(x, y, c.vx * 0.35, c.vy * 0.35, 2, 6.5 + Math.random() * 3, 1.4 + Math.random() * 0.8, '200,206,212', 0.16 * k + 0.03);
+    }
+  }
   function carEffects(c, dt) {
     fxZ = c.zRoad || 0;
-    const near = Math.hypot(c.x - cam.x, c.y - cam.y) < 260;
+    // (near the camera that draws the picture: the 3D one when there is one)
+    const cx = R3ok && R3.camera ? R3.camera.position.x : cam.x, cy = R3ok && R3.camera ? R3.camera.position.z : cam.y;
+    const near = Math.hypot(c.x - cx, c.y - cy) < 260;
     if (!near) { c.wheels.forEach(w => { w.lmx = null; }); return; }
+    if (Game.race && Game.race.wet) spray(c, dt, Game.race.wet);
     const SURF = F1.SURF;
     for (const w of c.wheels) {
       const hard = w.lock > 0.35 || w.spin > 0.35 || w.slide > 0.9;
@@ -1051,7 +1073,7 @@
       mandatory: R.mandatory !== false, weather: R.weather || 'dry', safetyCar: R.safetyCar || 'on',
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
       grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists, compound: R.compound,
-      ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, noGhost: o.quali != null || !!o.practice,
+      ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, spectate: !!o.spectate, noGhost: o.quali != null || !!o.practice,
     };
   }
 
@@ -1430,6 +1452,9 @@
       const P = Game.replay;
       P.advance(dt);
       P.apply();
+      // spray in a replay, from the recorded speeds and the recorded wetness
+      if (P.playing && R3ok && race.wet) { const cp = R3.camera.position; for (const c of race.cars) if ((c.x - cp.x) ** 2 + (c.y - cp.z) ** 2 < 260 * 260) spray(c, dt * Math.abs(P.rate), race.wet); }
+      stepFx(P.playing ? dt * Math.abs(P.rate) : 0);
       F1.Viewer.update(race, dt);
       Audio.updateRace(race, F1.Viewer.focus(race), { mode: F1.Viewer.V.mode }, !P.playing || Math.abs(P.rate) < 0.2);
     } else if (race && Game.state === 'race') {
