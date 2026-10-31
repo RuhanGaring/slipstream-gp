@@ -17,7 +17,7 @@
   const F1 = G.F1;
   const U = F1.U;
   const DT = 1 / 240;
-  const VERSION = 4;     // bump when physics or AI changes make stored results stale
+  const VERSION = 5;     // bump when physics or AI changes make stored results stale
   const STRIDE_LINE = 2, STRIDE_GRIP = 5;
   const G_MIN = 0.8, G_MAX = 1.4;
 
@@ -177,7 +177,10 @@
     const TOTAL = opts.lineIters || 45000, PER = opts.lineBatch || 12;
     const batches = Math.max(1, Math.ceil(TOTAL / (PER * nW)));
     const lim = F1.Raceline.lineLimits(tr), evalT = lineEval(tr, lim, null);
+    // opts.start (offsets every STRIDE_LINE samples): search on from that line (pulled inside
+    // the limits) instead of from scratch
     const off = F1.Raceline.techniqueLine(tr), sep = Math.round(160 / tr.ds);
+    if (opts.start) for (let i = 0; i < N; i++) { const f = i / STRIDE_LINE, L = opts.start, k = Math.floor(f) % L.length, t = f - Math.floor(f); off[i] = lim.clamp(i, L[k] + (L[(k + 1) % L.length] - L[k]) * t); }
     const t0 = evalT(off);
     let tBest = t0, moves = [];
     await Promise.all(Array.from({ length: nW }, (_, w) => pool.call(w, { cmd: 'optInit', id, off })));

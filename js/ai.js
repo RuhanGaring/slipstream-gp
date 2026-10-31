@@ -88,6 +88,11 @@
     return true;
   }
 
+  // Where the car may be across the road at each point: over a kerb in the corners, all four
+  // wheels on the asphalt everywhere else (Raceline.lineLimits). A stored line that strays
+  // past it is pulled back in as it is driven.
+  function edgeOf(tr) { return tr.aiEdge || (tr.aiEdge = F1.Raceline.lineLimits(tr)); }
+
   // The planner outputs a lateral corridor [lo, hi] (absolute offsets from the
   // centreline). The driver follows the racing line clamped into that corridor.
   function plan(race, car, dt) {
@@ -98,7 +103,8 @@
     // line is never trimmed where it uses a kerb (see Raceline.lineLimits), while a car
     // squeezed by another is not pushed past the asphalt where there is no kerb
     let lo = -lim, hi = lim;
-    for (let q = 0, n = Math.round(60 / tr.ds); q <= n; q += 2) { const o = tr.line.off[(i + q) % tr.N]; if (o > hi) hi = o; else if (o < lo) lo = o; }
+    const LL = edgeOf(tr);
+    for (let q = 0, n = Math.round(60 / tr.ds); q <= n; q += 2) { const j = (i + q) % tr.N, o = LL.clamp(j, tr.line.off[j]); if (o > hi) hi = o; else if (o < lo) lo = o; }
     // in the wet, off the painted kerbs (near ice) and a metre clear of the edge: the car runs
     // wide on less grip, and a wheel on the grass or in the gravel there is a spin
     if (car.wetness > 0.05) {
@@ -270,7 +276,7 @@
     lo = b.loS; hi = b.hiS;
     if (lo > hi) { const m = (lo + hi) / 2; lo = hi = m; }
     b.lo = lo; b.hi = hi;
-    b.desired = U.clamp(lineOff, lo, hi);
+    b.desired = U.clamp(edgeOf(tr).clamp(i, lineOff), lo, hi);
     b.bias = b.desired - lineOff;
   }
 
@@ -558,7 +564,8 @@
     }
     // pit approach: get over to the pit side before the entry
     const lo = b.lo == null ? -tr.hw : b.lo, hi = b.hi == null ? tr.hw : b.hi;
-    let latFn = j => U.clamp(tr.line.off[j], lo, hi);
+    const LL = edgeOf(tr);
+    let latFn = j => U.clamp(LL.clamp(j, tr.line.off[j]), lo, hi);
     if (b.pit && b.pit.phase === 'approach') {
       const d = Tracks.fwd(tr, car.loc.s, tr.pit.sIn);
       if (d < 260) latFn = j => (isNaN(tr.pit.off[j]) ? tr.pit.side * (tr.hw - 1.8) : tr.pit.off[j]);

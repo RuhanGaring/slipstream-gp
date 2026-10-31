@@ -9,6 +9,7 @@
   const F1 = G.F1;
   const U = F1.U;
   const Car = F1.Car;
+  const SURF = F1.SURF;
 
   function computeLine(tr) {
     const N = tr.N;
@@ -40,23 +41,32 @@
 
   // Where the car centre may go on each side. Where there is a kerb the line may put two
   // wheels right over it, as F1 drivers do through chicanes and at apexes: the car centre
-  // up to 0.6 m past the white line leaves the other two wheels inside it (the car is off
+  // up to 0.45 m past the white line leaves the other two wheels inside it (the car is off
   // the track only with all four out), the outer pair still on the kerb. That much only in
   // slow corners and chicanes (the tightest radius within 40 m under 40 m); by a 90 m radius
   // it is back to the outer wheels on the kerb, since a faster car drifts over half a metre
   // wide of its line on the exit. (The radius, not a speed: it is known before any line is.)
   // Whether a kerb pays is the optimiser's call: kerbGrip() below charges for it.
-  // Elsewhere the car stays on the asphalt.
+  // Elsewhere all four wheels stay on the asphalt, as on a real lap: the kerbs are for the
+  // corners only.
   function lineLimits(tr) {
     const N = tr.N, L = new Float64Array(N), R = new Float64Array(N);
-    const over0 = Math.max(-0.05, Math.min(0.6, tr.kerbW - 1.0));
+    const over0 = Math.max(-0.05, Math.min(0.45, tr.kerbW - 1.15));
     const W = Math.max(1, Math.round(40 / tr.ds)), kmax = new Float64Array(N);
     for (let i = 0; i < N; i++) { let k = 0; for (let q = -W; q <= W; q++) k = Math.max(k, Math.abs(tr.kap[(i + q + N) % N])); kmax[i] = k; }
+    // a kerb counts only where it runs under the whole car (2.5 m either way), so the line
+    // does not hang a wheel off its end into the grass
+    const C = Math.max(1, Math.round(2.5 / tr.ds));
+    const under = (K, i) => { for (let q = -C; q <= C; q++) if (!K[(i + q + N) % N]) return false; return true; };
     for (let i = 0; i < N; i++) {
       const slow = U.clamp((90 - 1 / Math.max(1e-6, kmax[i])) / 50, 0, 1);
       const over = -0.05 + (over0 + 0.05) * slow;
-      L[i] = tr.kerbL[i] ? tr.hw + over : tr.hw - 0.55;
-      R[i] = tr.kerbR[i] ? tr.hw + over : tr.hw - 0.55;
+      // (off the kerbs the wheels stay on the asphalt: next to grass or gravel the car centre
+      // keeps 1.2 m in from the edge, so the outer tyre stays inside it even running a little
+      // wide; next to paved run-off or a street wall the old 0.55 m)
+      const soft = side => { const t = tr.runT && tr.runT[side] ? tr.runT[side][i] : SURF.GRASS; return t === SURF.GRASS || t === SURF.GRAVEL; };
+      L[i] = under(tr.kerbL, i) ? tr.hw + over : tr.hw - (soft(0) ? 1.2 : 0.55);
+      R[i] = under(tr.kerbR, i) ? tr.hw + over : tr.hw - (soft(1) ? 1.2 : 0.55);
     }
     return { L, R, clamp: (i, o) => (o < -L[i] ? -L[i] : o > R[i] ? R[i] : o) };
   }
