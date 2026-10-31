@@ -11,5 +11,7 @@ module.exports = function load(files = CORE) {
     if (!fs.existsSync(p)) continue;
     vm.runInThisContext(fs.readFileSync(p, 'utf8'), { filename: p });
   }
+  // driving-technique overrides for tuning runs (tools/drivetune.js), workers included
+  if (process.env.AIP && globalThis.F1 && globalThis.F1.AI) Object.assign(globalThis.F1.AI.P, JSON.parse(process.env.AIP));
   return globalThis.F1;
 };

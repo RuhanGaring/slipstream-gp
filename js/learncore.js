@@ -17,7 +17,7 @@
   const F1 = G.F1;
   const U = F1.U;
   const DT = 1 / 240;
-  const VERSION = 3;     // bump when physics or AI changes make stored results stale
+  const VERSION = 4;     // bump when physics or AI changes make stored results stale
   const STRIDE_LINE = 2, STRIDE_GRIP = 5;
   const G_MIN = 0.8, G_MAX = 1.4;
 
@@ -32,7 +32,7 @@
       // wheels over a kerb cost grip: the line takes a kerb only where the shorter or
       // straighter path more than pays for it
       for (let i = 0; i < N; i++) g[i] = (grip ? grip[i] : 1) * F1.Raceline.kerbGrip(tr, i, off[i], line.kap[i]);
-      return F1.Raceline.lapTime(tr, line, F1.Car.SPEC, { pace: 1, grip: g }) + rough * 0.02;
+      return F1.Raceline.lapTime(tr, line, F1.Car.SPEC, { pace: 1, grip: g, real: true }) + rough * 0.02;
     };
   }
   function bump(off, lim, N, c, sig, amp) {
@@ -181,6 +181,13 @@
     const t0 = evalT(off);
     let tBest = t0, moves = [];
     await Promise.all(Array.from({ length: nW }, (_, w) => pool.call(w, { cmd: 'optInit', id, off })));
+    // opts.converge: keep running whole rounds of the search (each starting bold again from
+    // the best line so far) until a round gains less than that fraction of the lap
+    // opts.line (offsets every STRIDE_LINE samples): race this line, learn only the limits
+    const rounds = opts.line ? 0 : opts.converge ? (opts.maxRounds || 60) : 1;
+    if (opts.line) for (let i = 0; i < N; i++) { const f = i / STRIDE_LINE, L = opts.line, k = Math.floor(f) % L.length, t = f - Math.floor(f); off[i] = L[k] + (L[(k + 1) % L.length] - L[k]) * t; }
+    let tRound = tBest;
+    for (let round = 0; round < rounds; round++) {
     for (let b = 0; b < batches; b++) {
       if (cancelled()) return null;
       const anneal = 1 - b / batches;
@@ -203,7 +210,11 @@
       if (moves.length) tBest = evalT(off);
       if ((b & 7) === 7) report(0.3 * (b + 1) / batches, 'line');
     }
-    {
+      if (opts.onRound) opts.onRound(round, tBest);
+      if (tRound - tBest < (opts.converge || 0) * tBest) break;
+      tRound = tBest;
+    }
+    if (!opts.line) {
       const st = F1.Raceline.straighten(tr, off, evalT); // no ripples or flicks a real car would not drive
       off.set(st.off); tBest = st.t;
     }
@@ -216,6 +227,9 @@
       const f = i / STRIDE_LINE, k = Math.floor(f) % line.length, t = f - Math.floor(f);
       off[i] = line[k] + (line[(k + 1) % line.length] - line[k]) * t;
     }
+    // the line is most of the pace: the game can race on it now, with the grip model
+    // standing in for the limits until they are learned
+    if (opts.onLine) opts.onLine(line);
 
     // --- stage 2: grip limits, both handling modes side by side ---
     const modes = opts.modes || ['sim', 'arcade'];
@@ -301,5 +315,12 @@
     F1.Race.forgetTrack(res.id);
   }
 
-  F1.LearnCore = { VERSION, handle, learnTrack, apply, Runner };
+  // just a learned line (the limits still to come): the grip model fills in meanwhile
+  function applyLine(id, line) {
+    F1.Lines = F1.Lines || { stride: STRIDE_LINE };
+    F1.Lines[id] = line;
+    F1.Race.forgetTrack(id);
+  }
+
+  F1.LearnCore = { VERSION, handle, learnTrack, apply, applyLine, Runner };
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : globalThis));

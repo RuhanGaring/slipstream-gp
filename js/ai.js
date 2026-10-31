@@ -11,6 +11,18 @@
   const U = F1.U;
   const Tracks = F1.Tracks;
 
+  // The driving technique's constants, tuned over many circuits (tools/drivetune.js):
+  // steering lookahead, slip and yaw compensation, how hard and how early to brake, how the
+  // pedal is bled off into the corner, how fast the throttle goes back on.
+  // (tuned 2026-10-31 on 8 circuits until 80 tries in a row found nothing faster; 0.2 to
+  // 1.5% quicker on 6 circuits it never saw, with no more offs or track-limit breaches)
+  const P = {
+    look0: 6.364, lookV: 0.2455, slipComp: 0.001863, yawDamp: 0.05257, frontCap: 0.105,
+    aCap0: 33.24, aCapV: 0.0047, brkOn: 0.7192, brkFull: 0.9499, errBrk: 0.22, bleed: 2.878,
+    trailOn: 0.25, trailA: 1.2, trailB: 1.163, thr0: 0.2568, thrErr: 0.5, rearThr: 1.4,
+    thrRamp: 1.997, thrLoad: 0.2654, leadT: 0.09159,
+  };
+
   function makeBrain(car, prof, opts) {
     return {
       prof, pace: opts.pace || 1, aggr: opts.aggr == null ? 0.6 : opts.aggr,
@@ -266,7 +278,7 @@
   function control(race, car, latAt, vt, dt) {
     const tr = race.track, b = car.brain;
     const v = Math.max(0, car.u);
-    const look = 6.5 + v * 0.28;
+    const look = P.look0 + v * P.lookV;
     const i = car.loc.i;
     const j = (i + Math.round(look / tr.ds)) % tr.N;
     let lat = latAt(j);
@@ -286,13 +298,13 @@
     const kap = 2 * by / L2;
     let delta = Math.atan(car.spec.wb * kap);
     // slip compensation: lateral acceleration needs extra front slip angle
-    delta += kap * v * v * 0.0021;
+    delta += kap * v * v * P.slipComp;
     // yaw-rate damping
-    delta += (v * kap - car.r) * 0.035;
+    delta += (v * kap - car.r) * P.yawDamp;
     // a driver keeps the front tyres near peak slip instead of winding on more lock
     if (v > 8) {
       const betaF = Math.atan2(car.v + car.r * car.lf, Math.max(1, car.u));
-      const cap = 0.105;
+      const cap = P.frontCap;
       delta = U.clamp(delta, betaF - cap, betaF + cap);
     }
     const behind = bx < 0;
@@ -309,21 +321,21 @@
     // the car can do, then hit the brakes hard in a straight line. As speed bleeds off
     // the demand falls, so the pedal comes off progressively into the apex (trail
     // braking) while the steering takes over the grip.
-    let aCap = (15 + 0.0047 * u * u) * Math.min(1, 820 / (car.spec.mass + car.fuel));
+    let aCap = (P.aCap0 + P.aCapV * u * u) * Math.min(1, 820 / (car.spec.mass + car.fuel));
     if (car.wetness > 0.02) aCap *= Math.min(1, (car.grip == null ? 0.972 : car.grip) / 0.972); // wet brakes bite less
     const aReq = b && b.aReq != null ? b.aReq : 0;
     let thr = 0, brk = 0;
-    if (aReq > 0.72 * aCap) brk = U.clamp(aReq / (0.82 * aCap), 0, 1);
-    else if (err < -1.2) brk = U.clamp(-err * 0.22, 0, 1);
+    if (aReq > P.brkOn * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
+    else if (err < -1.2) brk = U.clamp(-err * P.errBrk, 0, 1);
     // once on the brakes, stay on them and bleed the pedal off (no on/off chatter): the
     // tyres now build slip progressively, so a held, smoothly released pedal is quicker
     if (b) {
       const held = b.brkPrev || 0;
-      if (brk < held && err < 0) brk = Math.max(brk, held - 2.2 * dt);
+      if (brk < held && err < 0) brk = Math.max(brk, held - P.bleed * dt);
       // trail braking: the pedal comes off as the cornering load builds, so the tyres
       // always have side grip left for the turn
       const lat0 = Math.abs(car.ay) / aCap;
-      if (lat0 > 0.25) brk = Math.min(brk, Math.max(0, 1.2 - lat0 * 1.45));
+      if (lat0 > P.trailOn) brk = Math.min(brk, Math.max(0, P.trailA - lat0 * P.trailB));
       // understeer: the fronts are at their peak and the car is still running wide toward
       // the outside edge. Wind no more throttle in; if the edge is close, a touch of brake
       // loads the nose and scrubs speed so the radius tightens
@@ -348,17 +360,17 @@
       b.brkPrev = brk;
     }
     if (brk > 0) thr = 0;
-    else if (err > 0) thr = U.clamp(0.35 + err * 0.5 + u * 0.006, 0, 1);
+    else if (err > 0) thr = U.clamp(P.thr0 + err * P.thrErr + u * 0.006, 0, 1);
     else if (err > -1.2) thr = U.clamp(0.25 + err * 0.25, 0, 1);
     // throttle technique: squeeze it on while the car is still loaded in the corner
     // the rear is stepping out: get off the throttle and let the steering catch it
-    if (rearSlide > 0.3) thr *= Math.max(0, 1 - (rearSlide - 0.3) * 1.4);
+    if (rearSlide > 0.3) thr *= Math.max(0, 1 - (rearSlide - 0.3) * P.rearThr);
     // pushing at the front: more throttle would only push it wider
     if (b && car.satF != null && car.satF > 0.97 && b.thrPrev != null) thr = Math.min(thr, b.thrPrev * 0.97);
     const latLoad = Math.abs(car.ay) / (aCap * 0.95);
-    if (b && latLoad > 0.45) {
+    if (b && latLoad > P.thrLoad) {
       b.thrPrev = b.thrPrev == null ? thr : b.thrPrev;
-      thr = Math.max(0, Math.min(thr, b.thrPrev + Math.max(0.8, 2.5 + 4 * (1 - latLoad)) * dt));
+      thr = Math.max(0, Math.min(thr, b.thrPrev + Math.max(0.8, P.thrRamp + 4 * (1 - latLoad)) * dt));
     }
     if (b) b.thrPrev = thr;
     car.ctl.throttle = thr; car.ctl.brake = brk;
@@ -444,7 +456,7 @@
     // per-lap braking noise: small variations so AI lap times are not identical
     b.noiseT -= dt;
     if (b.noiseT <= 0) { b.noiseT = 2 + b.rng() * 3; b.noise = 1 + (b.rng() - 0.5) * 0.012 * (1.4 - b.aggr); }
-    const leadIdx = (i + Math.round((v * 0.1 + 2) / tr.ds)) % tr.N;
+    const leadIdx = (i + Math.round((v * P.leadT + 2) / tr.ds)) % tr.N;
     let vt = b.prof[leadIdx] * b.noise;
     // off-line penalty in corners, and a slower car with a damaged front wing
     const kl = Math.abs(tr.line.kap[leadIdx]);
@@ -580,5 +592,5 @@
     if (b.stuckT > (car.speed < 1.5 && onLine ? 1.2 : 3)) { race.recover(car); b.stuckT = 0; }
   }
 
-  F1.AI = { makeBrain, drive, pitDrive, sense, relS, upcomingZone };
+  F1.AI = { P, makeBrain, drive, pitDrive, sense, relS, upcomingZone };
 })(typeof window !== 'undefined' ? window : globalThis);

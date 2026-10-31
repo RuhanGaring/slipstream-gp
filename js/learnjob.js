@@ -82,12 +82,24 @@
     if (F1.Limits && F1.Limits[id]) return true;
     try {
       const raw = G.localStorage && G.localStorage.getItem(key(id));
-      if (!raw) return false;
+      if (!raw) { restoreLine(id); return false; }
       const res = JSON.parse(raw);
       if (res.version !== LC().VERSION || res.id !== id) return false;
       LC().apply(res);
       return true;
     } catch (e) { return false; }
+  }
+  // a line learned on an earlier visit whose limits were not finished
+  function restoreLine(id) {
+    if (F1.Lines && F1.Lines[id]) return;
+    try {
+      const raw = G.localStorage && G.localStorage.getItem(key(id) + '.line');
+      const res = raw && JSON.parse(raw);
+      if (res && res.version === LC().VERSION && res.id === id) LC().applyLine(id, res.line);
+    } catch (e) { /* nothing kept */ }
+  }
+  function saveLine(id, line) {
+    try { G.localStorage.setItem(key(id) + '.line', JSON.stringify({ version: LC().VERSION, id, line })); } catch (e) { /* storage full or blocked */ }
   }
   function save(res) {
     try { G.localStorage.setItem(key(res.id), JSON.stringify({ version: res.version, id: res.id, N: res.N, line: res.line, limits: res.limits })); } catch (e) { /* storage full or blocked: it is learned again next time */ }
@@ -97,7 +109,7 @@
   function status(id) {
     if (restore(id)) return { id, state: 'done', p: 1 };
     const j = jobs.get(id);
-    return j ? { id, state: j.state, p: j.p, stage: j.stage, kind: j.kind } : { id, state: 'idle', p: 0 };
+    return j ? { id, state: j.state, p: j.p, stage: j.stage, kind: j.kind, lineReady: !!j.lineReady } : { id, state: 'idle', p: 0, lineReady: !!(F1.Lines && F1.Lines[id]) };
   }
   function cancel() {
     if (!active) return;
@@ -123,6 +135,8 @@
       return LC().learnTrack(pool, id, {
         progress: (p, stage) => { job.p = p; job.stage = stage; emit(job); },
         cancelled: () => job.cancelled,
+        // the line is ready long before the limits: race on it already if asked to
+        onLine: line => { if (job.cancelled) return; LC().applyLine(id, line); saveLine(id, line); job.lineReady = true; emit(job); },
         lineIters: pool.kind === 'local' ? 12000 : undefined,
       });
     };

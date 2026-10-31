@@ -42,17 +42,18 @@
   // wheels right over it, as F1 drivers do through chicanes and at apexes: the car centre
   // up to 0.6 m past the white line leaves the other two wheels inside it (the car is off
   // the track only with all four out), the outer pair still on the kerb. That much only in
-  // slow corners and chicanes (under 100 km/h); by 140 km/h it is back to the outer wheels
-  // on the kerb, since from there a car drifts over half a metre wide of its line on exit.
+  // slow corners and chicanes (the tightest radius within 40 m under 40 m); by a 90 m radius
+  // it is back to the outer wheels on the kerb, since a faster car drifts over half a metre
+  // wide of its line on the exit. (The radius, not a speed: it is known before any line is.)
   // Whether a kerb pays is the optimiser's call: kerbGrip() below charges for it.
   // Elsewhere the car stays on the asphalt.
   function lineLimits(tr) {
     const N = tr.N, L = new Float64Array(N), R = new Float64Array(N);
     const over0 = Math.max(-0.05, Math.min(0.6, tr.kerbW - 1.0));
+    const W = Math.max(1, Math.round(40 / tr.ds)), kmax = new Float64Array(N);
+    for (let i = 0; i < N; i++) { let k = 0; for (let q = -W; q <= W; q++) k = Math.max(k, Math.abs(tr.kap[(i + q + N) % N])); kmax[i] = k; }
     for (let i = 0; i < N; i++) {
-      // corner speed back from the kerb height prepare() set from it (230 km/h - 120 per unit)
-      const kmh = tr.kerbH ? 230 - 120 * (tr.kerbH[i] - 0.012) / 0.023 : 999;
-      const slow = U.clamp((140 - kmh) / 40, 0, 1);
+      const slow = U.clamp((90 - 1 / Math.max(1e-6, kmax[i])) / 50, 0, 1);
       const over = -0.05 + (over0 + 0.05) * slow;
       L[i] = tr.kerbL[i] ? tr.hw + over : tr.hw - 0.55;
       R[i] = tr.kerbR[i] ? tr.hw + over : tr.hw - 0.55;
@@ -266,6 +267,15 @@
     return tab;
   }
 
+  // How much of the modelled acceleration the car really finds flat out, by speed (every
+  // 4 m/s from 0): measured from the AI's own laps by tools/accelcal.js. The model above has
+  // no shift losses, deployment limits or tyre slip, and at 300 km/h finds about four times
+  // the push the car has. Used when timing a lap to compare lines (opt.real), so the search
+  // values a fast exit for what it is really worth; the AI's own speed targets keep the plain
+  // model, so it never lifts on a straight where the car (with a tow, DRS) could go faster.
+  const ACC_CAL = [0.95, 0.95, 0.95, 0.95, 0.95, 0.955, 0.899, 0.854, 0.778, 0.662, 0.572, 0.593, 0.574, 0.563, 0.532, 0.515, 0.496, 0.466, 0.437, 0.399, 0.337, 0.273, 0.187, 0.1, 0, 0, 0];
+  const accCal = v => { const f = U.clamp((v - 2) / 4, 0, ACC_CAL.length - 1), k = Math.floor(f), t = f - k; return ACC_CAL[k] + ((ACC_CAL[k + 1] == null ? ACC_CAL[k] : ACC_CAL[k + 1]) - ACC_CAL[k]) * t; };
+
   // Speed profile along the racing line. pace scales the grip used (0.85..1.0).
   // Grip model fitted to the physics on a skidpad (tools/calib.js): load
   // sensitivity makes downforce worth less than its raw newtons.
@@ -303,8 +313,9 @@
         const aGrip = muAt(i) * (gN(i, vi) + kA * vi * vi);
         const aLat = vi * vi * Math.abs(line.kap[i]);
         const left = Math.sqrt(Math.max(0, aGrip * aGrip - aLat * aLat));
-        const aP = acc[Math.min(acc.length - 1, Math.round(vi))] - Car.GRAV * grade(i);
-        const a = Math.max(0.5, Math.min(aP, left));
+        const a0 = acc[Math.min(acc.length - 1, Math.round(vi))];
+        const aP = (opt.real ? Math.max(0, a0) * accCal(vi) : a0) - Car.GRAV * grade(i);
+        const a = Math.max(opt.real ? 0 : 0.5, Math.min(aP, left));
         const vn = Math.sqrt(Math.max(0, vi * vi + 2 * a * line.dsl[i]));
         if (vn < v[j]) v[j] = vn;
       }
