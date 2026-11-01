@@ -4,7 +4,8 @@ Reads tools/data/handposes.json (or the file given), poses the glove on its Make
 as the editor does (each bone turned by its saved rotation about its own joint, the skin following
 by linear blend skinning, the suit and glove pushed out along the normals), and writes each car's
 pose into js/assets/handpose.js (F1.Assets.handPose): the posed, dressed glove, the hand's move
-(off, rot) and no extra thumb curl, since the editor poses the thumb on its own bones. Cars not in
+(off, rot) and the thumb's curl: none when the editor posed the thumb on its own bones, or the game's own
+curl toward the thumb hole when the file gives one ("thumb").  Cars not in
 the file keep the pose they had.
 
 usage: python tools/handbake.py [handposes.json]
@@ -70,7 +71,7 @@ if __name__ == '__main__':
     for car, p in poses.items():
         P = dress(skin(p.get('bones', {}))).astype('<f4')
         Rs = quat(p['settle']['q'])
-        cars[car] = {'p': base64.b64encode(P.tobytes()).decode(), 'thumb': 0, 'off': [round(float(x), 6) for x in p['settle']['p']],
+        cars[car] = {'p': base64.b64encode(P.tobytes()).decode(), 'thumb': round(float(p.get('thumb', 0)), 4), 'off': [round(float(x), 6) for x in p['settle']['p']],
                      'rot': [[round(float(x), 6) for x in Rs[:, k]] for k in range(3)], 'source': 'handeditor'}
         print(f'{car}: baked, hand moved {np.linalg.norm(p["settle"]["p"]) * 1000:.1f} mm, {len(p.get("bones", {}))} joints turned')
     asset = {'fing': base64.b64encode((FW >= 0.5).astype(np.uint8).tobytes()).decode(), 'cars': cars}
