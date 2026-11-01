@@ -447,7 +447,7 @@
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
-  const HOLE_AT = { w17: [0.106, 0.034, 0.03, 0.035] };
+  const HOLE_AT = { w17: [0.106, 0.034, 0.03, 0.035], rb22: [0.085, 0.035, 0.03, 0.035] }; // rb22: the upper opening, by the PC+ button, where the thumb rests (the lower one is the detector's pick)
   // The thumb hole beside each grip: an opening through the wheel between the grip bar and the
   // wheel's body. Every triangle of the wheel at the grips' depth (the shift paddles behind it
   // would fill the holes in) is drawn into a grid on the wheel's face (x across, y up; the right
