@@ -236,6 +236,7 @@
     // no shadow pass: the curtains span the whole lap, so they would fill every cascade, and the
     // front rows of real trees already throw the forest's shade onto the verge
     mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.userData.shell = true; // a painted wall: the renderer hides it from cameras off the cars
     root.add(mesh);
   }
 

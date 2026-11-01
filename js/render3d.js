@@ -1509,11 +1509,14 @@
     const b = W2.bounds;
     const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, half = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2;
     // the hills and mountains round the venue: a ring of real terrain from 0.9 km past the
-    // circuit's far corner out to 7 km more
-    root.userData.backdrop = { cx, cz, R: half + 900, Ri: half + 900, Ro: half + 7000, tr };
+    // circuit's far corner out to about 13 km from its middle (inside the 14 km far plane)
+    root.userData.backdrop = { cx, cz, R: half + 900, Ri: half + 900, Ro: Math.min(half + 11000, 13200), tr };
   }
   // The hills and mountains round the venue, as real terrain: a ring of ground rising from where
-  // the venue's own land ends to ranges several kilometres off. The landform is ridged
+  // the venue's own land ends to ranges several kilometres off. Where the venue has a real place
+  // behind it (js/assets/terrain.js, open elevation data baked by tools/terrain_prep.py) the
+  // ring is that place's land at true scale, north up, heights relative to the circuit, with a
+  // little fine relief added below the data's 125 m spacing; otherwise the landform is ridged
   // multifractal noise (sharp crests and branching valleys, like eroded rock; the venue's
   // `jag` says how sharp), under a broad massif term so ranges come and go round the horizon.
   // It is coloured by what grows or lies there (the venue's own vegetation tones low down, bare
@@ -1540,17 +1543,47 @@
       return sm * (1 - sharp) + s * 1.6 * sharp;
     };
     const desert = id === 'rimal' || id === 'lonestar', arid = desert || id === 'sierra' || id === 'varenna';
-    const peak = Math.max(90, L.ridgeH * 2.6), lam = 650 + L.ridgeH * 3.2, lamM = lam * 3.4;
-    const A = 384, NR = 46, Ri = bd.Ri, Ro = bd.Ro;
-    const nv = A * NR, pos = new Float32Array(nv * 3), colr = new Float32Array(nv * 3), hh = new Float32Array(nv);
+    let peak = Math.max(90, L.ridgeH * 2.6);
+    const lam = 650 + L.ridgeH * 3.2, lamM = lam * 3.4;
+    // the real place's heights, if any: an n x n grid over span metres centred on the circuit
+    const RT = F1.Assets && F1.Assets.terrain && F1.Assets.terrain[id];
+    let real = null;
+    const EXAG = 1.6;
+    if (RT) {
+      const b = atob(RT.h), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+      const H = new Int16Array(u.buffer), n = RT.n, cell = RT.span / n;
+      const at = (i, j) => H[Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i))];
+      real = (x, z) => {   // metres relative to the circuit; null over the sea
+        const gx = (x - bd.cx) / cell + n / 2 - 0.5, gz = (z - bd.cz) / cell + n / 2 - 0.5, i = Math.floor(gx), j = Math.floor(gz), fx = gx - i, fz = gz - j;
+        const a = at(i, j), b2 = at(i + 1, j), c2 = at(i, j + 1), d = at(i + 1, j + 1);
+        if (a < -9000 || b2 < -9000 || c2 < -9000 || d < -9000) return null;
+        return (a * (1 - fx) + b2 * fx) * (1 - fz) + (c2 * (1 - fx) + d * fx) * fz;
+      };
+      let mx = 0; for (let k = 0; k < H.length; k++) if (H[k] > mx) mx = H[k];
+      peak = Math.max(60, mx * EXAG);
+    }
+    const A = 448, NR = 60, Ri = bd.Ri, Ro = bd.Ro;
+    const gC = tr && tr.H ? tr.H(bd.cx, bd.cz) : 0;
+    const nv = A * NR, pos = new Float32Array(nv * 3), colr = new Float32Array(nv * 3), hh = new Float32Array(nv), sea = new Uint8Array(nv);
     for (let j = 0; j < NR; j++) {
       const t = j / (NR - 1), rho = Ri + (Ro - Ri) * Math.pow(t, 1.35);
       for (let i = 0; i < A; i++) {
         const th = i / A * Math.PI * 2, x = bd.cx + Math.cos(th) * rho, z = bd.cz + Math.sin(th) * rho;
         const rise = U.smooth(t / 0.3), far = 0.5 + 0.5 * t;
-        const massif = 0.25 + 0.75 * U.smooth((vn(x / lamM, z / lamM) - 0.2) / 0.6);
-        const h = peak * rise * far * massif * land(x / lam, z / lam);
-        const g0 = tr && tr.H ? tr.H(x, z) - 0.6 : 0, k = j * A + i;
+        // the venue's own ground at the inner edge, easing to the circuit's level further out (the
+        // venue's landform is only meant for its own few kilometres)
+        const g0 = (tr && tr.H ? tr.H(x, z) - 0.6 : 0) * (1 - rise) + gC * rise, k = j * A + i;
+        let h;
+        if (real) {
+          const r = real(x, z);
+          if (r == null) { sea[k] = 1; h = -4 - g0; }   // the sea: flat, a little below the land
+          // heights 1.6 times the real ones, as games and panoramas do: true-scale hills a few
+          // kilometres off sit only a degree or two over the horizon, behind the trackside trees
+          else h = (r * EXAG + (land(x / 260, z / 260) - 0.5) * Math.min(25, Math.abs(r) * 0.08 + 4)) * rise;
+        } else {
+          const massif = 0.25 + 0.75 * U.smooth((vn(x / lamM, z / lamM) - 0.2) / 0.6);
+          h = peak * rise * far * massif * land(x / lam, z / lam);
+        }
         pos[k * 3] = x; pos[k * 3 + 1] = g0 + h; pos[k * 3 + 2] = z; hh[k] = h;
       }
     }
@@ -1565,8 +1598,8 @@
     const nr = g.attributes.normal;
     const veg = [col(L.ridge[2]), col(L.ridge[1]), col(L.ridge[0])];
     const rock = col(desert ? '#b8916a' : arid ? '#9a8a76' : '#7e7a72'), rockD = col(desert ? '#8e6c4e' : '#5d5952'), snow = col('#eef2f6');
-    const snowLine = id === 'hakone' ? peak * 0.62 : 1e9; // only Hakone's peaks carry snow
-    const c = new THREE.Color();
+    const snowLine = real ? 1e9 : id === 'hakone' ? peak * 0.62 : 1e9; // real places: as in the racing season, no snow
+    const c = new THREE.Color(), seaC = col('#2d5468');
     for (let k = 0; k < nv; k++) {
       const x = pos[k * 3], z = pos[k * 3 + 2], h = hh[k], slope = 1 - nr.getY(k), hf = h / peak;
       const n1 = vn(x / 140, z / 140), n2 = vn(x / 37, z / 37);
@@ -1579,13 +1612,14 @@
       // snow on the high, gentler ground
       if (h > snowLine - 120) c.lerp(snow, U.smooth((h - snowLine + (n1 - 0.5) * 160) / 90) * (1 - U.smooth((slope - 0.35) / 0.2)));
       c.multiplyScalar(0.9 + n2 * 0.2);
+      if (sea[k]) c.copy(seaC).multiplyScalar(0.92 + n2 * 0.1);
       colr[k * 3] = c.r; colr[k * 3 + 1] = c.g; colr[k * 3 + 2] = c.b;
     }
     g.setAttribute('color', new THREE.BufferAttribute(colr, 3));
     g.computeBoundingSphere();
     const S3 = F1.R3S.U;
     const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0, envMapIntensity: 0.35, fog: false });
-    const hz = { uHaze: S3.uFogCol, uHazeD: { value: Math.max(5500, (L.fogF || 4000) * 2.6) }, uHazeH: { value: Math.max(300, peak * 0.9) } };
+    const hz = { uHaze: S3.uFogCol, uHazeD: { value: Math.max(8000, (L.fogF || 4000) * 3.6) }, uHazeH: { value: Math.max(300, peak * 0.9) } };
     m.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, hz);
       sh.vertexShader = 'varying vec3 vHzW;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vHzW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -1947,6 +1981,7 @@
   const C = { yaw: 0, mode: '', look: V(0, 0, 0), tv: null, fov: 60, last: null };
   // (free, top, map, heli, blimp, orbit, nose and side are the replay and spectator cameras)
   const MODES = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'tv', 'orbit', 'show', 'free', 'top', 'map', 'heli', 'blimp', 'nose', 'side'];
+  const ON_CAR = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'nose', 'side']; // cameras on or just behind a car
   const V2S = new THREE.Vector2();
   function setFov(f, dt, snap) {
     C.fov = snap ? f : C.fov + (f - C.fov) * Math.min(1, dt * 4);
@@ -2292,6 +2327,14 @@
       m.visible = camera.position.distanceTo(bs.center) - bs.radius < GFX.treeDist;
     } else if (state.dens && state.densCulled) for (const m of state.dens) m.visible = true;
     if (state.dens) state.densCulled = GFX.treeDist > 0;
+    // the forest curtains (r3-trees.js) are a painted wall that reads as forest only from track
+    // level: from the TV towers, the heli, the blimp and the other cameras off the cars they show
+    // for what they are, so there they are hidden (the trees in front of them stay)
+    if (state.root) {
+      if (!state.shells || state.shellsOf !== state.root) { state.shells = []; state.shellsOf = state.root; state.root.traverse(m => { if (m.userData.shell) state.shells.push(m); }); }
+      const onCar = ON_CAR.includes(camMode);
+      for (const m of state.shells) m.visible = onCar;
+    }
     updateGhost(o.ghost);
     updateFx(o.fx, dt);
     if (F1.R3D) F1.R3D.stepDebris(dt, state.tr);
