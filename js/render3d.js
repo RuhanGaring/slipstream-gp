@@ -228,7 +228,11 @@
       : std({ map: T.armco(), roughness: 0.35, metalness: 0.75, side: THREE.DoubleSide });
     MATS.tyres = std({ map: T.tyres(), roughness: 0.85, side: THREE.DoubleSide });
     if (ph) { MATS.tyres.normalMap = T.photo('rubber_n', 2, false); MATS.tyres.roughnessMap = T.photo('rubber_arm', 2, false); }
-    MATS.fence = std({ map: T.fence(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.45, metalness: 1, color: '#a7adb3' });
+    // chain-link catch fence: a scanned galvanised wire mesh (ambientCG Fence003, drawn 1.1 m a
+    // tile so the wire still reads from the car) blended by its own opacity (crisp wire up close, a fine grey veil far off, as a real fence);
+    // wall runs give 1.6 m a UV unit
+    MATS.fence = T.has('fence') ? std({ map: T.photo('fence', 1.6 / 1.1), normalMap: T.photo('fence_n', 1.6 / 1.1, false), transparent: true, alphaTest: 0.03, depthWrite: false, side: THREE.DoubleSide, roughness: 0.42, metalness: 0.9, color: '#c9ced3' })
+      : std({ map: T.fence(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.45, metalness: 1, color: '#a7adb3' });
     MATS.steel = ph ? pbr('metal', 1, { metalness: 1, color: '#c4c9ce' }) : std({ color: '#5b6067', roughness: 0.45, metalness: 0.7 });
     // the metal photo's mean luminance (linear) is 0.0347; times each material's colour
     if (ph) for (const m of [MATS.armco, MATS.steel]) {
@@ -1105,8 +1109,9 @@
         for (const x of [-12, -4, 4, 12]) steel.add(col0, at(mat(x, 6.6, 6.2, 0, 1, 13.2, 1)));
         fascia.add(box, at(mat(0, 12.6, -3.0, 0, 29.5, 1.0, 0.25, -0.06)), col(ads[n++ % ads.length]));
       }
-      add(conc.geo(), M.standShell || (M.standShell = T.has('concrete') ? pbr('concrete', 4, { color: '#9da2a8' }) : std({ color: '#6d727a', roughness: 0.8 })), { cast: true }); add(crowd.geo(), M.crowd, { cast: false });
-      add(roof.geo(), M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
+      add(conc.geo(), M.standShell || (M.standShell = T.has('stand') ? pbr('stand', 1 / 6, { color: '#c4c6c8' }) : T.has('concrete') ? pbr('concrete', 4, { color: '#9da2a8' }) : std({ color: '#6d727a', roughness: 0.8 })), { cast: true }); add(crowd.geo(), M.crowd, { cast: false });
+      // the roof: profiled steel sheet (the corrugation runs down the slope)
+      add(roof.geo(), T.has('clad') ? (M.standRoof || (M.standRoof = pbr('clad', [6, 2], { color: '#dfe3e7' }))) : M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
     }
 
     tag('stands');
@@ -1115,6 +1120,8 @@
       const walls = new Batch(true), roofs = new Batch(true), relief = new Batch(true), ub = new THREE.BoxGeometry(1, 1, 1);
       const awn = ['#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a', '#3d3f44', '#8a6a3a'];
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
+      // mid-rise fronts (ambientCG Facade018A/019A/020A: brick, dark concrete, brown piers; 13 m a tile, six floors)
+      const mids = T.has('facA') ? [['facA', 19, new Batch(false)], ['facB', 19, new Batch(false)], ['facC', 19, new Batch(false)]] : [];
       const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2', '#eec2a4', '#f1ddb0', '#e6b9a6', '#f3e3c8'];
       for (const it of W2.decor) {
         if (it.type !== 'building') continue;
@@ -1127,7 +1134,8 @@
         tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
         if (kinds.length && pick > (front ? 0.88 : 0.45)) {
           // modern blocks: office bands or glass, the taller ones more often glass
-          const [, tile, bt] = kinds[pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0];
+          const k0 = pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0;
+          const [, tile, bt] = k0 === 0 && mids.length && r() < 0.7 ? mids[Math.floor(r() * mids.length)] : kinds[k0];
           const gy0 = Tracks.groundAt(tr, it.x, it.y) - 3;
           bt.add(facadeBox(it.w, hgt + 3, it.h, tile, tile), mat(it.x, (hgt + 3) / 2 + gy0, it.y));
           const rf0 = new THREE.BoxGeometry(it.w + 0.6, 0.6, it.h + 0.6); rf0.translate(it.x, hgt + 3 + gy0, it.y);
@@ -1174,6 +1182,7 @@
       add(roofs.geo(), M.roofs || (M.roofs = std({ vertexColors: true, roughness: 0.8, normalMap: T.has('concrete_n') ? T.photo('concrete_n', 1, false) : null })), { cast: true });
       const VMc = venueMats(), kindMat = { office: VMc.office, glass: VMc.glass, glasslit: VMc.lit };
       for (const [k, , bt] of kinds) add(bt.parts.length ? bt.geo() : null, kindMat[k], { cast: true });
+      for (const [k, , bt] of mids) add(bt.parts.length ? bt.geo() : null, VMc[k], { cast: true });
     }
 
     tag('city');
@@ -1193,7 +1202,7 @@
     tag('grass');
     const gantry = buildGantry(root, tr); tag('gantry');
     buildBoards(root, W2, tr); tag('boards');
-    buildBackdrop(root, W2);
+    buildBackdrop(root, W2, tr);
     const tvCams = buildTvCams(tr);
     return { tr, root, gantry, water, tvCams, grass, turf };
   }
@@ -1361,7 +1370,9 @@
       lit: has ? pbr('glasslit', 1, { envMapIntensity: 1.3 }) : std({ map: repTex(T.windows(), 1, 1), roughness: 0.1 }),
       clad: has ? pbr('clad', 1, { color: '#e4e7eb' }) : M.white,
       roof: M.standShell || M.concrete,
+      brick: T.has('brick') ? pbr('brick', 1, { color: '#f1ece6' }) : null,
     };
+    for (const k of ['facA', 'facB', 'facC']) VM[k] = T.has(k) ? pbr(k, 1, { envMapIntensity: 1.1 }) : VM.office;
     if (has) VM.clad.normalScale.set(1.4, 1.4);
     return VM;
   }
@@ -1398,13 +1409,16 @@
       }
       return true;
     };
-    const glass = new Batch(false), office = new Batch(false), lit = new Batch(false), roof = new Batch(false), clad = new Batch(false);
+    const glass = new Batch(false), office = new Batch(false), lit = new Batch(false), roof = new Batch(false), clad = new Batch(false), brick = new Batch(false);
     const place = (x, y, h, w, d, floors, kind) => {
       if (!clear(x, y, w, d, h)) return false;
       const gy = Tracks.groundAt(tr, x, y), H = floors * 3.6, ry = -h;
       // glazed ground floor, office or glass floors above, a roof slab with plant on top
       lit.add(facadeBox(w, 3.6, d, 15, 15), mat(x, gy + 1.8 - 0.4, y, ry));
-      (kind === 'glass' ? glass : office).add(facadeBox(w - 0.4, H - 3.6, d - 0.4, kind === 'glass' ? 15 : 28, kind === 'glass' ? 15 : 28), mat(x, gy + 3.6 + (H - 3.6) / 2 - 0.4, y, ry));
+      const B = kind === 'glass' ? glass : kind === 'brick' && VMt.brick ? brick : office, tl = kind === 'glass' ? 15 : kind === 'brick' ? 2.4 : 28;
+      B.add(facadeBox(w - 0.4, H - 3.6, d - 0.4, tl, kind === 'brick' ? 1.2 : tl), mat(x, gy + 3.6 + (H - 3.6) / 2 - 0.4, y, ry));
+      // a brick block keeps its windows: a band of dark glazing on each floor, set into the wall
+      if (B === brick) for (let fl = 0; fl < floors - 1; fl++) lit.add(facadeBox(w - 2.2, 1.7, d - 0.25, 15, 15), mat(x, gy + 3.6 + fl * 3.6 + 1.6 - 0.4, y, ry));
       roof.add(new THREE.BoxGeometry(w + 0.6, 0.5, d + 0.6), mat(x, gy + H - 0.15, y, ry));
       clad.add(facadeBox(w * 0.3, 1.6, d * 0.4, 3, 3), mat(x + Math.cos(h) * w * 0.15, gy + H + 0.9, y + Math.sin(h) * w * 0.15, ry));
       foot.push({ x, y, w, d, h, r: Math.hypot(w, d) / 2 });
@@ -1417,7 +1431,7 @@
       if (k % 2) return;
       const back = -f * (it.d / 2 + 18 + 6.5);
       const x = it.x - Math.sin(it.h) * back, y = it.y + Math.cos(it.h) * back;
-      place(x, y, it.h, 26, 13, 2 + ((k / 2) % 3 === 1 ? 1 : 0), 'office');
+      place(x, y, it.h, 26, 13, 2 + ((k / 2) % 3 === 1 ? 1 : 0), (k / 2) % 2 ? 'brick' : 'office');
     });
     // race control: a glass tower at the head of the pit lane
     if (garages.length) {
@@ -1448,7 +1462,7 @@
       foot.push({ x: Tracks.pointAt(tr, s, dr + 2)[0], y: Tracks.pointAt(tr, s, dr + 2)[1], w: 5, d: 5, h: hh, r: 4 });
     }
     const addB = (b, m) => { const geo = b.geo(); if (!geo) return; const mesh = new THREE.Mesh(geo, m); mesh.castShadow = true; mesh.receiveShadow = true; root.add(mesh); };
-    addB(lit, VMt.lit); addB(glass, VMt.glass); addB(office, VMt.office); addB(roof, VMt.roof); addB(clad, VMt.clad);
+    addB(lit, VMt.lit); addB(glass, VMt.glass); addB(office, VMt.office); addB(roof, VMt.roof); addB(clad, VMt.clad); if (VMt.brick) addB(brick, VMt.brick);
     return foot;
   }
 
@@ -1491,24 +1505,97 @@
   }
 
   // distant hills / mountains / dunes: a ring of layered silhouettes, unfogged and pre-hazed
-  function buildBackdrop(root, W2) {
+  function buildBackdrop(root, W2, tr) {
     const b = W2.bounds;
-    const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2;
-    const R = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2 + 3800;
-    root.userData.backdrop = { cx, cz, R };
+    const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, half = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2;
+    // the hills and mountains round the venue: a ring of real terrain from 0.9 km past the
+    // circuit's far corner out to 7 km more
+    root.userData.backdrop = { cx, cz, R: half + 900, Ri: half + 900, Ro: half + 7000, tr };
   }
+  // The hills and mountains round the venue, as real terrain: a ring of ground rising from where
+  // the venue's own land ends to ranges several kilometres off. The landform is ridged
+  // multifractal noise (sharp crests and branching valleys, like eroded rock; the venue's
+  // `jag` says how sharp), under a broad massif term so ranges come and go round the horizon.
+  // It is coloured by what grows or lies there (the venue's own vegetation tones low down, bare
+  // rock on steep faces, snow on the high tops of the alpine venues, sand and rock in the
+  // desert), lit by the real sun and sky, and fades into the air with distance (aerial
+  // perspective toward the fog colour, thinning with height so the peaks stand out). One draw.
   function backdropFor(id, root) {
     const L = LOOKS[id] || LOOKS.kestrel, bd = root.userData.backdrop;
     if (!bd || root.userData.backdropMesh) return;
-    const H0 = L.ridgeH * 3.2;
-    const g = new THREE.CylinderGeometry(bd.R, bd.R, H0, 96, 1, true);
-    g.translate(bd.cx, H0 / 2 - 30, bd.cz);
-    const uv = g.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * 3);
-    const m = new THREE.MeshBasicMaterial({ map: T.ridge(L.ridge, id.length * 13 + 7, L.jag, !['rimal', 'lonestar', 'sierra'].includes(id)), transparent: true, alphaTest: 0.5, side: THREE.BackSide, fog: false, depthWrite: false });
-    m.color.set('#ffffff').lerp(col(L.fog), 0.25);
-    if (state.hdr) { const f = state.hdr.fog; m.color.multiplyScalar((f[0] * 0.2126 + f[1] * 0.7152 + f[2] * 0.0722) / 0.55); }
+    const tr = bd.tr, seed = id.length * 131 + id.charCodeAt(0) * 7;
+    const hash = (ix, iz) => { let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(seed, 982451653)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+    const vn = (x, z) => {
+      const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz, u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+      const a = hash(ix, iz), b = hash(ix + 1, iz), c = hash(ix, iz + 1), d = hash(ix + 1, iz + 1);
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    };
+    const sharp = U.clamp(L.jag / 22, 0.15, 1);
+    const land = (x, z) => {   // 0..~1.3
+      let s = 0, amp = 0.55, f = 1, w = 1, sm = 0;
+      for (let o = 0; o < 6; o++) {
+        const n = vn(x * f + o * 17.3, z * f - o * 9.1), r = 1 - Math.abs(2 * n - 1), rr = r * r * w;
+        s += rr * amp; sm += n * amp; w = U.clamp(rr * 2.2, 0, 1); f *= 2.03; amp *= 0.5;
+      }
+      return sm * (1 - sharp) + s * 1.6 * sharp;
+    };
+    const desert = id === 'rimal' || id === 'lonestar', arid = desert || id === 'sierra' || id === 'varenna';
+    const peak = Math.max(90, L.ridgeH * 2.6), lam = 650 + L.ridgeH * 3.2, lamM = lam * 3.4;
+    const A = 384, NR = 46, Ri = bd.Ri, Ro = bd.Ro;
+    const nv = A * NR, pos = new Float32Array(nv * 3), colr = new Float32Array(nv * 3), hh = new Float32Array(nv);
+    for (let j = 0; j < NR; j++) {
+      const t = j / (NR - 1), rho = Ri + (Ro - Ri) * Math.pow(t, 1.35);
+      for (let i = 0; i < A; i++) {
+        const th = i / A * Math.PI * 2, x = bd.cx + Math.cos(th) * rho, z = bd.cz + Math.sin(th) * rho;
+        const rise = U.smooth(t / 0.3), far = 0.5 + 0.5 * t;
+        const massif = 0.25 + 0.75 * U.smooth((vn(x / lamM, z / lamM) - 0.2) / 0.6);
+        const h = peak * rise * far * massif * land(x / lam, z / lam);
+        const g0 = tr && tr.H ? tr.H(x, z) - 0.6 : 0, k = j * A + i;
+        pos[k * 3] = x; pos[k * 3 + 1] = g0 + h; pos[k * 3 + 2] = z; hh[k] = h;
+      }
+    }
+    const idx = new Uint32Array(A * (NR - 1) * 6); let q = 0;
+    for (let j = 0; j < NR - 1; j++) for (let i = 0; i < A; i++) {
+      const a = j * A + i, b = j * A + (i + 1) % A, c = a + A, d = b + A;
+      idx[q++] = a; idx[q++] = b; idx[q++] = c; idx[q++] = b; idx[q++] = d; idx[q++] = c;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeVertexNormals();
+    const nr = g.attributes.normal;
+    const veg = [col(L.ridge[2]), col(L.ridge[1]), col(L.ridge[0])];
+    const rock = col(desert ? '#b8916a' : arid ? '#9a8a76' : '#7e7a72'), rockD = col(desert ? '#8e6c4e' : '#5d5952'), snow = col('#eef2f6');
+    const snowLine = id === 'hakone' ? peak * 0.62 : 1e9; // only Hakone's peaks carry snow
+    const c = new THREE.Color();
+    for (let k = 0; k < nv; k++) {
+      const x = pos[k * 3], z = pos[k * 3 + 2], h = hh[k], slope = 1 - nr.getY(k), hf = h / peak;
+      const n1 = vn(x / 140, z / 140), n2 = vn(x / 37, z / 37);
+      // vegetation: darker in the valleys, lighter and thinner up the slopes
+      c.copy(veg[0]).lerp(veg[1], U.clamp(hf * 1.6 + (n1 - 0.5) * 0.6, 0, 1));
+      if (hf > 0.45) c.lerp(veg[2], U.clamp((hf - 0.45) * 2, 0, 1));
+      // bare rock: steep faces, everything high on the alpine ranges, much of the arid ones
+      const rk = U.clamp(U.smooth((slope - (arid ? 0.12 : 0.22) + (n2 - 0.5) * 0.12) / 0.25) + (L.ridgeH > 500 ? U.smooth((hf - 0.45) / 0.25) * 0.6 : 0), 0, 1);
+      c.lerp(rockD.clone().lerp(rock, n1), rk);
+      // snow on the high, gentler ground
+      if (h > snowLine - 120) c.lerp(snow, U.smooth((h - snowLine + (n1 - 0.5) * 160) / 90) * (1 - U.smooth((slope - 0.35) / 0.2)));
+      c.multiplyScalar(0.9 + n2 * 0.2);
+      colr[k * 3] = c.r; colr[k * 3 + 1] = c.g; colr[k * 3 + 2] = c.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colr, 3));
+    g.computeBoundingSphere();
+    const S3 = F1.R3S.U;
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0, envMapIntensity: 0.35, fog: false });
+    const hz = { uHaze: S3.uFogCol, uHazeD: { value: Math.max(5500, (L.fogF || 4000) * 2.6) }, uHazeH: { value: Math.max(300, peak * 0.9) } };
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, hz);
+      sh.vertexShader = 'varying vec3 vHzW;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vHzW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = 'varying vec3 vHzW;\nuniform vec3 uHaze;\nuniform float uHazeD, uHazeH;\n' + sh.fragmentShader.replace('#include <fog_fragment>',
+        '  { float d = length(vHzW - cameraPosition); float a = (1.0 - exp(-d / uHazeD)) * mix(0.85, 0.45, clamp(vHzW.y / uHazeH, 0.0, 1.0));\n    gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, a); }');
+    };
+    m.customProgramCacheKey = () => 'mountains';
     const mesh = new THREE.Mesh(g, m);
-    mesh.renderOrder = -5; mesh.frustumCulled = false;
+    mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false;
+    mesh.userData.cat = 'backdrop';
     root.add(mesh);
     root.userData.backdropMesh = mesh;
   }

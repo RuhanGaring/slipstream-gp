@@ -38,6 +38,7 @@ drivers and circuits in the game are fictional.
 - Poly Haven 3D models (CC0), baked into 8-view tree impostors by tools/assets_trees.py: island_tree_01,
   island_tree_02, tree_small_02, fir_sapling_medium and quiver_tree_01.
 - ambientCG (https://ambientcg.com): Grass001, Rubber004, Facade001, Facade002, Facade006, CorrugatedSteel005 (venue buildings, via tools/assets_venue.py).
+- ambientCG (https://ambientcg.com): Fence003 (chain-link catch fences), Facade018A, Facade019A, Facade020A (city mid-rise fronts), Bricks105 (paddock buildings), Concrete046 (grandstands), via tools/assets_scenery.py. All CC0.
 
 ## Models
 
