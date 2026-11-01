@@ -728,6 +728,8 @@ function thumbBendPts(P, idx, T) {   // P: hand-frame positions (x, y, z per ver
 }
 // every glove point the bend can move: the thumb and the web and ball of the thumb with it
 const thumbSet = Int32Array.from((() => { const v = []; for (let i = 0; i < NV; i++) if (ZONE[i] !== 0 && W5[i * 5 + 4] >= 100 && FWT[i] < 0.5) v.push(i); return v; })());
+// a gripping hand presses its palm into the handle: the glove's cloth there gives by 2 mm
+const PALM_PRESS = 0.002;
 function seatHand() {
   if (!state.car) return;
   // the shortest move that clears the palm and the fingers' roots (the thumb is posed after, on its own bones)
@@ -735,7 +737,7 @@ function seatHand() {
   const M = relM().elements, n = seatSet.length, pts = new Float32Array(n * 3), sdf = state.car.sdf;
   for (let k = 0; k < n; k++) { const i = seatSet[k], x = SK[i * 3], y = SK[i * 3 + 1], z = SK[i * 3 + 2];
     pts[k * 3] = M[0] * x + M[4] * y + M[8] * z + M[12]; pts[k * 3 + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; pts[k * 3 + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; }
-  const margin = (dx, dy, dz) => { let m = 1; for (let k = 0; k < n; k++) { const d = sdf.at(pts[k * 3] + dx, pts[k * 3 + 1] + dy, pts[k * 3 + 2] + dz) - CLR; if (d < m) m = d; } return m; };
+  const margin = (dx, dy, dz) => { let m = 1; for (let k = 0; k < n; k++) { const d = sdf.at(pts[k * 3] + dx, pts[k * 3 + 1] + dy, pts[k * 3 + 2] + dz) - (CLR - PALM_PRESS); if (d < m) m = d; } return m; };
   const N = 800, dirs = [];
   for (let k = 0; k < N; k++) { const ph = Math.acos(1 - 2 * (k + 0.5) / N), th = Math.PI * (1 + Math.sqrt(5)) * (k + 0.5); dirs.push([Math.cos(th) * Math.sin(ph), Math.sin(th) * Math.sin(ph), Math.cos(ph)]); }
   let best = { cost: Math.max(0, -margin(0, 0, 0)) * 1000, t: [0, 0, 0] };
@@ -795,10 +797,18 @@ function seatAndAim() {
   if (!state.car.hole) { aimThumb(); return r0; }
   skinMats(); skin(seatSet, SK);
   let best = { cost: aimThumb(true), o: o0.clone() };
-  const palmOk = () => { skinMats(); const d = distances(seatSet, new Float32Array(seatSet.length)); let m = 1; for (const x of d) m = Math.min(m, x - CLR); return m >= -0.0005; };
-  for (let dx = -6; dx <= 6; dx += 3) for (let dy = -6; dy <= 6; dy += 3) for (let dz = -6; dz <= 6; dz += 3) {
+  const palmOk = () => { skinMats(); const d = distances(seatSet, new Float32Array(seatSet.length)); let m = 1; for (const x of d) m = Math.min(m, x - (CLR - PALM_PRESS)); return m >= -0.0005; };
+  // the hand goes where the thumb reaches its hole: up to 15 mm round the seat, then finer round the best
+  for (let dx = -15; dx <= 15; dx += 5) for (let dy = -15; dy <= 15; dy += 5) for (let dz = -15; dz <= 15; dz += 5) {
     if (!dx && !dy && !dz) continue;
     settleG.position.copy(o0).add(new THREE.Vector3(dx, dy, dz).multiplyScalar(0.001)); settleG.updateMatrixWorld(true);
+    if (!palmOk()) continue;
+    const c = aimThumb(true) + settleG.position.length() * 1000 / 20;
+    if (c < best.cost) best = { cost: c, o: settleG.position.clone() };
+  }
+  const o1 = best.o.clone();
+  for (let dx = -4; dx <= 4; dx += 2) for (let dy = -4; dy <= 4; dy += 2) for (let dz = -4; dz <= 4; dz += 2) {
+    settleG.position.copy(o1).add(new THREE.Vector3(dx, dy, dz).multiplyScalar(0.001)); settleG.updateMatrixWorld(true);
     if (!palmOk()) continue;
     const c = aimThumb(true) + settleG.position.length() * 1000 / 20;
     if (c < best.cost) best = { cost: c, o: settleG.position.clone() };
