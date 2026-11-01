@@ -792,6 +792,8 @@ function aimThumb(coarse) {
 }
 // seat the hand and aim the thumb together: round the seat, the hand position (within 6 mm) where
 // the palm stays clear and the thumb gets through its hole best (a mm of move counts as 1/20 mm of miss)
+// a hand kept close to the handle where moving it further for the thumb pushes the fingers out of place
+const MAX_MOVE = { mac26: 0.02 };
 function seatAndAim() {
   const r0 = seatHand(); const o0 = settleG.position.clone();
   if (!state.car.hole) { aimThumb(); return r0; }
@@ -802,14 +804,14 @@ function seatAndAim() {
   for (let dx = -15; dx <= 15; dx += 5) for (let dy = -15; dy <= 15; dy += 5) for (let dz = -15; dz <= 15; dz += 5) {
     if (!dx && !dy && !dz) continue;
     settleG.position.copy(o0).add(new THREE.Vector3(dx, dy, dz).multiplyScalar(0.001)); settleG.updateMatrixWorld(true);
-    if (!palmOk()) continue;
+    if (!palmOk() || settleG.position.length() > (MAX_MOVE[state.car.d.id] || 1)) continue;
     const c = aimThumb(true) + settleG.position.length() * 1000 / 20;
     if (c < best.cost) best = { cost: c, o: settleG.position.clone() };
   }
   const o1 = best.o.clone();
   for (let dx = -4; dx <= 4; dx += 2) for (let dy = -4; dy <= 4; dy += 2) for (let dz = -4; dz <= 4; dz += 2) {
     settleG.position.copy(o1).add(new THREE.Vector3(dx, dy, dz).multiplyScalar(0.001)); settleG.updateMatrixWorld(true);
-    if (!palmOk()) continue;
+    if (!palmOk() || settleG.position.length() > (MAX_MOVE[state.car.d.id] || 1)) continue;
     const c = aimThumb(true) + settleG.position.length() * 1000 / 20;
     if (c < best.cost) best = { cost: c, o: settleG.position.clone() };
   }
