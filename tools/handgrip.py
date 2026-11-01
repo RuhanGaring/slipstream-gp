@@ -15,10 +15,12 @@ is not watertight still has an inside).
      root clear of it (the glove was posed round a thinner bar than most handles).
   2. The thumb takes the curl (about its own axis, as the game's thumbBend) nearest the one aimed
      through the thumb hole that keeps it clear.
-  3. Each finger comes to rest where its joints' pull toward a relaxed grip (springs on every
-     joint toward 55 to 64, 65 and 40 degrees) balances the handle's push (stiff contact springs
-     on every glove vertex closer than 0.4 mm), within the joints' natural range: a coarse search,
-     then Powell's method.
+  3. The four fingers come to rest together where their joints' pull toward a relaxed grip
+     (springs on every joint toward 55 to 64, 65 and 40 degrees) balances the handle's push (stiff
+     contact springs on every glove vertex closer than 0.4 mm), within the joints' natural range.
+     The hand closes as one: each end joint follows its middle joint, and neighbouring fingers are
+     tied to each other, so none clenches while the next stays open. A coarse search over one
+     shared grip, then Powell's method on all four.
 Writes js/assets/handpose.js (F1.Assets.handPose): per car the posed, dressed glove, the thumb's
 curl and the hand's settle; js/r3-car.js uses them for that car.
 
@@ -182,6 +184,8 @@ def wheel_in_hand(car, settle_old):
 
 # ---------- the simulation ----------
 REL = {f: [55.0 + 3 * (f - 2), 65.0, 40.0] for f in range(2, 6)}  # the relaxed grip the joints pull toward
+TENDON = 40.0 / 65.0  # the end joint's share of the middle joint's flexion (one tendon flexes both)
+TIE = 3.0             # stiffness of the tie between neighbouring fingers
 def simulate(car, settle_old):
     t0 = time.time()
     Wt, T0 = wheel_in_hand(car, settle_old)
@@ -209,17 +213,28 @@ def simulate(car, settle_old):
     ok = [a for a, d in cands if d >= 0.0003]
     ta = float(min(ok, key=lambda a: abs(a - T0[3])) if ok else max(cands, key=lambda x: x[1])[0])
     print(f'  thumb curl {ta:.2f} (aimed {T0[3]:.2f})', flush=True)
-    # 3. each finger at rest between its joint springs and the handle's contact springs
-    ang = dict(open_)
-    for f in FB:
-        def pos(q): a = dict(open_); a[f] = list(q); return toHand(skin(a, PD))[links[f]] + off
-        def energy(q):
-            pen = np.clip(0.0004 - sdf(pos(q)), 0, None)
-            return 4e9 * (pen ** 2).sum() + 0.01 * ((np.array(q) - REL[f]) ** 2).sum()
-        g = min(((energy([m, p, e]), [m, p, e]) for m in range(0, 91, 10) for p in range(0, 111, 10) for e in range(0, 81, 10)), key=lambda x: x[0])
-        r = minimize(energy, g[1], method='Powell', bounds=[(0, 90), (0, 110), (0, 80)], options={'xtol': 0.05, 'maxiter': 4000})
-        ang[f] = [round(float(x), 2) for x in r.x]
-        d = sdf(pos(r.x))
+    # 3. the four fingers together at rest between their joint springs and the handle's contact springs.
+    #    A hand closes as one: each end joint follows its middle joint (one tendon drives both), and
+    #    neighbouring fingers are tied (shared tendons and the skin between them), so no finger can
+    #    clench while the next stays open.
+    fl = list(FB); fv = np.concatenate([links[f] for f in fl])
+    def angles(x):
+        return {f: [x[2 * i], x[2 * i + 1], min(80.0, TENDON * x[2 * i + 1])] for i, f in enumerate(fl)}
+    def energy(x):
+        x = np.clip(x, [0, 0] * 4, [90, 110] * 4); a = angles(x)
+        pen = np.clip(0.0004 - sdf(toHand(skin(a, PD))[fv] + off), 0, None)
+        e = 4e9 * (pen ** 2).sum()
+        e += 0.01 * sum((np.array(a[f]) - REL[f]) ** 2 for f in fl).sum()
+        for i in range(3):  # the tie between neighbours, about the relaxed grip's own fan
+            f, g = fl[i], fl[i + 1]
+            e += TIE * sum(((a[f][j] - REL[f][j]) - (a[g][j] - REL[g][j])) ** 2 for j in (0, 1))
+        return e
+    def shared(m, p): return np.array([v for f in fl for v in (m + REL[f][0] - REL[2][0], p)], float)
+    g = min((shared(m, p) for m in range(0, 91, 5) for p in range(0, 111, 5)), key=energy)
+    r = minimize(energy, g, method='Powell', bounds=[(0, 90), (0, 110)] * 4, options={'xtol': 0.05, 'maxiter': 20000})
+    ang = {f: [round(float(v), 2) for v in q] for f, q in angles(r.x).items()}
+    for f in fl:
+        d = sdf(toHand(skin({**{k: [0, 0, 0] for k in fl}, f: ang[f]}, PD))[links[f]] + off)
         print(f'  finger {f}: knuckle {ang[f][0]:.1f}, middle {ang[f][1]:.1f}, end {ang[f][2]:.1f} degrees; deepest {max(0, -d.min()) * 1000:.2f} mm', flush=True)
     V = thumb_bend(toHand(dress(skin(ang))), [*T0[:3], ta]) + off; d = sdf(V[glove])
     print(f'  glove vertices inside the wheel: {int((d < 0).sum())}, deepest {max(0, -d.min()) * 1000:.2f} mm  ({time.time() - t0:.0f} s)', flush=True)
