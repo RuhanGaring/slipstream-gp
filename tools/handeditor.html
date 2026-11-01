@@ -71,6 +71,7 @@
       <button id="selHand">Whole hand <kbd>H</kbd></button>
       <button id="selNone">None <kbd>Esc</kbd></button>
       <button id="resetHand">Reset hand <kbd>X</kbd></button>
+      <button id="seat">Seat hand on handle</button>
     </div>
     <div class="help">Click a dot on the glove to pick a finger joint (the dots at the tips move whole fingers). Moving a joint bends the finger to reach it.</div>
   </div>
@@ -605,7 +606,7 @@ function markSunk() {
   for (const k in sunk) delete sunk[k];
   if (!state.car) return;
   skinMats();
-  for (const [n, idx] of Object.entries(jointVerts)) { const d = distances(idx, new Float32Array(idx.length)); sunk[n] = d.map(x => (x < 0 ? 1 : 0)); }
+  for (const [n, idx] of Object.entries(jointVerts)) sunk[n] = distances(idx, new Float32Array(idx.length));
 }
 function gripTick() {
   if (!state.car || gripIdle) return false;
@@ -628,7 +629,7 @@ function gripTick() {
       turn(1); skinMats(ids); distances(idx, _d1);
       let ok = true;
       const sk = sunk[`finger${f}-${st}`];
-      for (let k = 0; k < idx.length; k++) if (!(sk && sk[k]) && _d1[k] < Math.min(CLR, _d0[k]) - 1e-6) { ok = false; break; }
+      for (let k = 0; k < idx.length; k++) if (_d1[k] < Math.min(CLR, _d0[k], sk ? sk[k] - 0.002 : CLR) - 1e-6) { ok = false; break; }
       if (ok) { step.forEach((a, j) => { if (a) state.flex[`finger${f}-${j + 1}`] = (state.flex[`finger${f}-${j + 1}`] || 0) + a; }); moved = true; break; }
       turn(-1); skinMats(ids);
     }
@@ -652,13 +653,15 @@ function wrapFinger(f) {
   if (names.some(n => state.pins.has(n))) return;
   const idx = jointVerts[names[0]], seg = segOf[f], sk = sunk[names[0]], ids = names.map(n => BI[n]);
   const set = a => names.forEach((n, j) => { const b = boneOf(n); b.quaternion.copy(qAxis(FLEX, a[j])); b.updateMatrixWorld(true); });
+  const nb = [f - 1, f + 1].filter(g => g >= 2 && g <= 5 && wrapped.has(g)).map(g => state.flex[`finger${g}-1`] || 0);
   const cost = a => {
+    if (nb.some(m => Math.abs(a[0] - m) > 35)) return Infinity;
     if (a[2] > 0.85 * a[1] + 15 || a[0] < 0 || a[1] < 0 || a[2] < 0 || a[0] > MAXF[0] || a[1] > MAXF[1] || a[2] > MAXF[2]) return Infinity;
     set(a); skinMats(ids); distances(idx, _d1);
     const gap = [1, 1, 1];
     for (let k = 0; k < idx.length; k++) {
       const d = _d1[k];
-      if (!(sk && sk[k]) && d < CLR - 0.0008) return Infinity;
+      if (d < Math.min(CLR - 0.0008, sk ? sk[k] - 0.002 : CLR)) return Infinity;
       if (seg[k] >= 0 && d < gap[seg[k]]) gap[seg[k]] = d;
     }
     let c = 0; for (const g of gap) c += Math.max(0, g - CLR) ** 2;
@@ -671,9 +674,71 @@ function wrapFinger(f) {
     const b0 = best.slice();
     for (let dm = -2; dm <= 2; dm++) for (let dp = -2; dp <= 2; dp++) for (let de = -2; de <= 2; de++) { const a = [b0[0] + dm * h, b0[1] + dp * h, b0[2] + de * h], c = cost(a); if (c < bc) { bc = c; best = a; } }
   }
-  set(best); names.forEach((n, j) => { state.flex[n] = best[j]; });
+  set(best); names.forEach((n, j) => { state.flex[n] = best[j]; }); wrapped.add(f);
 }
-function wrapAll() { skinMats(); for (const f of [2, 3, 4, 5]) wrapFinger(f); skinMats(); dirty = true; }
+const wrapped = new Set();
+// Seat the hand: the shortest move of the whole hand that brings the palm, the fingers' roots and
+// the thumb out of the handle (where nothing short clears them all, the move that leaves least of
+// the glove in it, a millimetre of glove counting as much as 2 cm of move).
+const seatSet = (() => {
+  const v = [], fb = new Set(); for (const f of FINGERS) for (let t = 1; t <= 3; t++) fb.add(BI[`finger${f}-${t}`]);
+  for (let i = 0; i < NV; i++) {
+    if (ZONE[i] === 0) continue;
+    let wf = 0, wt = 0; for (let j = WO[i]; j < WO[i + 1]; j++) { if (fb.has(WBa[j])) wf += WWa[j]; if ([1, 2, 3].some(t => WBa[j] === BI[`finger1-${t}`])) wt += WWa[j]; }
+    if (W5[i * 5 + 4] >= 100 && wf < 0.5 && wt < 0.5) v.push(i);   // palm and the fingers' roots
+  }
+  return Int32Array.from(v);
+})();
+// the game's thumb bend (r3-car.js thumbBend): the thumb turned about its axis toward the wheel's
+// thumb hole, fading in along the thumb and out round it, the fingers left alone
+const TH_ROOT = new THREE.Vector3(0.012, 0.008, 0.008), TH_TIP = new THREE.Vector3(0.02, 0, 0.072);
+const FWT = new Float32Array(NV);
+for (let i = 0; i < NV; i++) for (let j = WO[i]; j < WO[i + 1]; j++) for (const f of [2, 3, 4, 5]) for (let t = 1; t <= 3; t++) if (WBa[j] === BI[`finger${f}-${t}`]) FWT[i] += WWa[j];
+const smooth = (x, a, b) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function thumbBendPts(P, idx, T) {   // P: hand-frame positions (x, y, z per vertex index)
+  const ax = TH_TIP.clone().sub(TH_ROOT), L = ax.length(); ax.normalize();
+  const axis = new THREE.Vector3(T[0], T[1], T[2]).normalize(), q = new THREE.Quaternion(), v = new THREE.Vector3(), out = new Float32Array(idx.length * 3);
+  for (let k = 0; k < idx.length; k++) {
+    const i = idx[k]; v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).sub(TH_ROOT);
+    const along = v.dot(ax), t = along / L, r = v.clone().addScaledVector(ax, -along).length();
+    let w = smooth(t, 0.12, 0.6) * (1 - smooth(r, 0.011, 0.017)); if (W5[i * 5 + 4] < 100 || FWT[i] >= 0.5) w = 0;
+    if (w > 0) v.applyQuaternion(q.setFromAxisAngle(axis, T[3] * w));
+    v.add(TH_ROOT); out[k * 3] = v.x; out[k * 3 + 1] = v.y; out[k * 3 + 2] = v.z;
+  }
+  return out;
+}
+// every glove point the bend can move: the thumb and the web and ball of the thumb with it
+const thumbSet = Int32Array.from((() => { const v = []; for (let i = 0; i < NV; i++) if (ZONE[i] !== 0 && W5[i * 5 + 4] >= 100 && FWT[i] < 0.5) v.push(i); return v; })());
+function seatHand() {
+  if (!state.car) return;
+  // measured with the thumb as the game bends it (its bones straight, the game's curl toward the hole)
+  const keep = [1, 2, 3].map(t => boneOf(`finger1-${t}`).quaternion.clone());
+  [1, 2, 3].forEach(t => boneOf(`finger1-${t}`).quaternion.identity());
+  settleG.position.set(0, 0, 0); settleG.updateMatrixWorld(true); skinMats(); skin(ALL, SK); dress(SK, DR);
+  const M = relM().elements, toW = (x, y, z, o, k) => { o[k] = M[0] * x + M[4] * y + M[8] * z + M[12]; o[k + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; o[k + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; };
+  const Hd = new Float32Array(NV * 3); for (let i = 0; i < NV; i++) toW(DR[i * 3], DR[i * 3 + 1], DR[i * 3 + 2], Hd, i * 3);
+  const T = state.car.d.thumb || [1, 0, 0, 0], tp = thumbBendPts(Hd, thumbSet, T);
+  const nP = seatSet.length, nT = thumbSet.length, pts = new Float32Array((nP + nT) * 3), clr = new Float32Array(nP + nT);
+  for (let k = 0; k < nP; k++) { const i = seatSet[k]; toW(SK[i * 3], SK[i * 3 + 1], SK[i * 3 + 2], pts, k * 3); clr[k] = CLR; }
+  pts.set(tp, nP * 3); clr.fill(0.0004, nP);
+  [1, 2, 3].forEach((t, j) => boneOf(`finger1-${t}`).quaternion.copy(keep[j])); for (const o of bones) o.updateMatrixWorld(true);
+  const sdf = state.car.sdf, n = nP + nT;
+  const margin = (dx, dy, dz) => { let m = 1; for (let k = 0; k < n; k++) { const d = sdf.at(pts[k * 3] + dx, pts[k * 3 + 1] + dy, pts[k * 3 + 2] + dz) - clr[k]; if (d < m) m = d; } return m; };
+  const N = 800, dirs = [];
+  for (let k = 0; k < N; k++) { const ph = Math.acos(1 - 2 * (k + 0.5) / N), th = Math.PI * (1 + Math.sqrt(5)) * (k + 0.5); dirs.push([Math.cos(th) * Math.sin(ph), Math.sin(th) * Math.sin(ph), Math.cos(ph)]); }
+  // shortest move that clears palm, finger roots and the thumb in its hole; else least glove left in (1 mm = 2 cm of move)
+  let best = { cost: Math.max(0, -margin(0, 0, 0)) * 1000, t: [0, 0, 0] };
+  for (let r = 0.001; r <= 0.03 + 1e-9; r += 0.001) {
+    let bm = -1, bd = null;
+    for (const d of dirs) { const m = margin(d[0] * r, d[1] * r, d[2] * r); if (m > bm) { bm = m; bd = d; } }
+    const cost = Math.max(0, -bm) * 1000 + r * 1000 / 20;
+    if (cost < best.cost) best = { cost, t: bd.map(x => x * r) };
+    if (bm >= 0) break;
+  }
+  settleG.position.set(...best.t); settleG.updateMatrixWorld(true); dirty = true;
+  return Math.hypot(...best.t);
+}
+function wrapAll() { skinMats(); wrapped.clear(); for (const f of [3, 4, 2, 5]) wrapFinger(f); skinMats(); dirty = true; }
 function openFingers() {
   for (const f of [2, 3, 4, 5]) for (let s = 1; s <= 3; s++) {
     const n = `finger${f}-${s}`; if (state.pins.has(n)) continue;
@@ -800,6 +865,7 @@ $('phys').onchange = () => { gripIdle = !$('phys').checked; hud(); };
 $('release').onclick = () => { snapshot(); openFingers(); remember(); };
 $('unpin').onclick = () => { snapshot(); state.pins.clear(); gripIdle = false; dirty = true; remember(); };
 $('undo').onclick = undo;
+$('seat').onclick = () => { snapshot(); for (const f of [2, 3, 4, 5]) for (let t = 1; t <= 3; t++) { const n = `finger${f}-${t}`; if (!state.pins.has(n)) { boneOf(n).quaternion.identity(); state.flex[n] = 0; } } for (const o of bones) o.updateMatrixWorld(true); const r = seatHand(); openFingers(); remember(); attach(); say(`Hand moved ${(r * 1000).toFixed(1)} mm onto the handle, fingers wrapped.`); };
 $('resetHand').onclick = () => { snapshot(); defaultPose(state.car); openFingers(); remember(); attach(); say('Hand back at the game\'s default spot, gripping again.'); };
 $('reset').onclick = () => { snapshot(); defaultPose(state.car); delete store.cars[state.car.d.id]; try { localStorage.setItem('handposes', JSON.stringify(store)); } catch (e) {} gripIdle = true; dirty = true; attach(); say('Back to the game\'s current hand for this wheel.'); };
 $('xray').onchange = () => { for (const m of wheelMats) { m.opacity = $('xray').checked ? 0.35 : 1; m.depthWrite = !$('xray').checked; } };
@@ -869,7 +935,7 @@ try { const j = JSON.parse(localStorage.getItem('handposes') || 'null'); if (j &
 const first = +new URLSearchParams(location.search).get('car') || +$('car').options[0].value;
 $('car').value = String(TEAMS.findIndex((t, i) => i === first) >= 0 ? first : $('car').options[0].value);
 await showCar(+$('car').value);
-window.__editor = { wrapAll, setSteer, state, store, cars, select, setMode, setSpace, openFingers, gripTick, serialize, bones, boneOf, settleG, view, get clip() { return clipCount; }, get idle() { return gripIdle; }, skinAll: () => { skinMats(); skin(ALL, SK); dress(SK, DR); return DR; } };
+window.__editor = { seatHand, wrapAll, setSteer, state, store, cars, select, setMode, setSpace, openFingers, gripTick, serialize, bones, boneOf, settleG, view, get clip() { return clipCount; }, get idle() { return gripIdle; }, skinAll: () => { skinMats(); skin(ALL, SK); dress(SK, DR); return DR; } };
 
 // ---------------- loop ----------------
 renderer.setAnimationLoop(() => {

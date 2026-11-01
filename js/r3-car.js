@@ -359,7 +359,7 @@
     };
     MD.grip = gripOf(MD.swParts);
     MD.hole = HOLE_AT[id] || (MD.grip ? holeOf(MD.swParts, MD.grip) : null);
-    MD.thumb = thumbFor(MD);
+    MD.thumb = handPose(id) ? THUMB.slice(0, 3).concat(handPose(id).thumb) : thumbFor(MD);
     built.set(key, MD);
     return MD;
   }
@@ -444,9 +444,6 @@
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
       '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
-  // Each car's finger pose (fingerOpen): inside angles of the knuckles and of the joint after
-  // them, in degrees. The W17's handles are deeper than the grip the glove was posed round.
-  const FINGER_OPEN = { w17: [160, 130] };
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
   // the wheel's frame, read off the model.
@@ -1228,22 +1225,39 @@
       h0: new THREE.Vector3().crossVectors(E0.clone().sub(S0), W0.clone().sub(E0)).normalize() });
   }
   // geometry for one side: the left is the right mirrored across the car's centre line
-  const _armGeo = {};
+  const _armGeo = {}, _armArgs = {};
+  // A car's own hand pose (js/assets/handpose.js, made by tools/handgrip.py): the glove re-posed
+  // on the MakeHuman finger bones (knuckle, middle and end joint of every finger, skinned with the
+  // base mesh's own weights) into the rest a grasp simulation found on that car's wheel, the palm
+  // settled onto the handle and every finger closed round it. Returns
+  // { car: rest positions in the car frame, fing: 1 where a vertex belongs to a finger, thumb:
+  // the thumb's curl, rot (columns) and off: the hand's settle in its own frame } or null.
+  const _pose = {};
+  function handPose(id) {
+    if (id in _pose) return _pose[id];
+    const HP = F1.Assets && F1.Assets.handPose, P = HP && HP.cars[id], A = armData();
+    if (!P || !A) return (_pose[id] = null);
+    const bytes = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+    const pos = new Float32Array(bytes(P.p)), car = new Float32Array(pos.length);
+    for (let i = 0; i < pos.length; i += 3) { car[i] = pos[i + 2] * ARM_SCALE; car[i + 1] = pos[i + 1] * ARM_SCALE; car[i + 2] = -pos[i] * ARM_SCALE; }
+    return (_pose[id] = { car, fing: new Uint8Array(bytes(HP.fing)), thumb: P.thumb, off: P.off, rot: P.rot || [[1, 0, 0], [0, 1, 0], [0, 0, 1]] });
+  }
   // The posed thumb stands up over the wheel's face; a driver tucks it into the grip's finger
   // hole. Bend it there: points along the thumb (from its root low on the fist to
   // its tip above the fist, in the grip frame: x into the palm, y toward the wrist, z along
   // the bar) turn about an axis through the root, the turn growing from nothing at the root
   // to the full angle past the middle joint, and fading out sideways so the palm stays put.
+  // With a car's own hand pose the fingers are left alone (they have bones of their own there).
   // THUMB: [axis x, y, z, angle (radians)]; G.__thumb overrides it (then rebuild the arms).
   const THUMB = [1, 0, 0, 1.0], TH_ROOT = [0.012, 0.008, 0.008], TH_TIP = [0.02, 0, 0.072];
-  function thumbBend(p, sd, T0) {
+  function thumbBend(p, sd, T0, base, fing) {
     const A = armData(), T = G.__thumb || T0 || THUMB, inv = A.RF0inv, fwd = inv.clone().invert();
     const root = new THREE.Vector3(...TH_ROOT), tip = new THREE.Vector3(...TH_TIP), ax = tip.clone().sub(root), L = ax.length();
     ax.divideScalar(L);
     const q = new THREE.Quaternion(), axis = new THREE.Vector3(T[0], T[1], T[2]).normalize(), v = new THREE.Vector3(), d = new THREE.Vector3();
     for (let i = 0; i < A.n; i++) {
-      if (A.w[i * 5 + 4] < 100) continue;
-      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(inv);
+      if (A.w[i * 5 + 4] < 100 || (fing && fing[i])) continue;
+      v.set(base[i * 3], base[i * 3 + 1], base[i * 3 + 2]).applyMatrix4(inv);
       d.subVectors(v, root);
       const t = d.dot(ax) / L, r = d.clone().addScaledVector(ax, -d.dot(ax)).length();
       const k = THREE.MathUtils.smoothstep(t, 0.12, 0.6) * (1 - THREE.MathUtils.smoothstep(r, G.__thR0 || 0.011, G.__thR1 || 0.017));
@@ -1253,77 +1267,22 @@
       p[i * 3] = v.x; p[i * 3 + 1] = v.y; p[i * 3 + 2] = sd < 0 ? -v.z : v.z;
     }
   }
-  // The fingers' pose round a thicker grip, set by the inside angles of two joints (180 degrees
-  // is straight): the knuckles and the joint after them. Round the grip (grip frame: z along the
-  // bar, the palm on the -x side) the fingers run from the palm over the knuckles (where the hand
-  // is widest, about 1.6 rad round from the palm) to the next joint (about 2.45 rad). Each
-  // joint's present angle is read off the posed hand (the direction of the finger's centre line
-  // either side of it); everything beyond a joint then turns about it, parallel to the bar, to
-  // the angle wanted: the knuckles first, then the next joint about where it has moved to. The
-  // end joints keep their bend; a short blend at each joint keeps the glove whole.
-  // pose: [knuckle, next joint] in degrees. G.__fingerPose overrides it (then rebuild the arms).
-  const J_KNUCKLE = 1.6, J_NEXT = 2.45, J_BLEND = 0.08;
-  function fingerOpen(p, sd, pose0) {
-    const pose = G.__fingerPose || pose0;
-    if (!pose) return;
-    const A = armData(), inv = A.RF0inv, fwd = inv.clone().invert();
-    const root = new THREE.Vector3(...TH_ROOT), tax = new THREE.Vector3(...TH_TIP).sub(root), TL = tax.length();
-    tax.divideScalar(TL);
-    const v = new THREE.Vector3(), d = new THREE.Vector3(), pts = [];
-    for (let i = 0; i < A.n; i++) {
-      if (A.w[i * 5 + 4] < 100 || (A.zone[i] !== 1 && A.zone[i] !== 3)) continue;
-      v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(inv);
-      d.subVectors(v, root);
-      const t = d.dot(tax) / TL, r0 = d.clone().addScaledVector(tax, -d.dot(tax)).length();
-      if (t > 0.05 && r0 < 0.02) continue; // the thumb
-      if (Math.hypot(v.x, v.y) > 0.09) continue;
-      let ang = Math.atan2(v.y, -v.x);
-      if (ang < -1.2) ang += Math.PI * 2; // fingertips curled past the far side
-      pts.push({ i, v: v.clone(), ang });
-    }
-    const mean = (a0, a1) => { const s = pts.filter(q => q.ang >= a0 && q.ang < a1); return s.length ? [s.reduce((t, q) => t + q.v.x, 0) / s.length, s.reduce((t, q) => t + q.v.y, 0) / s.length] : null; };
-    const heading = (a0, a1) => { const m0 = mean(a0, a0 + 0.12), m1 = mean(a1 - 0.12, a1); return m0 && m1 ? Math.atan2(m1[1] - m0[1], m1[0] - m0[0]) : null; };
-    const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
-    // the finger's direction before the knuckles, between the joints, and after the next joint
-    const hPalm = heading(J_KNUCKLE - 0.6, J_KNUCKLE - 0.05), hProx = heading(J_KNUCKLE + 0.1, J_NEXT - 0.08), hMid = heading(J_NEXT + 0.08, J_NEXT + 0.55);
-    if (hPalm == null || hProx == null || hMid == null) return;
-    const inner = (h0, h1) => Math.PI - Math.abs(wrap(h1 - h0));
-    const R = Math.PI / 180;
-    // a turn that opens the joint is anticlockwise (the curl runs clockwise in x-y)
-    const turns = [[J_KNUCKLE, pose[0] * R - inner(hPalm, hProx)], [J_NEXT, pose[1] * R - inner(hProx, hMid)]];
-    const pivot = a => { const m = mean(a - 0.08, a + 0.08); return m ? { x: m[0], y: m[1] } : null; };
-    G.__fingerLast = { knuckleWas: +(inner(hPalm, hProx) / R).toFixed(1), nextWas: +(inner(hProx, hMid) / R).toFixed(1), turnDeg: turns.map(t => +(t[1] / R).toFixed(1)) }; // for tools/handclip.py
-    const pivots = turns.map(([a]) => pivot(a));
-    if (pivots.some(q => !q)) return;
-    turns.forEach(([ja, u], j) => {
-      const P = pivots[j], c = Math.cos(u), s2 = Math.sin(u);
-      const turn = q => { const dx = q.x - P.x, dy = q.y - P.y; q.x = P.x + dx * c - dy * s2; q.y = P.y + dx * s2 + dy * c; };
-      for (const q of pts) {
-        const k = THREE.MathUtils.smoothstep(q.ang, ja - J_BLEND, ja + J_BLEND);
-        if (k <= 0) continue;
-        if (k >= 1) turn(q.v);
-        else { const w = q.v.clone(); turn(w); q.v.lerp(w, k); }
-      }
-      for (let jj = j + 1; jj < pivots.length; jj++) turn(pivots[jj]); // the later joint moves with the finger
-    });
-    for (const q of pts) { const w = q.v.clone().applyMatrix4(fwd); p[q.i * 3] = w.x; p[q.i * 3 + 1] = w.y; p[q.i * 3 + 2] = sd < 0 ? -w.z : w.z; }
-  }
   // debug: rebuild the arms' geometry after changing G.__thumb
   function rebuildArms() {
     for (const key of Object.keys(_armGeo)) {
-      const G0 = _armGeo[key], [sd, ...T] = key.split(',').map(Number);
+      const G0 = _armGeo[key], args = _armArgs[key];
       delete _armGeo[key];
-      const G1 = armGeo(sd, T.slice(0, 4), T[4] || T[5] ? [T[4], T[5]] : null);
+      const G1 = armGeo(...args);
       G0.attributes.position.array.set(G1.attributes.position.array); G0.attributes.position.needsUpdate = true; G0.computeVertexNormals();
       _armGeo[key] = G0;
     }
   }
-  // one geometry per side and thumb bend (each car's wheel has its own thumb hole)
-  function armGeo(sd, T, open) {
-    const key = [sd].concat(T || THUMB, open || [0, 0]).map(x => +x.toFixed(4)).join(',');
+  // one geometry per side, thumb bend (each car's wheel has its own thumb hole) and hand pose
+  function armGeo(sd, T, poseId) {
+    const key = [sd].concat(T || THUMB).map(x => +x.toFixed(4)).concat(poseId || '').join(',');
     if (_armGeo[key]) return _armGeo[key];
-    const A = armData(), G = new THREE.BufferGeometry(), n = A.n;
-    const p = new Float32Array(A.car);
+    const A = armData(), G = new THREE.BufferGeometry(), n = A.n, HP = poseId ? handPose(poseId) : null;
+    const base = HP ? HP.car : A.car, p = new Float32Array(base);
     if (sd < 0) for (let i = 0; i < n; i++) p[i * 3 + 2] = -p[i * 3 + 2];
     const ix = new Uint16Array(A.ix);
     if (sd < 0) for (let t = 0; t < ix.length; t += 3) { const k = ix[t + 1]; ix[t + 1] = ix[t + 2]; ix[t + 2] = k; }
@@ -1335,14 +1294,14 @@
       const z = A.zone[i]; // 0 sleeve, 1 glove, 2 gauntlet, 3 knuckle panel
       col.set(z === 0 ? [1, 0, 0] : z === 3 ? [0, 0, 1] : [0, 1, 0], i * 3);
     }
-    thumbBend(p, sd, T);
-    fingerOpen(p, sd, open);
+    thumbBend(p, sd, T, base, HP && HP.fing);
     G.setAttribute('position', new THREE.BufferAttribute(p, 3));
     G.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     G.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     G.setAttribute('color', new THREE.BufferAttribute(col, 3));
     G.setIndex(new THREE.BufferAttribute(ix, 1));
     G.computeVertexNormals();
+    _armArgs[key] = [sd, T, poseId];
     return (_armGeo[key] = G);
   }
   // Cloth relief, 1024 px for a 5 cm tile (about 50 px per millimetre), as heights:
@@ -1460,11 +1419,11 @@
     };
     return m;
   }
-  function makeArm(sd, team, T, open) {
+  function makeArm(sd, team, T, poseId) {
     if (!armData()) return null;
     const bones = [0, 1, 2, 3, 4].map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
     const skel = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
-    const mesh = new THREE.SkinnedMesh(armGeo(sd, T, open), armMaterial(team, sd));
+    const mesh = new THREE.SkinnedMesh(armGeo(sd, T, poseId), armMaterial(team, sd));
     mesh.bindMode = THREE.DetachedBindMode;
     mesh.bind(skel, new THREE.Matrix4());
     mesh.frustumCulled = false; mesh.castShadow = true;
@@ -1573,6 +1532,9 @@
         .premultiply(_roll.makeRotationZ(sp)).premultiply(_roll.makeRotationX((G.__handPitch != null ? G.__handPitch : -0.35) * kn)).premultiply(_roll.makeRotationZ(-sp))
         .premultiply(_roll.makeTranslation(_gp.x, _gp.y, _gp.z));
     }
+    // a car's own hand pose: the hand as it rests on that wheel's handle (after the twist, which
+    // turns about the handle's axis)
+    if (ck.settle) H.multiply(ck.settle);
     _Hc.multiplyMatrices(ck.pivot.matrix, _spinR).multiply(H);
     solveArm(_Hc, arm.shoulder, _sol);
     arm.bones.forEach((b, k) => {
@@ -1641,7 +1603,7 @@
     // arms: the scanned, dressed arms (makeArm), shoulders low in the tub
     const arms = [];
     for (const sd of [-1, 1]) {
-      const arm = makeArm(sd, team, MD && MD.thumb, MD && FINGER_OPEN[MD.id]);
+      const arm = makeArm(sd, team, MD && MD.thumb, MD && handPose(MD.id) ? MD.id : null);
       if (!arm) continue;
       arm.shoulder = new THREE.Vector3(0.34, 0.66, 0.115); // the right one; the left is solved mirrored
       group.add(arm.mesh);
@@ -1654,7 +1616,9 @@
     const lens = mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 14), K.M.visor, false); lens.rotation.z = Math.PI / 2; lens.position.set(-0.462, 1.205, 0);
     if (!MD) group.add(mast, bar, lens); // (a car model has its own T-cam pod)
     const grip = (MD && MD.grip) || [GRIP_X, -0.019, 0];
-    return { group, pivot, spin, arms, grip, steer: null, helmet, povOnly: inner.povOnly, disp, head, neck: NECK, hs: { y: 0, p: 0, r: 0, vy: 0, vp: 0, vr: 0, t: 0, ph: Math.random() * 6.28 } };
+    // a car's own hand pose rests the hand on the handle (turned and moved in the hand's frame)
+    const HP = MD && handPose(MD.id), settle = HP ? new THREE.Matrix4().makeBasis(...HP.rot.map(c => new THREE.Vector3(...c))).setPosition(...HP.off) : null;
+    return { group, pivot, spin, arms, grip, settle, steer: null, helmet, povOnly: inner.povOnly, disp, head, neck: NECK, hs: { y: 0, p: 0, r: 0, vy: 0, vp: 0, vr: 0, t: 0, ph: Math.random() * 6.28 } };
   }
 
   // orient a unit-height mesh (Y axis) from a to b
@@ -1801,5 +1765,5 @@
     scene.traverse(o => { const ck = o.userData && o.userData.cockpit; if (ck && ck.arms) { ck.steer = null; updateCockpit(o, 0); } });
   }
 
-  F1.R3Car = { model: team => modelFor(team), armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, setCompound, setLod, updateCockpit, velHull, hasModel: team => !!modelFor(team), loft, box, beam, merge };
+  F1.R3Car = { model: team => modelFor(team), thumbFor: MD => thumbFor(MD), armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, setCompound, setLod, updateCockpit, velHull, hasModel: team => !!modelFor(team), loft, box, beam, merge };
 })(typeof window !== 'undefined' ? window : globalThis);
