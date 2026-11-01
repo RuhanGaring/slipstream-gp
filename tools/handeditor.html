@@ -246,6 +246,27 @@ function skin(idx, out) {
   }
 }
 const ALL = Int32Array.from({ length: NV }, (_, i) => i);
+// The game poses the arm itself (shoulder to wrist, by its own arm solver): the editor shows that
+// arm and blends it into the posed hand by the hand's skin weight, so the forearm comes from the
+// driver's shoulder as in the game. Near the wrist the arm follows the hand's own move.
+const W5 = b64(AA.w), HANDW = new Float32Array(NV), FOLLOW = new Float32Array(NV);
+for (let i = 0; i < NV; i++) { HANDW[i] = W5[i * 5 + 4] / 255; FOLLOW[i] = Math.min(1, (W5[i * 5 + 4] + 0.7 * W5[i * 5 + 3] + 0.25 * W5[i * 5 + 2]) / 255); }
+const _A = new THREE.Matrix4(), _Ai = new THREE.Matrix4();
+function blendArm() {
+  const c = state.car; if (!c || c.armNow.length !== NV * 3) return;
+  _A.multiplyMatrices(settleG.matrix, MHM); _Ai.copy(_A).invert();
+  const A = _A.elements, Ai = _Ai.elements, S = settleG.matrix.elements, G = c.armNow;
+  for (let i = 0; i < NV; i++) {
+    const wh = HANDW[i]; if (wh >= 1) continue;
+    const x = DR[i * 3], y = DR[i * 3 + 1], z = DR[i * 3 + 2];
+    const ox = A[0] * x + A[4] * y + A[8] * z + A[12], oy = A[1] * x + A[5] * y + A[9] * z + A[13], oz = A[2] * x + A[6] * y + A[10] * z + A[14];
+    const gx = G[i * 3], gy = G[i * 3 + 1], gz = G[i * 3 + 2], f = FOLLOW[i];
+    const sx = S[0] * gx + S[4] * gy + S[8] * gz + S[12], sy = S[1] * gx + S[5] * gy + S[9] * gz + S[13], sz = S[2] * gx + S[6] * gy + S[10] * gz + S[14];
+    const px = gx + (sx - gx) * f, py = gy + (sy - gy) * f, pz = gz + (sz - gz) * f;
+    const bx = ox * wh + px * (1 - wh), by = oy * wh + py * (1 - wh), bz = oz * wh + pz * (1 - wh);
+    DR[i * 3] = Ai[0] * bx + Ai[4] * by + Ai[8] * bz + Ai[12]; DR[i * 3 + 1] = Ai[1] * bx + Ai[5] * by + Ai[9] * bz + Ai[13]; DR[i * 3 + 2] = Ai[2] * bx + Ai[6] * by + Ai[10] * bz + Ai[14];
+  }
+}
 // the suit and glove over the skin (tools/assets_arm.py): pushed out along the normals by its thickness
 const WRIST = new THREE.Vector3(...AA.joints.wrist), UP = new THREE.Vector3(...AA.joints.fore2).sub(WRIST).normalize();
 function dress(P, out) {
@@ -381,7 +402,9 @@ function dumpCar(ti) {
       v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(A.RF0inv);
       const s = new T.Vector3().fromBufferAttribute(P, i); arm.mesh.applyBoneTransform(i, s); s.applyMatrix4(arm.mesh.matrixWorld); pr.push([v.x, v.y, v.z, s.x, s.y, s.z]);
     }
-    turn.push({ deg, wc: wc.toArray(), pairs: pr });
+    const all = new Float32Array(A.n * 3), u = new T.Vector3();
+    for (let i = 0; i < A.n; i++) { u.fromBufferAttribute(P, i); arm.mesh.applyBoneTransform(i, u); u.applyMatrix4(arm.mesh.matrixWorld); all[i * 3] = u.x; all[i * 3 + 1] = u.y; all[i * 3 + 2] = u.z; }
+    turn.push({ deg, wc: wc.toArray(), pairs: pr, arm: all });
   }
   ck.steer = null; F1.R3Car.updateCockpit(car, 0);
   const HP = F1.Assets.handPose && F1.Assets.handPose.cars && F1.Assets.handPose.cars[MD.id];
@@ -443,9 +466,14 @@ function loadCar(ti) {
   const CM = new THREE.Matrix4().fromArray(d.carM), cx = new THREE.Vector3(), cy = new THREE.Vector3(), cz = new THREE.Vector3(); CM.extractBasis(cx, cy, cz);
   const fwd = cx.transformDirection(H0i), up = cy.transformDirection(H0i);
   // per angle: the hand's move (Hc0^-1 Hc) and the wheel's (Hc0^-1 Wc Wc0^-1 Hc0)
-  const turn = d.turn.map((t, k) => ({ deg: t.deg, hand: H0i.clone().multiply(hc[k]), wheel: H0i.clone().multiply(wc[k]).multiply(W0i).multiply(hc[k0]) }));
+  const turn = d.turn.map((t, k) => {
+    // the game's arm (shoulder, elbow, forearm placed by its own arm solver) in the hand's frame at this angle
+    const rel = hc[k].clone().invert(), e = rel.elements, a = t.arm, out = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i += 3) { const x = a[i], y = a[i + 1], z = a[i + 2]; out[i] = e[0] * x + e[4] * y + e[8] * z + e[12]; out[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]; out[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14]; }
+    return { deg: t.deg, hand: H0i.clone().multiply(hc[k]), wheel: H0i.clone().multiply(wc[k]).multiply(W0i).multiply(hc[k0]), arm: out };
+  });
   const center = new THREE.Vector3().applyMatrix4(Wm);   // the wheel's hub
-  return (cars[d.id] = { ti, d, grp, sdf, fwd, up, turn, center });
+  return (cars[d.id] = { ti, d, grp, sdf, fwd, up, turn, center, armNow: new Float32Array(turn[0].arm.length) });
 }
 
 // ---------------- pose state ----------------
@@ -610,6 +638,7 @@ function setSteer(deg) {
   const c = state.car; if (!c) return;
   const T = c.turn, f = (steerDeg - T[0].deg) / (T[1].deg - T[0].deg), k = Math.min(T.length - 2, Math.max(0, Math.floor(f))), t = f - k;
   lerpM(T[k].hand, T[k + 1].hand, t, steerG.matrix); lerpM(T[k].wheel, T[k + 1].wheel, t, wheelRoot.matrix);
+  const a0 = T[k].arm, a1 = T[k + 1].arm, an = c.armNow; for (let i = 0; i < an.length; i++) an[i] = a0[i] + (a1[i] - a0[i]) * t;
   steerG.matrixWorldNeedsUpdate = true; wheelRoot.matrixWorldNeedsUpdate = true; dirty = true;
 }
 const turned = () => Math.abs(steerDeg) > 0.5;
@@ -617,7 +646,7 @@ const turned = () => Math.abs(steerDeg) > 0.5;
 // ---------------- redraw the glove ----------------
 let dirty = true, clipCount = 0, clipDeep = 0;
 function redraw() {
-  skinMats(); skin(ALL, SK); dress(SK, DR);
+  skinMats(); skin(ALL, SK); dress(SK, DR); blendArm();
   const M = relM().elements, sdf = state.car && state.car.sdf; clipCount = 0; clipDeep = 0;
   for (let i = 0; i < NV; i++) {
     let c = ZCOL[ZONE[i]];
