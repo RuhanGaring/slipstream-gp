@@ -409,7 +409,7 @@ function dumpCar(ti) {
   }
   ck.steer = null; F1.R3Car.updateCockpit(car, 0);
   const HP = F1.Assets.handPose && F1.Assets.handPose.cars && F1.Assets.handPose.cars[MD.id];
-  return { id: team.car, parts, pairs, thumb: MD.thumb, hp: HP ? { off: HP.off, rot: HP.rot || [[1, 0, 0], [0, 1, 0], [0, 0, 1]] } : null, fwd: fwd.toArray(), up: up.toArray(), turn, carM: car.matrixWorld.toArray() };
+  return { id: team.car, parts, pairs, thumb: MD.thumb, hole: MD.hole || null, grip: MD.grip || null, thumbAxis: (F1.R3Car.thumbFor ? F1.R3Car.thumbFor(MD) : MD.thumb), hp: HP ? { off: HP.off, rot: HP.rot || [[1, 0, 0], [0, 1, 0], [0, 0, 1]] } : null, fwd: fwd.toArray(), up: up.toArray(), turn, carM: car.matrixWorld.toArray() };
 }
 // the rigid placement (hand rest frame to the wheel's) that best maps the vertex pairs: Horn's
 // quaternion method, the rotation being the top eigenvector of a 4x4 symmetric matrix (Jacobi)
@@ -474,7 +474,19 @@ function loadCar(ti) {
     return { deg: t.deg, hand: H0i.clone().multiply(hc[k]), wheel: H0i.clone().multiply(wc[k]).multiply(W0i).multiply(hc[k0]), arm: out };
   });
   const center = new THREE.Vector3().applyMatrix4(Wm);   // the wheel's hub
-  return (cars[d.id] = { ti, d, grp, sdf, fwd, up, turn, center, armNow: new Float32Array(turn[0].arm.length) });
+  // the thumb hole's middle, where the game aims the thumb (r3-car.js thumbFor), in this frame
+  let hole = d.hole && d.grip && d.hole[2] >= 0.014 && d.hole[3] >= 0.014 ? new THREE.Vector3(d.hole[0], d.hole[1], d.grip[2] - 0.006) : null;
+  // the hole's true middle, near the game's marker (which can sit on its edge): within 2 cm in the
+  // wheel's plane, the point farthest from the wheel that the wheel rings all round
+  if (hole) {
+    const at = (x, y) => sdf.at(...new THREE.Vector3(x, y, hole.z).applyMatrix4(Wm).toArray());
+    const ringed = (x, y) => { for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6; let hit = false; for (let r = 0.002; r <= 0.03; r += 0.002) if (at(x + Math.cos(a) * r, y + Math.sin(a) * r) < 0) { hit = true; break; } if (!hit) return false; } return true; };
+    let best = null, bv = -1;
+    for (let dx = -0.02; dx <= 0.02 + 1e-9; dx += 0.002) for (let dy = -0.02; dy <= 0.02 + 1e-9; dy += 0.002) { const x = hole.x + dx, y = hole.y + dy, v = at(x, y); if (v > bv && v > 0 && ringed(x, y)) { bv = v; best = [x, y]; } }
+    if (best) hole.set(best[0], best[1], hole.z);
+    hole.applyMatrix4(Wm);
+  }
+  return (cars[d.id] = { ti, d, grp, sdf, fwd, up, turn, center, hole, armNow: new Float32Array(turn[0].arm.length) });
 }
 
 // ---------------- pose state ----------------
@@ -484,7 +496,7 @@ const qAxis = (axis, deg) => new THREE.Quaternion().setFromAxisAngle(axis, deg *
 function defaultPose(c) {
   for (const o of bones) o.quaternion.identity();
   settleG.position.set(0, 0, 0); settleG.quaternion.identity();
-  state.flex = {}; state.pins = new Set();
+  state.flex = {}; state.pins = new Set(); state.thumbCurl = null;
   for (const f of [2, 3, 4, 5]) ORIG(f).forEach((a, s) => { boneOf(`finger${f}-${s + 1}`).quaternion.copy(qAxis(FLEX, a)); state.flex[`finger${f}-${s + 1}`] = a; });
   // the thumb, curled as the game curls it toward the wheel's thumb hole
   const T = c.d.thumb;
@@ -494,6 +506,7 @@ function serialize() {
   const out = { settle: { p: settleG.position.toArray().map(r6), q: settleG.quaternion.toArray().map(r6) }, bones: {}, flex: {}, pins: [...state.pins] };
   for (const n of EDITABLE) { const q = boneOf(n).quaternion; if (Math.abs(q.w) < 0.999999) out.bones[n] = q.toArray().map(r6); }
   for (const [k, v] of Object.entries(state.flex)) out.flex[k] = Math.round(v * 100) / 100;
+  if (state.thumbCurl != null) out.thumb = state.thumbCurl;
   return out;
 }
 function r6(x) { return Math.round(x * 1e6) / 1e6; }
@@ -501,7 +514,7 @@ function applyPose(p) {
   for (const o of bones) o.quaternion.identity();
   settleG.position.fromArray(p.settle.p); settleG.quaternion.fromArray(p.settle.q);
   for (const [n, q] of Object.entries(p.bones || {})) if (n in BI) boneOf(n).quaternion.fromArray(q);
-  state.flex = { ...(p.flex || {}) }; state.pins = new Set(p.pins || []);
+  state.flex = { ...(p.flex || {}) }; state.pins = new Set(p.pins || []); state.thumbCurl = p.thumb != null ? p.thumb : null;
 }
 function remember() {
   if (!state.car) return;
@@ -648,14 +661,14 @@ for (const f of [2, 3, 4, 5]) {
   for (let k = 0; k < idx.length; k++) { let best = -1, bw = 0; const i = idx[k]; for (let j = WO[i]; j < WO[i + 1]; j++) for (let t = 1; t <= 3; t++) if (WBa[j] === BI[`finger${f}-${t}`] && WWa[j] > bw) { bw = WWa[j]; best = t - 1; } seg[k] = bw >= 0.5 ? best : -1; }
   segOf[f] = seg;
 }
-function wrapFinger(f) {
+function wrapFinger(f, tie = 30) {
   const names = [1, 2, 3].map(t => `finger${f}-${t}`);
   if (names.some(n => state.pins.has(n))) return;
   const idx = jointVerts[names[0]], seg = segOf[f], sk = sunk[names[0]], ids = names.map(n => BI[n]);
   const set = a => names.forEach((n, j) => { const b = boneOf(n); b.quaternion.copy(qAxis(FLEX, a[j])); b.updateMatrixWorld(true); });
-  const nb = [f - 1, f + 1].filter(g => g >= 2 && g <= 5 && wrapped.has(g)).map(g => state.flex[`finger${g}-1`] || 0);
+  const nb = [f - 1, f + 1].filter(g => g >= 2 && g <= 5 && wrapped.has(g)).map(g => [1, 2, 3].map(t => state.flex[`finger${g}-${t}`] || 0));
   const cost = a => {
-    if (nb.some(m => Math.abs(a[0] - m) > 35)) return Infinity;
+    if (nb.some(m => m.some((x, j) => Math.abs(a[j] - x) > tie)) || a[0] > 75 || a[1] > 95) return Infinity;
     if (a[2] > 0.85 * a[1] + 15 || a[0] < 0 || a[1] < 0 || a[2] < 0 || a[0] > MAXF[0] || a[1] > MAXF[1] || a[2] > MAXF[2]) return Infinity;
     set(a); skinMats(ids); distances(idx, _d1);
     const gap = [1, 1, 1];
@@ -674,6 +687,7 @@ function wrapFinger(f) {
     const b0 = best.slice();
     for (let dm = -2; dm <= 2; dm++) for (let dp = -2; dp <= 2; dp++) for (let de = -2; de <= 2; de++) { const a = [b0[0] + dm * h, b0[1] + dp * h, b0[2] + de * h], c = cost(a); if (c < bc) { bc = c; best = a; } }
   }
+  if (!isFinite(bc) && tie < 90) return wrapFinger(f, tie + 15);   // no clear pose that close to its neighbours: loosen the tie
   set(best); names.forEach((n, j) => { state.flex[n] = best[j]; }); wrapped.add(f);
 }
 const wrapped = new Set();
@@ -711,22 +725,14 @@ function thumbBendPts(P, idx, T) {   // P: hand-frame positions (x, y, z per ver
 const thumbSet = Int32Array.from((() => { const v = []; for (let i = 0; i < NV; i++) if (ZONE[i] !== 0 && W5[i * 5 + 4] >= 100 && FWT[i] < 0.5) v.push(i); return v; })());
 function seatHand() {
   if (!state.car) return;
-  // measured with the thumb as the game bends it (its bones straight, the game's curl toward the hole)
-  const keep = [1, 2, 3].map(t => boneOf(`finger1-${t}`).quaternion.clone());
-  [1, 2, 3].forEach(t => boneOf(`finger1-${t}`).quaternion.identity());
-  settleG.position.set(0, 0, 0); settleG.updateMatrixWorld(true); skinMats(); skin(ALL, SK); dress(SK, DR);
-  const M = relM().elements, toW = (x, y, z, o, k) => { o[k] = M[0] * x + M[4] * y + M[8] * z + M[12]; o[k + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; o[k + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; };
-  const Hd = new Float32Array(NV * 3); for (let i = 0; i < NV; i++) toW(DR[i * 3], DR[i * 3 + 1], DR[i * 3 + 2], Hd, i * 3);
-  const T = state.car.d.thumb || [1, 0, 0, 0], tp = thumbBendPts(Hd, thumbSet, T);
-  const nP = seatSet.length, nT = thumbSet.length, pts = new Float32Array((nP + nT) * 3), clr = new Float32Array(nP + nT);
-  for (let k = 0; k < nP; k++) { const i = seatSet[k]; toW(SK[i * 3], SK[i * 3 + 1], SK[i * 3 + 2], pts, k * 3); clr[k] = CLR; }
-  pts.set(tp, nP * 3); clr.fill(0.0004, nP);
-  [1, 2, 3].forEach((t, j) => boneOf(`finger1-${t}`).quaternion.copy(keep[j])); for (const o of bones) o.updateMatrixWorld(true);
-  const sdf = state.car.sdf, n = nP + nT;
-  const margin = (dx, dy, dz) => { let m = 1; for (let k = 0; k < n; k++) { const d = sdf.at(pts[k * 3] + dx, pts[k * 3 + 1] + dy, pts[k * 3 + 2] + dz) - clr[k]; if (d < m) m = d; } return m; };
+  // the shortest move that clears the palm and the fingers' roots (the thumb is posed after, on its own bones)
+  settleG.position.set(0, 0, 0); settleG.updateMatrixWorld(true); skinMats(); skin(seatSet, SK);
+  const M = relM().elements, n = seatSet.length, pts = new Float32Array(n * 3), sdf = state.car.sdf;
+  for (let k = 0; k < n; k++) { const i = seatSet[k], x = SK[i * 3], y = SK[i * 3 + 1], z = SK[i * 3 + 2];
+    pts[k * 3] = M[0] * x + M[4] * y + M[8] * z + M[12]; pts[k * 3 + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; pts[k * 3 + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; }
+  const margin = (dx, dy, dz) => { let m = 1; for (let k = 0; k < n; k++) { const d = sdf.at(pts[k * 3] + dx, pts[k * 3 + 1] + dy, pts[k * 3 + 2] + dz) - CLR; if (d < m) m = d; } return m; };
   const N = 800, dirs = [];
   for (let k = 0; k < N; k++) { const ph = Math.acos(1 - 2 * (k + 0.5) / N), th = Math.PI * (1 + Math.sqrt(5)) * (k + 0.5); dirs.push([Math.cos(th) * Math.sin(ph), Math.sin(th) * Math.sin(ph), Math.cos(ph)]); }
-  // shortest move that clears palm, finger roots and the thumb in its hole; else least glove left in (1 mm = 2 cm of move)
   let best = { cost: Math.max(0, -margin(0, 0, 0)) * 1000, t: [0, 0, 0] };
   for (let r = 0.001; r <= 0.03 + 1e-9; r += 0.001) {
     let bm = -1, bd = null;
@@ -737,6 +743,63 @@ function seatHand() {
   }
   settleG.position.set(...best.t); settleG.updateMatrixWorld(true); dirty = true;
   return Math.hypot(...best.t);
+}
+// The thumb through its hole, on its own bones: the base joint swings it (two ways across the
+// thumb) and the middle joint bends it, so that its outer half passes through the hole's middle,
+// with as little of the glove as possible going into the wheel. The game then shows exactly this
+// thumb (no extra curl).
+const thumbVerts = Int32Array.from((() => { const v = []; for (let i = 0; i < NV; i++) { if (ZONE[i] === 0) continue; let w = 0; for (let j = WO[i]; j < WO[i + 1]; j++) if ([1, 2, 3].some(t => WBa[j] === BI[`finger1-${t}`])) w += WWa[j]; if (w >= 0.3) v.push(i); } return v; })());
+function aimThumb(coarse) {
+  const c = state.car; state.thumbCurl = 0; state.thumbMiss = null;
+  const b1 = boneOf('finger1-1'), b2 = boneOf('finger1-2'), b3 = boneOf('finger1-3');
+  for (const b of [b1, b2, b3]) b.quaternion.identity();
+  for (const o of bones) o.updateMatrixWorld(true);
+  if (!c.hole) return;
+  // axes in the thumb's own (rest) frame: along it, and two across it
+  const i1 = BI['finger1-1'], i3 = BI['finger1-3'];
+  const along = TAIL[i1].clone().sub(HEAD[i1]).normalize(), u = new THREE.Vector3().crossVectors(along, FLEX).normalize(), v = new THREE.Vector3().crossVectors(along, u).normalize();
+  const flexAx = u;   // the thumb's own bend
+  const ids = [BI['finger1-1'], BI['finger1-2'], BI['finger1-3']];
+  const tgt = c.hole.clone(), rel = new THREE.Matrix4(), seg = new THREE.Line3(), near = new THREE.Vector3(), d = new Float32Array(thumbVerts.length);
+  const tipW = new THREE.Vector3(), midW = new THREE.Vector3();
+  const evalPose = (a, bb, g) => {
+    b1.quaternion.copy(qAxis(u, a)).multiply(qAxis(v, bb)); b2.quaternion.copy(qAxis(flexAx, g)); b3.quaternion.copy(qAxis(flexAx, g * 0.7));
+    b1.updateMatrixWorld(true); skinMats(ids);
+    // the distal half of the thumb: from the middle of its last bone to its tip, in the wheel's frame
+    rel.copy(relM());
+    midW.copy(HEAD[i3]).applyMatrix4(b3.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(-HEAD[i3].x, -HEAD[i3].y, -HEAD[i3].z)));
+    tipW.copy(TAIL[i3]).applyMatrix4(b3.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(-HEAD[i3].x, -HEAD[i3].y, -HEAD[i3].z)));
+    const toWheel = _wi.copy(wheelRoot.matrixWorld).invert();
+    midW.applyMatrix4(toWheel); tipW.applyMatrix4(toWheel);
+    seg.set(midW.clone().lerp(tipW, 0.0), tipW); const miss = seg.closestPointToPoint(tgt, true, near).distanceTo(tgt);
+    distances(thumbVerts, d); let pen = 0; for (let k = 0; k < d.length; k++) pen = Math.max(pen, CLR - d[k]);
+    return { miss, pen, cost: miss * 1000 + Math.max(0, pen - 0.0015) * 3000 + 0.002 * (Math.abs(a) + Math.abs(bb) + g) };
+  };
+  let best = null;
+  const st = coarse ? 14 : 7, gs = coarse ? 20 : 10;
+  for (let a = -70; a <= 70; a += st) for (let bb = -70; bb <= 70; bb += st) for (let g = 0; g <= 60; g += gs) { const e = evalPose(a, bb, g); if (!best || e.cost < best.cost) best = { ...e, a, bb, g }; }
+  for (const h of coarse ? [] : [2, 1]) { const b0 = { ...best }; for (let da = -2; da <= 2; da++) for (let db = -2; db <= 2; db++) for (let dg = -2; dg <= 2; dg++) { const a = b0.a + da * h, bb = b0.bb + db * h, g = Math.max(0, b0.g + dg * h * 2), e = evalPose(a, bb, g); if (e.cost < best.cost) best = { ...e, a, bb, g }; } }
+  evalPose(best.a, best.bb, best.g); for (const o of bones) o.updateMatrixWorld(true);
+  state.thumbMiss = best.miss; state.thumbPen = best.pen; dirty = true;
+  return best.cost;
+}
+// seat the hand and aim the thumb together: round the seat, the hand position (within 6 mm) where
+// the palm stays clear and the thumb gets through its hole best (a mm of move counts as 1/20 mm of miss)
+function seatAndAim() {
+  const r0 = seatHand(); const o0 = settleG.position.clone();
+  if (!state.car.hole) { aimThumb(); return r0; }
+  skinMats(); skin(seatSet, SK);
+  let best = { cost: aimThumb(true), o: o0.clone() };
+  const palmOk = () => { skinMats(); const d = distances(seatSet, new Float32Array(seatSet.length)); let m = 1; for (const x of d) m = Math.min(m, x - CLR); return m >= -0.0005; };
+  for (let dx = -6; dx <= 6; dx += 3) for (let dy = -6; dy <= 6; dy += 3) for (let dz = -6; dz <= 6; dz += 3) {
+    if (!dx && !dy && !dz) continue;
+    settleG.position.copy(o0).add(new THREE.Vector3(dx, dy, dz).multiplyScalar(0.001)); settleG.updateMatrixWorld(true);
+    if (!palmOk()) continue;
+    const c = aimThumb(true) + settleG.position.length() * 1000 / 20;
+    if (c < best.cost) best = { cost: c, o: settleG.position.clone() };
+  }
+  settleG.position.copy(best.o); settleG.updateMatrixWorld(true); aimThumb();
+  return settleG.position.length();
 }
 function wrapAll() { skinMats(); wrapped.clear(); for (const f of [3, 4, 2, 5]) wrapFinger(f); skinMats(); dirty = true; }
 function openFingers() {
@@ -865,7 +928,7 @@ $('phys').onchange = () => { gripIdle = !$('phys').checked; hud(); };
 $('release').onclick = () => { snapshot(); openFingers(); remember(); };
 $('unpin').onclick = () => { snapshot(); state.pins.clear(); gripIdle = false; dirty = true; remember(); };
 $('undo').onclick = undo;
-$('seat').onclick = () => { snapshot(); for (const f of [2, 3, 4, 5]) for (let t = 1; t <= 3; t++) { const n = `finger${f}-${t}`; if (!state.pins.has(n)) { boneOf(n).quaternion.identity(); state.flex[n] = 0; } } for (const o of bones) o.updateMatrixWorld(true); const r = seatHand(); openFingers(); remember(); attach(); say(`Hand moved ${(r * 1000).toFixed(1)} mm onto the handle, fingers wrapped.`); };
+$('seat').onclick = () => { snapshot(); for (const f of [2, 3, 4, 5]) for (let t = 1; t <= 3; t++) { const n = `finger${f}-${t}`; if (!state.pins.has(n)) { boneOf(n).quaternion.identity(); state.flex[n] = 0; } } for (const o of bones) o.updateMatrixWorld(true); const r = seatAndAim(); openFingers(); remember(); attach(); say(`Hand moved ${(r * 1000).toFixed(1)} mm onto the handle, fingers wrapped.`); };
 $('resetHand').onclick = () => { snapshot(); defaultPose(state.car); openFingers(); remember(); attach(); say('Hand back at the game\'s default spot, gripping again.'); };
 $('reset').onclick = () => { snapshot(); defaultPose(state.car); delete store.cars[state.car.d.id]; try { localStorage.setItem('handposes', JSON.stringify(store)); } catch (e) {} gripIdle = true; dirty = true; attach(); say('Back to the game\'s current hand for this wheel.'); };
 $('xray').onchange = () => { for (const m of wheelMats) { m.opacity = $('xray').checked ? 0.35 : 1; m.depthWrite = !$('xray').checked; } };
