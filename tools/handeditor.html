@@ -661,7 +661,9 @@ for (const f of [2, 3, 4, 5]) {
   for (let k = 0; k < idx.length; k++) { let best = -1, bw = 0; const i = idx[k]; for (let j = WO[i]; j < WO[i + 1]; j++) for (let t = 1; t <= 3; t++) if (WBa[j] === BI[`finger${f}-${t}`] && WWa[j] > bw) { bw = WWa[j]; best = t - 1; } seg[k] = bw >= 0.5 ? best : -1; }
   segOf[f] = seg;
 }
-function wrapFinger(f, tie = 30) {
+// the glove's cloth (2.8 mm) gives under a firm grip: the fingers may press it up to 1.8 mm into the handle
+const SQUEEZE = 0.0025;
+function wrapFinger(f, tie = 30, firm = true) {
   const names = [1, 2, 3].map(t => `finger${f}-${t}`);
   if (names.some(n => state.pins.has(n))) return;
   const idx = jointVerts[names[0]], seg = segOf[f], sk = sunk[names[0]], ids = names.map(n => BI[n]);
@@ -669,17 +671,19 @@ function wrapFinger(f, tie = 30) {
   const nb = [f - 1, f + 1].filter(g => g >= 2 && g <= 5 && wrapped.has(g)).map(g => [1, 2, 3].map(t => state.flex[`finger${g}-${t}`] || 0));
   const cost = a => {
     if (nb.some(m => m.some((x, j) => Math.abs(a[j] - x) > tie)) || a[0] > 75 || a[1] > 95) return Infinity;
+    if (firm && f !== 2 && (a[1] < 20 || a[2] < 18)) return Infinity;   // a firm grip: middle and end joints visibly curled
     if (a[2] > 0.85 * a[1] + 15 || a[0] < 0 || a[1] < 0 || a[2] < 0 || a[0] > MAXF[0] || a[1] > MAXF[1] || a[2] > MAXF[2]) return Infinity;
     set(a); skinMats(ids); distances(idx, _d1);
     const gap = [1, 1, 1];
     for (let k = 0; k < idx.length; k++) {
       const d = _d1[k];
-      if (d < Math.min(CLR - 0.0008, sk ? sk[k] - 0.002 : CLR)) return Infinity;
+      if (d < Math.min(CLR - SQUEEZE, sk ? sk[k] - 0.002 : CLR)) return Infinity;
       if (seg[k] >= 0 && d < gap[seg[k]]) gap[seg[k]] = d;
     }
-    let c = 0; for (const g of gap) c += Math.max(0, g - CLR) ** 2;
+    let c = 0; for (const g of gap) c += Math.max(0, g - (CLR - SQUEEZE + 0.0004)) ** 2;
     // a natural finger: the end joint about two thirds of the middle one, no joint far ahead of the others
-    return c * 1e6 + 1e-3 * (a[2] - 0.7 * a[1]) ** 2 + 2e-4 * ((a[1] - a[0]) ** 2) + 1e-4 * (a[0] + a[1] + a[2]);
+    // a hand gripping with effort: the end joint curled well in (about 85 % of the middle one)
+    return c * 1e6 + 1e-3 * (a[2] - 0.85 * a[1]) ** 2 + 2e-4 * ((a[1] - a[0]) ** 2) - 1e-4 * (a[0] + a[1] + a[2]);
   };
   let best = [0, 0, 0], bc = cost(best);
   for (let m = 0; m <= 90; m += 6) for (let p = 0; p <= 110; p += 6) for (let e = 0; e <= 80; e += 6) { const c = cost([m, p, e]); if (c < bc) { bc = c; best = [m, p, e]; } }
@@ -687,7 +691,8 @@ function wrapFinger(f, tie = 30) {
     const b0 = best.slice();
     for (let dm = -2; dm <= 2; dm++) for (let dp = -2; dp <= 2; dp++) for (let de = -2; de <= 2; de++) { const a = [b0[0] + dm * h, b0[1] + dp * h, b0[2] + de * h], c = cost(a); if (c < bc) { bc = c; best = a; } }
   }
-  if (!isFinite(bc) && tie < 90) return wrapFinger(f, tie + 15);   // no clear pose that close to its neighbours: loosen the tie
+  if (!isFinite(bc) && firm) return wrapFinger(f, tie, false);
+  if (!isFinite(bc) && tie < 90) return wrapFinger(f, tie + 15, false);   // no clear pose that close to its neighbours: loosen the tie
   set(best); names.forEach((n, j) => { state.flex[n] = best[j]; }); wrapped.add(f);
 }
 const wrapped = new Set();
