@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hand Pose Editor</title>
+<style>
+  :root { --bg: #16181d; --panel: #1f232b; --line: #313744; --text: #e6e8ec; --dim: #9aa1ad; --accent: #3fa9ff; --pin: #ffa53f; --sel: #ffe14a; --bad: #ff4d4d; --good: #5fd38d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; }
+  #panel { position: fixed; left: 12px; top: 12px; bottom: 12px; width: 270px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; z-index: 2; }
+  #panel.hidden { display: none; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+  .sec { display: flex; flex-direction: column; gap: 6px; }
+  .sec > label.t { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button, select { background: #2a2f3a; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #4b5466; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
+  button.primary { background: var(--good); border-color: var(--good); color: #0a1a10; font-weight: 600; }
+  select { width: 100%; }
+  .chk { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  kbd { background: #11141a; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 11px; color: var(--dim); }
+  #hud { position: fixed; right: 12px; top: 12px; background: rgba(31,35,43,.92); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 220px; z-index: 2; }
+  #hud .big { font-size: 14px; font-weight: 600; }
+  #hud .bad { color: var(--bad); } #hud .good { color: var(--good); }
+  #status { color: var(--dim); min-height: 1.4em; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 5; font-size: 15px; color: var(--dim); text-align: center; padding: 16px; }
+  #toggle { position: fixed; left: 12px; bottom: 12px; z-index: 3; display: none; }
+  .help { color: var(--dim); font-size: 12px; }
+  .help b { color: var(--text); font-weight: 600; }
+  #game { position: fixed; left: -3000px; top: 0; width: 640px; height: 360px; border: 0; visibility: hidden; }
+  @media (max-width: 700px) {
+    #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 48vh; }
+    #hud { right: 8px; top: 8px; min-width: 0; font-size: 12px; }
+    #toggle { display: block; bottom: auto; top: 8px; left: 8px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="loading">Loading the game's steering wheels…</div>
+<button id="toggle">Panel</button>
+<div id="panel">
+  <h1>Hand Pose Editor</h1>
+  <div class="sec">
+    <label class="t">Steering wheel</label>
+    <select id="car"></select>
+  </div>
+  <div class="sec">
+    <label class="t">Gizmo</label>
+    <div class="row">
+      <button id="mMove">Move <kbd>G</kbd></button>
+      <button id="mRot">Rotate <kbd>R</kbd></button>
+    </div>
+    <div class="row">
+      <button id="sLocal">Local</button>
+      <button id="sWorld">Absolute</button>
+      <span class="help" style="align-self:center"><kbd>L</kbd> toggles</span>
+    </div>
+  </div>
+  <div class="sec">
+    <label class="t">Select</label>
+    <div class="row">
+      <button id="selHand">Whole hand <kbd>H</kbd></button>
+      <button id="selNone">None <kbd>Esc</kbd></button>
+    </div>
+    <div class="help">Click a dot on the glove to pick a finger joint (the dots at the tips move whole fingers). Moving a joint bends the finger to reach it.</div>
+  </div>
+  <div class="sec">
+    <label class="t">Grip physics</label>
+    <label class="chk"><input type="checkbox" id="phys" checked> Fingers close on the handle <kbd>P</kbd></label>
+    <label class="chk"><input type="checkbox" id="regrip" checked> Re-grip after moving the hand</label>
+    <div class="row">
+      <button id="release">Open fingers <kbd>F</kbd></button>
+      <button id="unpin">Unpin all</button>
+    </div>
+    <div class="help">A joint you edit is pinned (orange): the grip leaves it alone until you unpin it.</div>
+  </div>
+  <div class="sec">
+    <label class="t">View</label>
+    <div class="row">
+      <button data-view="driver">Driver</button>
+      <button data-view="front">Front</button>
+      <button data-view="top">Top</button>
+      <button data-view="outside">Outside</button>
+      <button data-view="under">Under</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="xray"> See-through wheel</label>
+  </div>
+  <div class="sec">
+    <label class="t">This wheel</label>
+    <div class="row">
+      <button id="undo">Undo <kbd>Ctrl Z</kbd></button>
+      <button id="reset">Reset to game</button>
+    </div>
+  </div>
+  <div class="sec">
+    <label class="t">Send to Claude</label>
+    <div class="row">
+      <button id="save" class="primary">Save</button>
+      <button id="download">Download</button>
+      <button id="copy">Copy</button>
+      <button id="load">Load…</button>
+    </div>
+    <input type="file" id="file" accept=".json,application/json" hidden>
+    <div id="status"></div>
+    <div class="help">Save writes <b>tools/data/handposes.json</b> when this runs from <b>python tools/handeditor.py</b>; anywhere else it downloads the file. Your edits are also kept in this browser.</div>
+  </div>
+  <div class="help">The right hand is edited; the left hand is its mirror image in the game.</div>
+</div>
+<div id="hud"></div>
+<iframe id="game" src="../index.html" title="game"></iframe>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const say = t => { $('status').textContent = t; };
+const b64 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+const DEG = Math.PI / 180;
+
+// ---------------- the view ----------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+$('view').appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x16181d);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.003, 20);
+scene.add(camera);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3f4a, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(1, 2, 1.5); scene.add(sun);
+camera.add(new THREE.DirectionalLight(0xffffff, 1.0));
+const orbit = new OrbitControls(camera, renderer.domElement); orbit.enableDamping = true;
+const tc = new TransformControls(camera, renderer.domElement); tc.setSize(0.85); scene.add(tc);
+function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+// ---------------- the game, booted in a hidden frame for its cars ----------------
+const frame = $('game');
+async function bootGame() {
+  for (let i = 0; ; i++) {
+    try { const w = frame.contentWindow; if (w.__game && w.__game.ready && w.F1 && w.F1.Assets && w.F1.Assets.arm) return w; } catch (e) {}
+    if (i === 240) $('loading').textContent = 'Still loading the game… (it boots every car first)';
+    await sleep(250);
+  }
+}
+const G = await bootGame();
+try { G.__game.Game.paused = true; } catch (e) {}
+
+// ---------------- the glove's rig: the MakeHuman base mesh arm (CC0) ----------------
+const MH = await (await fetch('data/makehuman_arm.json')).json();
+const AA = G.F1.Assets.arm;
+const P0 = Float32Array.from(MH.pos.flat(), v => v * 0.1);
+const NV = P0.length / 3;           // decimetres to metres
+const TRI = Uint32Array.from(MH.tri.flat());
+const ZONE = b64(AA.zone);                                       // 0 sleeve, 1 glove, 2 gauntlet, 3 knuckle panel
+const BN = MH.bones.map(b => b.name.slice(0, -2)), BI = Object.fromEntries(BN.map((n, i) => [n, i]));
+const HEAD = MH.bones.map(b => new THREE.Vector3(...b.head).multiplyScalar(0.1));
+const TAIL = MH.bones.map(b => new THREE.Vector3(...b.tail).multiplyScalar(0.1));
+const PAR = MH.bones.map(b => (b.parent.slice(0, -2) in BI ? BI[b.parent.slice(0, -2)] : -1));
+// skin weights, flattened: vertex i's influences are [WO[i], WO[i+1])
+const WO = new Int32Array(NV + 1), WB = [], WW = [];
+MH.w.forEach((ws, i) => { const s = ws.reduce((a, x) => a + x[1], 0); WO[i] = WB.length; for (const [b, x] of ws) { WB.push(b); WW.push(x / s); } });
+WO[NV] = WB.length;
+const WBa = Int32Array.from(WB), WWa = Float32Array.from(WW);
+// fingers flex about the knuckle line (index to little), as the game's glove was posed
+const K = HEAD[BI['finger5-1']].clone().sub(HEAD[BI['finger2-1']]).normalize(), FLEX = K.clone().negate();
+const ORIG = f => [55 + 3 * (f - 2), 65, 40];
+const MAXF = [90, 110, 80];
+const FINGERS = [1, 2, 3, 4, 5];
+const JOINTS = []; for (const f of FINGERS) for (let s = 1; s <= 3; s++) JOINTS.push(`finger${f}-${s}`);
+const EDITABLE = JOINTS.concat(['metacarpal1', 'metacarpal2', 'metacarpal3', 'metacarpal4']);
+
+// MakeHuman space to the game's rest hand frame (r3-car.js armData: toCar, then RF0inv)
+const SC = 1.12;
+const dirCar = v => new THREE.Vector3(v[2], v[1], -v[0]).normalize();
+const toCar = v => new THREE.Vector3(v[2] * SC, v[1] * SC, -v[0] * SC);
+const X0 = dirCar(AA.hand.x), Y0 = dirCar(AA.hand.y); Y0.addScaledVector(X0, -Y0.dot(X0)).normalize();
+const Z0 = new THREE.Vector3().crossVectors(X0, Y0);
+const RF = new THREE.Matrix4().makeBasis(X0, Y0, Z0).setPosition(toCar(AA.hand.c));
+const MH2CAR = new THREE.Matrix4().set(0, 0, SC, 0, 0, SC, 0, 0, -SC, 0, 0, 0, 0, 0, 0, 1);
+const MHM = RF.clone().invert().multiply(MH2CAR);
+
+// scene graph: world = the hand's rest frame; settle = the hand's own move; mh = the base mesh
+const settleG = new THREE.Group(); scene.add(settleG);
+const mh = new THREE.Group(); mh.matrixAutoUpdate = false; mh.matrix.copy(MHM); settleG.add(mh);
+const bones = BN.map((n, i) => { const o = new THREE.Object3D(); o.name = n; return o; });
+bones.forEach((o, i) => {
+  const p = PAR[i];
+  if (p < 0) { o.position.copy(HEAD[i]); mh.add(o); } else { o.position.copy(HEAD[i]).sub(HEAD[p]); bones[p].add(o); }
+});
+const boneOf = n => bones[BI[n]];
+
+// linear blend skinning
+const skinE = BN.map(() => new Float32Array(16));
+const _m = new THREE.Matrix4(), _mi = new THREE.Matrix4(), _t = new THREE.Matrix4();
+function skinMats(list) {
+  mh.updateMatrixWorld(true); _mi.copy(mh.matrixWorld).invert();
+  for (const i of list || bones.keys()) {
+    _m.multiplyMatrices(_mi, bones[i].matrixWorld).multiply(_t.makeTranslation(-HEAD[i].x, -HEAD[i].y, -HEAD[i].z));
+    skinE[i].set(_m.elements);
+  }
+}
+function skin(idx, out) {
+  for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], x = P0[i * 3], y = P0[i * 3 + 1], z = P0[i * 3 + 2];
+    let ox = 0, oy = 0, oz = 0;
+    for (let j = WO[i]; j < WO[i + 1]; j++) {
+      const e = skinE[WBa[j]], w = WWa[j];
+      ox += w * (e[0] * x + e[4] * y + e[8] * z + e[12]);
+      oy += w * (e[1] * x + e[5] * y + e[9] * z + e[13]);
+      oz += w * (e[2] * x + e[6] * y + e[10] * z + e[14]);
+    }
+    out[i * 3] = ox; out[i * 3 + 1] = oy; out[i * 3 + 2] = oz;
+  }
+}
+const ALL = Int32Array.from({ length: NV }, (_, i) => i);
+// the suit and glove over the skin (tools/assets_arm.py): pushed out along the normals by its thickness
+const WRIST = new THREE.Vector3(...AA.joints.wrist), UP = new THREE.Vector3(...AA.joints.fore2).sub(WRIST).normalize();
+function dress(P, out) {
+  const N = new Float32Array(NV * 3);
+  for (let t = 0; t < TRI.length; t += 3) {
+    const a = TRI[t] * 3, b = TRI[t + 1] * 3, c = TRI[t + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+    const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    for (const q of [a, b, c]) { N[q] += nx; N[q + 1] += ny; N[q + 2] += nz; }
+  }
+  for (let i = 0; i < NV; i++) {
+    const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2], l = Math.hypot(nx, ny, nz) || 1;
+    const z = ZONE[i];
+    let th;
+    if (z === 0) th = 0.011; else if (z === 1) th = 0.0025; else if (z === 3) th = 0.0035;
+    else { const along = (P[i * 3] - WRIST.x) * UP.x + (P[i * 3 + 1] - WRIST.y) * UP.y + (P[i * 3 + 2] - WRIST.z) * UP.z; th = 0.013 + 0.006 * Math.min(1, Math.max(0, (0.075 - along) / 0.075)); }
+    out[i * 3] = P[i * 3] + nx / l * th; out[i * 3 + 1] = P[i * 3 + 1] + ny / l * th; out[i * 3 + 2] = P[i * 3 + 2] + nz / l * th;
+  }
+}
+
+// the glove mesh
+const SK = new Float32Array(NV * 3), DR = new Float32Array(NV * 3);
+const gloveGeo = new THREE.BufferGeometry();
+gloveGeo.setAttribute('position', new THREE.BufferAttribute(DR, 3));
+const COL = new Float32Array(NV * 3); gloveGeo.setAttribute('color', new THREE.BufferAttribute(COL, 3));
+gloveGeo.setIndex(new THREE.BufferAttribute(TRI, 1));
+const glove = new THREE.Mesh(gloveGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide }));
+glove.frustumCulled = false; mh.add(glove);
+const ZCOL = [new THREE.Color(0x2c6e78), new THREE.Color(0x3a3d44), new THREE.Color(0x30333a), new THREE.Color(0x26282d)], RED = new THREE.Color(0xff3030);
+
+// per finger: the vertices it moves (for the grip's contact test)
+const fingerVerts = {};
+for (const f of FINGERS) {
+  const bs = new Set([1, 2, 3].map(s => BI[`finger${f}-${s}`])), v = [];
+  for (let i = 0; i < NV; i++) for (let j = WO[i]; j < WO[i + 1]; j++) if (bs.has(WBa[j]) && WWa[j] > 0.05) { v.push(i); break; }
+  fingerVerts[f] = Int32Array.from(v);
+}
+
+// ---------------- the wheel: a signed distance field for contact ----------------
+function buildSDF(tris, half, h) {
+  const n = Math.ceil(2 * half / h) + 1, N = n * n * n, lo = -half, nn = n * n;
+  const st = new Uint8Array(N);   // 1 on the surface, 2 outside
+  const id = (x, y, z) => x + y * n + z * nn;
+  for (let t = 0; t < tris.length; t += 9) {
+    const ax = tris[t], ay = tris[t + 1], az = tris[t + 2], bx = tris[t + 3], by = tris[t + 4], bz = tris[t + 5], cx = tris[t + 6], cy = tris[t + 7], cz = tris[t + 8];
+    if (Math.max(ax, bx, cx) < lo || Math.min(ax, bx, cx) > half || Math.max(ay, by, cy) < lo || Math.min(ay, by, cy) > half || Math.max(az, bz, cz) < lo || Math.min(az, bz, cz) > half) continue;
+    const e = Math.max(Math.hypot(bx - ax, by - ay, bz - az), Math.hypot(cx - ax, cy - ay, cz - az), Math.hypot(cx - bx, cy - by, cz - bz));
+    const m = Math.max(1, Math.ceil(e / (h * 0.5)));
+    for (let i = 0; i <= m; i++) for (let j = 0; j <= m - i; j++) {
+      const u = i / m, v = j / m, x = ax + (bx - ax) * u + (cx - ax) * v, y = ay + (by - ay) * u + (cy - ay) * v, z = az + (bz - az) * u + (cz - az) * v;
+      const gx = Math.round((x - lo) / h), gy = Math.round((y - lo) / h), gz = Math.round((z - lo) / h);
+      if (gx >= 0 && gy >= 0 && gz >= 0 && gx < n && gy < n && gz < n) st[id(gx, gy, gz)] = 1;
+    }
+  }
+  // the outside: flood fill from the box's border; everything else is solid, so an open mesh still has an inside
+  const q = new Int32Array(N); let qh = 0, qt = 0;
+  const push = i => { if (st[i] === 0) { st[i] = 2; q[qt++] = i; } };
+  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) { push(id(0, a, b)); push(id(n - 1, a, b)); push(id(a, 0, b)); push(id(a, n - 1, b)); push(id(a, b, 0)); push(id(a, b, n - 1)); }
+  while (qh < qt) {
+    const i = q[qh++], x = i % n, y = ((i / n) | 0) % n, z = (i / nn) | 0;
+    if (x > 0) push(i - 1); if (x < n - 1) push(i + 1); if (y > 0) push(i - n); if (y < n - 1) push(i + n); if (z > 0) push(i - nn); if (z < n - 1) push(i + nn);
+  }
+  const edt = feature => {   // squared distance (in voxels) to the nearest feature voxel (Felzenszwalb and Huttenlocher)
+    const f = new Float32Array(N); for (let i = 0; i < N; i++) f[i] = feature(i) ? 0 : 1e20;
+    const g = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), zb = new Float64Array(n + 1);
+    const pass = (start, stride) => {
+      for (let i = 0; i < n; i++) g[i] = f[start + i * stride];
+      let k = 0; v[0] = 0; zb[0] = -1e30; zb[1] = 1e30;
+      for (let x = 1; x < n; x++) {
+        let s = ((g[x] + x * x) - (g[v[k]] + v[k] * v[k])) / (2 * x - 2 * v[k]);
+        while (s <= zb[k]) { k--; s = ((g[x] + x * x) - (g[v[k]] + v[k] * v[k])) / (2 * x - 2 * v[k]); }
+        k++; v[k] = x; zb[k] = s; zb[k + 1] = 1e30;
+      }
+      k = 0;
+      for (let x = 0; x < n; x++) { while (zb[k + 1] < x) k++; d[x] = (x - v[k]) * (x - v[k]) + g[v[k]]; }
+      for (let i = 0; i < n; i++) f[start + i * stride] = d[i];
+    };
+    for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) pass(y * n + z * nn, 1);
+    for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) pass(x + z * nn, n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) pass(x + y * n, nn);
+    return f;
+  };
+  const dOut = edt(i => st[i] !== 2), dIn = edt(i => st[i] === 2), D = new Float32Array(N);
+  for (let i = 0; i < N; i++) D[i] = st[i] === 2 ? Math.sqrt(dOut[i]) * h - h / 2 : -(Math.sqrt(dIn[i]) * h - h / 2);
+  return { n, lo, h, D, at(x, y, z) {
+    const gx = (x - lo) / h, gy = (y - lo) / h, gz = (z - lo) / h;
+    if (gx < 0 || gy < 0 || gz < 0 || gx >= n - 1 || gy >= n - 1 || gz >= n - 1) return 1;
+    const i = gx | 0, j = gy | 0, k = gz | 0, fx = gx - i, fy = gy - j, fz = gz - k, b = i + j * n + k * nn;
+    const c = (o) => D[b + o];
+    const x00 = c(0) * (1 - fx) + c(1) * fx, x10 = c(n) * (1 - fx) + c(n + 1) * fx, x01 = c(nn) * (1 - fx) + c(nn + 1) * fx, x11 = c(nn + n) * (1 - fx) + c(nn + n + 1) * fx;
+    return (x00 * (1 - fy) + x10 * fy) * (1 - fz) + (x01 * (1 - fy) + x11 * fy) * fz;
+  } };
+}
+
+// ---------------- each car's wheel, taken from the game ----------------
+function dumpCar(ti) {
+  const T = G.THREE, F1 = G.F1, team = F1.Data.TEAMS[ti], MD = F1.R3Car.model(team);
+  const car = F1.R3Car.makeCar(team, team.drivers[0][3], 'M'), ck = car.userData.cockpit;
+  F1.R3Car.setLod(car, 0, true); car.updateMatrixWorld(true);
+  ck.steer = null; F1.R3Car.updateCockpit(car, 0); ck.pivot.updateMatrix(); ck.spin.updateMatrix();
+  const toWheel = new T.Matrix4().multiplyMatrices(ck.pivot.matrix, ck.spin.matrix).invert();
+  const parts = [];
+  for (const p of MD.swParts) {
+    const P = p.G.attributes.position, ix = p.G.index ? p.G.index.array : null, cnt = ix ? ix.length : P.count, a = new Float32Array(cnt * 3);
+    for (let t = 0; t < cnt; t++) { const k = ix ? ix[t] : t; a[t * 3] = P.getX(k); a[t * 3 + 1] = P.getY(k); a[t * 3 + 2] = P.getZ(k); }
+    const m = MD.mats[p.m]; parts.push({ tri: a, color: m && m.color && !m.map ? m.color.getHex() : 0x4a4e57 });
+  }
+  // the hand's rest frame in the wheel's: palm vertices no pose moves, at rest and as placed
+  const A = F1.R3Car.armData(), arm = ck.arms.find(x => x.sd > 0), P = arm.mesh.geometry.attributes.position, v = new T.Vector3(), g = new T.Vector3(), pairs = [];
+  for (let i = 0; i < A.n; i++) {
+    if (A.w[i * 5 + 4] < 255) continue;
+    v.set(A.car[i * 3], A.car[i * 3 + 1], A.car[i * 3 + 2]).applyMatrix4(A.RF0inv);
+    g.fromBufferAttribute(P, i).applyMatrix4(A.RF0inv);
+    if (v.distanceTo(g) > 1e-6) continue;
+    const s = new T.Vector3().fromBufferAttribute(P, i); arm.mesh.applyBoneTransform(i, s); s.applyMatrix4(toWheel);
+    pairs.push([v.x, v.y, v.z, s.x, s.y, s.z]);
+  }
+  const fwd = new T.Vector3(1, 0, 0).transformDirection(toWheel), up = new T.Vector3(0, 1, 0).transformDirection(toWheel);
+  const HP = F1.Assets.handPose && F1.Assets.handPose.cars && F1.Assets.handPose.cars[MD.id];
+  return { id: team.car, parts, pairs, thumb: MD.thumb, hp: HP ? { off: HP.off, rot: HP.rot || [[1, 0, 0], [0, 1, 0], [0, 0, 1]] } : null, fwd: fwd.toArray(), up: up.toArray() };
+}
+// least squares placement (hand rest frame to wheel frame) from the vertex pairs
+function fitPlacement(pairs) {
+  const XtX = Array.from({ length: 4 }, () => [0, 0, 0, 0]), XtY = Array.from({ length: 4 }, () => [0, 0, 0]);
+  for (const [a, b, c, x, y, z] of pairs) { const X = [a, b, c, 1], Y = [x, y, z]; for (let i = 0; i < 4; i++) { for (let j = 0; j < 4; j++) XtX[i][j] += X[i] * X[j]; for (let j = 0; j < 3; j++) XtY[i][j] += X[i] * Y[j]; } }
+  const inv = new THREE.Matrix4().set(...XtX.flat()).invert().elements;  // column-major
+  const I = (r, c) => inv[c * 4 + r];
+  const B = Array.from({ length: 4 }, (_, r) => [0, 1, 2].map(j => XtY.reduce((s, row, k) => s + I(r, k) * row[j], 0)));
+  // wheel = B^T [v; 1]
+  return new THREE.Matrix4().set(B[0][0], B[1][0], B[2][0], B[3][0], B[0][1], B[1][1], B[2][1], B[3][1], B[0][2], B[1][2], B[2][2], B[3][2], 0, 0, 0, 1);
+}
+
+const cars = {};   // id -> { d, wheel group, sdf, fwd, up }
+const wheelRoot = new THREE.Group(); scene.add(wheelRoot);
+const wheelMats = [];
+function loadCar(ti) {
+  const d = dumpCar(ti);
+  const place = fitPlacement(d.pairs);
+  const unsettle = d.hp ? new THREE.Matrix4().makeBasis(...d.hp.rot.map(c => new THREE.Vector3(...c))).setPosition(...d.hp.off) : new THREE.Matrix4();
+  const Wm = unsettle.multiply(place.clone().invert());   // wheel frame to the hand's rest frame
+  const grp = new THREE.Group(), all = [];
+  const v = new THREE.Vector3();
+  for (const p of d.parts) {
+    const a = p.tri;
+    for (let i = 0; i < a.length; i += 3) { v.set(a[i], a[i + 1], a[i + 2]).applyMatrix4(Wm); a[i] = v.x; a[i + 1] = v.y; a[i + 2] = v.z; }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(a, 3)); geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 1 });
+    wheelMats.push(mat);
+    grp.add(new THREE.Mesh(geo, mat)); all.push(a);
+  }
+  const tris = new Float32Array(all.reduce((s, a) => s + a.length, 0)); let o = 0; for (const a of all) { tris.set(a, o); o += a.length; }
+  const sdf = buildSDF(tris, 0.15, 0.002);
+  const fwd = new THREE.Vector3(...d.fwd).transformDirection(Wm), up = new THREE.Vector3(...d.up).transformDirection(Wm);
+  return (cars[d.id] = { ti, d, grp, sdf, fwd, up });
+}
+
+// ---------------- pose state ----------------
+const state = { car: null, flex: {}, pins: new Set() };
+const store = { version: 1, cars: {} };
+const qAxis = (axis, deg) => new THREE.Quaternion().setFromAxisAngle(axis, deg * DEG);
+function defaultPose(c) {
+  for (const o of bones) o.quaternion.identity();
+  settleG.position.set(0, 0, 0); settleG.quaternion.identity();
+  state.flex = {}; state.pins = new Set();
+  for (const f of [2, 3, 4, 5]) ORIG(f).forEach((a, s) => { boneOf(`finger${f}-${s + 1}`).quaternion.copy(qAxis(FLEX, a)); state.flex[`finger${f}-${s + 1}`] = a; });
+  // the thumb, curled as the game curls it toward the wheel's thumb hole
+  const T = c.d.thumb;
+  if (T) { const ax = new THREE.Vector3(T[0], T[1], T[2]).transformDirection(MHM.clone().invert()); boneOf('finger1-1').quaternion.copy(new THREE.Quaternion().setFromAxisAngle(ax, T[3])); }
+}
+function serialize() {
+  const out = { settle: { p: settleG.position.toArray().map(r6), q: settleG.quaternion.toArray().map(r6) }, bones: {}, flex: {}, pins: [...state.pins] };
+  for (const n of EDITABLE) { const q = boneOf(n).quaternion; if (Math.abs(q.w) < 0.999999) out.bones[n] = q.toArray().map(r6); }
+  for (const [k, v] of Object.entries(state.flex)) out.flex[k] = Math.round(v * 100) / 100;
+  return out;
+}
+function r6(x) { return Math.round(x * 1e6) / 1e6; }
+function applyPose(p) {
+  for (const o of bones) o.quaternion.identity();
+  settleG.position.fromArray(p.settle.p); settleG.quaternion.fromArray(p.settle.q);
+  for (const [n, q] of Object.entries(p.bones || {})) if (n in BI) boneOf(n).quaternion.fromArray(q);
+  state.flex = { ...(p.flex || {}) }; state.pins = new Set(p.pins || []);
+}
+function remember() {
+  if (!state.car) return;
+  store.cars[state.car.d.id] = serialize();
+  try { localStorage.setItem('handposes', JSON.stringify(store)); } catch (e) {}
+}
+
+// ---------------- selection, handles, gizmo ----------------
+const handles = new THREE.Group(); scene.add(handles);
+const hGeo = new THREE.SphereGeometry(0.0036, 14, 10);
+const HANDLES = JOINTS.map(n => ({ n, tip: false })).concat(FINGERS.map(f => ({ n: `finger${f}-3`, tip: true })));
+for (const h of HANDLES) {
+  const m = new THREE.Mesh(hGeo, new THREE.MeshBasicMaterial({ color: 0x3fa9ff, depthTest: false, transparent: true, opacity: 0.95 }));
+  m.renderOrder = 10; m.userData.h = h; h.mesh = m; handles.add(m);
+}
+const proxy = new THREE.Object3D(); scene.add(proxy);
+let sel = null, mode = 'rotate', space = 'local', dragging = false;
+const jointWorld = (h, out = new THREE.Vector3()) => {
+  const b = boneOf(h.n);
+  return h.tip ? out.copy(TAIL[BI[h.n]]).sub(HEAD[BI[h.n]]).applyMatrix4(b.matrixWorld) : b.getWorldPosition(out);
+};
+function updateHandles() {
+  for (const h of HANDLES) {
+    jointWorld(h, h.mesh.position);
+    const pinned = state.pins.has(h.n) && !h.tip;
+    h.mesh.material.color.setHex(sel && sel.h === h ? 0xffe14a : pinned ? 0xffa53f : h.tip ? 0x7dd3ff : 0x3fa9ff);
+    h.mesh.scale.setScalar(h.tip ? 0.85 : 1);
+  }
+}
+function ikChain(h) {
+  const [f, s] = h.n.match(/finger(\d)-(\d)/).slice(1).map(Number);
+  if (h.tip) return [3, 2, 1].map(k => `finger${f}-${k}`);
+  if (s === 1) return f >= 2 ? [`metacarpal${f - 1}`] : [];
+  return Array.from({ length: s - 1 }, (_, k) => `finger${f}-${s - 1 - k}`);
+}
+function attach() {
+  tc.detach();
+  if (!sel) return refreshUI();
+  tc.setSpace(space === 'local' ? 'local' : 'world');
+  if (sel.hand) { tc.setMode(mode === 'move' ? 'translate' : 'rotate'); tc.attach(settleG); }
+  else if (mode === 'rotate') { tc.setMode('rotate'); tc.attach(boneOf(sel.h.n)); }
+  else {
+    if (!ikChain(sel.h).length) { say('The thumb\'s root joint turns but cannot move on its own: rotate it, or move the whole hand.'); mode = 'rotate'; return attach(); }
+    jointWorld(sel.h, proxy.position); boneOf(sel.h.n).getWorldQuaternion(proxy.quaternion); proxy.updateMatrixWorld();
+    tc.setMode('translate'); tc.attach(proxy);
+  }
+  refreshUI();
+}
+function select(s) { sel = s; attach(); }
+// CCD inverse kinematics: turn the chain's joints so the picked joint reaches the gizmo
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _qp = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+function solveIK(h, target) {
+  const chain = ikChain(h).map(boneOf);
+  for (let it = 0; it < 24; it++) {
+    for (const b of chain) {
+      b.updateMatrixWorld(true);
+      const e = jointWorld(h, _a); b.getWorldPosition(_p);
+      const ve = e.sub(_p), vt = _b.copy(target).sub(_p);
+      if (ve.lengthSq() < 1e-12 || vt.lengthSq() < 1e-12) continue;
+      _q.setFromUnitVectors(ve.normalize(), vt.normalize());
+      b.parent.getWorldQuaternion(_qp); b.getWorldQuaternion(_qb);
+      b.quaternion.copy(_qp.invert().multiply(_q).multiply(_qb));
+      b.updateMatrixWorld(true);
+    }
+    if (jointWorld(h, _a).distanceTo(target) < 1e-4) break;
+  }
+  for (const b of chain) state.pins.add(b.name);
+}
+
+// ---------------- the grip: fingers close until the handle stops them ----------------
+const STEP = 1.0, CLR = 0.0025 * SC + 0.0006;   // degrees per tick; clearance = the glove's thickness + a hair
+const stepQ = qAxis(FLEX, STEP), _v = new THREE.Vector3();
+let gripIdle = false;
+function fingerNearest(f) {
+  const idx = fingerVerts[f]; skin(idx, SK);
+  const M = mh.matrixWorld.elements, sdf = state.car.sdf; let m = 1;
+  for (let k = 0; k < idx.length; k++) {
+    const i = idx[k], x = SK[i * 3], y = SK[i * 3 + 1], z = SK[i * 3 + 2];
+    const d = sdf.at(M[0] * x + M[4] * y + M[8] * z + M[12], M[1] * x + M[5] * y + M[9] * z + M[13], M[2] * x + M[6] * y + M[10] * z + M[14]);
+    if (d < m) m = d;
+  }
+  return m;
+}
+function gripTick() {
+  if (!state.car || gripIdle) return false;
+  let moved = false;
+  for (const f of [2, 3, 4, 5]) {
+    const ids = [1, 2, 3].map(s => BI[`finger${f}-${s}`]);
+    skinMats(ids); let cur = fingerNearest(f);
+    for (let s = 0; s < 3; s++) {
+      const n = `finger${f}-${s + 1}`;
+      if (state.pins.has(n) || (state.flex[n] || 0) >= MAXF[s] || (dragging && sel && !sel.hand && ikChain(sel.h).concat(sel.h.n).includes(n))) continue;
+      const b = boneOf(n), old = b.quaternion.clone();
+      b.quaternion.multiply(stepQ); b.updateMatrixWorld(true); skinMats(ids);
+      const m = fingerNearest(f);
+      if (m >= Math.min(CLR, cur) - 1e-6) { state.flex[n] = (state.flex[n] || 0) + STEP; cur = m; moved = true; }
+      else { b.quaternion.copy(old); b.updateMatrixWorld(true); skinMats(ids); }
+    }
+  }
+  if (!moved) gripIdle = true;
+  return moved;
+}
+function openFingers() {
+  for (const f of [2, 3, 4, 5]) for (let s = 1; s <= 3; s++) {
+    const n = `finger${f}-${s}`; if (state.pins.has(n)) continue;
+    boneOf(n).quaternion.multiply(qAxis(FLEX, -(state.flex[n] || 0))); state.flex[n] = 0;
+  }
+  gripIdle = false; dirty = true;
+}
+
+// ---------------- redraw the glove ----------------
+let dirty = true, clipCount = 0, clipDeep = 0;
+function redraw() {
+  skinMats(); skin(ALL, SK); dress(SK, DR);
+  const M = mh.matrixWorld.elements, sdf = state.car && state.car.sdf; clipCount = 0; clipDeep = 0;
+  for (let i = 0; i < NV; i++) {
+    let c = ZCOL[ZONE[i]];
+    if (sdf && ZONE[i] !== 0) {
+      const x = DR[i * 3], y = DR[i * 3 + 1], z = DR[i * 3 + 2];
+      const d = sdf.at(M[0] * x + M[4] * y + M[8] * z + M[12], M[1] * x + M[5] * y + M[9] * z + M[13], M[2] * x + M[6] * y + M[10] * z + M[14]);
+      if (d < 0) { c = RED; clipCount++; clipDeep = Math.max(clipDeep, -d); }
+    }
+    COL[i * 3] = c.r; COL[i * 3 + 1] = c.g; COL[i * 3 + 2] = c.b;
+  }
+  gloveGeo.attributes.position.needsUpdate = true; gloveGeo.attributes.color.needsUpdate = true; gloveGeo.computeVertexNormals();
+  dirty = false; hud();
+}
+function hud() {
+  const s = sel ? (sel.hand ? 'Whole hand' : (sel.h.tip ? `${sel.h.n.replace('-3', '')} tip` : sel.h.n)) : 'nothing';
+  const FN = { 1: 'thumb', 2: 'index finger', 3: 'middle finger', 4: 'ring finger', 5: 'little finger' }, JN = { 1: 'knuckle', 2: 'middle joint', 3: 'end joint' };
+  const nice = s.replace(/finger(\d)-(\d)/, (_, f, j) => `${FN[f]}, ${JN[j]}`).replace(/finger(\d) tip/, (_, f) => `${FN[f]} tip`);
+  let ang = '';
+  if (sel && !sel.hand) { const n = sel.h.n, e = new THREE.Euler().setFromQuaternion(boneOf(n).quaternion); ang = `<div>local rotation ${[e.x, e.y, e.z].map(a => (a / DEG).toFixed(1)).join(', ')}°${state.pins.has(n) ? ' · pinned' : ''}</div>`; }
+  if (sel && sel.hand) { const p = settleG.position; ang = `<div>moved ${(p.length() * 1000).toFixed(1)} mm</div>`; }
+  $('hud').innerHTML = `<div class="big">${state.car ? state.car.d.id.toUpperCase() : ''}</div><div>selected: ${nice}</div>${ang}` +
+    `<div class="${clipCount ? 'bad' : 'good'}">${clipCount ? `${clipCount} glove points inside the wheel (deepest ${(clipDeep * 1000).toFixed(1)} mm)` : 'no clipping'}</div>` +
+    `<div>${$('phys').checked ? (gripIdle ? 'grip settled' : 'gripping…') : 'grip off'}</div>`;
+}
+
+// ---------------- undo ----------------
+const undoStack = [];
+function snapshot() { undoStack.push(JSON.stringify(serialize())); if (undoStack.length > 80) undoStack.shift(); }
+function undo() { const s = undoStack.pop(); if (!s) return; applyPose(JSON.parse(s)); gripIdle = true; dirty = true; remember(); attach(); }
+
+tc.addEventListener('dragging-changed', e => {
+  orbit.enabled = !e.value; dragging = e.value;
+  if (e.value) snapshot();
+  else {
+    if (sel && sel.hand && $('phys').checked && $('regrip').checked) openFingers();
+    else if (sel && !sel.hand) gripIdle = false;
+    if (sel && !sel.hand && mode === 'move') attach();
+    remember();
+  }
+});
+tc.addEventListener('objectChange', () => {
+  if (!sel) return;
+  if (sel.hand) { /* the hand moves as a whole */ }
+  else if (mode === 'rotate') state.pins.add(sel.h.n);
+  else { proxy.updateMatrixWorld(); solveIK(sel.h, proxy.position); }
+  dirty = true;
+});
+
+// picking
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5 || tc.dragging || tc.axis) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  // the nearest handle to the click, on screen
+  let best = null, bd = 18;
+  for (const h of HANDLES) {
+    const p = h.mesh.position.clone().project(camera), sx = (p.x + 1) / 2 * r.width, sy = (1 - p.y) / 2 * r.height;
+    const dd = Math.hypot(sx - (e.clientX - r.left), sy - (e.clientY - r.top));
+    if (p.z < 1 && dd < bd) { bd = dd; best = h; }
+  }
+  if (best) return select({ h: best });
+  if (ray.intersectObject(glove).length) return select({ hand: true });
+});
+
+// ---------------- views ----------------
+function view(kind) {
+  const c = state.car; if (!c) return;
+  const side = new THREE.Vector3().crossVectors(c.fwd, c.up).normalize();
+  const dir = { driver: c.fwd.clone().negate(), front: c.fwd.clone(), top: c.up.clone(), under: c.up.clone().negate(), outside: side.clone() }[kind];
+  const dist = kind === 'driver' || kind === 'front' ? 0.32 : 0.28;
+  const tgt = settleG.position.clone();
+  camera.up.copy(kind === 'top' || kind === 'under' ? c.fwd : c.up);
+  camera.position.copy(tgt).addScaledVector(dir, dist); orbit.target.copy(tgt); camera.lookAt(tgt); orbit.update();
+}
+
+// ---------------- UI ----------------
+function refreshUI() {
+  $('mMove').classList.toggle('on', mode === 'move'); $('mRot').classList.toggle('on', mode === 'rotate');
+  $('sLocal').classList.toggle('on', space === 'local'); $('sWorld').classList.toggle('on', space === 'world');
+  $('selHand').classList.toggle('on', !!(sel && sel.hand));
+  hud();
+}
+const setMode = m => { mode = m; attach(); };
+const setSpace = s => { space = s; attach(); };
+$('mMove').onclick = () => setMode('move'); $('mRot').onclick = () => setMode('rotate');
+$('sLocal').onclick = () => setSpace('local'); $('sWorld').onclick = () => setSpace('world');
+$('selHand').onclick = () => select({ hand: true }); $('selNone').onclick = () => select(null);
+$('phys').onchange = () => { gripIdle = !$('phys').checked; hud(); };
+$('release').onclick = () => { snapshot(); openFingers(); remember(); };
+$('unpin').onclick = () => { snapshot(); state.pins.clear(); gripIdle = false; dirty = true; remember(); };
+$('undo').onclick = undo;
+$('reset').onclick = () => { snapshot(); defaultPose(state.car); delete store.cars[state.car.d.id]; try { localStorage.setItem('handposes', JSON.stringify(store)); } catch (e) {} gripIdle = true; dirty = true; attach(); say('Back to the game\'s current hand for this wheel.'); };
+$('xray').onchange = () => { for (const m of wheelMats) { m.opacity = $('xray').checked ? 0.35 : 1; m.depthWrite = !$('xray').checked; } };
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => view(b.dataset.view));
+$('toggle').onclick = () => $('panel').classList.toggle('hidden');
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); return undo(); }
+  if (k === 'g' || k === 'w') setMode('move');
+  else if (k === 'r' || k === 'e') setMode('rotate');
+  else if (k === 'l') setSpace(space === 'local' ? 'world' : 'local');
+  else if (k === 'h') select({ hand: true });
+  else if (k === 'escape') select(null);
+  else if (k === 'p') { $('phys').checked = !$('phys').checked; $('phys').onchange(); }
+  else if (k === 'f') $('release').onclick();
+});
+
+// saving
+const payload = () => { remember(); return JSON.stringify({ ...store, saved: new Date().toISOString() }, null, 1); };
+function download() {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([payload()], { type: 'application/json' }));
+  a.download = 'handposes.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('save').onclick = async () => {
+  try {
+    const r = await fetch('/handposes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload() });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json(); say(`Saved ${j.cars.length} wheel${j.cars.length === 1 ? '' : 's'} to ${j.saved}. Tell Claude to apply it.`);
+  } catch (e) { download(); say('No editor server here, so the file was downloaded: send handposes.json to Claude.'); }
+};
+$('download').onclick = () => { download(); say('Downloaded handposes.json.'); };
+$('copy').onclick = async () => { try { await navigator.clipboard.writeText(payload()); say('Copied. Paste it to Claude.'); } catch (e) { say('Copy was blocked: use Download.'); } };
+$('load').onclick = () => $('file').click();
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return;
+  try { const j = JSON.parse(await f.text()); Object.assign(store.cars, j.cars || {}); remember(); showCar(state.car.ti, true); say(`Loaded ${Object.keys(j.cars || {}).length} wheels.`); } catch (e) { say('That file is not a hand pose file.'); }
+};
+
+// ---------------- cars ----------------
+const TEAMS = G.F1.Data.TEAMS;
+TEAMS.forEach((t, i) => { if (!G.F1.R3Car.hasModel(t)) return; const o = document.createElement('option'); o.value = i; o.textContent = `${t.name} (${t.car})`; $('car').appendChild(o); });
+async function showCar(ti, keepView) {
+  if (state.car) remember();
+  $('loading').style.display = 'grid'; $('loading').textContent = 'Building the wheel and its contact field…'; await sleep(30);
+  const id = TEAMS[ti].car;
+  const c = cars[id] || loadCar(ti);
+  wheelRoot.clear(); wheelRoot.add(c.grp); state.car = c;
+  $('xray').onchange();
+  if (store.cars[id]) applyPose(store.cars[id]); else defaultPose(c);
+  undoStack.length = 0; gripIdle = !!store.cars[id]; dirty = true; select(null);
+  if (!keepView) view('driver');
+  $('loading').style.display = 'none';
+}
+$('car').onchange = () => showCar(+$('car').value);
+
+// earlier work: the server's file, then this browser's own copy on top
+try { const r = await fetch('/handposes'); if (r.ok) Object.assign(store.cars, (await r.json()).cars || {}); } catch (e) {}
+try { const j = JSON.parse(localStorage.getItem('handposes') || 'null'); if (j && j.cars) Object.assign(store.cars, j.cars); } catch (e) {}
+
+const first = +new URLSearchParams(location.search).get('car') || +$('car').options[0].value;
+$('car').value = String(TEAMS.findIndex((t, i) => i === first) >= 0 ? first : $('car').options[0].value);
+await showCar(+$('car').value);
+window.__editor = { state, store, cars, select, setMode, setSpace, openFingers, gripTick, serialize, bones, boneOf, settleG, view, get clip() { return clipCount; }, get idle() { return gripIdle; }, skinAll: () => { skinMats(); skin(ALL, SK); dress(SK, DR); return DR; } };
+
+// ---------------- loop ----------------
+renderer.setAnimationLoop(() => {
+  if ($('phys').checked && !gripIdle) { for (let i = 0; i < 3; i++) if (!gripTick()) break; dirty = true; }
+  if (dirty) redraw();
+  scene.updateMatrixWorld(); updateHandles();
+  orbit.update(); renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
