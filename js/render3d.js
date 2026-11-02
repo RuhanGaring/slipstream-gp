@@ -2073,10 +2073,11 @@
       const ov = G.__cockpitEye; // debug override [x, y, lookY]
       const om = live.get(car), bu = om && om.userData.body.userData;
       if (bu && bu.eyeA && !ov) {
-        // the driver's head is in the chassis: it pitches, rolls and climbs with the car
+        // the driver's head is in the chassis: it pitches, rolls and climbs with the car (the neck
+        // keeps the eyes nearer level, so only half the chassis' roll reaches the view)
         om.updateMatrixWorld(true);
         bu.eyeA.getWorldPosition(camera.position); bu.lookA.getWorldPosition(C.look);
-        camera.up.set(0, 1, 0).applyQuaternion(bu.eyeA.getWorldQuaternion(new THREE.Quaternion()));
+        camera.up.set(0, 1, 0).applyQuaternion(bu.eyeA.getWorldQuaternion(new THREE.Quaternion())).lerp(_worldUp, 0.5).normalize();
         camera.lookAt(C.look);
       } else onboard(car, ov ? ov[0] : hm ? 0.3 : 0.24, ov ? ov[1] : hm ? 0.9 : 0.84, 30, ov ? ov[2] : hm ? 0.8 : 0.5);
       setFov(G.__cockpitFov || (hm ? 64 : 74), dt, snap); // a wide onboard lens, about 96 degrees across on 16:9
@@ -2173,6 +2174,7 @@
   // under braking, out of a corner and down over a kerb, and the driver looks a little into the
   // corner ahead of the car. Amounts are a few centimetres and degrees per g, so a 5 g corner
   // reads clearly without the horizon swimming.
+  const _worldUp = new THREE.Vector3(0, 1, 0);
   const HM = { on: false, p: new THREE.Vector3(), lv: new THREE.Vector3(), la: new THREE.Vector3(), x: new THREE.Vector3(), v: new THREE.Vector3(), yaw: 0, buzz: 0 };
   const _hr = new THREE.Vector3(), _hu = new THREE.Vector3(), _hf = new THREE.Vector3(), _hvel = new THREE.Vector3(), _ha = new THREE.Vector3();
   function headMotion(car, dt, snap, enabled) {
@@ -2195,7 +2197,9 @@
     _hr.set(m[0], m[1], m[2]); _hu.set(m[4], m[5], m[6]); _hf.set(-m[8], -m[9], -m[10]);
     const g = 9.81, aR = HM.la.dot(_hr) / g, aU = HM.la.dot(_hu) / g - 1, aF = HM.la.dot(_hf) / g;
     // the head lags the chassis: displaced against the acceleration (metres per g)
-    const tx = -aR * 0.011, ty = -aU * 0.006, tz = aF * 0.009; // braking (aF < 0) throws it forward (-z)
+    // (sideways only 4.5 mm a g: a braced neck and the headrest pads hold the head in a corner,
+    // and more reads as the whole view swaying)
+    const tx = -aR * 0.0045, ty = -aU * 0.006, tz = aF * 0.009; // braking (aF < 0) throws it forward (-z)
     const w = 2 * Math.PI * 2.2, z = 0.55, k = w * w, c = 2 * z * w;
     const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
     for (let i = 0; i < n; i++) {
@@ -2203,9 +2207,9 @@
       HM.x.addScaledVector(HM.v, h);
     }
     // keep it inside the helmet's travel
-    HM.x.x = THREE.MathUtils.clamp(HM.x.x, -0.07, 0.07); HM.x.y = THREE.MathUtils.clamp(HM.x.y, -0.04, 0.04); HM.x.z = THREE.MathUtils.clamp(HM.x.z, -0.06, 0.06);
-    // eyes lead into the corner: the lateral load says which way and how hard (about 0.6 deg/g, at most 2.5)
-    const look = THREE.MathUtils.clamp(aR * 0.01, -0.044, 0.044);
+    HM.x.x = THREE.MathUtils.clamp(HM.x.x, -0.03, 0.03); HM.x.y = THREE.MathUtils.clamp(HM.x.y, -0.04, 0.04); HM.x.z = THREE.MathUtils.clamp(HM.x.z, -0.06, 0.06);
+    // eyes lead into the corner: the lateral load says which way and how hard (about 0.35 deg/g, at most 1.5)
+    const look = THREE.MathUtils.clamp(aR * 0.006, -0.026, 0.026);
     HM.yaw += (look - HM.yaw) * (1 - Math.exp(-dt / 0.35));
     // engine and road buzz: tiny and fast, grows with speed; enough to feel, not to blur
     HM.buzz += dt;
@@ -2215,7 +2219,7 @@
     camera.rotateY(-HM.yaw);
     // the neck holds the eyes nearly level: only a slight nod and tip (under 1.5 degrees)
     camera.rotateX(HM.x.z * 0.35 - HM.x.y * 0.15); // nods down as it is thrown forward
-    camera.rotateZ(-HM.x.x * 0.3); // and tips with the sideways load
+    camera.rotateZ(-HM.x.x * 0.15); // and tips a little with the sideways load
   }
   // the loading-screen shot: low, outside the hero corner, long lens on the pack
   function loadCam(L, dt) {
