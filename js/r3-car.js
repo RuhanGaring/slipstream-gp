@@ -589,10 +589,12 @@
     }
     m.name = o.n;
     const a = (hue * Math.PI) / 180, turn = hue && p.map;
-    m.userData.patchKey = 'ck' + (kind === 'paint' ? 'p' : '') + (kind === 'tyre' ? 't' : '') + (turn ? '_hue' + hue : '');
+    m.userData.patchKey = (kind === 'tyre' || kind === 'rim' || kind === 'disc' ? 'w' + kind : 'ck' + (kind === 'paint' ? 'p' : '')) + (turn ? '_hue' + hue : '');
     if (kind === 'tyre') { m.sheen = 0.5; m.sheenRoughness = 0.45; m.sheenColor = new THREE.Color(0x4a4846); m.envMapIntensity = 1.2; }
     m.userData.patchExtra = sh => {
-      cockpitPatch(sh, kind === 'paint');
+      // (not on the wheels: the cockpit's region is in the car's frame, but a wheel's mesh sits in its
+      // own, where the region's hard edges fell across the tyre as a line)
+      if (kind !== 'tyre' && kind !== 'rim' && kind !== 'disc') cockpitPatch(sh, kind === 'paint');
       if (kind === 'tyre') tyrePatch(sh);
       // a team running this car in its own colours: the base colour's hue turned (luma kept)
       if (turn) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
@@ -672,6 +674,29 @@
       root.add(g);
       lodGroups.push(g);
     });
+    // A model's tyre is two meshes (tread over the shoulders, and sidewall) meeting in a ring, each
+    // with its own normals, so the light broke along the join. Once per model, the normals of every
+    // vertex the tyre's meshes share (same place, a tenth of a millimetre) are averaged across both,
+    // and the tyre shades as one surface.
+    if (!MD.tyresWelded) {
+      MD.tyresWelded = true;
+      for (const L of MD.lods) for (const key of Object.keys(L.wheels)) {
+        const parts = L.wheels[key].parts.filter(p => surface(MD.mats[p.m].name || '') === 'tyre');
+        if (!parts.length) continue;
+        const acc = new Map(), kOf = (P, i) => Math.round(P.getX(i) * 1e4) + ',' + Math.round(P.getY(i) * 1e4) + ',' + Math.round(P.getZ(i) * 1e4);
+        for (const p of parts) {
+          const P = p.G.attributes.position, N = p.G.attributes.normal;
+          if (!N) continue;
+          for (let i = 0; i < P.count; i++) { const k = kOf(P, i), a = acc.get(k) || [0, 0, 0]; a[0] += N.getX(i); a[1] += N.getY(i); a[2] += N.getZ(i); acc.set(k, a); }
+        }
+        for (const p of parts) {
+          const P = p.G.attributes.position, N = p.G.attributes.normal;
+          if (!N) continue;
+          for (let i = 0; i < P.count; i++) { const a = acc.get(kOf(P, i)), l = Math.hypot(a[0], a[1], a[2]) || 1; N.setXYZ(i, a[0] / l, a[1] / l, a[2] / l); }
+          N.needsUpdate = true;
+        }
+      }
+    }
     // wheels: one pivot per corner (steers), spinning group inside, both LODs
     for (const key of ['FL', 'FR', 'RL', 'RR']) {
       const W0 = MD.lods[0].wheels[key];
