@@ -538,32 +538,37 @@
   // the rubber itself is a dark charcoal, never pure black; the sidewall is matte with a fine
   // speckle of brake and road dust; the tread is scuffed to a lighter grey in uneven bands across
   // its width, grained in fine lines round the tyre, spotted with darker picked-up rubber, and has
-  // the soft sheen of warm rubber. The wheel's geometry spins about its own z, so a face whose
-  // normal runs along z is sidewall and one pointing out from the axle is tread.
+  // the satin sheen of warm rubber (the grey a tyre shows is mostly the sky in it). The wheel's
+  // geometry spins about its own z, so a face whose normal runs along z is sidewall and one
+  // pointing out from the axle is tread. The noise is sampled on circles round the axle (3D noise
+  // at (cos, sin) of the angle), so it closes on itself with no seam.
   function tyrePatch(sh) {
     sh.vertexShader = 'varying vec3 vTyP; varying vec3 vTyN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position; vTyN = normal;');
     sh.fragmentShader = [
       'varying vec3 vTyP; varying vec3 vTyN;',
-      'float tyH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
-      'float tyN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-      '  return mix(mix(tyH(i), tyH(i + vec2(1, 0)), f.x), mix(tyH(i + vec2(0, 1)), tyH(i + vec2(1, 1)), f.x), f.y); }',
+      'float tyH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }',
+      'float tyN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(mix(tyH(i), tyH(i + vec3(1, 0, 0)), f.x), mix(tyH(i + vec3(0, 1, 0)), tyH(i + vec3(1, 1, 0)), f.x), f.y),',
+      '             mix(mix(tyH(i + vec3(0, 0, 1)), tyH(i + vec3(1, 0, 1)), f.x), mix(tyH(i + vec3(0, 1, 1)), tyH(i + vec3(1, 1, 1)), f.x), f.y), f.z); }',
+      // noise k times round the tyre (a circle of radius k / 2 pi in noise space), and w along a third axis
+      'float tyC(vec2 cs, float k, float w) { return tyN(vec3(cs * (k * 0.159155), w)); }',
     ].join('\n') + '\n' + sh.fragmentShader
       .replace('#include <map_fragment>', [
         '#include <map_fragment>',
-        '  float tySide = smoothstep(0.45, 0.8, abs(normalize(vTyN).z)), tyTread = 1.0 - tySide;',
-        '  float tyA = atan(vTyP.y, vTyP.x) * 0.159155 + 0.5, tyR = length(vTyP.xy);',
+        '  float tySide = smoothstep(0.3, 0.9, abs(normalize(vTyN).z)), tyTread = 1.0 - tySide;',
+        '  float tyR = length(vTyP.xy); vec2 tyCs = vTyP.xy / max(tyR, 1e-4);',
         // the rubber, not the printing: dark and unsaturated in the texture
         '  float tyMx = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)), tyMn = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));',
         '  float tyRub = (1.0 - smoothstep(0.1, 0.22, tyMx)) * (1.0 - smoothstep(0.05, 0.12, tyMx - tyMn));',
-        '  float tyDust = tyN(vec2(tyA * 260.0, tyR * 140.0)) * 0.6 + tyN(vec2(tyA * 900.0, tyR * 500.0)) * 0.4;',
+        '  float tyDust = tyC(tyCs, 260.0, tyR * 140.0) * 0.6 + tyC(tyCs, 900.0, tyR * 500.0) * 0.4;',
         '  vec3 tySw = vec3(0.026, 0.026, 0.026) + vec3(0.009, 0.0085, 0.0075) * smoothstep(0.55, 0.95, tyDust);',
-        '  float tyBand = tyN(vec2(vTyP.z * 55.0, tyA * 3.0)) * 0.6 + tyN(vec2(vTyP.z * 140.0, tyA * 9.0)) * 0.4;',
-        '  float tyGrain = tyN(vec2(tyA * 1400.0, vTyP.z * 22.0));',
-        '  float tyPick = smoothstep(0.72, 0.9, tyN(vec2(tyA * 420.0, vTyP.z * 180.0)));',
-        '  vec3 tyTr = vec3(0.06, 0.058, 0.055) * (0.75 + 0.5 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.45 * tyPick);',
+        '  float tyBand = tyC(tyCs, 3.0, vTyP.z * 55.0) * 0.6 + tyC(tyCs, 9.0, vTyP.z * 140.0 + 7.0) * 0.4;',
+        '  float tyGrain = tyC(tyCs, 1400.0, vTyP.z * 22.0);',
+        '  float tyPick = smoothstep(0.72, 0.9, tyC(tyCs, 420.0, vTyP.z * 180.0 + 3.0));',
+        '  vec3 tyTr = vec3(0.036, 0.035, 0.034) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick);',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, mix(tySw, tyTr, tyTread), tyRub);',
       ].join('\n'))
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.9, 0.58 + 0.2 * tyBand + 0.1 * tyPick, tyTread), tyRub);');
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyTread), tyRub);');
   }
   function carMat(o, C, hue) {
     const T = i => (i >= 0 ? C.tex[i] : null), kind = surface(o.n);
@@ -582,7 +587,7 @@
     m.name = o.n;
     const a = (hue * Math.PI) / 180, turn = hue && p.map;
     m.userData.patchKey = 'ck' + (kind === 'paint' ? 'p' : '') + (kind === 'tyre' ? 't' : '') + (turn ? '_hue' + hue : '');
-    if (kind === 'tyre') { m.sheen = 0.35; m.sheenRoughness = 0.55; m.sheenColor = new THREE.Color(0x3a3836); }
+    if (kind === 'tyre') { m.sheen = 0.5; m.sheenRoughness = 0.45; m.sheenColor = new THREE.Color(0x4a4846); m.envMapIntensity = 1.2; }
     m.userData.patchExtra = sh => {
       cockpitPatch(sh, kind === 'paint');
       if (kind === 'tyre') tyrePatch(sh);
