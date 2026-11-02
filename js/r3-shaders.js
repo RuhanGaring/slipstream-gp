@@ -181,7 +181,8 @@
     // the sun's shadow from the cascades; opaque surfaces also write how much sun reaches them
     // into the scene's alpha, for the ambient occlusion pass
     if (F1.R3Shadow && sh.fragmentShader.includes('#include <lights_fragment_begin>')) {
-      sh.fragmentShader = F1.R3Shadow.PARS + sh.fragmentShader.replace('#include <lights_fragment_begin>', F1.R3Shadow.lightsChunk());
+      sh.fragmentShader = F1.R3Shadow.PARS + sh.fragmentShader.replace('#include <lights_fragment_begin>', F1.R3Shadow.lightsChunk())
+        .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + F1.R3Shadow.CAR_FN);
       // the share of the surface's light that comes straight from the sun: ambient occlusion
       // can only take away the rest (sky and bounce light)
       if (opaque) sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', '#include <opaque_fragment>\n' +

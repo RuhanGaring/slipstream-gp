@@ -33,7 +33,7 @@
   const BIAS = [0.004, 0.025, 0.09], RADIUS = [1.6, 1.3, 1.1];
   const BACK = 260; // how far toward the sun the shadow cameras reach for casters (stands, trees)
 
-  const S = { lights: [], on: false, q: Q.high, uni: null };
+  const S = { lights: [], cars: [], on: false, q: Q.high, uni: null };
 
   // uniforms shared by every patched material (merged into R3S.U)
   const U = {
@@ -46,14 +46,17 @@
   };
 
   // Cost control. The near slice draws every caster in full (it holds the cockpit, the hands
-  // and the cars alongside, where shadow detail shows). The outer slices, where a car is a few
-  // shadow texels, draw each car as a one-mesh stand-in (its merged far model) instead of its
-  // twenty-odd detailed parts, cockpit and skinned arms (the swap is made in js/render3d.js,
-  // which renders the slices one at a time). The outer
-  // slices are also re-rendered less often: the middle one on even frames and the far one on
-  // every other odd frame (every fourth), so no frame pays for both; between renders each keeps sampling its
-  // last map through the matrix it was drawn with, so the shadows stay put. Any jump (a camera
-  // cut, a quality change) re-renders everything at once.
+  // and the cars alongside, where shadow detail shows), every frame. The outer two hold only
+  // the still scenery, and are re-rendered less often: the middle one on even frames and the far
+  // one on every other odd frame (every fourth), so no frame pays for both; between renders each
+  // keeps sampling its last map through the matrix it was drawn with, so the shadows stay put.
+  // Any jump (a camera cut, a quality change) re-renders everything at once.
+  // The cars cannot wait like that: at 80 m/s a car is a metre and more past a map drawn a frame
+  // earlier, and its shadow would jump back and forth under it. So each outer slice has a second
+  // map of the same size and reach for the cars alone, drawn every frame from each car's
+  // one-mesh stand-in (its merged far model; at that scale a car is a few texels, and its full
+  // detail costs more than the rest of the scene). The slices are rendered one at a time by the
+  // shadow-map wrapper in js/render3d.js, which routes each light to what it should draw.
   const EVERY = [1, 2, 4], PHASE = [0, 0, 1];
   let frame = 0, force = true;
   const lastPos = [new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0)];
@@ -65,6 +68,15 @@
       l.shadow.autoUpdate = false;
       scene.add(l, l.target);
       S.lights.push(l);
+    }
+    // the cars' maps for the outer slices; added after the cascades, so three numbers their
+    // shadows 3 and 4 (the shader below reads them by those numbers)
+    for (let i = 1; i < N; i++) {
+      const l = new THREE.DirectionalLight(0xffffff, 0);
+      l.castShadow = true;
+      l.shadow.autoUpdate = false;
+      scene.add(l, l.target);
+      S.cars.push(l);
     }
   }
 
@@ -81,11 +93,18 @@
       if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
       l.shadow.radius = RADIUS[i] * soft;
     });
-    S.radius = S.lights.map(l => l.shadow.radius);
+    S.cars.forEach((l, k) => {
+      const i = k + 1, sz = S.q.size[i] || 512;
+      l.castShadow = S.on && i < S.q.n;
+      if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
+      l.shadow.radius = RADIUS[i] * soft;
+    });
+    S.all = S.lights.concat(S.cars);
+    S.radius = S.all.map(l => l.shadow.radius);
     force = true;
   }
   // under cloud the sun is a bright patch of sky, not a point: what shadow is left is wide and soft
-  function setSoften(k) { S.lights.forEach((l, i) => { if (S.radius) l.shadow.radius = S.radius[i] * k; }); }
+  function setSoften(k) { if (S.radius) S.all.forEach((l, i) => { l.shadow.radius = S.radius[i] * k; }); }
 
   const _m = new THREE.Matrix4(), _mi = new THREE.Matrix4(), _c = new THREE.Vector3(), _o = new THREE.Vector3(), _up = new THREE.Vector3();
   // fit the slices to the camera; sunDir points toward the sun
@@ -102,40 +121,46 @@
     if (lastSun.distanceToSquared(sunDir) > 1e-6) { force = true; lastSun.copy(sunDir); }
     for (let i = 0; i < S.q.n; i++) {
       const end = ends[i];
-      // the slice reaches back over the previous one's last fifth, where they cross-fade
-      const over = i ? (ends[i - 1] - (i > 1 ? ends[i - 2] : 0)) * 0.2 : 0;
+      // the slice reaches back over the last third of the previous one, where they cross-fade: a wide
+      // band, so the step from the sharp near map to the coarser one beyond is never seen as an edge
+      const over = i ? (ends[i - 1] - (i > 1 ? ends[i - 2] : 0)) * 0.35 : 0;
       const d0 = Math.max(camera.near, start - over), d1 = end;
       U.r3Casc.value[i].set(i ? d0 : -1, i ? start : 0, end);
+      // the cars' map of an outer slice follows the camera every frame
+      if (i) { S.cars[i - 1].shadow.needsUpdate = true; fit(S.cars[i - 1], i, d0, d1, camera, tx, ty, sunDir); }
       // due this frame? (a camera that jumped further than a tenth of the slice re-renders it now)
       const l0 = S.lights[i], jump = lastPos[i].distanceToSquared(camera.position) > (end * 0.1) ** 2;
       const due = force || jump || G.__shFull || frame % EVERY[i] === PHASE[i];
       l0.shadow.needsUpdate = due;
-      if (!due) { start = end; continue; }
-      lastPos[i].copy(camera.position);
-      // bounding sphere of the slice: centred on the view axis, radius to its far corners
-      const cz = (d0 + d1) / 2;
-      const rN = Math.hypot(d0 * tx, d0 * ty, d0 - cz), rF = Math.hypot(d1 * tx, d1 * ty, d1 - cz);
-      const r = Math.max(rN, rF);
-      _c.set(0, 0, -cz).applyMatrix4(camera.matrixWorld);
-      // snap the centre to whole shadow texels in light space
-      const l = S.lights[i], size = l.shadow.mapSize.x, texel = 2 * r / size;
-      _c.applyMatrix4(_mi);
-      _c.x = Math.round(_c.x / texel) * texel; _c.y = Math.round(_c.y / texel) * texel;
-      _c.applyMatrix4(_m);
-      const cam = l.shadow.camera;
-      cam.left = cam.bottom = -r; cam.right = cam.top = r;
-      cam.near = 0.5; cam.far = r + BACK + r;
-      cam.updateProjectionMatrix();
-      l.target.position.copy(_c);
-      l.position.copy(_c).addScaledVector(sunDir, r + BACK);
-      l.updateMatrixWorld(); l.target.updateMatrixWorld();
-      // bias in metres, converted to the depth range; normal offset about half a texel
-      l.shadow.bias = -BIAS[i] / cam.far;
-      l.shadow.normalBias = texel * 0.6;
+      if (due) { lastPos[i].copy(camera.position); fit(l0, i, d0, d1, camera, tx, ty, sunDir); }
       start = end;
     }
     U.r3ShadowEnd.value = ends[S.q.n - 1];
     force = false;
+  }
+
+  // fit light l to slice i (view depth d0 to d1)
+  function fit(l, i, d0, d1, camera, tx, ty, sunDir) {
+    // bounding sphere of the slice: centred on the view axis, radius to its far corners
+    const cz = (d0 + d1) / 2;
+    const rN = Math.hypot(d0 * tx, d0 * ty, d0 - cz), rF = Math.hypot(d1 * tx, d1 * ty, d1 - cz);
+    const r = Math.max(rN, rF);
+    _c.set(0, 0, -cz).applyMatrix4(camera.matrixWorld);
+    // snap the centre to whole shadow texels in light space
+    const size = l.shadow.mapSize.x, texel = 2 * r / size;
+    _c.applyMatrix4(_mi);
+    _c.x = Math.round(_c.x / texel) * texel; _c.y = Math.round(_c.y / texel) * texel;
+    _c.applyMatrix4(_m);
+    const cam = l.shadow.camera;
+    cam.left = cam.bottom = -r; cam.right = cam.top = r;
+    cam.near = 0.5; cam.far = r + BACK + r;
+    cam.updateProjectionMatrix();
+    l.target.position.copy(_c);
+    l.position.copy(_c).addScaledVector(sunDir, r + BACK);
+    l.updateMatrixWorld(); l.target.updateMatrixWorld();
+    // bias in metres, converted to the depth range; normal offset about half a texel
+    l.shadow.bias = -BIAS[i] / cam.far;
+    l.shadow.normalBias = texel * 0.6;
   }
 
   // the directional-light part of three's lights_fragment_begin, rewritten: the cascade
@@ -160,6 +185,22 @@
     '      #endif',
     '    }',
     '    #pragma unroll_loop_end',
+    // the cars' maps of the outer slices (shadows 3 and 4), cross-faded the same way; the near
+    // slice already holds the cars, so it counts as lit here
+    '    #if NUM_DIR_LIGHT_SHADOWS > 4',
+    '    float r3C = 1.0;',
+    '    if ( r3D >= r3Casc[ 1 ].x && r3D < r3Casc[ 1 ].z ) {',
+    '      r3Sh = directionalLightShadows[ 3 ];',
+    '      r3s = r3CarShadow( directionalShadowMap[ 3 ], r3Sh.shadowMapSize, r3Sh.shadowBias, r3Sh.shadowRadius, vDirectionalShadowCoord[ 3 ] );',
+    '      r3C = mix( r3C, r3s, smoothstep( r3Casc[ 1 ].x, r3Casc[ 1 ].y, r3D ) );',
+    '    }',
+    '    if ( r3D >= r3Casc[ 2 ].x && r3D < r3Casc[ 2 ].z ) {',
+    '      r3Sh = directionalLightShadows[ 4 ];',
+    '      r3s = r3CarShadow( directionalShadowMap[ 4 ], r3Sh.shadowMapSize, r3Sh.shadowBias, r3Sh.shadowRadius, vDirectionalShadowCoord[ 4 ] );',
+    '      r3C = mix( r3C, r3s, smoothstep( r3Casc[ 2 ].x, r3Casc[ 2 ].y, r3D ) );',
+    '    }',
+    '    r3SunVis *= r3C;',
+    '    #endif',
     '    r3SunVis = mix( r3SunVis, 1.0, smoothstep( r3ShadowEnd * 0.85, r3ShadowEnd, r3D ) );',
     '  }',
     '  #endif',
@@ -184,6 +225,20 @@
     chunk = 'float r3SunVis = 1.0;\n' + src.slice(0, a) + DIR + '\n' + src.slice(b);
     return chunk;
   }
+  // A cars' map is empty except where a car stands, so most pixels need not pay for the full
+  // filter: five probes over the filter's square (its corners and centre) that find no car mean
+  // the pixel is lit. (Cleared texels unpack to depth 1; a car is never near the far plane.)
+  const CAR_FN = [
+    '#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 4',
+    'float r3CarShadow( sampler2D m, vec2 size, float bias, float radius, vec4 sc ) {',
+    '  vec3 c = sc.xyz / sc.w; vec2 o = radius / size;',
+    '  float z = min( min( unpackRGBAToDepth( texture2D( m, c.xy ) ), unpackRGBAToDepth( texture2D( m, c.xy + o ) ) ),',
+    '    min( min( unpackRGBAToDepth( texture2D( m, c.xy - o ) ), unpackRGBAToDepth( texture2D( m, c.xy + vec2( o.x, -o.y ) ) ) ),',
+    '      unpackRGBAToDepth( texture2D( m, c.xy + vec2( -o.x, o.y ) ) ) ) );',
+    '  return z > 0.999 ? 1.0 : getShadow( m, size, bias, radius, sc );',
+    '}',
+    '#endif',
+  ].join('\n');
   const PARS = 'uniform vec3 r3Casc[3]; uniform float r3ShadowEnd; uniform float r3SunA;\n';
 
   // ---------- sky occlusion under the cars ----------
@@ -265,6 +320,6 @@
   }
 
   // shadow-casting lights in use; their count is baked into every lit shader
-  function casters() { return S.on ? S.q.n : 0; }
-  F1.R3Shadow = { setSoften, casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
+  function casters() { return S.on ? S.q.n + (S.q.n > 1 ? S.q.n - 1 : 0) : 0; }
+  F1.R3Shadow = { CAR_FN, setSoften, casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
 })(typeof window !== 'undefined' ? window : globalThis);
