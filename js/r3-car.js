@@ -543,9 +543,11 @@
   // pointing out from the axle is tread. The noise is sampled on circles round the axle (3D noise
   // at (cos, sin) of the angle), so it closes on itself with no seam.
   function tyrePatch(sh) {
-    sh.vertexShader = 'varying vec3 vTyP; varying vec3 vTyN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position; vTyN = normal;');
+    // the tread's true normal (straight out from the axle) in view space: the model's tread is a
+    // ring of flat facets, and on glossy rubber each facet would reflect the sky as its own band
+    sh.vertexShader = 'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position; vTyN = normal; vTyRad = normalMatrix * normalize(vec3(position.xy, 0.0) + vec3(1e-5));');
     sh.fragmentShader = [
-      'varying vec3 vTyP; varying vec3 vTyN;',
+      'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad;',
       'float tyH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }',
       'float tyN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
       '  return mix(mix(mix(tyH(i), tyH(i + vec3(1, 0, 0)), f.x), mix(tyH(i + vec3(0, 1, 0)), tyH(i + vec3(1, 1, 0)), f.x), f.y),',
@@ -568,7 +570,8 @@
         '  vec3 tyTr = vec3(0.036, 0.035, 0.034) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick);',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, mix(tySw, tyTr, tyTread), tyRub);',
       ].join('\n'))
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyTread), tyRub);');
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyTread), tyRub);')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 tyRn = normalize(vTyRad); tyRn *= sign(dot(tyRn, normal) + 1e-4); normal = normalize(mix(normal, tyRn, smoothstep(0.35, 0.95, tyTread))); }');
   }
   function carMat(o, C, hue) {
     const T = i => (i >= 0 ? C.tex[i] : null), kind = surface(o.n);
