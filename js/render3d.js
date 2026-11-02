@@ -901,6 +901,115 @@
       add(p.geo(), M.pitlane);
     }
 
+    // Tyre marks laid on the road over a race weekend, beyond the rubbered line the asphalt
+    // shader paints: black lock-up streaks into the braking zones (sometimes one wheel only),
+    // wheelspin snakes out of the slow corners and off the grid, the odd spin's curving arc,
+    // short smudges, and long faint pairs wandering across the whole width, where cars ran
+    // off line, followed, defended. Each tyre is a soft-edged strip (fading out at its sides
+    // and ends, broken up along its length) a few millimetres over the asphalt; all of them are
+    // one mesh, one draw call.
+    {
+      const r = U.rng((tr.def.seed || 7) * 977 + 13), mk = { p: [], c: [], a: [], ix: [] };
+      const look = Math.round(140 / tr.ds), kapAhead = new Float32Array(N), kapBehind = new Float32Array(N);
+      for (let k = 0; k < N; k++) {
+        let a1 = 0, b1 = 0;
+        for (let q = 0; q <= look; q++) { a1 = Math.max(a1, Math.abs(tr.kap[(k + q) % N])); b1 = Math.max(b1, Math.abs(tr.kap[(k - q + N) % N])); }
+        kapAhead[k] = a1; kapBehind[k] = b1;
+      }
+      const lineAt = k => (tr.line ? tr.line.off[k] : 0);
+      const hwm = hw + 1.5;
+      // one tyre's strip along a path given as (s, d) at t in 0..1, with an alpha profile
+      const strip = (s0, len, dOf, w, alphaOf, step) => {
+        // a point every 0.45 m on a short mark, up to every 2.2 m on the long gentle ones
+        const n = Math.max(2, Math.ceil(len / (step || U.clamp(len / 22, 0.5, 3)))), base = mk.p.length / 3;
+        for (let q = 0; q <= n; q++) {
+          const t = q / n, sq = s0 + t * len, d = U.clamp(dOf(t), -hwm, hwm), k = Math.round(((sq % tr.L) + tr.L) % tr.L / tr.ds) % N;
+          const al = U.clamp(alphaOf(t), 0, 1);
+          // two points across; the shader softens the edges (crisp middle, a soft rim)
+          for (const sd of [-1, 1]) {
+            const [x, z] = Tracks.pointAt(tr, sq, d + sd * w / 2);
+            mk.p.push(x, Tracks.surfZ(tr, k, d + sd * w / 2) + 0.014, z); mk.c.push(255, 255, 255, Math.round(al * 255)); mk.a.push(sd);
+          }
+          if (q) { const a0 = base + (q - 1) * 2, b0 = base + q * 2; mk.ix.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0); }
+        }
+      };
+      const fade = (t, a, b) => U.smooth(t / a) * U.smooth((1 - t) / b);
+      const brk = (seed, f) => t => 0.55 + 0.45 * Math.sin(t * f + seed) * Math.sin(t * f * 2.3 + seed * 1.7);
+      const pair = (s0, len, dOf, w, alphaOf, gap = 1.6, only = 0, step = 0) => {
+        for (const sg of only ? [only] : [-1, 1]) strip(s0, len, t => dOf(t) + sg * gap / 2, w, alphaOf, step);
+      };
+      // where marks gather: mostly the corners (by how sharply the road bends nearby), some anywhere
+      const cw = new Float32Array(N); let cs = 0;
+      for (let k = 0; k < N; k++) { cs += 0.12 + Math.min(1, (kapAhead[k] + kapBehind[k]) * 30); cw[k] = cs; }
+      const pickK = () => { const v = r() * cs; let lo = 0, hi = N - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (cw[m] < v) lo = m + 1; else hi = m; } return lo; };
+      const one = () => (r() < 0.5 ? -1 : 1);
+      const count = Math.round(tr.L / 3.2);
+      for (let m = 0; m < count; m++) {
+        const kind = r(), ph = r() * 50;
+        if (kind < 0.5) {
+          // sweeping lines through the corners, crossing each other and the whole road: a car
+          // off the line, sliding, catching it (thin and crisp, one tyre or a pair)
+          const k = pickK(), len = 18 + r() * 75, d0 = lineAt(k) + (r() * 2 - 1) * hw * 0.9, cross = (r() * 2 - 1) * hw * 1.3;
+          const A1 = r() * 2.2, f1 = 0.3 + r() * 1.2, a0 = 0.22 + r() * 0.45, w = 0.14 + r() * 0.1, b = brk(ph, 25 + r() * 40);
+          pair(k * tr.ds - len * r() * 0.6, len, t => d0 + cross * t * t * (3 - 2 * t) + A1 * Math.sin(t * f1 * 6.283 + ph), w, t => a0 * fade(t, 0.12, 0.2) * b(t), 1.55, r() < 0.55 ? one() : 0);
+        } else if (kind < 0.62) {
+          // spins: tight arcs scrubbed sideways, often out over the kerb
+          const k = pickK(), len = 8 + r() * 22, d0 = lineAt(k) + (r() * 2 - 1) * hw * 0.7, sweep = one() * (4 + r() * 7), a0 = 0.35 + r() * 0.35;
+          pair(k * tr.ds, len, t => d0 + sweep * Math.pow(t, 1.6 + r() * 0.0), 0.16 + r() * 0.12, t => a0 * fade(t, 0.08, 0.2), 1.2 + r() * 0.6, r() < 0.4 ? one() : 0);
+        } else if (kind < 0.74) {
+          // lock-ups: into a braking zone (where a sharp bend lies ahead), straight and black
+          let k = Math.floor(r() * N); for (let q = 0; q < 40 && kapAhead[k] < 0.012; q++) k = Math.floor(r() * N);
+          const len = 8 + r() * 30, d0 = lineAt(k) + (r() - 0.5) * 4, drift = (r() - 0.5) * 1.6, a0 = 0.32 + r() * 0.3;
+          pair(k * tr.ds, len, t => d0 + drift * t * t, 0.3, t => a0 * fade(t, 0.06, 0.35) * (0.8 + 0.2 * brk(ph, 60)(t)), 1.6, r() < 0.35 ? one() : 0);
+        } else if (kind < 0.84) {
+          // wheelspin: out of a slow corner (a sharp bend just behind), snaking, darkest at the start
+          let k = Math.floor(r() * N); for (let q = 0; q < 40 && kapBehind[k] < 0.014; q++) k = Math.floor(r() * N);
+          const len = 14 + r() * 40, d0 = lineAt(k) + (r() - 0.5) * 5, wav = 0.2 + r() * 0.5, per = 4 + r() * 5, a0 = 0.28 + r() * 0.3;
+          pair(k * tr.ds, len, t => d0 + Math.sin(t * len / per * 6.283 + ph) * wav * (1 - t), 0.3, t => a0 * U.smooth(t / 0.04) * Math.pow(1 - t, 1.3));
+        } else if (kind < 0.95) {
+          // long faint pairs wandering anywhere on the lap
+          const k0 = Math.floor(r() * N), len = 60 + r() * 220, d0 = lineAt(k0) + (r() + r() + r() - 1.5) * hw * 0.8, A1 = 0.6 + r() * 2.2, f1 = 0.6 + r() * 1.8, drift = (r() - 0.5) * hw;
+          const a0 = 0.07 + r() * 0.14, b = brk(ph, 30 + r() * 30);
+          pair(k0 * tr.ds, len, t => d0 + drift * t + A1 * Math.sin(t * f1 * 6.283 + ph), 0.26, t => a0 * fade(t, 0.15, 0.2) * b(t));
+        } else {
+          // short smudges anywhere
+          const len = 2 + r() * 7, d0 = (r() * 2 - 1) * hwm, a0 = 0.12 + r() * 0.22;
+          pair(Math.floor(r() * N) * tr.ds, len, t => d0, 0.3, t => a0 * fade(t, 0.25, 0.25), 1.6, r() < 0.5 ? one() : 0);
+        }
+      }
+      // and hundreds more scattered over the whole lap, straights included, anywhere across the
+      // road: short curving single lines and pairs, faint to dark (each only 6 to 12 points)
+      const scatter = Math.round(tr.L / 7);
+      for (let m = 0; m < scatter; m++) {
+        const k = Math.floor(r() * N), len = 3 + r() * r() * 30, d0 = (r() * 2 - 1) * hw, bend = (r() * 2 - 1) * (0.3 + r() * 3);
+        const a0 = 0.12 + r() * r() * 0.5, ph = r() * 6.283;
+        pair(k * tr.ds, len, t => d0 + bend * t * t + Math.sin(t * 3 + ph) * 0.2, 0.13 + r() * 0.12, t => a0 * fade(t, 0.15, 0.25), 1.5, r() < 0.7 ? one() : 0, Math.max(0.6, len / 9));
+      }
+      // off the grid: every slot leaves two dark wheelspin streaks
+      if (tr.grid && tr.grid.length) for (const gs of tr.grid) {
+        const sg = gs.s != null ? gs.s : gs[0], dg = gs.d != null ? gs.d : gs[1];
+        if (sg == null || dg == null) continue;
+        const len = 12 + r() * 16, a0 = 0.35 + r() * 0.2, ph = r() * 9;
+        pair(sg + 2, len, t => dg + Math.sin(t * 5 + ph) * 0.15 * (1 - t), 0.4, t => a0 * U.smooth(t / 0.03) * Math.pow(1 - t, 1.6));
+      }
+      const g = new THREE.BufferGeometry();
+      const nv = mk.p.length / 3, nrm = new Float32Array(nv * 3); for (let k = 0; k < nv; k++) nrm[k * 3 + 1] = 1;
+      g.setAttribute('position', new THREE.Float32BufferAttribute(mk.p, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(mk.c), 4, true)); // a byte a channel
+      g.setAttribute('acr', new THREE.BufferAttribute(new Int8Array(mk.a), 1));
+      g.setIndex(nv > 65535 ? new THREE.BufferAttribute(new Uint32Array(mk.ix), 1) : new THREE.BufferAttribute(new Uint16Array(mk.ix), 1)); g.computeBoundingSphere();
+      if (!M.tyreMarks) {
+        M.tyreMarks = std({ color: '#070708', roughness: 0.85, metalness: 0, envMapIntensity: 0.25, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        M.tyreMarks.onBeforeCompile = sh => {
+          sh.vertexShader = 'attribute float acr; varying float vAcr;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vAcr = acr;');
+          sh.fragmentShader = 'varying float vAcr;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= 1.0 - pow(abs(vAcr), 6.0);');
+        };
+        M.tyreMarks.customProgramCacheKey = () => 'tyreMarks';
+      }
+      add(g, M.tyreMarks, { order: 1 });
+    }
+
     // painted lines: edges, pit lane, start, grid, DRS, pit boxes
     {
       const pa = new Acc(true), white = col('#f2f3f4');
