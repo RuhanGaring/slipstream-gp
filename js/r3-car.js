@@ -590,7 +590,8 @@
     m.name = o.n;
     const a = (hue * Math.PI) / 180, turn = hue && p.map;
     m.userData.patchKey = (kind === 'tyre' || kind === 'rim' || kind === 'disc' ? 'w' + kind : 'ck' + (kind === 'paint' ? 'p' : '')) + (turn ? '_hue' + hue : '');
-    if (kind === 'tyre') { m.sheen = 0.5; m.sheenRoughness = 0.45; m.sheenColor = new THREE.Color(0x4a4846); m.envMapIntensity = 1.2; }
+    // (no sheen: on rubber it lit every tyre's silhouette as a pale rim, against its own shadow most of all)
+    if (kind === 'tyre') m.envMapIntensity = 1.2;
     m.userData.patchExtra = sh => {
       // (not on the wheels: the cockpit's region is in the car's frame, but a wheel's mesh sits in its
       // own, where the region's hard edges fell across the tyre as a line)

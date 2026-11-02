@@ -81,8 +81,11 @@
       if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
       l.shadow.radius = RADIUS[i] * soft;
     });
+    S.radius = S.lights.map(l => l.shadow.radius);
     force = true;
   }
+  // under cloud the sun is a bright patch of sky, not a point: what shadow is left is wide and soft
+  function setSoften(k) { S.lights.forEach((l, i) => { if (S.radius) l.shadow.radius = S.radius[i] * k; }); }
 
   const _m = new THREE.Matrix4(), _mi = new THREE.Matrix4(), _c = new THREE.Vector3(), _o = new THREE.Vector3(), _up = new THREE.Vector3();
   // fit the slices to the camera; sunDir points toward the sun
@@ -263,5 +266,5 @@
 
   // shadow-casting lights in use; their count is baked into every lit shader
   function casters() { return S.on ? S.q.n : 0; }
-  F1.R3Shadow = { casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
+  F1.R3Shadow = { setSoften, casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -218,10 +218,26 @@
 
   // ---------- composite ----------
   const compMat = mk([
-    'varying vec2 vUv;',
+    'varying vec2 vUv;', DEPTH,
     'uniform sampler2D tScene; uniform sampler2D tAO; uniform sampler2D tBloom; uniform sampler2D tShaft; uniform sampler2D tSun;',
     'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain;',
+    // The AO target is half size. Read plainly (bilinear), along a silhouette it mixes the near
+    // surface's value into the far one's: the road beside a car took the car's own (unoccluded)
+    // value, a pale outline round the car against its shadow. Each of the four half-size texels
+    // round the pixel is weighted by how near its depth is to the pixel's own.
+    'uniform vec2 uAOSize; uniform float uSunK;',
+    'vec2 aoUp(vec2 uv) {',
+    '  vec2 g = uv * uAOSize - 0.5, b = floor(g), f = g - b; float w0 = viewW(uv), ws = 0.0; vec2 s = vec2(0.0);',
+    '  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {',
+    '    vec2 t = (b + vec2(float(i), float(j)) + 0.5) / uAOSize;',
+    '    float bw = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);',
+    '    float dw = abs(viewW(t) - w0) / (w0 * 0.02 + 0.03);',
+    '    float k = bw * exp(-dw * dw) + 1e-4 * bw;',
+    '    s += texture2D(tAO, t).rg * k; ws += k;',
+    '  }',
+    '  return s / ws;',
+    '}',
     'const mat3 SRGB_2020 = mat3(vec3(0.6274, 0.0691, 0.0164), vec3(0.3293, 0.9195, 0.0880), vec3(0.0433, 0.0113, 0.8956));',
     'const mat3 R2020_SRGB = mat3(vec3(1.6605, -0.1246, -0.0182), vec3(-0.5876, 1.1329, -0.1006), vec3(-0.0728, -0.0083, 1.1187));',
     'vec3 agxCurve(vec3 x){ vec3 x2 = x * x, x4 = x2 * x2; return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232; }',
@@ -263,7 +279,7 @@
     // faint in bright sun
     // (never more than 80% of the sky light: a crease still sees some bounce light)
     // only the light that is not direct sun is occluded: the screen-space term (r, limited) and the cars' sky occlusion (g, full depth)
-    '  { float dirS = clamp(texture2D(tSun, vUv).a, 0.0, 1.0); vec2 o = texture2D(tAO, vUv).rg; c *= dirS + (1.0 - dirS) * mix(1.0, max(o.r, 0.2), uAO) * o.g; }',
+    '  { float dirS = clamp(texture2D(tSun, vUv).a, 0.0, 1.0) * uSunK; vec2 o = aoUp(vUv); c *= dirS + (1.0 - dirS) * mix(1.0, max(o.r, 0.2), uAO) * o.g; }',
     '  c += texture2D(tBloom, vUv).rgb * uBloom;',
     '  c += texture2D(tShaft, vUv).rgb * uShaftCol * uShaft;',
     '  c *= uExposure;',
@@ -276,7 +292,8 @@
     '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a);', // debug views (window.__postDbg)
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
-    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 },
+    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 },
+    tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) },
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
   });
@@ -396,6 +413,7 @@
     }
     // 6. composite to the canvas
     const u = compMat.uniforms;
+    setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0;
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
@@ -420,5 +438,5 @@
   }
   // which passes this GPU could not compile (switched off), for the graphics report
   function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, brokenPasses: b }; }
-  F1.R3Post = { init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
+  F1.R3Post = { setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -580,8 +580,15 @@
     state.rainS = (state.rainS || 0) + (r - (state.rainS || 0)) * a;
     state.wetS = (state.wetS || 0) + (w - (state.wetS || 0)) * a;
     const k = state.rainS, S3 = F1.R3S.U;
-    sun.intensity = B.sunI * (1 - 0.8 * k);
-    hemi.intensity = B.hemi * (1 - 0.3 * k);
+    // Overcast: the cloud spreads the sun over the sky, so the direct light (and its hard shadow)
+    // fades with the cover and comes back as soft skylight from above; rain adds to it. Under a
+    // clear sky (cloud under about 0.45) nothing changes.
+    const L = state.look || {}, oc = U.clamp(U.smooth(((L.cloud || 0) - 0.45) / 0.3) + 0.9 * k, 0, 1);
+    sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
+    hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777');
+    hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
+    if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== oc) { F1.R3Shadow.setSoften(1 + 4 * oc); state.ocS = oc; }
+    if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(1 - 0.88 * oc);
     S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     S3.uFogDensity.value = B.fogD * (1 + 0.9 * k);
     S3.uFogCol.value.copy(B.fog).lerp(WX_GREY, 0.35 * k);
