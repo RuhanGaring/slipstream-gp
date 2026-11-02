@@ -1088,6 +1088,9 @@
     fade.classList.add('on');
     setTimeout(() => {
       Game.state = 'loading';
+      // a restart comes here straight from the race: its HUD must not show over the loading screen
+      document.getElementById('hud').classList.add('off');
+      Game.paused = false;
       startLoadScene(def.id, Game.flow.team || 0);
       const tr0 = Race.getTrack(def.id);
       const R0 = Game.raceDefaults;
