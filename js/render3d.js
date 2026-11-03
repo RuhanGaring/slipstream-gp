@@ -551,6 +551,7 @@
       envRT = pmrem.fromEquirectangular(probe);
       probe.dispose();
       state.sunDir = V(H0.sun[0], H0.sun[1], H0.sun[2]).normalize();
+      if (state.tr && state.tr.gen2 && state.tr.gen2.city) { const az = Math.atan2(state.sunDir.z, state.sunDir.x), el = 40 * Math.PI / 180; state.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)); }
       if (state.sunDir.y < 0.06) { state.sunDir.y = 0.06; state.sunDir.normalize(); }
       const e = H0.sunE, lum = e[0] * 0.2126 + e[1] * 0.7152 + e[2] * 0.0722;
       sun.color.setRGB(e[0] / lum, e[1] / lum, e[2] / lum, THREE.LinearSRGBColorSpace); sun.intensity = lum;
@@ -567,7 +568,7 @@
     // onboard pictures of a harbour circuit are high-key
     const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
     // (+1.1 EV in all: broadcast onboard pictures of a Riviera noon are high key, whites clip)
-    if (rivi) { state.exposure *= 1.25; sun.intensity *= 1.1; }
+    if (rivi) { state.exposure *= 1.35; sun.intensity *= 1.1; }
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
@@ -1211,7 +1212,7 @@
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
       if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap })); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
-      add(fen.geo(), M.fence, { cast: false });
+      add(fen.geo(), W2.town && M.fence ? (M.fenceTown || (M.fenceTown = (() => { const m = M.fence.clone(); m.color.set('#5d6166'); return m; })())) : M.fence, { cast: false });
       add(posts.geo(), M.steel, { cast: true });
     }
 
@@ -1258,7 +1259,7 @@
     tag('base');
     // grandstands
     {
-      const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true), scrim = new Batch(false);
+      const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true), scrim = new Batch(false), lattice = new Batch(false);
       const box = new THREE.BoxGeometry(1, 1, 1);
       // seating slope: local x along the track, rising away from it (+z)
       const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
@@ -1279,13 +1280,15 @@
         conc.add(box, at(mat(0, 0.7, -6.1, 0, 28, 1.4, 0.3)));
         conc.add(box, at(mat(0, 5.4, 6.4, 0, 28, 10.8, 0.4)));
         // (a town's temporary stands: scaffold ends hung with mesh scrim, not concrete)
-        (W2.town ? scrim : conc).add(side, at(mat(-14.2, 0, 0)));
-        (W2.town ? scrim : conc).add(side, at(mat(13.85, 0, 0)));
+        (W2.town ? lattice : conc).add(side, at(mat(-14.2, 0, 0)));
+        (W2.town ? lattice : conc).add(side, at(mat(13.85, 0, 0)));
+        if (W2.town) for (const sx of [-14.05, 14.05]) scrim.add(box, at(mat(sx, 2.0, 0.15, 0, 0.06, 4.0, 12.3)));
         roof.add(box, at(mat(0, 13.2, 2.0, 0, 29.5, 0.35, 10, -0.06)));
         for (const x of [-12, -4, 4, 12]) steel.add(col0, at(mat(x, 6.6, 6.2, 0, 1, 13.2, 1)));
         fascia.add(box, at(mat(0, 12.6, -3.0, 0, 29.5, 1.0, 0.25, -0.06)), col(ads[n++ % ads.length]));
       }
-      if (scrim.parts.length) add(scrim.geo(), M.scrim || (M.scrim = std({ color: '#33473e', roughness: 0.95, side: THREE.DoubleSide })), { cast: true });
+      if (scrim.parts.length) add(scrim.geo(), M.scrim || (M.scrim = std({ color: '#3f5a4c', roughness: 0.95, side: THREE.DoubleSide })), { cast: true });
+      if (lattice.parts.length) add(lattice.geo(), M.fenceTown || M.fence || M.steel, { cast: false });
       add(conc.geo(), M.standShell || (M.standShell = T.has('stand') ? pbr('stand', 1 / 6, { color: '#c4c6c8' }) : T.has('concrete') ? pbr('concrete', 4, { color: '#9da2a8' }) : std({ color: '#6d727a', roughness: 0.8 })), { cast: true }); add(crowd.geo(), M.crowd, { cast: false });
       // the roof: profiled steel sheet (the corrugation runs down the slope)
       add(roof.geo(), T.has('clad') ? (M.standRoof || (M.standRoof = pbr('clad', [6, 2], { color: '#dfe3e7' }))) : M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
