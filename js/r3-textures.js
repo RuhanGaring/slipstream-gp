@@ -124,7 +124,8 @@
     // where seats are empty. Shaded under each row so the steps read.
     const c = cv(1024, 512), g = c.getContext('2d'), r = U.rng(17);
     g.fillStyle = '#3c4148'; g.fillRect(0, 0, 1024, 512);
-    const cloth = ['#2a2d33', '#3a4250', '#f0f0ee', '#d9d6cf', '#1d2a44', '#5d6670', '#7a1e1e', '#c23a2c', '#e8c547', '#2b5fa8', '#ff7a1a', '#4a6b3a', '#8c8f94', '#151719'];
+    // (a summer crowd: mostly white, pale and faded clothes, a few team shirts)
+    const cloth = ['#f2f2ef', '#e8e4da', '#f0f0ee', '#d9d6cf', '#c9d3dc', '#aab6c2', '#2a2d33', '#3a4250', '#1d2a44', '#5d6670', '#8c8f94', '#e3d3a8', '#b5462f', '#2b5fa8', '#d6dde3', '#9a2a24'];
     const skin = ['#e3bf9e', '#c99a73', '#a5714c', '#7a4f33', '#f0d0b4'];
     for (let y = 0; y < 512; y += 24) {
       g.fillStyle = '#596370'; g.fillRect(0, y + 17, 1024, 4); // seat backs

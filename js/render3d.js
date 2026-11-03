@@ -566,13 +566,16 @@
     // a generated Riviera town under a high summer sun: whitewashed walls, pale stone, the
     // onboard pictures of a harbour circuit are high-key
     const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
-    if (rivi) { state.exposure *= 1.14; sun.intensity *= 1.25; }
+    // (+1.1 EV in all: broadcast onboard pictures of a Riviera noon are high key, whites clip)
+    if (rivi) { state.exposure *= 1.25; sun.intensity *= 1.1; }
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
-    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = (H0 ? 1 : L.env) * (rivi ? 0.72 : 1);
+    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? 1 : L.env;
+    // (the light bounced off sunlit stucco into the street's shade)
+    if (rivi) { hemi.color.set('#f2e6d2'); hemi.groundColor.set('#b8a88e'); hemi.intensity = 0.45; }
     state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
   }
 
@@ -814,7 +817,7 @@
       const pad = W2.town ? 900 : 220;
       // (a town is paved only round its streets and buildings; its gardens, the slopes between
       // and the hills above are scrub)
-      const gn = W2.town && T.has('grass') ? (MATS.ground_scrub || (MATS.ground_scrub = macro(pbr('grass', 36 / 3.2, { color: '#7a7c58' }), 110, 0.24, 0.1, false))) : null;
+      const gn = W2.town && T.has('grass') ? (MATS.ground_scrub || (MATS.ground_scrub = macro(pbr('grass', 36 / 3.2, { color: '#6e6c50' }), 110, 0.24, 0.1, false))) : null;
       if (gn) gn.userData.wetK = [0.55, 0.25];
       const fineG = grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true);
       if (gn) { townGround(fineG, W2, tr); add(fineG, [gm, gn]); } else add(fineG, gm);
@@ -1169,9 +1172,7 @@
               wallRun(acc, tr, i, j, d, -0.07, 1.05, bare ? 8 : 4.4, 1.12, 0.55);
               i = j;
             }
-            continue;
-          }
-          wallRun(style === 'park' ? conc : ad, tr, i0, i1, d, -0.07, 1.05, style === 'park' ? 8 : 14, 1.12, 0.55);
+          } else wallRun(style === 'park' ? conc : ad, tr, i0, i1, d, -0.07, 1.05, style === 'park' ? 8 : 14, 1.12, 0.55);
           wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fenceH, 1.6, 1.6, 0);
           for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 0.5; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 1.05 + (fenceH - 1.05) / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH - 1.05, 1)); }
         }
@@ -1257,7 +1258,7 @@
     tag('base');
     // grandstands
     {
-      const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true);
+      const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true), scrim = new Batch(false);
       const box = new THREE.BoxGeometry(1, 1, 1);
       // seating slope: local x along the track, rising away from it (+z)
       const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
@@ -1277,12 +1278,14 @@
         crowd.add(slope, base);
         conc.add(box, at(mat(0, 0.7, -6.1, 0, 28, 1.4, 0.3)));
         conc.add(box, at(mat(0, 5.4, 6.4, 0, 28, 10.8, 0.4)));
-        conc.add(side, at(mat(-14.2, 0, 0)));
-        conc.add(side, at(mat(13.85, 0, 0)));
+        // (a town's temporary stands: scaffold ends hung with mesh scrim, not concrete)
+        (W2.town ? scrim : conc).add(side, at(mat(-14.2, 0, 0)));
+        (W2.town ? scrim : conc).add(side, at(mat(13.85, 0, 0)));
         roof.add(box, at(mat(0, 13.2, 2.0, 0, 29.5, 0.35, 10, -0.06)));
         for (const x of [-12, -4, 4, 12]) steel.add(col0, at(mat(x, 6.6, 6.2, 0, 1, 13.2, 1)));
         fascia.add(box, at(mat(0, 12.6, -3.0, 0, 29.5, 1.0, 0.25, -0.06)), col(ads[n++ % ads.length]));
       }
+      if (scrim.parts.length) add(scrim.geo(), M.scrim || (M.scrim = std({ color: '#33473e', roughness: 0.95, side: THREE.DoubleSide })), { cast: true });
       add(conc.geo(), M.standShell || (M.standShell = T.has('stand') ? pbr('stand', 1 / 6, { color: '#c4c6c8' }) : T.has('concrete') ? pbr('concrete', 4, { color: '#9da2a8' }) : std({ color: '#6d727a', roughness: 0.8 })), { cast: true }); add(crowd.geo(), M.crowd, { cast: false });
       // the roof: profiled steel sheet (the corrugation runs down the slope)
       add(roof.geo(), T.has('clad') ? (M.standRoof || (M.standRoof = pbr('clad', [6, 2], { color: '#dfe3e7' }))) : M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
@@ -1299,7 +1302,7 @@
       // (a town's fronts carry their own colour; their tints only vary it, never darken it to brick)
       const townTints = ['#fffaf2', '#fff6ea', '#fbf4ec', '#ffffff', '#fff3e0', '#f8f1e6', '#fffbe9'];
       const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2', '#eec2a4', '#f1ddb0', '#e6b9a6', '#f3e3c8'];
-      const cityB = W2.town && T.has('city_facA') ? ['city_facA', 'city_facB', 'city_facC', 'city_facD'].filter(k => T.has(k)).map(k => [k, new Batch(true)]) : null;
+      const cityB = W2.town && T.has('city_facA') ? ['city_facA', 'city_facB', 'city_facC', 'city_facD', 'city_facE', 'city_facF'].filter(k => T.has(k)).map(k => [k, new Batch(true)]) : null;
       for (const it of W2.decor) {
         if (it.type !== 'building') continue;
         const r = U.rng(it.seed);
@@ -1316,7 +1319,7 @@
         let front = false;
         if (it.front != null) front = it.front; else tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
         // (a generated town's blocks are stucco, only its towers glass and office fronts)
-        if (kinds.length && (it.a != null ? it.tower && pick > 0.88 : pick > (front ? 0.88 : 0.45))) {
+        if (kinds.length && it.a == null && pick > (front ? 0.88 : 0.45)) {
           // modern blocks: office bands or glass, the taller ones more often glass
           const k0 = pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0;
           const [, tile, bt] = k0 === 0 && mids.length && r() < 0.7 ? mids[Math.floor(r() * mids.length)] : kinds[k0];
@@ -1329,7 +1332,7 @@
         const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
         // a generated harbour town's blocks wear its own stucco fronts (shuttered windows, two bays
         // by two floors a 6.4 m tile), the rest the venue's facade
-        const town = it.a != null && cityB ? (it.tower && cityB.length > 2 ? cityB[2] : cityB[it.seed % cityB.length]) : null, tile = town ? 6.4 : 14;
+        const town = it.a != null && cityB ? cityB[it.seed % cityB.length] : null, tile = town ? 6.4 : 14;
         for (let k = 0; k < uv.count; k++) {
           const nx = Math.abs(nor.getX(k)), nz = Math.abs(nor.getZ(k));
           const along = nx > 0.5 ? pos.getZ(k) : nz > 0.5 ? pos.getX(k) : pos.getX(k);
@@ -1348,14 +1351,15 @@
             if (L < 4) continue;
             const at = (out, y, l, hh, dd) => { const [wx, wz] = W2L(fx + sx * out, fz + sz * out); return mat(wx, gy + y, wz, ry, rot ? dd : l, hh, rot ? l : dd); };
             // shopfronts: dark glass band, a stone fascia over it and an awning on most bays
-            relief.add(ub, at(0.08, 3 + 1.6, L, 3.2, 0.2), col('#1f2428'));
+            relief.add(ub, at(0.08, 3 + 1.6, L, 3.2, 0.2), col(r() < 0.5 ? '#56636c' : '#4a5660'));
             relief.add(ub, at(0.14, 3 + 3.45, L + 0.6, 0.5, 0.3), stone);
             if (r() < 0.75) { const [wx, wz] = W2L(fx + sx * 0.75, fz + sz * 0.75); relief.add(ub, mat(wx, gy + 3 + 3.0, wz, ry, rot ? 1.3 : L * 0.8, 0.12, rot ? L * 0.8 : 1.3), col(awn[Math.floor(r() * awn.length)])); }
             if (!balc) continue;
             for (let y = 3 + 6.6; y < hgt + 1; y += 3.3) {
               relief.add(ub, at(0.45, y, L, 0.16, 0.9), stone);
+              // (a wrought-iron railing, its top rail and bottom bar, not a solid band)
               relief.add(ub, at(0.86, y + 0.95, L, 0.05, 0.05), rail);
-              relief.add(ub, at(0.86, y + 0.45, L, 0.8, 0.02), col('#4a4d52'));
+              relief.add(ub, at(0.86, y + 0.2, L, 0.04, 0.04), rail);
             }
           }
         }
@@ -1433,7 +1437,7 @@
       }
     }
     for (const it of W2.decor) if (it.type === 'building' && it.poly) { stamp(it.x, it.y, Math.max(it.w, it.h) / 2 + 3); for (const p of it.poly) stamp(p[0], p[1], 4); }
-    for (let i = 0; i < tr.N; i += 2) stamp(tr.x[i], tr.y[i], Math.max(tr.barr[0][i], tr.barr[1][i]) + 9);
+    for (let i = 0; i < tr.N; i += 2) stamp(tr.x[i], tr.y[i], Math.max(tr.barr[0][i], tr.barr[1][i], isNaN(tr.pit.off[i]) ? 0 : Math.abs(tr.pit.off[i]) + tr.pit.lane) + 9);
     for (const pl of site.piers) for (let k = 0; k < pl.length - 1; k++) for (let t = 0; t <= 1; t += 0.05) stamp(pl[k][0] + (pl[k + 1][0] - pl[k][0]) * t, pl[k][1] + (pl[k + 1][1] - pl[k][1]) * t, site.pierW / 2 + 4);
     const urban = (x, z) => { const i = Math.round((x - x0) / C), j = Math.round((z - z0) / C); return m[j * nx + i] === 1 || site.inland(x, z) < 25; };
     const a = [], b = [];
@@ -1612,41 +1616,62 @@
       }
       add(pole.geo(), M.steel || M.concrete, { cast: true }); add(head.geo(), M.dark || M.concrete, { cast: true });
     }
-    // retaining walls: where the lap is cut into the hill, the ground beside it held back by a
-    // stuccoed wall just behind the barrier, up to the level of the ground behind (a stone cap on
-    // top), as the town's own streets are walled where they cut into the slope
+    // retaining walls: where the lap is cut into the hill, the ground beside it held back just
+    // behind the barrier, in dressed stone or painted stucco with garage doors let into it; a cut
+    // deeper than 4 m is terraced, a lower wall of at most 3.6 m, a planted ledge 2.6 m deep and a
+    // second wall behind it, each capped in stone
     {
-      const wl = new Acc(), cap = new Acc(), hedge = new Batch(false), hb = new THREE.BoxGeometry(1, 1, 1), N = tr.N, step = Math.max(1, Math.round(2 / tr.ds));
+      const wl = new Acc(), stc = new Acc(), cap = new Acc(), hedge = new Batch(false), doors = new Batch(false), hb = new THREE.BoxGeometry(1, 1, 1), N = tr.N, step = Math.max(1, Math.round(2 / tr.ds));
       const tun = k => town.tunnel && k >= town.tunnel.i0 - 4 && k <= town.tunnel.i1 + 4;
+      let nextDoor = 0;
       for (const sd of [-1, 1]) {
-        let prev = null, along = 0, hPrev = 0;
+        let along = 0, hPrev = 0;
+        const prev = [null, null];
         for (let i = 0; i <= N; i += step) {
           const k = i % N; along += tr.ds * step;
           const b0 = (sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 1.4, y = tr.z[k];
           let top = -1e9;
           for (const o of [1.5, 4, 7, 10]) { const d = sd * (b0 + o); top = Math.max(top, gy(tr.x[k] + tr.nx[k] * d, tr.y[k] + tr.ny[k] * d)); }
           // (the wall's height eases along it, never stepping more than 40 cm in 2 m)
-          let H = Math.min(7, top + 0.4 - y);
-          if (prev) H = U.clamp(H, hPrev - 0.4, hPrev + 0.4);
-          if (H < 1.1 || tun(k) || site.inland(tr.x[k], tr.y[k]) < 6) { prev = null; hPrev = 0; continue; }
+          let H = Math.min(7.2, top + 0.4 - y);
+          if (prev[0]) H = U.clamp(H, hPrev - 0.4, hPrev + 0.4);
+          if (H < 1.1 || tun(k) || site.inland(tr.x[k], tr.y[k]) < 6) { prev[0] = prev[1] = null; hPrev = 0; continue; }
           hPrev = H;
-          const d = sd * b0, x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, fx = -tr.nx[k] * sd, fz = -tr.ny[k] * sd;
-          const a = wl.v(x, y - 0.3, z, fx, 0, fz, along / 3, 0), c = wl.v(x, y + H, z, fx, 0, fz, along / 3, (H + 0.3) / 3);
-          const ox = x - fx * 0.55, oz = z - fz * 0.55;
-          const c0 = cap.v(x + fx * 0.08, y + H, z + fz * 0.08, fx, 0, fz, along / 1.2, 0), c1 = cap.v(x + fx * 0.08, y + H + 0.3, z + fz * 0.08, 0, 1, 0, along / 1.2, 0.25), c2 = cap.v(ox, y + H + 0.3, oz, 0, 1, 0, along / 1.2, 0.7);
-          if (prev) {
-            if (sd > 0) { wl.t(prev[0], prev[1], a); wl.t(prev[1], c, a); } else { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); }
-            const [p0, p1, p2] = prev[2];
-            if (sd > 0) { cap.t(p0, p1, c0); cap.t(p1, c1, c0); cap.t(p1, p2, c1); cap.t(p2, c2, c1); } else { cap.t(p0, c0, p1); cap.t(p1, c0, c1); cap.t(p1, c1, p2); cap.t(p2, c1, c2); }
+          const fx = -tr.nx[k] * sd, fz = -tr.ny[k] * sd, ry = -Math.atan2(tr.ty[k], tr.tx[k]), stucco = Math.sin(along / 47 + sd * 2) > 0.25;
+          const H1 = H > 4.2 ? Math.min(3.6, H * 0.5) : H, tiers = H > 4.2 ? [[b0, -0.3, H1], [b0 + 2.6, H1, H]] : [[b0, -0.3, H]];
+          for (let t = 0; t < 2; t++) {
+            if (!tiers[t]) { prev[t] = null; continue; }
+            const [off, lo, hi] = tiers[t], d = sd * off, x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d;
+            const a = wl.v(x, y + lo, z, fx, 0, fz, along / 3, lo / 3), c = wl.v(x, y + hi, z, fx, 0, fz, along / 3, hi / 3);
+            const as = stc.v(x, y + lo, z, fx, 0, fz, along / 3, lo / 3), cs = stc.v(x, y + hi, z, fx, 0, fz, along / 3, hi / 3);
+            const ox = x - fx * 0.55, oz = z - fz * 0.55;
+            const c0 = cap.v(x + fx * 0.08, y + hi, z + fz * 0.08, fx, 0, fz, along / 1.2, 0), c1 = cap.v(x + fx * 0.08, y + hi + 0.3, z + fz * 0.08, 0, 1, 0, along / 1.2, 0.25), c2 = cap.v(ox, y + hi + 0.3, oz, 0, 1, 0, along / 1.2, 0.7);
+            const pv = prev[t];
+            if (pv) {
+              if (stucco) { if (sd > 0) { stc.t(pv[2], pv[3], as); stc.t(pv[3], cs, as); } else { stc.t(pv[2], as, pv[3]); stc.t(pv[3], as, cs); } }
+              else if (sd > 0) { wl.t(pv[0], pv[1], a); wl.t(pv[1], c, a); } else { wl.t(pv[0], a, pv[1]); wl.t(pv[1], a, c); }
+              const [p0, p1, p2] = [pv[4], pv[5], pv[6]];
+              if (sd > 0) { cap.t(p0, p1, c0); cap.t(p1, c1, c0); cap.t(p1, p2, c1); cap.t(p2, c2, c1); } else { cap.t(p0, c0, p1); cap.t(p1, c0, c1); cap.t(p1, c1, p2); cap.t(p2, c1, c2); }
+            }
+            prev[t] = [a, c, as, cs, c0, c1, c2];
+            // (the terrace: a paved ledge with a planter of oleander or rosemary along it)
+            if (t === 0 && tiers[1] && (i / step) % 2 === 0) {
+              const lx = x - fx * 1.6, lz = z - fz * 1.6;
+              hedge.add(hb, mat(lx, y + hi + 0.06, lz, ry, tr.ds * step * 2.1, 0.12, 2.1), col('#d8cfbd'));
+              if (Math.sin(along / 19 + sd) > -0.3) hedge.add(hb, mat(x - fx * 2.1, y + hi + 0.5, z - fz * 2.1, ry, tr.ds * step * 2.1, 0.8 + 0.3 * Math.sin(along / 4), 0.9), col(Math.sin(along / 31) > 0.5 ? '#5f7a34' : '#46622b'));
+            }
+            if (t === (tiers[1] ? 1 : 0)) {
+              // (a clipped hedge or a bank of oleander along the top, in stretches)
+              if ((i / step) % 3 === 0 && Math.sin(along / 37 + sd) > -0.2) hedge.add(hb, mat(ox - fx * 0.5, y + hi + 0.3 + 0.55, oz - fz * 0.5, ry, 6.2, 1.1 + 0.4 * Math.sin(along / 5), 0.9), col(Math.sin(along / 23) > 0.6 ? '#4e6a2c' : '#3f5a26'));
+            }
+            if (t === 0 && stucco && hi > 3.0 && along > nextDoor) { doors.add(hb, mat(x + fx * 0.05, y + 1.2, z + fz * 0.05, ry, 2.6, 2.5, 0.1), col(Math.sin(along) > 0 ? '#6b5d4f' : '#4f6655')); nextDoor = along + 8 + 6 * (0.5 + 0.5 * Math.sin(along * 1.7)); }
           }
-          prev = [a, c, [c0, c1, c2]];
-          // (a clipped hedge or a bank of oleander along the top, in stretches)
-          if ((i / step) % 3 === 0 && Math.sin(along / 37 + sd) > -0.2) hedge.add(hb, mat(ox - fx * 0.5, y + H + 0.3 + 0.55, oz - fz * 0.5, -Math.atan2(tr.ty[k], tr.tx[k]), 6.2, 1.1 + 0.4 * Math.sin(along / 5), 0.9), col(Math.sin(along / 23) > 0.6 ? '#4e6a2c' : '#3f5a26'));
         }
       }
       add(wl.geo(), M.retWall || (M.retWall = std({ map: ashlar(), roughness: 0.9, normalMap: T.has('concrete_n') ? T.photo('concrete_n', 1, false) : null })), { cast: true });
+      add(stc.geo(), M.retStucco || (M.retStucco = T.has('city_terrace') ? pbr('city_terrace', 1, { color: '#f3e3c4' }) : M.concrete), { cast: true });
       add(cap.geo(), M.concrete, { cast: true });
-      add(hedge.geo(), M.vcol, { cast: true });
+      add(hedge.geo(), M.vcol, { cast: true }); add(doors.geo(), M.vcol, { cast: true });
     }
     return water;
   }
@@ -2827,6 +2852,8 @@
         exposure, dt: o.dt || 0, sunDir: state.sunDir, sunCol: sun.color, shaftK: state.look && state.look.shaftK != null ? state.look.shaftK : 1,
         motionNear: ['tv', 'load', 'orbit', 'free', 'top', 'map', 'heli', 'blimp'].includes(mode) ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' || mode === 'nose' || mode === 'side' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
+        // (a Riviera town in summer is shot hard: the ACES curve keeps its whites white)
+        tone: state.tr && state.tr.gen2 && state.tr.gen2.city ? 'aces' : null,
       });
     } else {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;

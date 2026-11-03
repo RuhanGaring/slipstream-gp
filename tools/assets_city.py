@@ -41,6 +41,8 @@ STYLES = [
     ('B', (238, 206, 150), (120, 82, 52), None),       # ochre, brown shutters
     ('C', (244, 242, 236), None, 'slab'),              # white modern block, continuous balconies
     ('D', (240, 196, 176), (214, 209, 200), 'iron'),   # salmon pink, light grey shutters
+    ('E', (242, 226, 168), (64, 98, 70), 'iron'),      # pale yellow, green shutters
+    ('F', (236, 232, 222), (70, 96, 128), None),       # off-white, blue-grey shutters
 ]
 
 def facade(style):

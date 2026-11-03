@@ -288,7 +288,8 @@
       for (let q = -10; q < 20; q++) k += tr.kap[(i0 + q + tr.N) % tr.N];
       stands.push({ s: z.s1 - 30, len: 90, side: k > 0 ? -1 : 1 });
     }
-    for (const st of stands.slice(0, 10)) {
+    // (a town has room for a few temporary stands only: the start, and the three slowest corners)
+    for (const st of W.town || tr.def.style2 === 'city' ? stands.slice(0, 1).concat(stands.slice(1).sort((a, b) => a.s - b.s).filter((_, k) => k % 2 === 0).slice(0, 3)) : stands.slice(0, 10)) {
       for (let s = st.s - st.len / 2; s < st.s + st.len / 2; s += 30) {
         const i = Math.floor(((s % tr.L) + tr.L) % tr.L / tr.ds) % tr.N;
         const side = st.side > 0 ? 1 : 0;

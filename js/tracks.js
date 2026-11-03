@@ -252,7 +252,7 @@
     const kerbL = new Uint8Array(N), kerbR = new Uint8Array(N);
     {
       const corner = new Uint8Array(N);
-      for (let i = 0; i < N; i++) if (Math.abs(kap[i]) > (def.gen2 && def.style2 === 'city' ? 1 / 120 : 1 / 300)) corner[i] = 1;
+      for (let i = 0; i < N; i++) if (Math.abs(kap[i]) > (def.gen2 && def.style2 === 'city' ? 1 / 70 : 1 / 300)) corner[i] = 1;
       const pre = Math.round(10 / ds), post = Math.round(22 / ds);
       for (let i = 0; i < N; i++) if (corner[i]) {
         const inside = kap[i] > 0 ? 1 : -1; // right-hand corner: inside is the right
