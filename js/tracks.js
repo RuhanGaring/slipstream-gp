@@ -212,6 +212,8 @@
   const SURF = F1.SURF = { ASPHALT: 0, KERB: 1, TARMAC: 2, GRASS: 3, GRAVEL: 4, PIT: 5, WALL: 6 };
 
   function build(def) {
+    // a finished elevation-aware circuit comes from its generator, profile, ground and town
+    if (def.gen2 && def.gen2.cand != null && F1.TrackGen2) return F1.TrackGen2.trackById(def.id);
     const tt = fillet(def.v);
     const sm = smoothClosed(tt.pts, def.style === 'street' ? 3 : 5, 0.5);
     let { out: P, L } = resample(sm, DS);
@@ -549,6 +551,7 @@
   }
   // ground height anywhere: the road surface near the circuit, blended out to the terrain
   function groundAt(tr, x, y) {
+    if (tr.H2) return tr.H2(x, y); // an elevation-aware circuit's own cut-and-filled ground
     let best = -1, bd = 1e18;
     tr.hash.near(x, y, 160, i => { const dd = (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2; if (dd < bd) { bd = dd; best = i; } });
     const Ht = tr.H(x, y);
@@ -632,6 +635,8 @@
     if (d) return d;
     const m = /^gen-(\d+)$/.exec(id || '');
     if (m && F1.TrackGen) { const g = F1.TrackGen.make(+m[1]); GEN.set(g.id, g); return g; }
+    // the elevation-aware generator (js/trackgen2.js): gen2-<style>-<seed>-<candidate>
+    if (/^gen2-/.test(id || '') && F1.TrackGen2) return F1.TrackGen2.defById(id);
     return null;
   }
   // the scenery and sky set a circuit borrows (generated circuits reuse a venue's)

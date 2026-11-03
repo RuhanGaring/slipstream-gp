@@ -247,6 +247,12 @@
   // ground stands above it on land
   function waterMesh(res, box) {
     const tr = res.tr, F = 12000;
+    if (res.style === 'city' && !res.site.coastLine) {
+      // a generated town (its ground runs down under the sea): one sheet at sea level
+      const g = new THREE.PlaneGeometry(F, F); g.rotateX(-Math.PI / 2); g.translate((box.x0 + box.x1) / 2, 0.15, (box.y0 + box.y1) / 2);
+      scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: '#1f5873', roughness: 0.15 })));
+      return;
+    }
     if (res.style === 'city') {
       // the sea: from the coastline (carried on past its ends) out to the horizon, so none shows
       // inland behind the mountains
@@ -278,7 +284,7 @@
   // the harbour's yachts: moored stern-on along the quays and the breakwaters, and palms along
   // the promenade (instanced, one draw each)
   function harbourLife(res) {
-    if (res.style !== 'city') return;
+    if (res.style !== 'city' || !res.site.harbour) return;   // (a generated town's harbour is the game's to draw)
     const tr = res.tr, site = res.site, rnd = U.rng(res.seed * 31 + 7);
     const boats = [];
     const moor = (x, y, dx, dy) => { // (dx, dy): pointing out from the quay

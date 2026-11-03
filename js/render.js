@@ -243,8 +243,10 @@
     W.bounds = { x0: mnx - pad, y0: mny - pad, x1: mxx + pad, y1: mxy + pad };
 
     W.solid = [];
+    // a generated harbour town (js/trackgen2.js) brings its own coastline, streets and buildings
+    const town = tr.gen2 && tr.gen2.city ? tr.gen2 : null;
     // harbour for the street circuit: water north of the main straight
-    if (th.city) {
+    if (th.city && !town) {
       W.water = { y: Math.min(...Array.from(tr.y)) - 34 };
     }
     // garages and pit building behind the pit lane
@@ -299,7 +301,8 @@
     }
     // trees / palms / city blocks
     const area = (W.bounds.x1 - W.bounds.x0) * (W.bounds.y1 - W.bounds.y0);
-    if (th.city) {
+    if (town) townScenery(W, town, rnd);
+    else if (th.city) {
       const cell = 34;
       for (let gx = W.bounds.x0; gx < W.bounds.x1; gx += cell) for (let gy = W.bounds.y0; gy < W.bounds.y1; gy += cell) {
         if (W.water && gy < W.water.y) continue;
@@ -386,6 +389,93 @@
           if (!clearance(tr, x, y, 50, W)) continue;
           addDecor(W, { type: 'lot', x, y, w: 60 + rnd() * 50, h: 40 + rnd() * 30, seed: Math.floor(rnd() * 1e6), r: 70 });
         }
+      }
+    }
+  }
+
+  // A generated town: its buildings (turned to their streets), trees along the pavements, palms
+  // on the seafront and quays, yachts at the marina's berths and along the outer quays. The sea,
+  // the streets, the quays and the tunnel are the 3D renderer's (render3d buildTown).
+  function townScenery(W, town, rnd) {
+    const tr = W.tr, site = town.site;
+    W.town = town;
+    const roofs = ['#c9a27a', '#b9805a', '#d8cfc2', '#a7a39b', '#c4b59f', '#9c6b4e', '#e3ddd2', '#b4775a'];
+    const bgrid = new Map(), bk = (x, y) => Math.floor(x / 40) + ',' + Math.floor(y / 40);
+    // (only those over the detailed ground the 3D view lays round the circuit)
+    const B = W.bounds, far = 540;
+    for (const b of town.city.buildings) {
+      if (b.c[0] < B.x0 - far || b.c[0] > B.x1 + far || b.c[1] < B.y0 - far || b.c[1] > B.y1 + far) continue;
+      const p = b.poly, w = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), d = Math.hypot(p[2][0] - p[1][0], p[2][1] - p[1][1]);
+      let front = false;
+      tr.hash.near(b.c[0], b.c[1], 40 + b.rad, () => { front = true; });
+      const it = { type: 'building', x: b.c[0], y: b.c[1], w, h: d, a: Math.atan2(p[1][1] - p[0][1], p[1][0] - p[0][0]), hgt: b.h, col: roofs[Math.floor(rnd() * roofs.length)], seed: Math.floor(rnd() * 1e6), r: b.rad, front, tower: b.tower, poly: p };
+      addDecor(W, it);
+      const k = bk(it.x, it.y); if (!bgrid.has(k)) bgrid.set(k, []); bgrid.get(k).push(it);
+    }
+    const inBuilding = (x, y, m) => {
+      const k0 = Math.floor(x / 40), k1 = Math.floor(y / 40);
+      for (let a = -1; a <= 1; a++) for (let c = -1; c <= 1; c++) for (const it of bgrid.get((k0 + a) + ',' + (k1 + c)) || []) {
+        const ca = Math.cos(it.a), sa = Math.sin(it.a), dx = x - it.x, dy = y - it.y;
+        if (Math.abs(dx * ca + dy * sa) < it.w / 2 + m && Math.abs(-dx * sa + dy * ca) < it.h / 2 + m) return true;
+      }
+      return false;
+    };
+    // street trees on the pavements; palms within a block of the shore
+    for (const rd of site.roads) {
+      for (let k = 0; k < rd.pts.length - 1; k++) {
+        const a = rd.pts[k], b = rd.pts[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (l < 0.5) continue;
+        const ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l;
+        for (let t = rnd() * 12; t < l; t += 10 + rnd() * 8) for (const sd of [-1, 1]) {
+          if (rnd() < 0.35) continue;
+          const o = rd.w / 2 + 1.6, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
+          const u = site.inland(x, y);
+          if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2)) continue;
+          if (u < 70) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
+          else addDecor(W, { type: 'tree', x, y, r: 2.8 + rnd() * 2.2, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
+        }
+      }
+    }
+    // gardens and scrub on the unbuilt ground (ravine walls, parks): umbrella pines and broadleaf
+    // trees, kept off the streets and the buildings
+    {
+      const rg = new Map(), rk = (x, y) => Math.floor(x / 20) + ',' + Math.floor(y / 20);
+      for (const rd of site.roads) for (let k = 0; k < rd.pts.length - 1; k++) {
+        const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]);
+        for (let t = 0; t < l; t += 4) { const x = a[0] + (c[0] - a[0]) * t / l, y = a[1] + (c[1] - a[1]) * t / l, kk = rk(x, y); if (!rg.has(kk)) rg.set(kk, []); rg.get(kk).push([x, y, rd.w / 2 + 3]); }
+      }
+      const onRoad = (x, y) => { const i0 = Math.floor(x / 20), j0 = Math.floor(y / 20); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of rg.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], y - q[1]) < q[2]) return true; return false; };
+      const B = W.bounds;
+      for (let y = B.y0 - 520; y < B.y1 + 520; y += 9) for (let x = B.x0 - 520; x < B.x1 + 520; x += 9) {
+        const px = x + (rnd() - 0.5) * 7, py = y + (rnd() - 0.5) * 7;
+        if (site.inland(px, py) < 8) continue;
+        const e = 3, g = Math.hypot(site.H(px + e, py) - site.H(px - e, py), site.H(px, py + e) - site.H(px, py - e)) / (2 * e);
+        if (!(g > 0.35 || (site.park && site.park(px, py)))) continue;
+        if (rnd() < 0.4 || inBuilding(px, py, 2) || onRoad(px, py) || !clearance(tr, px, py, 3, W)) continue;
+        addDecor(W, { type: 'tree', x: px, y: py, r: 3 + rnd() * 2.8, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
+      }
+    }
+    // yachts: at the pontoons' berths, and the big ones along the breakwaters
+    for (const f of site.fingers || []) {
+      if (rnd() < 0.15) continue;
+      const [a, b] = f, l = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l;
+      const L = 8 + rnd() * 10 + (rnd() < 0.15 ? 10 : 0), o = 2.2 + L * 0.16, sd = rnd() < 0.5 ? 1 : -1;
+      const x = a[0] + ux * (L * 0.5 + 0.5) - uy * sd * o, y = a[1] + uy * (L * 0.5 + 0.5) + ux * sd * o;
+      W.boats = W.boats || [];
+      W.boats.push({ x, y, h: Math.atan2(uy, ux) + (rnd() < 0.5 ? Math.PI : 0), l: L, col: rnd() < 0.75 ? '#f4f5f2' : rnd() < 0.5 ? '#e8e1cf' : '#1d2a3a' });
+    }
+    for (const pl of site.piers) for (let k = 0; k < pl.length - 1; k++) {
+      const a = pl[k], b = pl[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l;
+      // on the sheltered side: the side facing the basin's middle
+      for (let t = 20; t < l - 20; t += 0) {
+        const L = 25 + rnd() * 45;
+        for (const sd of [-1, 1]) {
+          const o = site.pierW / 2 + 0.35 * L / 2.6 + 2, x = a[0] + ux * (t + L / 2) - uy * sd * o, y = a[1] + uy * (t + L / 2) + ux * sd * o;
+          if (site.inland(x, y) > -6) continue;
+          W.boats = W.boats || [];
+          if (rnd() < 0.55) W.boats.push({ x, y, h: Math.atan2(uy, ux), l: L, col: rnd() < 0.8 ? '#f6f7f5' : '#20262e', big: true });
+        }
+        t += L + 6 + rnd() * 20;
       }
     }
   }

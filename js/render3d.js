@@ -699,7 +699,7 @@
     {
       let gm;
       if (T.has('grass')) {
-        const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);
+        const key = style === 'park' || W2.town ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);
         gm = macro(pbr(key, rep, { color: style === 'modern' ? '#f3dcc0' : '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
         // desert sand: the photo drawn without a visible repeat, with relief from its own grains
         if (style === 'modern') F1.R3S.noTile(gm, 1.4);
@@ -793,8 +793,8 @@
         }
         return g;
       };
-      const pad = 220;
-      add(grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, 7, true), gm);
+      const pad = W2.town ? 560 : 220;
+      add(grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true), gm);
       turf = turfMap(hgrid, tr);
       const size = span + 9000;
       add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gm);
@@ -825,6 +825,8 @@
       }
       add(hull.geo(), M.vcol, { cast: true }); add(cabin.geo(), M.vcol, { cast: true }); add(mast.geo(), M.white);
     }
+
+    if (W2.town) water = buildTown(root, tr, W2, add, M);
 
     // run-off: gravel traps and tarmac, per side
     {
@@ -1251,20 +1253,25 @@
       for (const it of W2.decor) {
         if (it.type !== 'building') continue;
         const r = U.rng(it.seed);
-        const hgt = 10 + r() * 26 + (r() < 0.12 ? 25 : 0);
+        const hgt = it.hgt || 10 + r() * 26 + (r() < 0.12 ? 25 : 0);
+        const ry = -(it.a || 0), ca = Math.cos(it.a || 0), sa = Math.sin(it.a || 0);
+        // (lx, lz) in the block's own frame, to the world
+        const W2L = (lx, lz) => [it.x + lx * ca - lz * sa, it.y + lx * sa + lz * ca];
+        // on a slope it stands on its lowest corner, its foundations below the rest
+        let gmin = Tracks.groundAt(tr, it.x, it.y);
+        if (it.a != null) for (const [qx, qz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) gmin = Math.min(gmin, Tracks.groundAt(tr, ...W2L(qx * it.w / 2, qz * it.h / 2)));
         const pick = r();
         // the blocks facing the circuit are the old town's stone and stucco (glass and office
         // towers stand further back, as at Monaco)
         let front = false;
-        tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
-        if (kinds.length && pick > (front ? 0.88 : 0.45)) {
+        if (it.front != null) front = it.front; else tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
+        if (kinds.length && pick > (front ? 0.88 : it.tower ? 0.2 : 0.45)) {
           // modern blocks: office bands or glass, the taller ones more often glass
           const k0 = pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0;
           const [, tile, bt] = k0 === 0 && mids.length && r() < 0.7 ? mids[Math.floor(r() * mids.length)] : kinds[k0];
-          const gy0 = Tracks.groundAt(tr, it.x, it.y) - 3;
-          bt.add(facadeBox(it.w, hgt + 3, it.h, tile, tile), mat(it.x, (hgt + 3) / 2 + gy0, it.y));
-          const rf0 = new THREE.BoxGeometry(it.w + 0.6, 0.6, it.h + 0.6); rf0.translate(it.x, hgt + 3 + gy0, it.y);
-          roofs.add(rf0, null, col(it.col));
+          const gy0 = gmin - 3;
+          bt.add(facadeBox(it.w, hgt + 3, it.h, tile, tile), mat(it.x, (hgt + 3) / 2 + gy0, it.y, ry));
+          roofs.add(ub, mat(it.x, hgt + 3 + gy0, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
           continue;
         }
         const g = new THREE.BoxGeometry(it.w, hgt, it.h);
@@ -1274,10 +1281,9 @@
           const along = nx > 0.5 ? pos.getZ(k) : nz > 0.5 ? pos.getX(k) : pos.getX(k);
           uv.setXY(k, along / 14 + (it.seed % 4) / 4, (pos.getY(k) + hgt / 2) / 14); // 4 bays x 4 floors per 14 m tile
         }
-        const gy = Tracks.groundAt(tr, it.x, it.y) - 3; // foundations below sloping streets
+        const gy = gmin - 3; // foundations below sloping streets
         g.scale(1, (hgt + 3) / hgt, 1);
-        g.translate(it.x, (hgt + 3) / 2 + gy, it.y);
-        walls.add(g, null, col(tints[Math.floor(r() * tints.length)]));
+        walls.add(g, mat(it.x, (hgt + 3) / 2 + gy, it.y, ry), col(tints[Math.floor(r() * tints.length)]));
         // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
         // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
         // dark glazing under fabric awnings
@@ -1286,11 +1292,11 @@
           for (const [fx, fz, len, rot] of [[0, it.h / 2, it.w, 0], [0, -it.h / 2, it.w, 0], [it.w / 2, 0, it.h, 1], [-it.w / 2, 0, it.h, 1]]) {
             const sx = Math.sign(fx), sz = Math.sign(fz), L = len - 2.4;
             if (L < 4) continue;
-            const at = (out, y, l, hh, dd) => mat(it.x + fx + sx * out, gy + y, it.y + fz + sz * out, 0, rot ? dd : l, hh, rot ? l : dd);
+            const at = (out, y, l, hh, dd) => { const [wx, wz] = W2L(fx + sx * out, fz + sz * out); return mat(wx, gy + y, wz, ry, rot ? dd : l, hh, rot ? l : dd); };
             // shopfronts: dark glass band, a stone fascia over it and an awning on most bays
             relief.add(ub, at(0.08, 3 + 1.6, L, 3.2, 0.2), col('#1f2428'));
             relief.add(ub, at(0.14, 3 + 3.45, L + 0.6, 0.5, 0.3), stone);
-            if (r() < 0.75) relief.add(ub, mat(it.x + fx + sx * 0.75, gy + 3 + 3.0, it.y + fz + sz * 0.75, 0, rot ? 1.3 : L * 0.8, 0.12, rot ? L * 0.8 : 1.3), col(awn[Math.floor(r() * awn.length)]));
+            if (r() < 0.75) { const [wx, wz] = W2L(fx + sx * 0.75, fz + sz * 0.75); relief.add(ub, mat(wx, gy + 3 + 3.0, wz, ry, rot ? 1.3 : L * 0.8, 0.12, rot ? L * 0.8 : 1.3), col(awn[Math.floor(r() * awn.length)])); }
             if (!balc) continue;
             for (let y = 3 + 6.6; y < hgt + 1; y += 3.3) {
               relief.add(ub, at(0.45, y, L, 0.16, 0.9), stone);
@@ -1299,8 +1305,7 @@
             }
           }
         }
-        const rf = new THREE.BoxGeometry(it.w + 0.6, 0.6, it.h + 0.6); rf.translate(it.x, hgt + 3 + gy, it.y);
-        roofs.add(rf, null, col(it.col));
+        roofs.add(ub, mat(it.x, hgt + 3 + gy, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
       }
       add(relief.geo(), M.vcol, { cast: true });
       add(walls.geo(), T.has('facade') ? pbr('facade', 1, { vertexColors: true }) : std({ map: repTex(T.windows(), 1, 1), vertexColors: true, roughness: 0.75 }), { cast: true });
@@ -1330,6 +1335,156 @@
     buildBackdrop(root, W2, tr);
     const tvCams = buildTvCams(tr);
     return { tr, root, gantry, water, tvCams, grass, turf };
+  }
+
+  // A generated town's sea, streets, quay walls, breakwaters and marina, its yachts and the
+  // tunnel the lap runs through (js/trackgen2.js; render.js townScenery places the buildings and
+  // trees). Returns the sea's mesh.
+  function buildTown(root, tr, W2, add, M) {
+    const town = W2.town, site = town.site, b = W2.bounds, rnd = U.rng(4049);
+    const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, pad = 560;
+    const X0 = b.x0 - pad, X1 = b.x1 + pad, Z0 = b.y0 - pad, Z1 = b.y1 + pad;
+    const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Z1;
+    // the sea: one sheet at sea level, the land above it
+    const sg = new THREE.PlaneGeometry(9000, 9000); sg.rotateX(-Math.PI / 2); sg.translate(cx, 0.15, cz);
+    const water = add(sg, M.water);
+    // streets: asphalt a few centimetres over the ground, a kerb either side; cut short where they
+    // meet the circuit (its barriers close the junction)
+    const road = new Acc(), kerb = new Acc(), pave = new Acc(), sdOk = q => q && q.length === 4;
+    const near = (x, z) => { let hit = false; tr.hash.near(x, z, 40, i => { if (hit) return; if (Math.hypot(x - tr.x[i], z - tr.y[i]) < Math.max(tr.barr[0][i], tr.barr[1][i]) + 1.5) hit = true; }); return hit; };
+    const gy = (x, z) => Tracks.groundAt(tr, x, z);
+    for (const rd of site.roads) {
+      const pts = [];
+      for (let k = 0; k < rd.pts.length - 1; k++) {
+        const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]), n = Math.max(1, Math.ceil(l / 4));
+        for (let q = 0; q < n; q++) pts.push([a[0] + (c[0] - a[0]) * q / n, a[1] + (c[1] - a[1]) * q / n]);
+      }
+      pts.push(rd.pts[rd.pts.length - 1]);
+      const hw = rd.w / 2;
+      let prev = null, along = 0;
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k], q = pts[Math.min(k + 1, pts.length - 1)], o = pts[Math.max(k - 1, 0)];
+        const dx = q[0] - o[0], dz = q[1] - o[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l;
+        if (k) along += Math.hypot(p[0] - pts[k - 1][0], p[1] - pts[k - 1][1]);
+        if (!inside(p[0], p[1]) || near(p[0], p[1]) || site.inland(p[0], p[1]) < 1) { prev = null; continue; }
+        const Lp = [p[0] - nx * hw, p[1] - nz * hw], Rp = [p[0] + nx * hw, p[1] + nz * hw];
+        const y = Math.max(gy(p[0], p[1]), (gy(Lp[0], Lp[1]) + gy(Rp[0], Rp[1])) / 2) + 0.12;
+        const a = road.v(Lp[0], y, Lp[1], 0, 1, 0, 0, along / 9), c = road.v(Rp[0], y, Rp[1], 0, 1, 0, rd.w / 9, along / 9);
+        // kerbs: 15 cm stone edges, the pavement's lip
+        const kv = [];
+        for (const sd of [-1, 1]) {
+          const ex = p[0] + nx * sd * hw, ez = p[1] + nz * sd * hw, fx = p[0] + nx * sd * (hw + 0.3), fz = p[1] + nz * sd * (hw + 0.3);
+          kv.push(kerb.v(ex, y, ez, -nx * sd, 0, -nz * sd, along / 1.5, 0), kerb.v(ex, y + 0.15, ez, 0, 1, 0, along / 1.5, 0.1), kerb.v(fx, y + 0.15, fz, 0, 1, 0, along / 1.5, 0.3));
+        }
+        // the pavement behind each kerb, 2.6 m of paving slabs
+        const pv = [];
+        for (const sd of [-1, 1]) {
+          const ix = p[0] + nx * sd * (hw + 0.3), iz = p[1] + nz * sd * (hw + 0.3), ox = p[0] + nx * sd * (hw + 2.9), oz = p[1] + nz * sd * (hw + 2.9);
+          pv.push(pave.v(ix, y + 0.15, iz, 0, 1, 0, sd * (hw + 0.3) / 3.2, along / 3.2), pave.v(ox, Math.max(y + 0.15, gy(ox, oz) + 0.06), oz, 0, 1, 0, sd * (hw + 2.9) / 3.2, along / 3.2));
+        }
+        if (prev) {
+          if (sdOk(prev[3])) { pave.t(prev[3][0], pv[0], prev[3][1]); pave.t(prev[3][1], pv[0], pv[1]); pave.t(prev[3][2], prev[3][3], pv[2]); pave.t(prev[3][3], pv[3], pv[2]); }
+          road.t(prev[0], a, prev[1]); road.t(prev[1], a, c);
+          for (let si = 0; si < 2; si++) for (let j = 0; j < 2; j++) {
+            const p0 = prev[2][si * 3 + j], p1 = prev[2][si * 3 + j + 1], q0 = kv[si * 3 + j], q1 = kv[si * 3 + j + 1];
+            kerb.t(p0, q0, p1); kerb.t(p1, q0, q1); kerb.t(p0, p1, q0); kerb.t(p1, q1, q0);
+          }
+        }
+        prev = [a, c, kv, pv];
+      }
+    }
+    add(road.geo(), M.pitlane); add(kerb.geo(), M.concrete);
+    add(pave.geo(), T.has('pavement') ? (M.townPave || (M.townPave = pbr('pavement', 1, { color: '#f2efe9' }))) : M.concrete);
+    // quay walls along the shore: the land's edge drawn as a vertical stone face from below the
+    // water to the quayside (marching squares on the distance inland, every 4 m)
+    {
+      const q = new Acc(), C = 4, nx = Math.ceil((X1 - X0) / C), nz = Math.ceil((Z1 - Z0) / C), u = new Float32Array((nx + 1) * (nz + 1));
+      for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) u[j * (nx + 1) + i] = site.inland(X0 + i * C, Z0 + j * C);
+      const seg = (ax, az, bx, bz) => {
+        const l = Math.hypot(bx - ax, bz - az); if (l < 0.2) return;
+        const ya = Math.max(1.8, gy(ax, az)), yb = Math.max(1.8, gy(bx, bz)), nxx = (bz - az) / l, nzz = -(bx - ax) / l;
+        const k0 = q.v(ax, -3, az, nxx, 0, nzz, 0, 0), k1 = q.v(bx, -3, bz, nxx, 0, nzz, l / 3, 0), k2 = q.v(bx, yb, bz, nxx, 0, nzz, l / 3, (yb + 3) / 3), k3 = q.v(ax, ya, az, nxx, 0, nzz, 0, (ya + 3) / 3);
+        q.t(k0, k1, k2); q.t(k0, k2, k3); q.t(k0, k2, k1); q.t(k0, k3, k2);
+      };
+      const at = (i0, j0, i1, j1) => { const a = u[j0 * (nx + 1) + i0], c = u[j1 * (nx + 1) + i1], t = a / (a - c); return [X0 + (i0 + (i1 - i0) * t) * C, Z0 + (j0 + (j1 - j0) * t) * C]; };
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const e = [], L0 = u[j * (nx + 1) + i] > 0, L1 = u[j * (nx + 1) + i + 1] > 0, L2 = u[(j + 1) * (nx + 1) + i + 1] > 0, L3 = u[(j + 1) * (nx + 1) + i] > 0;
+        if (L0 !== L1) e.push(at(i, j, i + 1, j));
+        if (L1 !== L2) e.push(at(i + 1, j, i + 1, j + 1));
+        if (L2 !== L3) e.push(at(i + 1, j + 1, i, j + 1));
+        if (L3 !== L0) e.push(at(i, j + 1, i, j));
+        if (e.length === 2) seg(e[0][0], e[0][1], e[1][0], e[1][1]);
+        else if (e.length === 4) { seg(e[0][0], e[0][1], e[1][0], e[1][1]); seg(e[2][0], e[2][1], e[3][0], e[3][1]); }
+      }
+      add(q.geo(), M.concrete, { cast: false });
+    }
+    // breakwaters (rubble-faced concrete), pontoons and their berths
+    {
+      const dk = new Batch(false), box = new THREE.BoxGeometry(1, 1, 1), rock = new Batch(true), rk = new THREE.DodecahedronGeometry(1, 0);
+      const strip = (B, a, c, w, y0, y1) => { const l = Math.hypot(c[0] - a[0], c[1] - a[1]); B.add(box, mat((a[0] + c[0]) / 2, (y0 + y1) / 2, (a[1] + c[1]) / 2, -Math.atan2(c[1] - a[1], c[0] - a[0]), l + w * 0.5, y1 - y0, w)); };
+      for (const pl of site.piers) for (let k = 0; k < pl.length - 1; k++) {
+        strip(dk, pl[k], pl[k + 1], site.pierW, -6, 2.6);
+        const a = pl[k], c = pl[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]), ux = (c[0] - a[0]) / l, uz = (c[1] - a[1]) / l;
+        for (let t = 0; t < l; t += 2.2) for (const sd of [-1, 1]) {
+          const o = site.pierW / 2 + 1 + rnd() * 2.5, s2 = 1.2 + rnd() * 1.4;
+          rock.add(rk, mat(a[0] + ux * t - uz * sd * o, 0.2 + rnd() * 1.4, a[1] + uz * t + ux * sd * o, rnd() * 6, s2, s2 * 0.7, s2, rnd(), rnd()), new THREE.Color().setHSL(0.09, 0.08, 0.42 + rnd() * 0.2));
+        }
+      }
+      for (const pl of site.pontoons || []) strip(dk, pl[0], pl[1], 2.6, 0.2, 0.75);
+      for (const pl of site.fingers || []) strip(dk, pl[0], pl[1], 1.1, 0.25, 0.65);
+      add(dk.geo(), M.concrete, { cast: true }); add(rock.geo(), M.vcol, { cast: true });
+    }
+    // yachts: white hulls, a deckhouse or two (the big ones three), the odd mast
+    {
+      const hull = new Batch(true), cabin = new Batch(true), mast = new Batch(false), glass = new Batch(false);
+      const hs = new THREE.Shape(); [[-0.5, -0.5], [0.2, -0.5], [0.5, 0], [0.2, 0.5], [-0.5, 0.5]].forEach(([x, y], k) => (k ? hs.lineTo(x, y) : hs.moveTo(x, y)));
+      const hg = new THREE.ExtrudeGeometry(hs, { depth: 1, bevelEnabled: false }); hg.rotateX(-Math.PI / 2);
+      const cb = new THREE.BoxGeometry(1, 1, 1), mg = new THREE.CylinderGeometry(0.06, 0.09, 1, 5); mg.translate(0, 0.5, 0);
+      for (const it of W2.boats || []) {
+        const l = it.l, w = l * (it.big ? 0.19 : 0.3), ry = -it.h, f = (k, h0) => [it.x + Math.cos(it.h) * l * k, h0, it.y + Math.sin(it.h) * l * k];
+        const fb = l * 0.085 + 0.6;
+        hull.add(hg, mat(it.x, -0.5, it.y, ry, l, fb + 0.5, w), col(it.col));
+        const decks = it.big ? 2 + (l > 45 ? 1 : 0) : 1;
+        for (let dI = 0; dI < decks; dI++) {
+          const k = 1 - dI * 0.18, [x, y, z] = f(-0.06 - dI * 0.03, fb + 0.55 + dI * 1.9);
+          cabin.add(cb, mat(x, y, z, ry, l * 0.45 * k, 1.7, w * 0.78 * k), col(dI % 2 ? '#e9ecef' : '#f7f8f6'));
+          const [gx, gy2, gz] = f(-0.06 - dI * 0.03 + 0.01, fb + 0.75 + dI * 1.9);
+          glass.add(cb, mat(gx, gy2, gz, ry, l * 0.45 * k + 0.06, 0.6, w * 0.78 * k + 0.06));
+        }
+        if (!it.big && rnd() < 0.3) { const [x, , z] = f(0.05, 0); mast.add(mg, mat(x, fb, z, 0, 1, l * 1.1, 1)); }
+      }
+      add(hull.geo(), M.vcol, { cast: true }); add(cabin.geo(), M.vcol, { cast: true }); add(mast.geo(), M.white);
+      add(glass.geo(), M.dark);
+    }
+    // the tunnel: walls behind the barriers, a slab roof, a strip of lamps along the ceiling
+    if (town.tunnel) {
+      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.5, 0.08, 2.2);
+      const off = (k, sd) => sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4), H = 6.4;
+      for (const sd of [-1, 1]) {
+        let prev = null, along = 0;
+        for (let i = i0 - 2; i <= i1 + 2; i++) {
+          const k = ((i % N) + N) % N, d = off(k, sd), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, y = tr.z[k];
+          along += tr.ds;
+          const a = wl.v(x, y - 0.2, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, 0), c = wl.v(x, y + H, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, H / 3);
+          if (prev) { if (sd > 0) { wl.t(prev[0], prev[1], a); wl.t(prev[1], c, a); } else { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); } }
+          prev = [a, c];
+        }
+      }
+      // the roof: its underside faces the road, its top carries the promontory's garden
+      let prev = null;
+      for (let i = i0 - 2; i <= i1 + 2; i++) {
+        const k = ((i % N) + N) % N, dl = off(k, -1), dr = off(k, 1), y = tr.z[k] + H;
+        const a = wl.v(tr.x[k] + tr.nx[k] * dl, y, tr.y[k] + tr.ny[k] * dl, 0, -1, 0, 0, i / 3), c = wl.v(tr.x[k] + tr.nx[k] * dr, y, tr.y[k] + tr.ny[k] * dr, 0, -1, 0, 1, i / 3);
+        const a2 = wl.v(tr.x[k] + tr.nx[k] * dl, y + 1.2, tr.y[k] + tr.ny[k] * dl, 0, 1, 0, 0, i / 3), c2 = wl.v(tr.x[k] + tr.nx[k] * dr, y + 1.2, tr.y[k] + tr.ny[k] * dr, 0, 1, 0, 1, i / 3);
+        if (prev) { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); wl.t(prev[2], prev[3], a2); wl.t(prev[3], c2, a2); }
+        prev = [a, c, a2, c2];
+        if (i % Math.max(1, Math.round(6 / tr.ds)) === 0) lamps.add(lg, mat(tr.x[k], y - 0.06, tr.y[k], -Math.atan2(tr.ty[k], tr.tx[k]) + Math.PI / 2));
+      }
+      add(wl.geo(), M.concrete, { cast: true });
+      if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#fff3d6', emissive: '#ffe2a8', emissiveIntensity: 6, roughness: 0.5 });
+      add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
+    }
+    return water;
   }
 
   // The turf map: what the ground does to the grass at each 7 m terrain sample.
