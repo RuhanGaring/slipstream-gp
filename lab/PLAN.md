@@ -23,16 +23,29 @@ Four styles: **city** (a harbour town on a hill, after Monaco), **park**, **moun
    - Modern: a near-flat plain.
 2. **Layout.**
    - Open styles reuse the first generator's outlines.
-   - City circuits are traced through a warped street grid. Row streets follow the hill's
-     contours and cross streets climb it.
-   - The lap is the outline of a random connected set of city blocks with no holes and no
-     corner-only contacts. That outline is always a single simple loop, so a city lap cannot
-     cross itself by construction.
-   - Narrow terrace strips between two streets give hairpins.
-   - Long straights get chicanes, as at the harbour and swimming pool.
-   - A gentle covered stretch becomes a tunnel.
-   - The longest straight becomes the start straight, with the pit lane on whichever side is
-     clear.
+   - City circuits follow Monaco's way of laying out a lap without copying it. The lap is a
+     grammar of sections, in order:
+     - along the water: a seafront curving with the coast (partly a tunnel), a chicane, a
+       bend onto the harbourside, two sets of esses on the quay, a tight complex and the start
+       straight;
+     - a tight first corner turning inland and a climb with kinks;
+     - a long sweep at the top, a plaza jog and a winding road along the hill;
+     - a descent of tight corners with a switchback hairpin, back down to the seafront.
+     Every angle, radius and length is rolled and the direction is either way round. The turns
+     are trimmed to a whole turn, and the climb's first straight and the hill road are solved
+     (with the waterside straights scaled together) so the lap closes.
+   - The town is built around its lap:
+     - a coastline outside the seafront and the quays;
+     - a harbour with two breakwaters, and sometimes a rocky headland across it;
+     - an amphitheatre hillside with ravines running down it and a spur reaching the shore,
+       with mountains rising right behind the highest street;
+     - dense buildings turned along the street they face or the hillside's contour: mostly 6
+       to 15 storeys, a few towers, none on cliffs, a plaza left open at the top;
+     - yachts moored along the quays and breakwaters, palms on the promenade, and a hotel over
+       the tunnel.
+   - The layout is checked against Monaco's measured figures (tools/f1layout_prep.js runs the
+     same layout measurement on the real centrelines): corners per km, share of right-angle
+     turns, hairpins, sweeping and tight share, how grid-like, how elongated.
 3. **Grading.** The road is graded the way a real one is.
    - The height field is sampled around the lap and smoothed.
    - The road is then held to a gradient limit, which is lower through corners, through

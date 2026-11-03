@@ -38,12 +38,15 @@
   // per style: width, lap length, gradient limits (straight / corner / hairpin / grid and pit),
   // minimum radius, clearance between unrelated parts of the lap, total climb range, bank slope
   const STYLES = {
-    city: { width: [10, 11], len: [3000, 4300], gMax: 0.14, gCorner: 0.09, gHair: 0.055, gGrid: 0.03, minR: 9, sep: 19, range: [16, 80], slope: 6, corners: [11, 24], looks: ['lucerne'] },
+    city: { width: [10, 11], len: [3000, 4000], gMax: 0.14, gCorner: 0.09, gHair: 0.055, gGrid: 0.03, minR: 9, sep: 19, range: [16, 80], slope: 6, corners: [11, 24], looks: ['lucerne'] },
     park: { width: [14, 15], len: [4300, 5800], gMax: 0.11, gCorner: 0.08, gHair: 0.05, gGrid: 0.02, minR: 10, sep: 58, range: [8, 60], slope: 0.55, corners: [8, 22], looks: ['kestrel', 'varenna', 'hakone'] },
     mountain: { width: [13, 14], len: [4300, 6200], gMax: 0.17, gCorner: 0.12, gHair: 0.06, gGrid: 0.025, minR: 10, sep: 58, range: [35, 170], slope: 1.3, walls: 0.02, corners: [8, 22], looks: ['sierra', 'hakone'] },
     modern: { width: [15, 15], len: [4400, 5900], gMax: 0.11, gCorner: 0.08, gHair: 0.05, gGrid: 0.015, minR: 10, sep: 62, range: [3, 35], slope: 0.45, corners: [8, 22], looks: ['rimal', 'lonestar'] },
   };
   const STYLE_LIST = ['city', 'park', 'mountain', 'modern'];
+  // <layout> (written by tools/f1layout_prep.js from the real centrelines; do not edit by hand)
+  const LAYOUT = {"city":{"from":"Circuit de Monaco","cpk":[3.62,6.27],"square":[0,0.56],"hairpins":[1,3],"sweep":[0.22,0.59],"bendy":[0.18,0.44],"grid":[0,0.88],"aspect":[1.89,5.83]}};
+  // </layout>
   // <real> (written by tools/f1elev_fit.py from tools/data/f1_elevation.json; do not edit by hand)
   const REAL = {"city": {"from": ["Circuit de Monaco", "Baku City Circuit", "Circuito de Madring"], "range": [26.95, 47.04], "g100": [4.05, 14.69], "share4": [7.86, 62.45], "ratio": [1.48, 2.69], "climbs": [2, 5], "crestR": 444}, "park": {"from": ["Circuit de Barcelona-Catalunya", "Silverstone Circuit", "Hockenheimring", "Hungaroring", "Autodromo Nazionale Monza", "Autodromo Enzo e Dino Ferrari", "Aut\u00f3dromo Internacional do Algarve", "Circuit Zandvoort", "Circuit de Nevers Magny-Cours", "Aut\u00f3dromo do Estoril", "Aut\u00f3dromo Internacional Nelson Piquet", "Indianapolis Motor Speedway"], "range": [2.89, 42.9], "g100": [0.5, 11.88], "share4": [0.0, 33.82], "ratio": [1.17, 3.79], "climbs": [1, 7], "crestR": 972}, "mountain": {"from": ["Red Bull Ring", "Circuit de Spa-Francorchamps", "Suzuka International Racing Course", "Aut\u00f3dromo Jos\u00e9 Carlos Pace - Interlagos", "N\u00fcrburgring", "Autodromo Internazionale del Mugello", "Kyalami Grand Prix Circuit", "Watkins Glen International"], "range": [36.38, 117.49], "g100": [4.25, 20.3], "share4": [11.34, 62.57], "ratio": [1.03, 2.7], "climbs": [1, 7], "crestR": 529}, "modern": {"from": ["Bahrain International Circuit", "Shanghai International Circuit", "Circuit Paul Ricard", "Circuit of the Americas", "Yas Marina Circuit", "Sepang International Circuit", "Intercity Istanbul Park", "Losail International Circuit"], "range": [4.17, 45.47], "g100": [1.75, 11.56], "share4": [0.0, 49.8], "ratio": [1.33, 6.13], "climbs": [1, 7], "crestR": 798}};
   // </real>
@@ -118,19 +121,6 @@
   // natural ground height (m) for a style; city sites also return the coastline
   function site(r, style, box) {
     const s = 1 + Math.floor(r() * 1e6);
-    if (style === 'city') {
-      // a harbour town: the sea along y < coast(x), the hill rising inland, with terraces of noise
-      const Hs = 30 + r() * 32, lam = 220 + r() * 200, ca = 10 + r() * 22, cl = 600 + r() * 700, cp = r() * 6.283, und = 12 + r() * 10, uwl = 220 + r() * 120;
-      const coast = x => -38 + Math.sin(x / cl + cp) * ca;
-      return {
-        coast, sea: 0,
-        H: (x, y) => {
-          const u = y - coast(x);
-          if (u < 0) return Math.max(-8, u * 0.4) - 0.5; // the sea floor shelves away
-          return 1.6 + Hs * (1 - Math.exp(-u / lam)) + fbm(x / uwl, y / uwl, s, 3) * und * U.smooth(u / 80);
-        },
-      };
-    }
     const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2, wx = box[2] - box[0], wy = box[3] - box[1];
     const L = (a, b) => a + (b - a) * r();
     // somewhere the lap will cross: inside the middle 70 % of the layout's box
@@ -184,164 +174,252 @@
   }
 
   // ---------- city circuits ----------
-  // A warped street grid: column lines across the hill, row lines along it (row 0 is the
-  // harbour front). Some row gaps are narrow terrace strips (no buildings, a steep bank).
-  function cityGrid(r, coast) {
-    const nc = 10 + Math.floor(r() * 4), nr = 6 + Math.floor(r() * 3);
-    const X = [0];
-    for (let i = 1; i <= nc; i++) X.push(X[i - 1] + 95 + r() * 85);
-    const Y = [0], narrow = [false];
-    for (let j = 1; j <= nr; j++) {
-      const nar = j >= 2 && !narrow[j - 1] && r() < 0.32;
-      narrow.push(nar);
-      Y.push(Y[j - 1] + (nar ? 27 + r() * 7 : 72 + r() * 60));
+  // A harbour town circuit in the manner of Monaco: not Monaco, but put together the way it is.
+  // The lap is written as a sequence of sections, each with the kind of corners it has there.
+  // Its lower side runs along the water: a long seafront curving with the coast (partly a tunnel),
+  // a chicane, a bend onto the harbourside, two sets of esses along the quay, a tight corner
+  // complex, and the start straight on the quay. At its end a tight first corner turns inland and
+  // the road climbs the hillside, with a kink or two, to a long sweeping bend at the top; a plaza
+  // jog, a road along the hill, and the descent: a tight corner, a switchback hairpin, and three
+  // more tight corners zig-zagging down onto the seafront.
+  // Every angle, radius and length is rolled from the style's ranges and the direction of the
+  // lap is either way round. The turns are trimmed to make a whole turn exactly, and the climb's
+  // first straight and the road along the top of the hill are solved so the lap closes.
+  function harbourLayout(r) {
+    const L = (a, b) => a + (b - a) * r(), sg = () => (r() < 0.5 ? -1 : 1);
+    const it = [];
+    // ang: degrees, positive with the lap's own turning; adj: may be trimmed for the closure
+    const add = (ang, R, after, role, adj) => it.push({ ang, R, after, role, adj: !!adj });
+    add(L(70, 110), L(15, 24), 0, 'climb', true);                        // first corner, inland
+    for (let k = 1 + (r() < 0.6 ? 1 : 0); k > 0; k--) add(sg() * L(10, 28), L(160, 320), L(50, 130), 'climb');
+    add(L(70, 120), L(80, 150), L(40, 100), 'top', true);               // the long sweep at the top
+    add(L(35, 65), L(26, 40), L(30, 70), 'plaza'); add(-L(35, 65), L(26, 40), 0, 'top'); // the plaza jog, then the road along the hill
+    const topRoad = it.length - 1;
+    for (let k = 1 + (r() < 0.5 ? 1 : 0); k > 0; k--) add(sg() * L(12, 32), L(150, 320), L(50, 140), 'top'); // the road bends along the hill
+    if (r() < 0.7) { const a = L(30, 60); add(a, L(28, 50), L(30, 70), 'top'); add(-a * L(0.8, 1.2), L(28, 50), L(40, 110), 'top'); } // a corner pair in the old town
+    add(L(95, 125), L(16, 22), L(60, 120), 'descent', true);
+    add(-L(170, 190), L(9.6, 11.5), L(20, 45), 'hairpin');               // the switchback
+    add(L(80, 105), L(15, 22), L(40, 90), 'descent', true);
+    add(L(80, 105), L(15, 24), L(40, 100), 'descent', true);
+    add(L(80, 105), L(16, 26), L(50, 110), 'sea', true);                 // down onto the seafront
+    for (let k = 1 + (r() < 0.6 ? 1 : 0); k > 0; k--) add(sg() * L(15, 40), L(240, 450), L(60, 150), 'sea'); // curving with the coast
+    if (r() < 0.45) { add(L(30, 50), L(25, 40), L(8, 20), 'sea'); add(-L(30, 50), L(25, 40), L(60, 140), 'sea'); } // a second chicane
+    add(-L(35, 60), L(22, 34), L(8, 22), 'chicane');
+    add(L(35, 60), L(22, 34), L(40, 90), 'harbour');
+    add(-L(30, 55), L(55, 110), L(50, 100), 'harbour');                  // onto the harbourside
+    add(L(20, 38), L(35, 60), L(10, 25), 'harbour'); add(-L(20, 38), L(35, 60), L(40, 80), 'harbour');
+    add(-L(25, 45), L(25, 40), L(8, 20), 'harbour'); add(L(25, 45), L(25, 40), L(30, 70), 'harbour');
+    add(L(95, 130), L(15, 22), L(20, 45), 'harbour', true);             // the tight complex
+    add(-L(40, 75), L(22, 40), L(320, 440), 'harbour', true);            // onto the start straight
+    // a whole turn exactly: the difference is shared by the corners allowed to take it
+    let sum = it.reduce((s, c) => s + c.ang, 0);
+    const adj = it.filter(c => c.adj), aw = adj.reduce((s, c) => s + c.ang, 0);
+    for (const c of adj) {
+      const na = c.ang + (360 - sum) * c.ang / aw;
+      if (na / c.ang < 0.72 || na / c.ang > 1.3) return { fail: 'turning' };
+      c.ang = na;
     }
-    const x0 = -X[nc] / 2, bend = 14 + r() * 26, bl = 500 + r() * 500, bp = r() * 6.283, shear = (r() - 0.5) * 0.25;
-    const P = [];
-    for (let i = 0; i <= nc; i++) {
-      P.push([]);
-      for (let j = 0; j <= nr; j++) {
-        const xb = x0 + X[i] + (j ? (r() - 0.5) * 14 : (r() - 0.5) * 4) + shear * Y[j];
-        // the front follows the coast; streets above follow the hill's contours, bent a little
-        const y = coast(xb) + 34 + (j ? Y[j] + Math.sin(xb / bl + bp + j * 0.4) * bend * Math.min(1, j / 2) + (r() - 0.5) * 8 : 0);
-        P[i].push([xb, y]);
-      }
+    // corners of 150 degrees or more become two half corners (a vertex cannot turn that far)
+    // the road along the hill takes its solved length either side of its first bend, so it is
+    // never one long straight
+    it[topRoad].flex = true; it[topRoad + 1].flex = true;
+    const items = [];
+    for (const c of it) {
+      if (Math.abs(c.ang) >= 150) { items.push(Object.assign({}, c, { ang: c.ang / 2, after: 0 })); items.push(Object.assign({}, c, { ang: c.ang / 2 })); }
+      else items.push(c);
     }
-    return { nc, nr, P, narrow };
+    const n = items.length, sense = sg(), h0 = r() * Math.PI * 2;
+    const tan = items.map(c => c.R * Math.tan(Math.abs(c.ang) * Math.PI / 360));
+    const head = [];
+    let hh = h0;
+    for (const c of items) { hh += sense * c.ang * Math.PI / 180; head.push(hh); }
+    // vertex k to k+1: tangent, straight, tangent. The first straight (the climb) and the road
+    // along the top are solved so the lap closes
+    // the straights along the water are scaled together by f (0.6 to 1.5): with the two solved
+    // lengths that gives the closure a third freedom, so few layouts are thrown away
+    const along = items.map(c => c.role === 'sea' || c.role === 'chicane' || (c.role === 'harbour' && c !== items[n - 1]));
+    const D0 = items.map((c, k) => tan[k] + (along[k] ? 0 : c.after) + tan[(k + 1) % n]);
+    let kx0 = 0, ky0 = 0, kx1 = 0, ky1 = 0;
+    for (let k = 0; k < n; k++) {
+      kx0 += D0[k] * Math.cos(head[k]); ky0 += D0[k] * Math.sin(head[k]);
+      if (along[k]) { kx1 += items[k].after * Math.cos(head[k]); ky1 += items[k].after * Math.sin(head[k]); }
+    }
+    const a = 0, fl = items.map((c, k) => (c.flex ? k : -1)).filter(k => k >= 0), ax = Math.cos(head[a]), ay = Math.sin(head[a]);
+    const bx = fl.reduce((t, k) => t + Math.cos(head[k]), 0) / fl.length, by = fl.reduce((t, k) => t + Math.sin(head[k]), 0) / fl.length;
+    const det = ax * by - ay * bx;
+    if (Math.abs(det) < Math.sin(35 * Math.PI / 180) * Math.hypot(bx, by)) return { fail: 'closure' };
+    // la and lb are linear in f: the f range that keeps both in bounds, then the f nearest 1
+    const sol = (kx, ky) => [(-kx * by + ky * bx) / det, (-ax * ky + ay * kx) / det];
+    const [la0, lb0] = sol(kx0, ky0), [la1, lb1] = sol(kx1, ky1);
+    let f0 = 0.6, f1 = 1.5;
+    const keep = (c0, c1, lo, hi) => { // lo <= c0 + c1 f <= hi
+      if (Math.abs(c1) < 1e-9) { if (c0 < lo || c0 > hi) f0 = Infinity; return; }
+      const p = (lo - c0) / c1, q = (hi - c0) / c1;
+      f0 = Math.max(f0, Math.min(p, q)); f1 = Math.min(f1, Math.max(p, q));
+    };
+    keep(la0, la1, 60, 280); keep(lb0, lb1, 60, 900);
+    if (!(f0 <= f1)) return { fail: 'closure' };
+    const f = U.clamp(1, f0, f1), la = la0 + la1 * f, lb = lb0 + lb1 * f;
+    for (let k = 0; k < n; k++) if (along[k]) items[k].after *= f;
+    const D = items.map((c, k) => tan[k] + c.after + tan[(k + 1) % n]);
+    D[a] += la; items[a].after += la;
+    for (const k of fl) { D[k] += lb / fl.length; items[k].after += lb / fl.length; }
+    const v = [];
+    let x = 0, y = 0;
+    for (let k = 0; k < n; k++) { v.push([x, y, items[k].R]); x += D[k] * Math.cos(head[k]); y += D[k] * Math.sin(head[k]); }
+    // the vertex polygon must not cross or crowd itself (the corners cut inside it a little)
+    for (let i = 0; i < n; i++) for (let j = i + 4; j < n; j++) {
+      if (j - i > n - 4) continue; // neighbours within three corners (a switchback's legs are close by design)
+      const p = v[i], q = v[(i + 1) % n], s = v[j], t = v[(j + 1) % n];
+      if (segDist(p, q, s, t) < 26) return { fail: 'crowded' };
+    }
+    // the start line: 235 m of straight behind it for the grid, at least 70 m after it
+    const z = n - 1, Ls = D[z], startAt = (tan[z] + 235) / Ls;
+    if (startAt > 0.85 || Ls * (1 - startAt) - tan[0] < 70) return { fail: 'start straight' };
+    return {
+      v: v.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2] * 10) / 10]),
+      roles: items.map(c => c.role), sense, startAt, pitSides: [1, -1],
+    };
   }
-  // cell (i, j) spans columns i..i+1 and rows j..j+1; its corners in loop order
-  const cellKey = (i, j) => i + ',' + j;
-  // the outline of a set of cells as one loop of grid vertices, or null when it is not one
-  // simple loop (a hole, or two cells touching only at a corner)
-  function outline(set, g) {
-    const edges = new Map(); // directed boundary edges, keyed by start vertex
-    const vk = (i, j) => i + ':' + j;
-    const add = (a, b) => { const k = vk(a[0], a[1]); if (edges.has(k)) return false; edges.set(k, b); return true; };
-    for (const key of set) {
-      const [i, j] = key.split(',').map(Number);
-      // counter-clockwise in grid index space: (i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)
-      const sides = [[[i, j], [i + 1, j], cellKey(i, j - 1)], [[i + 1, j], [i + 1, j + 1], cellKey(i + 1, j)], [[i + 1, j + 1], [i, j + 1], cellKey(i, j + 1)], [[i, j + 1], [i, j], cellKey(i - 1, j)]];
-      for (const [a, b, nb] of sides) if (!set.has(nb)) { if (!add(a, b)) return null; }
-    }
-    // walk the loop; every boundary vertex must have exactly one outgoing edge, all on one loop
-    const start = edges.keys().next().value;
-    const loop = [];
-    let k = start;
-    for (let n = 0; n <= edges.size; n++) {
-      const [i, j] = k.split(':').map(Number);
-      loop.push([i, j]);
-      const b = edges.get(k);
-      if (!b) return null;
-      k = vk(b[0], b[1]);
-      if (k === start) break;
-    }
-    if (loop.length !== edges.size) return null;
-    // a vertex visited twice is a pinch (cells meeting at a corner)
-    if (new Set(loop.map(p => p[0] + ':' + p[1])).size !== loop.length) return null;
-    return loop;
-  }
-  function loopLen(loop, g) {
-    let L = 0;
-    for (let k = 0; k < loop.length; k++) { const a = g.P[loop[k][0]][loop[k][1]], b = g.P[loop[(k + 1) % loop.length][0]][loop[(k + 1) % loop.length][1]]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); }
-    return L;
-  }
-  function cityLayout(r, st, coast) {
-    const g = cityGrid(r, coast);
-    const target = U.lerp(st.len[0] + 150, st.len[1] - 250, r());
-    // start on the harbour front: a run of front cells for the long straight
-    const set = new Set();
-    const i0 = 1 + Math.floor(r() * (g.nc - 5)), run = 3 + Math.floor(r() * 3);
-    for (let i = i0; i < Math.min(g.nc - 1, i0 + run); i++) set.add(cellKey(i, 0));
-    let loop = outline(set, g);
-    for (let step = 0; step < 400 && loop && loopLen(loop, g) < target; step++) {
-      // grow by a neighbouring cell, weighted toward the hill (climbs) and away from the edges
-      const cand = [];
-      for (const key of set) {
-        const [i, j] = key.split(',').map(Number);
-        for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
-          if (a < 0 || b < 0 || a >= g.nc || b >= g.nr || set.has(cellKey(a, b))) continue;
-          let w = 1 + (b > j ? 1.4 : 0) + (b === 0 ? 0.6 : 0);
-          if (g.narrow[b + 1] || g.narrow[b]) w *= 0.8;
-          if (a === 0 || a === g.nc - 1) w *= 0.4;
-          cand.push([cellKey(a, b), w]);
-        }
-      }
-      if (!cand.length) break;
-      let tot = cand.reduce((s, c) => s + c[1], 0), pick = r() * tot, chosen = cand[0][0];
-      for (const [k, w] of cand) { pick -= w; if (pick <= 0) { chosen = k; break; } }
-      set.add(chosen);
-      const lp = outline(set, g);
-      if (!lp || loopLen(lp, g) > st.len[1] - 100) { set.delete(chosen); continue; }
-      loop = lp;
-    }
-    if (!loop) return null;
-    const pts = loop.map(([i, j]) => g.P[i][j].slice());
-    // drop vertices the road runs straight through
-    let v = [];
-    for (let k = 0; k < pts.length; k++) {
-      const a = pts[(k - 1 + pts.length) % pts.length], b = pts[k], c = pts[(k + 1) % pts.length];
-      const d = Math.abs(U.wrapAngle(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0])));
-      if (d > 0.07) v.push({ p: b, deg: d * 180 / Math.PI });
-    }
-    if (v.length < 8) return null;
-    // radii: street corners tight, bends gentler, kinks wide
-    v = v.map(({ p, deg }) => {
-      const rad = deg > 70 ? 11 + r() * 10 : deg > 35 ? 22 + r() * 30 : deg > 15 ? 70 + r() * 90 : 220 + r() * 250;
-      return [p[0], p[1], rad];
-    });
-    // chicanes on long straights (the harbour front gets one, as at Monaco's swimming pool)
-    const segs = v.map((p, k) => { const q = v[(k + 1) % v.length]; return [k, Math.hypot(q[0] - p[0], q[1] - p[1])]; }).sort((a, b) => b[1] - a[1]);
-    const longest = segs[0][0], add = [];
-    for (const [k, l] of segs.slice(1, 4)) {
-      if (l < 300 || r() < 0.35) continue;
-      const p = v[k], q = v[(k + 1) % v.length], dx = (q[0] - p[0]) / l, dy = (q[1] - p[1]) / l;
-      const at = 0.4 + r() * 0.2, jog = (r() < 0.5 ? -1 : 1) * (7 + r() * 5), len = 32 + r() * 14;
-      const m = [p[0] + dx * l * at, p[1] + dy * l * at];
-      add.push([k, [[m[0], m[1], 15 + r() * 6], [m[0] + dx * len - dy * jog, m[1] + dy * len + dx * jog, 15 + r() * 6]]]);
-    }
-    add.sort((a, b) => b[0] - a[0]).forEach(([k, ms]) => v.splice(k + 1, 0, ...ms));
-    // the longest straight becomes the start straight (the last segment)
-    let best = 0, bl = 0;
-    for (let k = 0; k < v.length; k++) {
-      const a = v[k], b = v[(k + 1) % v.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (l > bl) { bl = l; best = k; }
-    }
-    v = v.slice(best + 1).concat(v.slice(0, best + 1));
-    v = v.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, Math.round(p[2])]);
-    void longest;
-    const pre = cornerPrecheck(v, st);
-    if (pre) return { fail: pre };
-    return { v, grid: g, cells: set, pitSides: [1, -1] };
+  function segDist(p, q, s, t) {
+    const d = (a, b, c) => { const vx = c[0] - b[0], vy = c[1] - b[1], l2 = vx * vx + vy * vy || 1, u = U.clamp(((a[0] - b[0]) * vx + (a[1] - b[1]) * vy) / l2, 0, 1); return Math.hypot(a[0] - b[0] - vx * u, a[1] - b[1] - vy * u); };
+    const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    if (Math.sign(cross(p, q, s)) !== Math.sign(cross(p, q, t)) && Math.sign(cross(s, t, p)) !== Math.sign(cross(s, t, q))) return 0;
+    return Math.min(d(p, s, t), d(q, s, t), d(s, p, q), d(t, p, q));
   }
 
-  // The fillet's radius shrink (as Tracks.build does it) and the hairpin test, worked out on the
-  // corner list alone: a layout that would fail either is dropped before the circuit is built
-  function cornerPrecheck(v, st) {
-    const n = v.length, dirs = [], th = [], rad = v.map(p => p[2]);
-    for (let i = 0; i < n; i++) { const a = v[i], b = v[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]); dirs.push([(b[0] - a[0]) / l, (b[1] - a[1]) / l, l]); }
-    for (let i = 0; i < n; i++) { const di = dirs[(i - 1 + n) % n], dout = dirs[i]; th.push(Math.atan2(di[0] * dout[1] - di[1] * dout[0], di[0] * dout[0] + di[1] * dout[1])); }
-    for (let it = 0; it < 20; it++) for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n, ta = rad[i] * Math.tan(Math.abs(th[i]) / 2), tb = rad[j] * Math.tan(Math.abs(th[j]) / 2), l = dirs[i][2];
-      if (ta + tb > l * 0.98) { const k = l * 0.98 / (ta + tb); rad[i] *= k; rad[j] *= k; }
+  // The town's site, built around its lap once the lap exists. The coastline runs outside the
+  // seafront, the chicane and the harbourside (a promenade along the sea, a quay along the
+  // harbour), carried on past both ends. Inland the ground climbs an amphitheatre hillside and
+  // then the mountains behind; seaward the bed shelves away. Two breakwaters enclose the harbour
+  // and a rocky headland may stand across it.
+  function harbourSite(r, tr, lay) {
+    const N = tr.N, L = (a, b) => a + (b - a) * r(), s = 1 + Math.floor(r() * 1e6);
+    // each corner vertex's place on the lap (its nearest sample), and each sample's section
+    const at = lay.v.map(p => { let best = 0, bd = Infinity; for (let i = 0; i < N; i++) { const d = (tr.x[i] - p[0]) ** 2 + (tr.y[i] - p[1]) ** 2; if (d < bd) { bd = d; best = i; } } return best; });
+    const role = new Array(N);
+    for (let k = 0; k < at.length; k++) {
+      const i0 = at[k], i1 = at[(k + 1) % at.length];
+      for (let i = i0; i !== i1; i = (i + 1) % N) role[i] = lay.roles[k];
     }
-    for (let i = 0; i < n; i++) if (Math.abs(th[i]) > 0.05 && rad[i] < st.minR + 0.3) return 'radius';
-    // a hairpin: one turn of 150 degrees, or two same-way turns adding to it within 45 m
-    for (let i = 0; i < n; i++) {
-      if (Math.abs(th[i]) > 2.62) return null;
-      const j = (i + 1) % n;
-      if (Math.sign(th[i]) === Math.sign(th[j]) && Math.abs(th[i] + th[j]) > 2.62 && dirs[i][2] < 45) return null;
+    for (let i = 0; i < N; i++) if (!role[i]) role[i] = 'final';
+    const out = -lay.sense; // the side away from the lap's inside (n is the driver's right)
+    const coastal = i => role[i] === 'sea' || role[i] === 'chicane' || role[i] === 'harbour';
+    // the coastal run: from the first seafront sample to the last harbourside one
+    let i0 = -1;
+    for (let i = 0; i < N; i++) if (coastal(i) && !coastal((i - 1 + N) % N)) { i0 = i; break; }
+    if (i0 < 0) return { fail: 'coast' };
+    const run = [];
+    for (let q = 0, i = i0; q < N && coastal(i); q++, i = (i + 1) % N) run.push(i);
+    const prom = L(22, 34), quay = L(12, 20);
+    const raw = run.map(i => { const off = tr.hw + (role[i] === 'sea' ? prom : quay); return [tr.x[i] + tr.nx[i] * off * out, tr.y[i] + tr.ny[i] * off * out]; });
+    // smoothed, so the bends' inside does not knot the offset line, then every 15 m
+    const pts = [];
+    for (let k = 0; k < raw.length; k += 7) {
+      let sx = 0, sy = 0, w = 0;
+      for (let d = -12; d <= 12; d++) { const q = U.clamp(k + d, 0, raw.length - 1), ww = Math.exp(-0.5 * (d / 6) ** 2); sx += raw[q][0] * ww; sy += raw[q][1] * ww; w += ww; }
+      pts.push([sx / w, sy / w]);
     }
-    return 'no hairpin';
+    if (pts.length < 6) return { fail: 'coast' };
+    for (const p of pts) {
+      for (let it = 0; it < 4; it++) {
+        let bi = -1, bd = Infinity;
+        tr.hash.near(p[0], p[1], 60, i => { const d = Math.hypot(p[0] - tr.x[i], p[1] - tr.y[i]); if (d < bd) { bd = d; bi = i; } });
+        const need = tr.hw + quay * 0.9;
+        if (bi < 0 || bd >= need) break;
+        p[0] += tr.nx[bi] * out * (need - bd + 1); p[1] += tr.ny[bi] * out * (need - bd + 1);
+      }
+    }
+    // carried on 4 km past both ends, straight along their last direction
+    const ext = (p, q) => { const dx = p[0] - q[0], dy = p[1] - q[1], l = Math.hypot(dx, dy) || 1; return [p[0] + dx / l * 4000, p[1] + dy / l * 4000]; };
+    const line = [ext(pts[0], pts[2])].concat(pts, [ext(pts[pts.length - 1], pts[pts.length - 3])]);
+    // the seaward normal of each segment: the side the road is not on
+    const segs = [];
+    for (let k = 0; k < line.length - 1; k++) {
+      const p = line[k], q = line[k + 1], dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1;
+      segs.push({ p, dx: dx / l, dy: dy / l, l, nx: -dy / l, ny: dx / l });
+    }
+    // orient: the lap's coastal samples must be on the land side
+    const probe = run[Math.floor(run.length / 2)];
+    let acc = 0;
+    for (const g of segs) { g.t0 = acc; acc += g.l; }
+    // nearest point of the coastline: distance, side, and how far along the coast it is
+    const signAt = (x, y) => { let best = Infinity, sgn = 1, t = 0; for (const g of segs) { const u = U.clamp((x - g.p[0]) * g.dx + (y - g.p[1]) * g.dy, 0, g.l), qx = g.p[0] + g.dx * u, qy = g.p[1] + g.dy * u, d = Math.hypot(x - qx, y - qy); if (d < best) { best = d; sgn = Math.sign((x - qx) * g.nx + (y - qy) * g.ny) || 1; t = g.t0 + u; } } return { d: best, sgn, t }; };
+    const flip = signAt(tr.x[probe], tr.y[probe]).sgn; // + means the normal points inland
+    // signed distance inland of the coastline (negative out at sea)
+    // signed distance inland of the coastline (negative out at sea) and the distance along it,
+    // read from a 10 m raster over the town (exact further out)
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (let i = 0; i < N; i += 5) { bx0 = Math.min(bx0, tr.x[i]); by0 = Math.min(by0, tr.y[i]); bx1 = Math.max(bx1, tr.x[i]); by1 = Math.max(by1, tr.y[i]); }
+    const C = 10, gx0 = bx0 - 1000, gy0 = by0 - 1000, gnx = Math.ceil((bx1 - bx0 + 2000) / C) + 1, gny = Math.ceil((by1 - by0 + 2000) / C) + 1;
+    const RU = new Float32Array(gnx * gny), RT = new Float32Array(gnx * gny);
+    for (let j = 0; j < gny; j++) for (let i = 0; i < gnx; i++) { const q = signAt(gx0 + i * C, gy0 + j * C); RU[j * gnx + i] = q.d * q.sgn * flip; RT[j * gnx + i] = q.t; }
+    const look = (R, x, y) => {
+      const fx = (x - gx0) / C, fy = (y - gy0) / C, i = Math.floor(fx), j = Math.floor(fy);
+      if (i < 0 || j < 0 || i >= gnx - 1 || j >= gny - 1) return null;
+      const a = fx - i, b = fy - j, k = j * gnx + i;
+      return (R[k] * (1 - a) + R[k + 1] * a) * (1 - b) + (R[k + gnx] * (1 - a) + R[k + gnx + 1] * a) * b;
+    };
+    const inland = (x, y) => { const v = look(RU, x, y); if (v != null) return v; const q = signAt(x, y); return q.d * q.sgn * flip; };
+    const along = (x, y) => { const v = look(RT, x, y); return v != null ? v : signAt(x, y).t; };
+    // breakwaters: from the coast at each end of the harbourside, out and round toward each other
+    const hs = run.filter(i => role[i] === 'harbour');
+    const piers = [];
+    if (hs.length > 20) {
+      const rootAt = i => { const off = tr.hw + quay; return [tr.x[i] + tr.nx[i] * off * out, tr.y[i] + tr.ny[i] * off * out]; };
+      const A = rootAt(hs[0]), B = rootAt(hs[hs.length - 1]);
+      const seaDir = p => { const e = 6, gx = inland(p[0] + e, p[1]) - inland(p[0] - e, p[1]), gy = inland(p[0], p[1] + e) - inland(p[0], p[1] - e), l = Math.hypot(gx, gy) || 1; return [-gx / l, -gy / l]; };
+      const reach = L(200, 320), mouth = L(60, 110);
+      const dA = seaDir(A), dB = seaDir(B);
+      const A1 = [A[0] + dA[0] * reach, A[1] + dA[1] * reach], B1 = [B[0] + dB[0] * reach * 0.8, B[1] + dB[1] * reach * 0.8];
+      const mx = (A1[0] + B1[0]) / 2, my = (A1[1] + B1[1]) / 2, gx = B1[0] - A1[0], gy = B1[1] - A1[1], gl = Math.hypot(gx, gy) || 1;
+      const A2 = [mx - gx / gl * mouth / 2, my - gy / gl * mouth / 2], B2 = [mx + gx / gl * mouth / 2, my + gy / gl * mouth / 2];
+      piers.push([A, A1, A2], [B, B1, B2]);
+    }
+    const pierW = L(14, 20);
+    const pierDist = (x, y) => { let best = Infinity; for (const pl of piers) for (let k = 0; k < pl.length - 1; k++) best = Math.min(best, segDist([x, y], [x, y], pl[k], pl[k + 1])); return best; };
+    // a rocky headland across the harbour, now and then
+    let head = null;
+    if (piers.length && r() < 0.55) {
+      const B = piers[1][0], dB = [piers[1][1][0] - B[0], piers[1][1][1] - B[1]], l = Math.hypot(dB[0], dB[1]) || 1;
+      const along = [segs[segs.length - 1].dx, segs[segs.length - 1].dy];
+      const c = [B[0] + along[0] * L(250, 420) + dB[0] / l * L(120, 220), B[1] + along[1] * L(250, 420) + dB[1] / l * L(120, 220)];
+      head = { c, R: L(170, 260), h: L(45, 70) };
+      for (let i = 0; i < N; i += 4) if (Math.hypot(tr.x[i] - c[0], tr.y[i] - c[1]) < head.R + 110) { head = null; break; }
+    }
+    // the ground: amphitheatre hillside, mountains behind, the bed shelving away at sea
+    // ravines run down the hillside to the sea (the road along the hill dips through them) and a
+    // spur may reach the shore (the seafront climbs over it), as on the real Riviera
+    // the mountains rise right behind the town's highest street, an amphitheatre round the bay
+    let topU = 0;
+    for (let i = 0; i < N; i += 6) topU = Math.max(topU, inland(tr.x[i], tr.y[i]));
+    const Hs = L(32, 60), lam = L(260, 420), M = L(260, 460), U0 = topU + L(90, 220), W = L(450, 750), und = L(14, 24), uwl = L(170, 280);
+    const tc0 = 4000 - 150, tc1 = segs[segs.length - 1].t0 - 150;
+    const rav = [];
+    for (let k = 2 + Math.floor(r() * 3); k > 0; k--) rav.push({ t: L(tc0, tc1), d: L(12, 28), w: L(50, 110) });
+    const spur = r() < 0.7 ? { t: L(tc0 + 150, tc1), h: L(8, 18), w: L(90, 180) } : null;
+    const H = (x, y) => {
+      const u = inland(x, y);
+      let h = u < 0 ? Math.max(-14, u * 0.06) - 1 : 1.6 + Hs * (1 - Math.exp(-u / lam)) + M * U.smooth((u - U0) / W) + fbm(x / uwl, y / uwl, s, 3) * und * U.smooth((u - 30) / 80);
+      if (u > 0) {
+        const t = along(x, y);
+        for (const g of rav) h -= g.d * Math.exp(-(((t - g.t) / g.w) ** 2)) * U.smooth((u - 40) / 70) * (1 - U.smooth((u - 450) / 250));
+        if (spur) h += spur.h * Math.exp(-(((t - spur.t) / spur.w) ** 2)) * U.smooth(u / 20) * Math.exp(-Math.max(0, u - 40) / 260);
+      }
+      if (piers.length && pierDist(x, y) < pierW / 2) h = Math.max(h, 2.6);
+      if (head) { const d = Math.hypot(x - head.c[0], y - head.c[1]); if (d < head.R + 40) h = Math.max(h, head.h * U.smooth((head.R + 40 - d) / 70) * (0.85 + 0.15 * fbm(x / 90, y / 90, s + 5, 2)) - 2); }
+      return h;
+    };
+    const plaza = lay.v[lay.roles.indexOf('plaza')];
+    return { H, inland, along, role, coastal, run, coastLine: pts, piers, pierW, head, out, plaza, harbour: hs, townEdge: U0 + 40 };
   }
 
   // ---------- buildings (city) ----------
-  // Each block that is not a terrace strip gets one to four buildings, set back from its streets;
-  // any that would come within reach of the circuit are shrunk or dropped.
-  function shrinkQuad(q, d) {
-    // move each edge inward by d (quads are convex)
-    const n = q.length, cx = q.reduce((s, p) => s + p[0], 0) / n, cy = q.reduce((s, p) => s + p[1], 0) / n;
-    return q.map(p => { const dx = cx - p[0], dy = cy - p[1], l = Math.hypot(dx, dy) || 1; return [p[0] + dx / l * d * 1.41, p[1] + dy / l * d * 1.41]; });
-  }
+  // Dense, like a Riviera town: on every piece of land not taken by the road, its pavements,
+  // the promenade, the quays and the plaza, a building, turned along the street it faces (or
+  // along the hillside's contour further from the circuit), with gaps for the side streets.
+  // Most are six to fifteen storeys, a few are towers, the ones higher up the hill a little
+  // taller. Any that would come within reach of the circuit is dropped.
   function quadArea(q) { let a = 0; for (let k = 0; k < q.length; k++) { const p = q[k], o = q[(k + 1) % q.length]; a += p[0] * o[1] - o[0] * p[1]; } return Math.abs(a) / 2; }
   function distToTrack(tr, x, y, R) {
     let best = R;
@@ -355,33 +433,56 @@
     pts.push([poly.reduce((s, p) => s + p[0], 0) / poly.length, poly.reduce((s, p) => s + p[1], 0) / poly.length]);
     return pts.every(p => distToTrack(tr, p[0], p[1], need + 1) >= need);
   }
-  function cityBuildings(r, lay, tr, coast) {
-    const g = lay.grid, out = [];
-    for (let i = 0; i < g.nc; i++) for (let j = 0; j < g.nr; j++) {
-      if (g.narrow[j + 1]) continue; // terrace strip
-      const q = [g.P[i][j], g.P[i + 1][j], g.P[i + 1][j + 1], g.P[i][j + 1]];
-      let lot = shrinkQuad(q, 7);
-      if (quadArea(lot) < 600) continue;
-      // split along the longer side into one to three buildings
-      const e1 = Math.hypot(lot[1][0] - lot[0][0], lot[1][1] - lot[0][1]), e2 = Math.hypot(lot[3][0] - lot[0][0], lot[3][1] - lot[0][1]);
-      const parts = Math.max(1, Math.min(3, Math.round(Math.max(e1, e2) / 55)));
-      for (let k = 0; k < parts; k++) {
-        const t0 = k / parts + 0.02, t1 = (k + 1) / parts - 0.02;
-        const L = (a, b, t) => [U.lerp(a[0], b[0], t), U.lerp(a[1], b[1], t)];
-        let poly = e1 >= e2 ? [L(lot[0], lot[1], t0), L(lot[0], lot[1], t1), L(lot[3], lot[2], t1), L(lot[3], lot[2], t0)]
-          : [L(lot[0], lot[3], t0), L(lot[1], lot[2], t0), L(lot[1], lot[2], t1), L(lot[0], lot[3], t1)];
-        let ok = false;
-        for (let s = 0; s < 4 && !ok; s++) {
-          if (polyClear(tr, poly, tr.hw + 5.5) && poly.every(p => p[1] > coast(p[0]) + 6)) ok = true;
-          else poly = shrinkQuad(poly, 4);
-          if (quadArea(poly) < 250) break;
-        }
-        if (!ok) continue;
-        const inland = (j + 1) / g.nr;
-        out.push({ poly, h: Math.round(10 + r() * 18 + inland * r() * 30), tone: r() });
+  function harbourBuildings(r, tr, site) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < tr.N; i += 5) { x0 = Math.min(x0, tr.x[i]); y0 = Math.min(y0, tr.y[i]); x1 = Math.max(x1, tr.x[i]); y1 = Math.max(y1, tr.y[i]); }
+    const M = 420, G = 31, out = [], placed = new Map();
+    const key = (x, y) => Math.floor(x / 60) + ',' + Math.floor(y / 60);
+    for (let gy = y0 - M; gy <= y1 + M; gy += G) for (let gx = x0 - M; gx <= x1 + M; gx += G) {
+      const cx = gx + (r() - 0.5) * 12, cy = gy + (r() - 0.5) * 12;
+      const u = site.inland(cx, cy);
+      if (u < 14 || u > site.townEdge || r() < 0.08) continue; // the sea, the promenade, the mountains, the odd gap
+      if (site.plaza && Math.hypot(cx - site.plaza[0], cy - site.plaza[1]) < 55) continue; // the plaza and its gardens
+      if (site.head && Math.hypot(cx - site.head.c[0], cy - site.head.c[1]) < site.head.R + 30) continue;
+      // along the street it faces, or the hillside's contour
+      let best = -1, bd = 75;
+      tr.hash.near(cx, cy, 75, i => { const d = Math.hypot(cx - tr.x[i], cy - tr.y[i]); if (d < bd) { bd = d; best = i; } });
+      let ax, ay;
+      if (best >= 0) { ax = tr.tx[best]; ay = tr.ty[best]; }
+      else { const e = 8, gx2 = site.inland(cx + e, cy) - site.inland(cx - e, cy), gy2 = site.inland(cx, cy + e) - site.inland(cx, cy - e), l = Math.hypot(gx2, gy2) || 1; ax = -gy2 / l; ay = gx2 / l; }
+      const tower = u > 120 && r() < 0.02;
+      const wa = tower ? 18 + r() * 12 : 16 + r() * 24, wb = tower ? 18 + r() * 12 : 12 + r() * 14;
+      const bx = -ay, by = ax;
+      const poly = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([p, q]) => [cx + ax * p * wa / 2 + bx * q * wb / 2, cy + ay * p * wa / 2 + by * q * wb / 2]);
+      if (poly.some(p => site.inland(p[0], p[1]) < 10)) continue;
+      // none on cliffs: the ground under it may fall no more than about two storeys
+      { const hs = poly.map(p => site.H(p[0], p[1])); if (Math.max(...hs) - Math.min(...hs) > 7) continue; }
+      const rad = Math.hypot(wa, wb) / 2;
+      let clash = false;
+      for (let ox = -1; ox <= 1 && !clash; ox++) for (let oy = -1; oy <= 1 && !clash; oy++) {
+        const list = placed.get((Math.floor(cx / 60) + ox) + ',' + (Math.floor(cy / 60) + oy));
+        if (list) for (const b of list) if (Math.hypot(b.c[0] - cx, b.c[1] - cy) < (b.rad + rad) * 0.82) { clash = true; break; }
       }
+      if (clash || !polyClear(tr, poly, tr.hw + 4.5)) continue;
+      const up = U.clamp(u / 380, 0, 1);
+      const h = tower ? 60 + r() * 90 : Math.round(14 + r() * 18 + r() * 26 * up);
+      const b = { poly, h, tone: r(), c: [cx, cy], rad, tower };
+      out.push(b);
+      const k = key(cx, cy);
+      if (!placed.has(k)) placed.set(k, []);
+      placed.get(k).push(b);
     }
     return out;
+  }
+  // a covered stretch on the seafront: 200 to 380 m of it, away from its ends
+  function seafrontTunnel(r, tr, site) {
+    if (r() < 0.2) return null;
+    const N = tr.N, ds = tr.ds, sea = [];
+    for (let i = 0; i < N; i++) if (site.role[i] === 'sea' && isNaN(tr.pit.off[i])) sea.push(i);
+    const len = Math.round((200 + r() * 180) / ds), spare = sea.length - len - Math.round(40 / ds) * 2;
+    if (spare < 0) return null;
+    const i0 = sea[Math.round(40 / ds) + Math.floor(r() * (spare + 1))];
+    return { i0, i1: i0 + len };
   }
 
   // ---------- grading ----------
@@ -427,6 +528,87 @@
     let mn = Infinity, mx = -Infinity, at = 0;
     for (let i = 0; i < N; i++) { const n = 1 + v[i] * v[i] * ddz[i] / GRAV; if (n < mn) { mn = n; at = i; } mx = Math.max(mx, n); }
     return { min: mn, max: mx, at, ddz };
+  }
+
+  // ---------- layout realism ----------
+  // The shape of a lap, measured the same way for a generated circuit and for the real ones
+  // (tools/f1layout_prep.js runs this on the real centrelines): the line resampled every 5 m and
+  // smoothed over 12 m (the real lines are traced every 20 to 70 m), corners as stretches tighter
+  // than 120 m radius (same-way stretches less than 20 m apart are one corner), straights as
+  // stretches gentler than 500 m radius.
+  //   cpk       corners of more than 25 degrees per km
+  //   square    share of those corners between 65 and 115 degrees (city-block turns)
+  //   hairpins  corners of 140 degrees or more
+  //   longest   the longest straight (m); long: straights of 250 m or more
+  //   sweep     share of the lap in sweeping curves (120 to 600 m radius)
+  //   bendy     share of the lap in corners (under 120 m radius)
+  //   grid      share of the straight length within 10 degrees of one pair of perpendicular
+  //             directions (a street grid scores high, a coast road low)
+  //   aspect    the lap's length against its width (principal axes)
+  function layoutStats(xs, ys) {
+    const n0 = xs.length;
+    let L = 0;
+    const cum = [0];
+    for (let i = 1; i <= n0; i++) { L += Math.hypot(xs[i % n0] - xs[i - 1], ys[i % n0] - ys[i - 1]); cum.push(L); }
+    const n = Math.max(40, Math.round(L / 5)), X = new Float64Array(n), Yv = new Float64Array(n);
+    for (let k = 0, j = 0; k < n; k++) {
+      const s = k * L / n;
+      while (cum[j + 1] < s) j++;
+      const t = (s - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j]), a = j, b = (j + 1) % n0;
+      X[k] = xs[a] + (xs[b] - xs[a]) * t; Yv[k] = ys[a] + (ys[b] - ys[a]) * t;
+    }
+    const sx = smoothLoop(X, 12 / 5), sy = smoothLoop(Yv, 12 / 5), ds = L / n;
+    const hd = new Float64Array(n), k = new Float64Array(n);
+    for (let i = 0; i < n; i++) hd[i] = Math.atan2(sy[(i + 1) % n] - sy[(i - 1 + n) % n], sx[(i + 1) % n] - sx[(i - 1 + n) % n]);
+    for (let i = 0; i < n; i++) k[i] = U.wrapAngle(hd[(i + 1) % n] - hd[(i - 1 + n) % n]) / (2 * ds);
+    // corners: runs tighter than 120 m, starting the walk on a straight so none is split
+    let st = 0;
+    for (let i = 0; i < n; i++) if (Math.abs(k[i]) < 1 / 500) { st = i; break; }
+    const runs = [];
+    let cur = null;
+    for (let q = 0; q < n; q++) {
+      const i = (st + q) % n, c = Math.abs(k[i]) > 1 / 120;
+      if (c) {
+        const sg = Math.sign(k[i]);
+        if (cur && cur.sg === sg && q - cur.end <= 20 / ds) { cur.end = q; cur.ang += k[i] * ds; }
+        else { if (cur) runs.push(cur); cur = { sg, start: q, end: q, ang: k[i] * ds }; }
+      } else if (cur) cur.ang += k[i] * ds * (q - cur.end <= 20 / ds ? 1 : 0);
+    }
+    if (cur) runs.push(cur);
+    const corners = runs.map(r => Math.abs(r.ang) * 180 / Math.PI).filter(a => a > 25);
+    let bendy = 0, sweep = 0, longest = 0, long = 0, run = 0, stLen = 0;
+    const hist = new Float64Array(18); // straight length by heading, 5-degree bins over 90 degrees
+    for (let q = 0; q <= n; q++) {
+      const i = (st + q) % n, a = Math.abs(k[i]);
+      if (q < n) { if (a > 1 / 120) bendy++; else if (a > 1 / 600) sweep++; }
+      if (a < 1 / 500 && q < n) {
+        run += ds; stLen += ds;
+        const h = ((hd[i] * 180 / Math.PI) % 90 + 90) % 90;
+        hist[Math.floor(h / 5) % 18] += ds;
+      } else { if (run >= 250) long++; longest = Math.max(longest, run); run = 0; }
+    }
+    let gbest = 0;
+    for (let b = 0; b < 18; b++) { let g = 0; for (const o of [-2, -1, 0, 1, 2]) g += hist[(b + o + 18) % 18]; gbest = Math.max(gbest, g); }
+    // principal axes of the line
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += sx[i]; my += sy[i]; }
+    mx /= n; my /= n;
+    let cxx = 0, cyy = 0, cxy = 0;
+    for (let i = 0; i < n; i++) { const dx = sx[i] - mx, dy = sy[i] - my; cxx += dx * dx; cyy += dy * dy; cxy += dx * dy; }
+    const tr0 = cxx + cyy, det = cxx * cyy - cxy * cxy, l1 = tr0 / 2 + Math.sqrt(Math.max(0, tr0 * tr0 / 4 - det)), l2 = tr0 / 2 - Math.sqrt(Math.max(0, tr0 * tr0 / 4 - det));
+    return {
+      L, cpk: corners.length / (L / 1000), square: corners.length ? corners.filter(a => a >= 65 && a <= 115).length / corners.length : 0,
+      hairpins: corners.filter(a => a >= 140).length, longest, long, sweep: sweep / n, bendy: bendy / n,
+      grid: stLen ? gbest / stLen : 0, aspect: Math.sqrt(l1 / Math.max(1e-9, l2)),
+    };
+  }
+
+  // what of the lap's layout falls outside the city envelope (LAYOUT), or '' when nothing does
+  function layoutMiss(tr, info) {
+    const ls = layoutStats(Array.from(tr.x), Array.from(tr.y)), E = LAYOUT.city, lo = [];
+    if (info) info.layout = ls;
+    for (const k of ['cpk', 'square', 'hairpins', 'sweep', 'bendy', 'grid', 'aspect']) if (ls[k] < E[k][0] || ls[k] > E[k][1]) lo.push(k + ' ' + (+ls[k].toFixed(2)));
+    return lo.join(', ');
   }
 
   // ---------- realism ----------
@@ -505,9 +687,7 @@
     const st = STYLES[style];
     let lay, s0;
     if (style === 'city') {
-      s0 = site(r, 'city');
-      lay = cityLayout(r, st, s0.coast);
-      if (!lay) return { fail: 'city layout' };
+      lay = harbourLayout(r);
       if (lay.fail) return { fail: lay.fail };
     } else {
       lay = openLayout(r, style, st);
@@ -521,7 +701,7 @@
     const def = {
       id: 'gen2-' + style + '-' + seed, gen2: true, seed: seed % 100000 + 101, gen: seed, style: city ? 'street' : style === 'mountain' ? 'park' : style,
       style2: style, name: F1.TrackGen._word(r) + ' ' + (city ? 'Harbour Circuit' : style === 'mountain' ? 'Mountain Circuit' : style === 'modern' ? 'Grand Prix Circuit' : 'Park'),
-      width, look, startAt: city ? 0.5 : 0.55, v: lay.v,
+      width, look, startAt: city ? +lay.startAt.toFixed(3) : 0.55, v: lay.v,
       pit: city ? { side: 1, entry: -300, exit: 200, offset: 16, lane: 10 } : { side: 1, entry: -400, exit: 240, offset: 22, lane: 12 },
       terrain: { amp: 0, wl: 1000, bank: city ? 0.012 : 0.03 },
     };
@@ -538,16 +718,24 @@
       const g = verify({ tr, st, style, geomOnly: true });
       if (!g.ok) return { fail: g.fails[0].split(':')[0] };
     }
+    // the town is built around its lap, once the lap is laid out like a real harbour circuit
+    if (city) {
+      const lo = layoutMiss(tr);
+      if (lo) return { fail: 'layout' };
+      s0 = harbourSite(r, tr, lay); if (s0.fail) return { fail: s0.fail };
+    }
     // grade the road over the natural ground
     const raw = new Float64Array(tr.N);
     for (let i = 0; i < tr.N; i++) raw[i] = s0.H(tr.x[i], tr.y[i]);
+    // a harbour town's quays and seafront stand a couple of metres above the water
+    if (city) for (let i = 0; i < tr.N; i++) raw[i] = Math.max(raw[i], 2.5);
     const gr = grade(tr, raw, st);
     applyProfile(tr, gr.z, s0.H, st);
     tr.H2 = groundFn(tr, s0.H, st.slope);
     const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed };
     if (city) {
-      res.city = { grid: lay.grid, cells: lay.cells, buildings: cityBuildings(r, lay, tr, s0.coast) };
-      res.tunnel = tunnelRange(r, tr);
+      res.city = { buildings: harbourBuildings(r, tr, s0) };
+      res.tunnel = seafrontTunnel(r, tr, s0);
     }
     return res;
   }
@@ -580,18 +768,6 @@
     }
     return true;
   }
-  // a covered stretch (city): 220 to 420 m of gentle road away from the start and the pits
-  function tunnelRange(r, tr) {
-    if (r() < 0.25) return null;
-    const N = tr.N, ds = tr.ds, len = Math.round((220 + r() * 200) / ds);
-    const okAt = i => Math.abs(tr.kap[i]) < 1 / 70 && isNaN(tr.pit.off[i]) && i * ds > 300 && i * ds < tr.L - 400;
-    const starts = [];
-    for (let i = 0; i < N - len; i += 10) { let ok = true; for (let k = 0; k < len && ok; k += 2) ok = okAt(i + k); if (ok) starts.push(i); }
-    if (!starts.length) return null;
-    const i0 = starts[Math.floor(r() * starts.length)];
-    return { i0, i1: i0 + len };
-  }
-
   // ---------- verification ----------
   // Independent checks of a finished circuit. Every failure names itself.
   function verify(res) {
@@ -684,15 +860,21 @@
     if (edgeJump > 0.5) fail('bank reach', 'a cut deeper than the banks reach (' + edgeJump.toFixed(1) + ' m)');
     // city: above the sea, buildings clear of the road and of each other, tunnel sound
     if (style === 'city') {
-      const coast = res.site.coast;
-      for (let i = 0; i < N; i++) {
-        if (tr.y[i] < coast(tr.x[i]) + 10) { fail('in the sea', 'sample ' + i); break; }
+      // the road on land: the seafront and quays at least a promenade from the water, the rest
+      // well inland
+      const site = res.site;
+      for (let i = 0; i < N; i += 2) {
+        const u = site.inland(tr.x[i], tr.y[i]);
+        if (u < tr.hw + 8) { fail('in the sea', 'sample ' + i + ' only ' + u.toFixed(0) + ' m inland'); break; }
         if (tr.z[i] < 1.0) { fail('below sea level', tr.z[i].toFixed(1) + ' m'); break; }
       }
       const B = res.city.buildings;
-      for (const b of B) if (!polyClear(tr, b.poly, tr.hw + 5)) { fail('building on the road'); break; }
+      for (const b of B) if (!polyClear(tr, b.poly, tr.hw + 4) || b.poly.some(p => site.inland(p[0], p[1]) < 8)) { fail('building on the road'); break; }
       info.buildings = B.length;
-      if (B.length < 20) fail('too few buildings', String(B.length));
+      if (B.length < 150) fail('too few buildings', String(B.length));
+      // laid out like the real harbour circuit (see LAYOUT)
+      const lo = layoutMiss(tr, info);
+      if (lo) fail('layout', lo);
       if (res.tunnel) {
         const t = res.tunnel;
         for (let i = t.i0; i < t.i1; i++) if (!isNaN(tr.pit.off[i % N])) { fail('tunnel', 'over the pit lane'); break; }
@@ -714,7 +896,7 @@
   // Candidate k of a seed draws from its own random stream, so candidates can be tried in any
   // order and on any number of threads (js/gen2pool.js, tools/gen2batch.js): the circuit for a
   // seed is always its lowest-numbered candidate that passes every check.
-  const MAX_TRIES = 160;
+  const MAX_TRIES = 800;
   const normSeed = seed => Math.max(1, Math.floor(Math.abs(seed)) % 1000000);
   function stream(seed, k) {
     const r = U.rng(((Math.imul(seed, 2654435761) ^ Math.imul(k + 7, 0x9e3779b1)) >>> 0) || 1);
@@ -749,5 +931,5 @@
     throw e;
   }
 
-  F1.TrackGen2 = { make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
+  F1.TrackGen2 = { layoutStats, make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -77,7 +77,8 @@
     for (let k = 1; k < GRADE.length; k++) if (g <= GRADE[k][0]) return new THREE.Color(GRADE[k - 1][1]).lerp(new THREE.Color(GRADE[k][1]), (g - GRADE[k - 1][0]) / (GRADE[k][0] - GRADE[k - 1][0]));
     return new THREE.Color(GRADE[GRADE.length - 1][1]);
   };
-  const FACADE = ['#efe3c8', '#e8cfa3', '#d9a77a', '#f3efe6', '#e7c9b4', '#cfd9d3', '#f0d9a8', '#d8b9a0'];
+  const FACADE = ['#efe3c8', '#e8cfa3', '#d9a77a', '#f3efe6', '#e7c9b4', '#f0d9a8', '#d8b9a0', '#e9d8c4', '#f2e6d0', '#d6a98a'];
+  const TOWER = ['#9fb3c2', '#b8c4cc', '#8ea2b0'];
 
   // ---------- building the scene for a circuit ----------
   function disposeWorld() {
@@ -92,28 +93,30 @@
     const tr = res.tr, city = res.style === 'city';
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (let i = 0; i < tr.N; i++) { x0 = Math.min(x0, tr.x[i]); y0 = Math.min(y0, tr.y[i]); x1 = Math.max(x1, tr.x[i]); y1 = Math.max(y1, tr.y[i]); }
-    const M = 420;
-    x0 -= M; y0 -= M + (city ? 300 : 0); x1 += M; y1 += M;
-    const cell = Math.max(5, Math.max(x1 - x0, y1 - y0) / 300);
+    const M = city ? 900 : 420;
+    x0 -= M; y0 -= M; x1 += M; y1 += M;
+    const cell = Math.max(5, Math.max(x1 - x0, y1 - y0) / (city ? 360 : 300));
     const nx = Math.ceil((x1 - x0) / cell) + 1, ny = Math.ceil((y1 - y0) / cell) + 1;
     const pos = new Float32Array(nx * ny * 3), col = new Float32Array(nx * ny * 3), H = new Float32Array(nx * ny);
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) H[j * nx + i] = tr.H2(x0 + i * cell, y0 + j * cell);
-    const grass = new THREE.Color(res.style === 'modern' ? '#c9b48a' : '#6d8f4a'), rock = new THREE.Color('#8a8378'), pave = new THREE.Color('#bdb6a8'), sand = new THREE.Color('#d8c89e'), dark = new THREE.Color('#4f6b38');
-    const c = new THREE.Color();
-    const coast = city ? res.site.coast : null, g = city ? res.city.grid : null;
-    let gx0 = 0, gx1 = 0;
-    if (g) { gx0 = Math.min(...g.P[0].map(p => p[0])) - 30; gx1 = Math.max(...g.P[g.nc].map(p => p[0])) + 30; }
+    const grass = new THREE.Color(res.style === 'modern' ? '#c9b48a' : '#6d8f4a'), rock = new THREE.Color('#8a8378'), pave = new THREE.Color('#c9c1b2'), quay = new THREE.Color('#d9d4c8'), dark = new THREE.Color('#4f6b38');
+    const scrub = new THREE.Color('#6f7a4a'), cliff = new THREE.Color('#a39581'), bed = new THREE.Color('#2a5566');
+    const c = new THREE.Color(), site = city ? res.site : null;
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
       const k = j * nx + i, x = x0 + i * cell, y = y0 + j * cell, h = H[k];
       const hx = H[j * nx + Math.min(nx - 1, i + 1)] - H[j * nx + Math.max(0, i - 1)], hy = H[Math.min(ny - 1, j + 1) * nx + i] - H[Math.max(0, j - 1) * nx + i];
       const slope = Math.hypot(hx, hy) / (2 * cell);
       c.copy(grass).lerp(dark, U.clamp(0.5 + Math.sin(x * 0.013) * Math.cos(y * 0.011) * 0.5, 0, 1) * 0.35);
       if (city) {
-        const u = y - coast(x);
-        if (u < 14) c.copy(sand);
-        else if (x > gx0 && x < gx1 && u < (g.P[0][g.nr][1] - coast(g.P[0][0][0])) + 40) c.copy(pave);
-      }
-      c.lerp(rock, U.clamp((slope - 0.45) / 0.5, 0, 1));
+        // the sea bed, the quays and promenade, the town's paving, then scrub and rock on the
+        // mountainside; cliffs where it is steep
+        const u = site.inland(x, y);
+        if (h < 0.3) c.copy(bed);
+        else if (u < 16 || h < 3.2) c.copy(quay);
+        else if (u < 1000) c.copy(pave).lerp(scrub, U.smooth((u - 700) / 300));
+        else c.copy(scrub).lerp(dark, 0.3);
+        c.lerp(cliff, U.clamp((slope - 0.55) / 0.45, 0, 1));
+      } else c.lerp(rock, U.clamp((slope - 0.45) / 0.5, 0, 1));
       pos[k * 3] = x; pos[k * 3 + 1] = Y(h); pos[k * 3 + 2] = y;
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
     }
@@ -232,35 +235,108 @@
       const geo = new THREE.ExtrudeGeometry(shape, { depth: Y(b.h + 3), bevelEnabled: false });
       geo.rotateX(-Math.PI / 2);
       geo.translate(0, Y(base) - 3 * state.ex, 0);
-      const col = FACADE[Math.floor(b.tone * FACADE.length) % FACADE.length];
+      const col = b.tower ? TOWER[Math.floor(b.tone * TOWER.length) % TOWER.length] : FACADE[Math.floor(b.tone * FACADE.length) % FACADE.length];
       if (!byCol.has(col)) byCol.set(col, new THREE.MeshLambertMaterial({ color: col }));
       grp.add(new THREE.Mesh(geo, byCol.get(col)));
     }
     world.add(grp);
   }
 
-  // the sea (city): from just inland of the coast out to the horizon; land beyond the modelled
-  // ground: a plain at the height of the ground's edge, so the view never ends in empty sky
+  // land beyond the modelled ground: a plain at the height of its edge (open circuits), so the
+  // view never ends in empty sky. The town's sea is a plane at sea level under everything: the
+  // ground stands above it on land
   function waterMesh(res, box) {
     const tr = res.tr, F = 12000;
+    if (res.style === 'city') {
+      // the sea: from the coastline (carried on past its ends) out to the horizon, so none shows
+      // inland behind the mountains
+      const site = res.site, pts = site.coastLine, n = pts.length;
+      const seaward = (p, q) => { const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l; return site.inland(p[0] + nx * 60, p[1] + ny * 60) < site.inland(p[0] - nx * 60, p[1] - ny * 60) ? [nx, ny] : [-nx, -ny]; };
+      const d0 = [pts[0][0] - pts[2][0], pts[0][1] - pts[2][1]], l0 = Math.hypot(d0[0], d0[1]) || 1, d1 = [pts[n - 1][0] - pts[n - 3][0], pts[n - 1][1] - pts[n - 3][1]], l1 = Math.hypot(d1[0], d1[1]) || 1;
+      const E0 = [pts[0][0] + d0[0] / l0 * F, pts[0][1] + d0[1] / l0 * F], E1 = [pts[n - 1][0] + d1[0] / l1 * F, pts[n - 1][1] + d1[1] / l1 * F];
+      const s0 = seaward(pts[0], pts[1]), s1 = seaward(pts[n - 2], pts[n - 1]);
+      const ring = [E0].concat(pts, [E1, [E1[0] + s1[0] * F, E1[1] + s1[1] * F], [E0[0] + s0[0] * F, E0[1] + s0[1] * F]]);
+      // inland of the coastline (the quays) the ground covers it anyway: the ring is drawn a
+      // little inland so no gap shows along the shore
+      const shape = new THREE.Shape(ring.map(p => new THREE.Vector2(p[0], -p[1])));
+      const g = new THREE.ShapeGeometry(shape);
+      g.rotateX(-Math.PI / 2);
+      const w = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: '#2b6c8f', transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+      w.position.y = 0.05;
+      world.add(w);
+      return;
+    }
     let edge = Infinity;
     for (let x = box.x0; x <= box.x1; x += 40) edge = Math.min(edge, tr.H2(x, box.y1), tr.H2(x, box.y0));
     for (let y = box.y0; y <= box.y1; y += 40) edge = Math.min(edge, tr.H2(box.x0, y), tr.H2(box.x1, y));
-    let landY0 = box.y0 - F;
-    if (res.style === 'city') {
-      let cmax = -Infinity;
-      for (let x = box.x0 - F; x <= box.x1 + F; x += 50) cmax = Math.max(cmax, res.site.coast(x));
-      const top = cmax + 40, w = new THREE.Mesh(new THREE.PlaneGeometry(box.x1 - box.x0 + 2 * F, top - (box.y0 - F)), new THREE.MeshLambertMaterial({ color: '#2d6f93', transparent: true, opacity: 0.9 }));
-      w.rotation.x = -Math.PI / 2;
-      w.position.set((box.x0 + box.x1) / 2, 0.02, (top + box.y0 - F) / 2);
-      world.add(w);
-      landY0 = top;
-      edge = Math.max(edge, 2);
-    }
-    const land = new THREE.Mesh(new THREE.PlaneGeometry(box.x1 - box.x0 + 2 * F, box.y1 + F - landY0), new THREE.MeshLambertMaterial({ color: res.style === 'modern' ? '#bca77f' : '#5f7f42' }));
+    const land = new THREE.Mesh(new THREE.PlaneGeometry(box.x1 - box.x0 + 2 * F, box.y1 - box.y0 + 2 * F), new THREE.MeshLambertMaterial({ color: res.style === 'modern' ? '#bca77f' : '#5f7f42' }));
     land.rotation.x = -Math.PI / 2;
-    land.position.set((box.x0 + box.x1) / 2, Y(edge) - 1.5, (landY0 + box.y1 + F) / 2);
+    land.position.set((box.x0 + box.x1) / 2, Y(edge) - 1.5, (box.y0 + box.y1) / 2);
     world.add(land);
+  }
+
+  // the harbour's yachts: moored stern-on along the quays and the breakwaters, and palms along
+  // the promenade (instanced, one draw each)
+  function harbourLife(res) {
+    if (res.style !== 'city') return;
+    const tr = res.tr, site = res.site, rnd = U.rng(res.seed * 31 + 7);
+    const boats = [];
+    const moor = (x, y, dx, dy) => { // (dx, dy): pointing out from the quay
+      for (let k = 0; k < 3; k++) {
+        const len = 12 + rnd() * 30, gx = x + dx * (6 + len / 2), gy = y + dy * (6 + len / 2);
+        if (tr.H2(gx, gy) > -0.2 || tr.H2(x + dx * (8 + len), y + dy * (8 + len)) > -0.2) return;
+        boats.push([gx, gy, Math.atan2(dy, dx), len]);
+        return;
+      }
+    };
+    const out = site.out;
+    for (const i of site.harbour) if (i % 9 === 0) {
+      const d = tr.hw + 16, x = tr.x[i] + tr.nx[i] * out * d, y = tr.y[i] + tr.ny[i] * out * d;
+      moor(x, y, tr.nx[i] * out, tr.ny[i] * out);
+    }
+    for (const pl of site.piers) for (let k = 0; k < pl.length - 1; k++) {
+      const a = pl[k], b = pl[k + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L;
+      for (let t = 20; t < L - 10; t += 16) for (const sgn of [-1, 1]) moor(a[0] + ux * t - uy * sgn * site.pierW / 2, a[1] + uy * t + ux * sgn * site.pierW / 2, -uy * sgn, ux * sgn);
+    }
+    if (boats.length) {
+      const hull = new THREE.BoxGeometry(1, 1, 1), m = new THREE.InstancedMesh(hull, new THREE.MeshLambertMaterial({ color: '#f4f4f2' }), boats.length);
+      const deck = new THREE.InstancedMesh(hull, new THREE.MeshLambertMaterial({ color: '#2f3a44' }), boats.length);
+      const o = new THREE.Object3D();
+      boats.forEach(([x, y, a, len], k) => {
+        o.position.set(x, Y(0.9), y); o.rotation.set(0, -a, 0); o.scale.set(len, 2.2 * state.ex, len * 0.24); o.updateMatrix(); m.setMatrixAt(k, o.matrix);
+        o.position.set(x, Y(2.4), y); o.scale.set(len * 0.45, 1.6 * state.ex, len * 0.16); o.updateMatrix(); deck.setMatrixAt(k, o.matrix);
+      });
+      world.add(m, deck);
+    }
+    // palms along the promenade and the quays, clear of the tunnel
+    const palms = [];
+    const inT = i => res.tunnel && ((i >= res.tunnel.i0 && i <= res.tunnel.i1) || (i + tr.N >= res.tunnel.i0 && i + tr.N <= res.tunnel.i1));
+    for (const i of site.run) if (i % 11 === 0 && !inT(i)) {
+      const d = tr.hw + 5, x = tr.x[i] + tr.nx[i] * out * d, y = tr.y[i] + tr.ny[i] * out * d;
+      if (tr.H2(x, y) > 1) palms.push([x, y, tr.H2(x, y)]);
+    }
+    if (palms.length) {
+      const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.35, 1, 6), new THREE.MeshLambertMaterial({ color: '#8a7358' }), palms.length);
+      const crown = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshLambertMaterial({ color: '#4f7a3a' }), palms.length);
+      const o = new THREE.Object3D();
+      palms.forEach(([x, y, h], k) => {
+        const ht = 8 + rnd() * 4;
+        o.position.set(x, Y(h) + ht * state.ex / 2, y); o.rotation.set(0, 0, 0); o.scale.set(1, ht * state.ex, 1); o.updateMatrix(); trunk.setMatrixAt(k, o.matrix);
+        o.position.set(x, Y(h) + ht * state.ex, y); o.scale.set(3.2, 1.4 * state.ex, 3.2); o.updateMatrix(); crown.setMatrixAt(k, o.matrix);
+      });
+      world.add(trunk, crown);
+    }
+    // the hotel over the tunnel
+    if (res.tunnel) {
+      const { i0, i1 } = res.tunnel, mid = Math.floor((i0 + i1) / 2) % tr.N, len = (i1 - i0) * tr.ds;
+      const g = new THREE.BoxGeometry(len * 0.8, 1, tr.hw * 2 + 40);
+      const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: '#efe7da' }));
+      const ht = 28 + rnd() * 14;
+      mesh.scale.set(1, ht * state.ex, 1);
+      mesh.position.set(tr.x[mid] - tr.nx[mid] * out * 6, Y(tr.z[mid]) + (7.5 + ht / 2) * state.ex, tr.y[mid] - tr.ny[mid] * out * 6);
+      mesh.rotation.y = -Math.atan2(tr.ty[mid], tr.tx[mid]);
+      world.add(mesh);
+    }
   }
 
   function buildScene() {
@@ -271,6 +347,7 @@
     roadMeshes(res);
     buildingMeshes(res);
     waterMesh(res, box);
+    harbourLife(res);
   }
 
   // ---------- panels ----------
@@ -292,7 +369,7 @@
     ['gradient', 'Gradients'], ['closure', 'Lap closes'], ['crest', 'No take-off crests'],
     ['dip', 'No bottoming dips'], ['banking', 'Banking'], ['realism', 'Like real F1 circuits'], ['retaining walls', 'Banks meet the road'], ['bank reach', 'Ground continuous'], ['nan', 'Finite geometry'],
   ];
-  const CITY_CHECKS = [['in the sea', 'On land'], ['below sea level', 'Above the sea'], ['building on the road', 'Buildings clear'], ['too few buildings', 'Town built'], ['tunnel', 'Tunnel sound'], ['no hairpin', 'Hairpin']];
+  const CITY_CHECKS = [['layout', 'Laid out like Monaco'], ['in the sea', 'On land'], ['below sea level', 'Above the sea'], ['building on the road', 'Buildings clear'], ['too few buildings', 'Town built'], ['tunnel', 'Tunnel sound'], ['no hairpin', 'Hairpin']];
   function checks(res) {
     const rep = TG2.verify(res), failed = new Set(rep.fails.map(f => f.split(':')[0]));
     const list = CHECKS.concat(res.style === 'city' ? CITY_CHECKS : []);
@@ -382,9 +459,10 @@
     ctx.clearRect(0, 0, W, H);
     if (res.city) {
       ctx.fillStyle = '#2d5f7c';
-      ctx.beginPath(); ctx.moveTo(0, 0);
-      for (let px = 0; px <= W; px += 8) { const x = x0 + (px - ox) / k; ctx.lineTo(px, P(x, res.site.coast(x))[1]); }
-      ctx.lineTo(W, 0); ctx.closePath(); ctx.fill();
+      for (let py = 0; py < H; py += 6) for (let px = 0; px < W; px += 6) {
+        const x = x0 + (px - ox) / k, y = y0 + (py - oy) / k;
+        if (res.tr.H2(x, y) < 0.3) ctx.fillRect(px, py, 6, 6);
+      }
       ctx.fillStyle = 'rgba(232,207,163,.28)';
       for (const b of res.city.buildings) { ctx.beginPath(); b.poly.forEach((p, n) => { const q = P(p[0], p[1]); n ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.fill(); }
     }
