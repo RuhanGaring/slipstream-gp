@@ -959,11 +959,11 @@
     el.appendChild(foot([['ENTER', 'confirm / skip'], ['ESC', 'cancel']]));
     const STEPS = [
       ['CENTRE', 'Centre the wheel and take your feet off every pedal, then press ENTER.'],
-      ['FULL LEFT', 'Turn the wheel all the way to the left and hold it there.'],
-      ['FULL RIGHT', 'Now all the way to the right, and hold.'],
-      ['THROTTLE', 'Back to the centre. Press the throttle all the way down and hold.'],
-      ['BRAKE', 'Release the throttle. Press the brake all the way down and hold.'],
-      ['CLUTCH', 'Release the brake. Press the clutch all the way down and hold, or press ENTER if you have none.'],
+      ['FULL LEFT', 'Turn the wheel to the left as far as you would ever steer (to its stop) and hold it there, or press ENTER while holding it.'],
+      ['FULL RIGHT', 'Now all the way to the right, and hold (or press ENTER while holding it).'],
+      ['THROTTLE', 'Back to the centre. Press the throttle all the way down and hold (or press ENTER while holding it).'],
+      ['BRAKE', 'Release the throttle. Press the brake all the way down and hold (or press ENTER while holding it).'],
+      ['CLUTCH', 'Release the brake. Press the clutch all the way down and hold, or press ENTER with it released if you have none.'],
       ['DONE', 'Calibrated. Press ENTER to save, then map your buttons.'],
     ];
     const stepsEl = wrap.querySelector('.wc-steps'), tEl = wrap.querySelector('.wc-t'), sEl = wrap.querySelector('.wc-s'), holdEl = wrap.querySelector('.wc-hold i'), liveEl = wrap.querySelector('.wc-live');
@@ -975,39 +975,47 @@
       tEl.textContent = STEPS[k][0]; sEl.textContent = STEPS[k][1]; hold = 0; last = null;
     };
     show();
-    const used = () => [cal.steer && cal.steer.axis, cal.thr && cal.thr.axis, cal.brk && cal.brk.axis].filter(x => x != null);
-    // the value must hold still (within 1%) for this long before it is taken
-    const HOLD = 0.6;
-    live(el, () => {
-      const now = performance.now(), dt = Math.min(0.1, (now - t0) / 1000); t0 = now;
-      const dev = W.find(W.pads());
-      if (!dev) { sEl.textContent = 'Waiting for the wheel: turn it or press a pedal.'; return; }
-      const gp = dev.gp;
-      liveEl.textContent = 'AXES  ' + gp.axes.map((v, i) => (i + 1) + ': ' + v.toFixed(2)).join('   ');
-      if (!base || k === 0) { holdEl.style.width = '0%'; return; }
-      let axis = -1, v = 0, need = 0.3, skip = [];
-      if (k === 1) { const m = W.movedAxis(gp, base, []); axis = m.axis; v = gp.axes[axis]; need = 0.25; if (m.d < need) axis = -1; }
-      else if (k === 2) { axis = cal.steer.axis; v = gp.axes[axis]; if (Math.sign(v - cal.steer.c) === Math.sign(cal.steer.l - cal.steer.c) || Math.abs(v - cal.steer.c) < 0.25) axis = -1; }
-      else if (k >= 3 && k <= 5) {
-        skip = k === 3 ? [cal.steer.axis] : used();
-        // the brake may share the throttle's axis (combined pedals): then it moves the other way
-        if (k === 4 && cal.thr) skip = skip.filter(a => a !== cal.thr.axis);
-        const m = W.movedAxis(gp, base, skip);
-        axis = m.d >= 0.4 ? m.axis : -1; v = axis >= 0 ? gp.axes[axis] : 0;
-        if (k === 4 && axis === cal.thr.axis && Math.sign(v - cal.thr.rest) === Math.sign(cal.thr.full - cal.thr.rest)) axis = -1;
+    const used = () => [cal.steer, cal.thr, cal.brk].filter(Boolean);
+    // the value must hold still (within 2 % of its range) for this long before it is taken
+    const HOLD = 0.5;
+    // what the current step would take now: { dev, axis, v, rest } or null
+    const candidate = list => {
+      if (k === 2) {
+        const v = W.axisNow(list, cal.steer.dev, cal.steer.axis);
+        if (v == null || Math.abs(v - cal.steer.c) < 0.2 || Math.sign(v - cal.steer.c) === Math.sign(cal.steer.l - cal.steer.c)) return null;
+        return { dev: cal.steer.dev, axis: cal.steer.axis, v };
       }
-      if (axis < 0) { hold = 0; last = null; holdEl.style.width = '0%'; return; }
-      if (last && last.axis === axis && Math.abs(v - last.v) < 0.01) hold += dt; else hold = 0;
-      last = { axis, v };
-      holdEl.style.width = Math.min(100, hold / HOLD * 100) + '%';
-      if (hold < HOLD) return;
-      if (k === 1) cal.steer = { axis, c: base.axes[axis], l: v, r: null };
-      else if (k === 2) cal.steer.r = v;
-      else if (k === 3) cal.thr = { axis, rest: base.axes[axis], full: v };
-      else if (k === 4) cal.brk = { axis, rest: base.axes[axis], full: v };
-      else if (k === 5) cal.clu = { axis, rest: base.axes[axis], full: v };
+      let skip = k === 1 ? [] : k === 3 ? [cal.steer] : used();
+      // the brake may share the throttle's axis (combined pedals): then it moves the other way
+      if (k === 4 && cal.thr) skip = skip.filter(a => a !== cal.thr);
+      const m = W.movedAxis(list, base, skip);
+      if (!m.best || m.d < (k === 1 ? 0.2 : 0.35)) return null;
+      const c = m.best;
+      if (k === 4 && cal.thr && c.dev === cal.thr.dev && c.axis === cal.thr.axis && Math.sign(c.v - cal.thr.rest) === Math.sign(cal.thr.full - cal.thr.rest)) return null;
+      return c;
+    };
+    const take = c => {
+      if (k === 1) cal.steer = { dev: c.dev, axis: c.axis, c: base[c.dev].axes[c.axis], l: c.v, r: null };
+      else if (k === 2) cal.steer.r = c.v;
+      else if (k === 3) cal.thr = { dev: c.dev, axis: c.axis, rest: base[c.dev].axes[c.axis], full: c.v };
+      else if (k === 4) cal.brk = { dev: c.dev, axis: c.axis, rest: base[c.dev].axes[c.axis], full: c.v };
+      else if (k === 5) cal.clu = { dev: c.dev, axis: c.axis, rest: base[c.dev].axes[c.axis], full: c.v };
       Audio.ui.tick();
       k++; show();
+    };
+    let lastCand = null;
+    live(el, () => {
+      const now = performance.now(), dt = Math.min(0.1, (now - t0) / 1000); t0 = now;
+      const list = W.pads();
+      if (!list.length) { sEl.textContent = 'Waiting for the wheel: turn it or press a pedal.'; return; }
+      liveEl.textContent = list.map(gp => W.ids(gp).name.toUpperCase() + '\n  ' + gp.axes.map((v, i) => 'AXIS ' + (i + 1) + ' ' + v.toFixed(2)).join('   ')).join('\n');
+      if (!base || k === 0 || k === 6) { holdEl.style.width = '0%'; lastCand = null; return; }
+      const c = lastCand = candidate(list);
+      if (!c) { hold = 0; last = null; holdEl.style.width = '0%'; return; }
+      liveEl.textContent = 'DETECTED  ' + (c.name || '').toUpperCase() + '  AXIS ' + (c.axis + 1) + '  ' + c.v.toFixed(2) + '\n\n' + liveEl.textContent;
+      if (last && last.dev === c.dev && last.axis === c.axis && Math.abs(c.v - last.v) < 0.02) hold += dt; else { hold = 0; last = { dev: c.dev, axis: c.axis, v: c.v }; }
+      holdEl.style.width = Math.min(100, hold / HOLD * 100) + '%';
+      if (hold >= HOLD) take(c);
     });
     const finish = () => {
       const dev = W.find(W.pads());
@@ -1018,8 +1026,9 @@
       el, items: [], wheelOwn: true,
       onKey: code => {
         if (code !== 'Enter' && code !== 'NumpadEnter' && code !== 'Space') return false;
-        const dev = W.find(W.pads());
-        if (k === 0 && dev) { base = W.snapshot(dev.gp); k = 1; show(); Audio.ui.select(); }
+        const list = W.pads();
+        if (k === 0 && list.length) { base = W.snapshot(list); k = 1; show(); Audio.ui.select(); }
+        else if (k >= 1 && k <= 5 && lastCand) take(lastCand);
         else if (k === 5) { k = 6; show(); Audio.ui.select(); }
         else if (k === 6) { Audio.ui.select(); finish(); }
         return true;
@@ -1051,7 +1060,7 @@
     const start = (a, label) => {
       const dev = W.find(W.pads());
       if (!dev) { cap.textContent = 'NO WHEEL CONNECTED'; return; }
-      waiting = a; base = W.snapshot(dev.gp); scr.wheelOwn = true;
+      waiting = a; base = W.snapshot(W.pads()); scr.wheelOwn = true;
       cap.textContent = 'PRESS THE WHEEL BUTTON FOR  ' + label.toUpperCase() + '   (ESC CANCELS, BACKSPACE CLEARS)';
       cap.classList.add('on');
     };
@@ -1061,9 +1070,9 @@
       const dev = W.find(W.pads());
       if (!dev) return;
       const cal = dev.prof.cal || {};
-      const skip = [cal.steer, cal.thr, cal.brk, cal.clu].filter(Boolean).map(c => c.axis);
-      if (!cal.steer) skip.push(0);
-      const c = W.detectControl(dev.gp, base, skip);
+      const skip = [cal.steer, cal.thr, cal.brk, cal.clu].filter(Boolean).map(c => ({ dev: c.dev || dev.key, axis: c.axis }));
+      if (!cal.steer) skip.push({ dev: dev.key, axis: 0 });
+      const c = W.detectControl(W.pads(), base, skip);
       if (!c) return;
       dev.prof.binds[waiting] = c; G2.saveSettings(); Audio.ui.select();
       stop();

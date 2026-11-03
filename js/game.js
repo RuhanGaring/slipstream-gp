@@ -360,7 +360,9 @@
     const pads = F1.Wheel ? F1.Wheel.pads() : Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
     const wheel = F1.Wheel ? F1.Wheel.find(pads) : null;
     Game.wheelDev = wheel;
-    const gp = pads.find(x => !wheel || x !== wheel.gp);
+    // with a wheel connected, only a real gamepad counts as one (not separate pedals, a shifter or
+    // a second interface of the wheel base)
+    const gp = wheel ? pads.find(x => x !== wheel.gp && x.mapping === 'standard' && !F1.Wheel.isWheel(x, F1.Wheel.cfgOf())) : pads[0];
     if (!gp) return null;
     const b = i => (gp.buttons[i] ? gp.buttons[i].value : 0);
     const pressed = i => b(i) > 0.5 && !(padPrev[i] > 0.5);
@@ -406,7 +408,8 @@
   // settings in js/wheel.js) and goes to the car as a direct front-wheel angle, so the car turns
   // exactly as far as the wheel does, with no speed-dependent limit. The pedals only count once
   // calibrated. Mapped buttons drive the race and the menus.
-  let wheelHint = 0;
+  let wheelHint = 0, wheelLast = null;
+  Game.inputSrc = 'keys';
   function pollWheel(dt) {
     const dev = Game.wheelDev;
     if (!dev) { if (F1.Wheel) F1.Wheel.ffbStop(); return null; }
@@ -437,7 +440,19 @@
 
   function applyInput(p, dt, pad, wh) {
     const arcade = Game.race.mode === 'arcade';
-    // a wheel steers the car directly; it lets go when unplugged
+    // A wheel steers the car directly while it is the device in use. The last device touched
+    // drives, as in the F1 games: turning the wheel (a couple of degrees) or pressing a pedal
+    // hands control to the wheel; a steering, throttle or brake key, a gamepad stick or mouse
+    // steering hands it back to the keyboard. Unplugging the wheel lets go of it too.
+    if (wh) {
+      const keyUse = ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'ArrowUp', 'ArrowDown'].some(k => keys.has(k)) || (pad && pad.active) || mouse.on;
+      const moved = wheelLast != null && Math.abs(wh.deg - wheelLast) > 2.5;
+      if (wheelLast == null || keyUse) wheelLast = wh.deg;
+      if (keyUse && Game.inputSrc !== 'keys') { Game.inputSrc = 'keys'; HUD.message('KEYBOARD CONTROL', '', '', 1.2); }
+      else if (!keyUse && (moved || (wh.pedals && (wh.thr > 0.08 || wh.brk > 0.08))) && Game.inputSrc !== 'wheel') { Game.inputSrc = 'wheel'; HUD.message('WHEEL CONTROL', 'blue', '', 1.2); }
+      if (Game.inputSrc === 'wheel') wheelLast = wh.deg;
+      if (Game.inputSrc !== 'wheel') wh = null;
+    } else wheelLast = null;
     if (wh) {
       p.ctl.steerDirect = p.ctl.wheelSteer = wh.steer * p.spec.lockF; p.ctl.wheelDeg = wh.deg; p.ctl.wheelLock = wh.lock;
       p.ctl.byWheel = true;

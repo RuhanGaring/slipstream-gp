@@ -35,6 +35,8 @@
     ['044f', ['b67f', 'b67e'], 'Thrustmaster TMX', 900], ['044f', ['b696', 'b697'], 'Thrustmaster T248', 900],
     ['044f', ['b69a', 'b69b'], 'Thrustmaster T128', 900], ['044f', ['b692', 'b691'], 'Thrustmaster TS-XW', 1080],
     ['044f', [], 'Thrustmaster wheel', 1080],
+    ['346e', ['0005', '0015'], 'MOZA R3', 900], ['346e', ['0004', '0014'], 'MOZA R5', 900], ['346e', ['0002', '0012'], 'MOZA R9', 900],
+    ['346e', ['0006', '0016'], 'MOZA R12', 900], ['346e', ['0000', '0010'], 'MOZA R16 / R21', 900],
     ['0eb7', [], 'Fanatec wheel', 1080], ['346e', [], 'MOZA wheel', 900], ['16d0', [], 'Simucube', 900],
     ['3670', [], 'Simagic wheel', 900], ['2433', [], 'Asetek wheel', 900], ['1dd2', [], 'Leo Bodnar wheel', 900],
   ];
@@ -83,27 +85,54 @@
     for (const [k, v] of Object.entries(DEFAULTS)) if (p[k] === undefined) p[k] = JSON.parse(JSON.stringify(v));
     return p;
   }
-  // the wheel among the connected pads (the first one), or null
+  // The wheel among the connected pads, or null. A rig is often several USB devices (a wheel
+  // base, separate pedals, a shifter, a handbrake), and some bases show up twice (MOZA bases list
+  // a second, idle interface), so the calibration and the button mapping record which device
+  // each input lives on (by vendor and product), and every read looks it up among all the pads
+  // (dev.all). The profile belongs to the device most likely to be the wheel base.
+  function baseScore(gp, cfg) {
+    const d = ids(gp), f = cfg.force && cfg.force[d.key];
+    if (f) return f === 'wheel' ? 9 : 0;
+    if (!isWheel(gp, cfg)) return 0;
+    const k = knownOf(d);
+    let sc = k && k[1].length ? 6 : k ? 3 : 2;
+    if (/pedal|shifter|handbrake|hbp|sr-p|crp|clubsport pedals|t3pm|t-lcm|button box/i.test(gp.id)) sc = 1;
+    else if (/base|wheel|racing/i.test(gp.id)) sc += 1;
+    // a device with a real steering axis beats an idle twin (both read 0 at rest, but the idle
+    // one has no buttons or axes at all)
+    if (!gp.axes.length) sc = 0.5;
+    return sc;
+  }
   function find(pads) {
     const cfg = cfgOf();
+    let best = null, bs = 0;
     for (const gp of pads || []) {
-      if (!gp || !gp.connected || !isWheel(gp, cfg)) continue;
-      const d = ids(gp), k = knownOf(d);
-      return { gp, key: d.key, name: k ? k[2] : d.name, prof: profile(d), known: !!k, logitech: d.v === '046d', ids: d };
+      if (!gp || !gp.connected) continue;
+      const sc = baseScore(gp, cfg);
+      if (sc > bs) { bs = sc; best = gp; }
     }
-    return null;
+    if (!best) return null;
+    const d = ids(best), k = knownOf(d);
+    return { gp: best, all: pads, key: d.key, name: k ? k[2] : d.name, prof: profile(d), known: !!(k && k[1].length), logitech: d.v === '046d', moza: d.v === '346e', ids: d };
   }
   function pads() {
     try { return Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean); } catch (e) { return []; }
   }
+  // the device an input was calibrated or mapped on (older profiles: the wheel itself)
+  function devOf(dev, key) {
+    if (!key || key === dev.key) return dev.gp;
+    for (const gp of dev.all || []) if (gp && ids(gp).key === key) return gp;
+    return null;
+  }
 
   // ---------- reading ----------
-  const ax = (gp, i) => (i != null && i >= 0 && i < gp.axes.length ? gp.axes[i] : 0);
+  const ax = (gp, i) => (gp && i != null && i >= 0 && i < gp.axes.length ? gp.axes[i] : 0);
   // a pedal from its calibration: 0 at rest, 1 fully pressed
-  function pedal(gp, c) {
+  function pedal(dev, c) {
     if (!c || c.axis == null) return 0;
+    const gp = devOf(dev, c.dev);
     const span = c.full - c.rest;
-    if (Math.abs(span) < 0.05) return 0;
+    if (!gp || Math.abs(span) < 0.05) return 0;
     return U.clamp((ax(gp, c.axis) - c.rest) / span, 0, 1);
   }
   // deadzone, saturation and linearity, F1-game style (0 to 100 each). Deadzone ignores the first
@@ -115,10 +144,13 @@
     o = U.clamp(o, 0, 1);
     return lin > 0 ? Math.pow(o, 1 + lin / 40) : o;
   }
-  // the wheel's angle, -1 to 1 of its hardware range (left is negative)
-  function steerRaw(gp, p) {
+  // the wheel's angle, -1 to 1 of its hardware range (left is negative). Before calibration only
+  // a wheel base we know reads its first axis (on an unknown device that could be a pedal)
+  function steerRaw(dev, p) {
     const c = p.cal && p.cal.steer;
-    if (!c) return U.clamp(ax(gp, 0), -1, 1);
+    if (!c) return dev.known ? U.clamp(ax(dev.gp, 0), -1, 1) : 0;
+    const gp = devOf(dev, c.dev);
+    if (!gp) return 0;
     const v = ax(gp, c.axis), dl = c.l - c.c, dr = c.r - c.c;
     if (Math.abs(dl) < 0.05 || Math.abs(dr) < 0.05) return U.clamp(v, -1, 1);
     // each side scaled on its own (a wheel whose centre is not mid-range still reads 0 there),
@@ -128,14 +160,14 @@
   }
   // full read of a wheel
   function read(dev) {
-    const gp = dev.gp, p = dev.prof, cal = p.cal || {};
-    const raw = steerRaw(gp, p);
+    const p = dev.prof, cal = p.cal || {};
+    const raw = steerRaw(dev, p);
     const deg = raw * p.hw / 2;
     // the soft lock: full steering at half the maximum rotation either way
     const lock = Math.max(30, Math.min(p.rot, p.hw)) / 2;
     const e = U.clamp(deg / lock, -1, 1);
     const steer = Math.sign(e) * shape(Math.abs(e), p.sDead, p.sSat, p.sLin);
-    const thrR = pedal(gp, cal.thr), brkR = pedal(gp, cal.brk), cluR = pedal(gp, cal.clu);
+    const thrR = pedal(dev, cal.thr), brkR = pedal(dev, cal.brk), cluR = pedal(dev, cal.clu);
     return {
       raw, deg, steer, lock,
       thrR, brkR, cluR,
@@ -147,9 +179,12 @@
   }
 
   // ---------- buttons ----------
-  // a binding is a button {b} or an axis position {a, v} (hats and some paddles report as axes)
-  function bindDown(gp, bd) {
+  // a binding is a button {b} or an axis position {a, v} (hats and some paddles report as axes),
+  // on the device {dev}
+  function bindDown(dev, bd) {
     if (!bd) return false;
+    const gp = devOf(dev, bd.dev);
+    if (!gp) return false;
     if (bd.b != null) { const x = gp.buttons[bd.b]; return !!x && (x.pressed || x.value > 0.5); }
     if (bd.a != null) return Math.abs(ax(gp, bd.a) - bd.v) < 0.12;
     return false;
@@ -157,14 +192,14 @@
   const prevDown = {};
   // edge-triggered: true on the frame the bound control goes down
   function pressed(dev, action) {
-    const down = bindDown(dev.gp, dev.prof.binds[action]);
+    const down = bindDown(dev, dev.prof.binds[action]);
     const was = prevDown[action];
     prevDown[action] = down;
     return down && !was;
   }
-  const held = (dev, action) => bindDown(dev.gp, dev.prof.binds[action]);
+  const held = (dev, action) => bindDown(dev, dev.prof.binds[action]);
   // after a screen read the wheel itself: what is held now does not count as a new press
-  function sync(dev) { for (const [a] of ACTIONS) prevDown[a] = bindDown(dev.gp, dev.prof.binds[a]); }
+  function sync(dev) { for (const [a] of ACTIONS) prevDown[a] = bindDown(dev, dev.prof.binds[a]); }
   function bindName(bd) {
     if (!bd) return 'NOT SET';
     if (bd.b != null) return 'BUTTON ' + (bd.b + 1);
@@ -178,28 +213,48 @@
     ['menuUp', 'Menu up'], ['menuDown', 'Menu down'], ['menuLeft', 'Menu left'], ['menuRight', 'Menu right'],
     ['menuOk', 'Menu select'], ['menuBack', 'Menu back'],
   ];
-  // the control the player is touching now, against a snapshot taken when the screen asked:
-  // a button that went down, or an axis (not the steering or a pedal) that moved well away
-  function snapshot(gp) { return { axes: gp.axes.slice(), buttons: gp.buttons.map(b => b.pressed || b.value > 0.5) }; }
-  function detectControl(gp, base, skipAxes) {
-    for (let i = 0; i < gp.buttons.length; i++) if ((gp.buttons[i].pressed || gp.buttons[i].value > 0.5) && !base.buttons[i]) return { b: i };
-    for (let i = 0; i < gp.axes.length; i++) {
-      if (skipAxes.includes(i)) continue;
-      if (Math.abs(gp.axes[i] - base.axes[i]) > 0.5 && Math.abs(gp.axes[i]) <= 1.01) return { a: i, v: Math.round(gp.axes[i] * 100) / 100 };
+  // Snapshots of every connected device, keyed like the profiles, for the calibration and the
+  // mapping: what moved is judged against the moment the screen asked
+  function snapshot(list) {
+    const out = {};
+    for (const gp of list) out[ids(gp).key] = { axes: gp.axes.slice(), buttons: gp.buttons.map(b => b.pressed || b.value > 0.5), name: ids(gp).name };
+    return out;
+  }
+  const skipped = (skip, key, i) => skip.some(s => s && s.axis === i && (s.dev || '') === key);
+  // the control the player is touching now: a button that went down, or an axis (not the
+  // steering or a pedal) that moved well away
+  function detectControl(list, base, skip) {
+    for (const gp of list) {
+      const key = ids(gp).key, b0 = base[key];
+      if (!b0) continue;
+      for (let i = 0; i < gp.buttons.length; i++) if ((gp.buttons[i].pressed || gp.buttons[i].value > 0.5) && !b0.buttons[i]) return { dev: key, b: i };
+      for (let i = 0; i < gp.axes.length; i++) {
+        if (skipped(skip, key, i)) continue;
+        if (Math.abs(gp.axes[i] - b0.axes[i]) > 0.5 && Math.abs(gp.axes[i]) <= 1.01) return { dev: key, a: i, v: Math.round(gp.axes[i] * 100) / 100 };
+      }
     }
     return null;
   }
-  // the axis that moved furthest from the snapshot (for the calibration)
-  function movedAxis(gp, base, skip) {
-    let best = -1, d = 0;
-    for (let i = 0; i < gp.axes.length; i++) {
-      if (skip.includes(i)) continue;
-      const x = Math.abs(gp.axes[i] - base.axes[i]);
-      // a hat at rest reads about 1.29 and jumps in steps: never a steering wheel or pedal
-      if (Math.abs(base.axes[i]) > 1.05) continue;
-      if (x > d) { d = x; best = i; }
+  // the axis, on any device, that moved furthest from the snapshot (for the calibration)
+  function movedAxis(list, base, skip) {
+    let best = null, d = 0;
+    for (const gp of list) {
+      const key = ids(gp).key, b0 = base[key];
+      if (!b0) continue;
+      for (let i = 0; i < gp.axes.length; i++) {
+        if (skipped(skip, key, i)) continue;
+        // a hat at rest reads about 1.29 and jumps in steps: never a steering wheel or pedal
+        if (Math.abs(b0.axes[i]) > 1.05 || Math.abs(gp.axes[i]) > 1.05) continue;
+        const x = Math.abs(gp.axes[i] - b0.axes[i]);
+        if (x > d) { d = x; best = { dev: key, axis: i, v: gp.axes[i], rest: b0.axes[i], name: b0.name }; }
+      }
     }
-    return { axis: best, d };
+    return { best, d };
+  }
+  // the value of one axis of one device now
+  function axisNow(list, key, i) {
+    for (const gp of list) if (ids(gp).key === key) return ax(gp, i);
+    return null;
   }
 
   // ---------- force feedback (Logitech classic protocol over WebHID) ----------
@@ -274,7 +329,7 @@
   if (typeof navigator !== 'undefined') setTimeout(reconnect, 0);
 
   F1.Wheel = {
-    KNOWN, DEFAULTS, ACTIONS, find, pads, read, pressed, held, sync, bindName, snapshot, detectControl, movedAxis, profile, cfgOf, ids, isWheel,
+    KNOWN, DEFAULTS, ACTIONS, find, pads, read, pressed, held, sync, bindName, snapshot, detectControl, movedAxis, axisNow, profile, cfgOf, ids, isWheel,
     FFB, hidOK, connect, reconnect, setRange, ffbUpdate, ffbStop, force,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
