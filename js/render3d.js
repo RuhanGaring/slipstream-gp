@@ -259,11 +259,21 @@
   }
 
   // Fictional sponsor hoardings for walls: the circuit's own branding and the teams'.
-  function adTexture() {
-    const c = document.createElement('canvas'); c.width = 2048; c.height = 128;
+  function adTexture(only) {
+    const c = document.createElement('canvas'); c.width = only != null ? 512 : 2048; c.height = 128;
     const g = c.getContext('2d');
     const ads = [['SLIPSTREAM', '#0b1f3a', '#ffffff'], ['VANTA', '#121417', '#d8b45a'], ['FERRO CORSA', '#c8102e', '#ffffff'], ['MERIDIAN', '#0e8f86', '#ffffff'],
       ['HALCYON', '#16224a', '#ff7a1a'], ['GRAND PRIX', '#f4f4f4', '#c8102e'], ['KODIAK', '#1a2f8f', '#f2c230'], ['AUREX', '#b7e000', '#121212']];
+    // (one sponsor alone: its panel repeated down a whole run of wall, as the real ones are sold)
+    if (only != null) {
+      const [t, bg, fg] = ads[only % ads.length];
+      g.fillStyle = bg; g.fillRect(0, 0, 512, 128);
+      g.fillStyle = fg; g.font = 'italic 900 56px Titillium Web, Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(t, 256, 70, 440);
+      g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(0, 0, 3, 128); g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 118, 512, 10);
+      const t1 = new THREE.CanvasTexture(c); t1.colorSpace = THREE.SRGBColorSpace; t1.wrapS = t1.wrapT = THREE.RepeatWrapping; t1.anisotropy = 8;
+      return t1;
+    }
     ads.forEach(([t, bg, fg], k) => {
       g.fillStyle = bg; g.fillRect(k * 256, 0, 256, 128);
       g.fillStyle = fg; g.font = 'italic 900 46px Titillium Web, Segoe UI, sans-serif';
@@ -553,12 +563,16 @@
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
     }
+    // a generated Riviera town under a high summer sun: whitewashed walls, pale stone, the
+    // onboard pictures of a harbour circuit are high-key
+    const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
+    if (rivi) { state.exposure *= 1.14; sun.intensity *= 1.25; }
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
-    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? 1 : L.env;
+    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = (H0 ? 1 : L.env) * (rivi ? 0.72 : 1);
     state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
   }
 
@@ -699,7 +713,7 @@
     {
       let gm;
       if (T.has('grass')) {
-        const key = style === 'park' || W2.town ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);
+        const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : 'pavement', rep = 36 / (style === 'modern' ? 6 : 3.2);   // (a town's banks and yards are stone and paving; its gardens are its trees)
         gm = macro(pbr(key, rep, { color: style === 'modern' ? '#f3dcc0' : '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
         // desert sand: the photo drawn without a visible repeat, with relief from its own grains
         if (style === 'modern') F1.R3S.noTile(gm, 1.4);
@@ -730,6 +744,10 @@
               Wv[k] = bd < 3600 ? 1 - U.smooth((Math.abs(dl) - tr.hw) / 9) : 0;
               hgrid.edge[k] = Math.abs(dl) - tr.hw; // metres from the edge of the tarmac
               y -= sag * Wv[k];
+              // (a town: the ground by the circuit stays at the road's level out past the barrier,
+              // the cutting held by the retaining wall; an 8 m grid drawn up its face would show
+              // as a ramp in front of the wall)
+              if (W2.town && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 5) y = Math.min(y, Tracks.surfZ(tr, bi, Math.sign(dl) * Math.min(Math.abs(dl), tr.hw)) - 0.05);
               // A wide gravel or tarmac run-off is a ribbon in the road's own plane; out at its far
               // edge a rising hillside can stand above it and show through as bare turf. The ground
               // under the whole run-off is kept below it (and its neighbours' minimum, below).
@@ -793,11 +811,16 @@
         }
         return g;
       };
-      const pad = W2.town ? 560 : 220;
-      add(grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true), gm);
+      const pad = W2.town ? 900 : 220;
+      // (a town is paved only round its streets and buildings; its gardens, the slopes between
+      // and the hills above are scrub)
+      const gn = W2.town && T.has('grass') ? (MATS.ground_scrub || (MATS.ground_scrub = macro(pbr('grass', 36 / 3.2, { color: '#7a7c58' }), 110, 0.24, 0.1, false))) : null;
+      if (gn) gn.userData.wetK = [0.55, 0.25];
+      const fineG = grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true);
+      if (gn) { townGround(fineG, W2, tr); add(fineG, [gm, gn]); } else add(fineG, gm);
       turf = turfMap(hgrid, tr);
       const size = span + 9000;
-      add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gm);
+      add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gn || gm);
     }
     // water for the harbour circuit
     let water = null;
@@ -1045,6 +1068,19 @@
         pa.v(q2[0], yy(q2), q2[1], 0, 1, 0, 0, 0, c); pa.v(q3[0], yy(q3), q3[1], 0, 1, 0, 0, 0, c); pa.v(q4[0], yy(q4), q4[1], 0, 1, 0, 0, 0, c);
         pa.t(k, k + 1, k + 2); pa.t(k, k + 2, k + 3);
       };
+      // a town's streets keep their own markings under the race: a centre line (yellow on some
+      // streets, dashed white on others), and a zebra crossing every few hundred metres
+      if (W2.town) {
+        const yellow = col('#e8c547'), rz = U.rng(733);
+        let s = 0;
+        while (s < tr.L - 30) {
+          const len = 150 + rz() * 350, dashed = rz() < 0.6;
+          for (let t = s; t < Math.min(tr.L - 20, s + len); t += dashed ? 9 : 1.5) quad(t, t + (dashed ? 3 : 1.6), -0.07, 0.07, dashed ? white : yellow);
+          s += len + 30;
+          // a zebra crossing
+          if (rz() < 0.55 && s < tr.L - 40) for (let q = -hw + 0.6; q < hw - 0.6; q += 1.0) quad(s - 15, s - 12, q, q + 0.5, white);
+        }
+      }
       for (let k = 0; k < 20; k++) {
         const g = tr.grid[k];
         quad(g.s + 2.75, g.s + 2.9, g.d - 1.15, g.d + 1.15, white);
@@ -1118,6 +1154,8 @@
       const mainStraight = k => { const s = k * tr.ds; return s < 260 || s > tr.L - 320; };
       const postG = new THREE.BoxGeometry(0.12, 1, 0.12);
       const fenceH = 4.2;
+      // (in a town each sponsor buys a run of 60 to 150 m of wall; one run in seven is bare)
+      const adRuns = W2.town ? [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Acc()) : null, rnA = U.rng(911 + (tr.def.seed || 1));
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         const skip = k => side === ps && garageZone(k);
@@ -1125,6 +1163,14 @@
         // concrete (street, modern, every main straight) or armco
         const isConc = k => style !== 'park' || mainStraight(k);
         for (const [i0, i1] of runs(N, k => !skip(k) && isConc(k))) {
+          if (adRuns && style !== 'park') {
+            for (let i = i0; i < i1;) {
+              const j = Math.min(i1, i + Math.round((60 + rnA() * 90) / tr.ds)), bare = rnA() < 0.14, acc = bare ? conc : adRuns[Math.floor(rnA() * 8)];
+              wallRun(acc, tr, i, j, d, -0.07, 1.05, bare ? 8 : 4.4, 1.12, 0.55);
+              i = j;
+            }
+            continue;
+          }
           wallRun(style === 'park' ? conc : ad, tr, i0, i1, d, -0.07, 1.05, style === 'park' ? 8 : 14, 1.12, 0.55);
           wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fenceH, 1.6, 1.6, 0);
           for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 0.5; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 1.05 + (fenceH - 1.05) / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH - 1.05, 1)); }
@@ -1162,6 +1208,7 @@
         wallRun(fen, tr, i0, i1 - 1, k => d(k) + pit.side * 0.3, 1.1, 3.6, 1.6, 1.6, 0);
       }
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
+      if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap })); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
       add(fen.geo(), M.fence, { cast: false });
       add(posts.geo(), M.steel, { cast: true });
@@ -1249,7 +1296,10 @@
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
       // mid-rise fronts (ambientCG Facade018A/019A/020A: brick, dark concrete, brown piers; 13 m a tile, six floors)
       const mids = T.has('facA') ? [['facA', 19, new Batch(false)], ['facB', 19, new Batch(false)], ['facC', 19, new Batch(false)]] : [];
+      // (a town's fronts carry their own colour; their tints only vary it, never darken it to brick)
+      const townTints = ['#fffaf2', '#fff6ea', '#fbf4ec', '#ffffff', '#fff3e0', '#f8f1e6', '#fffbe9'];
       const tints = ['#f2e6d0', '#e8d2b0', '#f6efe4', '#e4c8a8', '#d9c3a5', '#efe1cf', '#e9d9c2', '#eec2a4', '#f1ddb0', '#e6b9a6', '#f3e3c8'];
+      const cityB = W2.town && T.has('city_facA') ? ['city_facA', 'city_facB', 'city_facC', 'city_facD'].filter(k => T.has(k)).map(k => [k, new Batch(true)]) : null;
       for (const it of W2.decor) {
         if (it.type !== 'building') continue;
         const r = U.rng(it.seed);
@@ -1265,7 +1315,8 @@
         // towers stand further back, as at Monaco)
         let front = false;
         if (it.front != null) front = it.front; else tr.hash.near(it.x, it.y, 60 + Math.max(it.w, it.h) / 2, () => { front = true; });
-        if (kinds.length && pick > (front ? 0.88 : it.tower ? 0.2 : 0.45)) {
+        // (a generated town's blocks are stucco, only its towers glass and office fronts)
+        if (kinds.length && (it.a != null ? it.tower && pick > 0.88 : pick > (front ? 0.88 : 0.45))) {
           // modern blocks: office bands or glass, the taller ones more often glass
           const k0 = pick > 0.85 ? 2 : hgt > 26 && pick > 0.6 ? 1 : 0;
           const [, tile, bt] = k0 === 0 && mids.length && r() < 0.7 ? mids[Math.floor(r() * mids.length)] : kinds[k0];
@@ -1276,14 +1327,17 @@
         }
         const g = new THREE.BoxGeometry(it.w, hgt, it.h);
         const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
+        // a generated harbour town's blocks wear its own stucco fronts (shuttered windows, two bays
+        // by two floors a 6.4 m tile), the rest the venue's facade
+        const town = it.a != null && cityB ? (it.tower && cityB.length > 2 ? cityB[2] : cityB[it.seed % cityB.length]) : null, tile = town ? 6.4 : 14;
         for (let k = 0; k < uv.count; k++) {
           const nx = Math.abs(nor.getX(k)), nz = Math.abs(nor.getZ(k));
           const along = nx > 0.5 ? pos.getZ(k) : nz > 0.5 ? pos.getX(k) : pos.getX(k);
-          uv.setXY(k, along / 14 + (it.seed % 4) / 4, (pos.getY(k) + hgt / 2) / 14); // 4 bays x 4 floors per 14 m tile
+          uv.setXY(k, along / tile + (it.seed % 4) / 4, (pos.getY(k) + hgt / 2) / tile); // 4 bays x 4 floors per 14 m tile
         }
         const gy = gmin - 3; // foundations below sloping streets
         g.scale(1, (hgt + 3) / hgt, 1);
-        walls.add(g, mat(it.x, (hgt + 3) / 2 + gy, it.y, ry), col(tints[Math.floor(r() * tints.length)]));
+        (town ? town[1] : walls).add(g, mat(it.x, (hgt + 3) / 2 + gy, it.y, ry), col(town ? townTints[Math.floor(r() * townTints.length)] : tints[Math.floor(r() * tints.length)]));
         // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
         // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
         // dark glazing under fabric awnings
@@ -1308,6 +1362,7 @@
         roofs.add(ub, mat(it.x, hgt + 3 + gy, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
       }
       add(relief.geo(), M.vcol, { cast: true });
+      if (cityB) for (const [k, b] of cityB) add(b.parts.length ? b.geo() : null, M[k] || (M[k] = pbr(k, 1, { vertexColors: true, envMapIntensity: 0.8 })), { cast: true });
       add(walls.geo(), T.has('facade') ? pbr('facade', 1, { vertexColors: true }) : std({ map: repTex(T.windows(), 1, 1), vertexColors: true, roughness: 0.75 }), { cast: true });
       add(roofs.geo(), M.roofs || (M.roofs = std({ vertexColors: true, roughness: 0.8, normalMap: T.has('concrete_n') ? T.photo('concrete_n', 1, false) : null })), { cast: true });
       const VMc = venueMats(), kindMat = { office: VMc.office, glass: VMc.glass, glasslit: VMc.lit };
@@ -1337,12 +1392,66 @@
     return { tr, root, gantry, water, tvCams, grass, turf };
   }
 
+  // Dressed limestone for retaining walls: courses 0.5 m high of blocks 0.7 to 1.3 m long, each
+  // its own shade of cream, sunk mortar joints (a 3 m by 3 m tile)
+  function ashlar() {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const g = c.getContext('2d'), rn = U.rng(77), px = 512 / 3;
+    g.fillStyle = '#a99d88'; g.fillRect(0, 0, 512, 512);
+    for (let row = 0; row < 6; row++) {
+      let x = -rn() * 0.6 * px;
+      while (x < 512) {
+        const w = (0.7 + rn() * 0.6) * px, l = 78 + rn() * 12, h0 = 38 + rn() * 6;
+        g.fillStyle = 'hsl(' + h0 + ',' + (18 + rn() * 12) + '%,' + l + '%)';
+        g.fillRect(x + 2, row * px / 2 + 2, w - 4, px / 2 - 4);
+        for (let k = 0; k < 40; k++) { g.fillStyle = 'rgba(' + (rn() < 0.5 ? '90,80,60' : '255,250,240') + ',' + (0.04 + rn() * 0.05) + ')'; g.fillRect(x + 2 + rn() * (w - 8), row * px / 2 + 2 + rn() * (px / 2 - 8), 2 + rn() * 9, 2 + rn() * 6); }
+        x += w;
+      }
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
+
+  // A town's ground split in two: paving within reach of its streets, buildings, quays and the
+  // circuit (group 0), scrub everywhere else (group 1). An urban mask on a 6 m raster decides
+  // each triangle by its middle.
+  function townGround(g, W2, tr) {
+    const site = W2.town.site, pos = g.attributes.position.array, idx = g.index.array;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let k = 0; k < pos.length; k += 3) { x0 = Math.min(x0, pos[k]); x1 = Math.max(x1, pos[k]); z0 = Math.min(z0, pos[k + 2]); z1 = Math.max(z1, pos[k + 2]); }
+    const C = 6, nx = Math.ceil((x1 - x0) / C) + 1, nz = Math.ceil((z1 - z0) / C) + 1, m = new Uint8Array(nx * nz);
+    const stamp = (x, z, R) => {
+      const i0 = Math.max(0, Math.floor((x - R - x0) / C)), i1 = Math.min(nx - 1, Math.ceil((x + R - x0) / C)), j0 = Math.max(0, Math.floor((z - R - z0) / C)), j1 = Math.min(nz - 1, Math.ceil((z + R - z0) / C));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if ((x0 + i * C - x) ** 2 + (z0 + j * C - z) ** 2 < R * R) m[j * nx + i] = 1;
+    };
+    for (const rd of site.roads) {
+      if (rd.kind === 'rail' || rd.kind === 'steps') continue;
+      const R = rd.w / 2 + 7;
+      for (let k = 0; k < rd.pts.length - 1; k++) {
+        const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]), n = Math.max(1, Math.ceil(l / 4));
+        for (let q = 0; q <= n; q++) stamp(a[0] + (c[0] - a[0]) * q / n, a[1] + (c[1] - a[1]) * q / n, R);
+      }
+    }
+    for (const it of W2.decor) if (it.type === 'building' && it.poly) { stamp(it.x, it.y, Math.max(it.w, it.h) / 2 + 3); for (const p of it.poly) stamp(p[0], p[1], 4); }
+    for (let i = 0; i < tr.N; i += 2) stamp(tr.x[i], tr.y[i], Math.max(tr.barr[0][i], tr.barr[1][i]) + 9);
+    for (const pl of site.piers) for (let k = 0; k < pl.length - 1; k++) for (let t = 0; t <= 1; t += 0.05) stamp(pl[k][0] + (pl[k + 1][0] - pl[k][0]) * t, pl[k][1] + (pl[k + 1][1] - pl[k][1]) * t, site.pierW / 2 + 4);
+    const urban = (x, z) => { const i = Math.round((x - x0) / C), j = Math.round((z - z0) / C); return m[j * nx + i] === 1 || site.inland(x, z) < 25; };
+    const a = [], b = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t] * 3, i1 = idx[t + 1] * 3, i2 = idx[t + 2] * 3;
+      ((urban((pos[i0] + pos[i1] + pos[i2]) / 3, (pos[i0 + 2] + pos[i1 + 2] + pos[i2 + 2]) / 3)) ? a : b).push(idx[t], idx[t + 1], idx[t + 2]);
+    }
+    const out = new Uint32Array(idx.length); out.set(a); out.set(b, a.length);
+    g.setIndex(new THREE.BufferAttribute(out, 1));
+    g.clearGroups(); g.addGroup(0, a.length, 0); g.addGroup(a.length, b.length, 1);
+  }
+
   // A generated town's sea, streets, quay walls, breakwaters and marina, its yachts and the
   // tunnel the lap runs through (js/trackgen2.js; render.js townScenery places the buildings and
   // trees). Returns the sea's mesh.
   function buildTown(root, tr, W2, add, M) {
     const town = W2.town, site = town.site, b = W2.bounds, rnd = U.rng(4049);
-    const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, pad = 560;
+    const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, pad = 900;
     const X0 = b.x0 - pad, X1 = b.x1 + pad, Z0 = b.y0 - pad, Z1 = b.y1 + pad;
     const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Z1;
     // the sea: one sheet at sea level, the land above it
@@ -1354,6 +1463,7 @@
     const near = (x, z) => { let hit = false; tr.hash.near(x, z, 40, i => { if (hit) return; if (Math.hypot(x - tr.x[i], z - tr.y[i]) < Math.max(tr.barr[0][i], tr.barr[1][i]) + 1.5) hit = true; }); return hit; };
     const gy = (x, z) => Tracks.groundAt(tr, x, z);
     for (const rd of site.roads) {
+      if (rd.kind === 'rail') continue;
       const pts = [];
       for (let k = 0; k < rd.pts.length - 1; k++) {
         const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]), n = Math.max(1, Math.ceil(l / 4));
@@ -1483,6 +1593,60 @@
       add(wl.geo(), M.concrete, { cast: true });
       if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#fff3d6', emissive: '#ffe2a8', emissiveIntensity: 6, roughness: 0.5 });
       add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
+    }
+    // street lamps along the circuit: a slim pole behind the barrier every 28 m, alternating sides,
+    // its arm and lantern reaching out over the road
+    {
+      const pole = new Batch(false), head = new Batch(false), cg = new THREE.CylinderGeometry(0.07, 0.11, 1, 6), bx = new THREE.BoxGeometry(1, 1, 1), N = tr.N;
+      const tun = k => town.tunnel && k >= town.tunnel.i0 - 4 && k <= town.tunnel.i1 + 4;
+      for (let i = 0, n = 0; i < N; i += Math.max(1, Math.round(28 / tr.ds)), n++) {
+        const sd = n % 2 ? 1 : -1, k = i;
+        if (tun(k)) continue;
+        const o = sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 1.0), x = tr.x[k] + tr.nx[k] * o, z = tr.y[k] + tr.ny[k] * o;
+        if (site.inland(x, z) < 3) continue;
+        const y = Math.max(tr.z[k], gy(x, z)) - 0.2, Hh = 8.5, ax = -tr.nx[k] * sd, az = -tr.ny[k] * sd;
+        pole.add(cg, mat(x, y + Hh / 2, z, 0, 1, Hh, 1));
+        // (the arm: 1.6 m out toward the road, the lantern at its end)
+        head.add(bx, mat(x + ax * 0.8, y + Hh - 0.1, z + az * 0.8, -Math.atan2(az, ax), 1.6, 0.08, 0.08));
+        head.add(bx, mat(x + ax * 1.6, y + Hh - 0.25, z + az * 1.6, -Math.atan2(az, ax), 0.7, 0.18, 0.32));
+      }
+      add(pole.geo(), M.steel || M.concrete, { cast: true }); add(head.geo(), M.dark || M.concrete, { cast: true });
+    }
+    // retaining walls: where the lap is cut into the hill, the ground beside it held back by a
+    // stuccoed wall just behind the barrier, up to the level of the ground behind (a stone cap on
+    // top), as the town's own streets are walled where they cut into the slope
+    {
+      const wl = new Acc(), cap = new Acc(), hedge = new Batch(false), hb = new THREE.BoxGeometry(1, 1, 1), N = tr.N, step = Math.max(1, Math.round(2 / tr.ds));
+      const tun = k => town.tunnel && k >= town.tunnel.i0 - 4 && k <= town.tunnel.i1 + 4;
+      for (const sd of [-1, 1]) {
+        let prev = null, along = 0, hPrev = 0;
+        for (let i = 0; i <= N; i += step) {
+          const k = i % N; along += tr.ds * step;
+          const b0 = (sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 1.4, y = tr.z[k];
+          let top = -1e9;
+          for (const o of [1.5, 4, 7, 10]) { const d = sd * (b0 + o); top = Math.max(top, gy(tr.x[k] + tr.nx[k] * d, tr.y[k] + tr.ny[k] * d)); }
+          // (the wall's height eases along it, never stepping more than 40 cm in 2 m)
+          let H = Math.min(7, top + 0.4 - y);
+          if (prev) H = U.clamp(H, hPrev - 0.4, hPrev + 0.4);
+          if (H < 1.1 || tun(k) || site.inland(tr.x[k], tr.y[k]) < 6) { prev = null; hPrev = 0; continue; }
+          hPrev = H;
+          const d = sd * b0, x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, fx = -tr.nx[k] * sd, fz = -tr.ny[k] * sd;
+          const a = wl.v(x, y - 0.3, z, fx, 0, fz, along / 3, 0), c = wl.v(x, y + H, z, fx, 0, fz, along / 3, (H + 0.3) / 3);
+          const ox = x - fx * 0.55, oz = z - fz * 0.55;
+          const c0 = cap.v(x + fx * 0.08, y + H, z + fz * 0.08, fx, 0, fz, along / 1.2, 0), c1 = cap.v(x + fx * 0.08, y + H + 0.3, z + fz * 0.08, 0, 1, 0, along / 1.2, 0.25), c2 = cap.v(ox, y + H + 0.3, oz, 0, 1, 0, along / 1.2, 0.7);
+          if (prev) {
+            if (sd > 0) { wl.t(prev[0], prev[1], a); wl.t(prev[1], c, a); } else { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); }
+            const [p0, p1, p2] = prev[2];
+            if (sd > 0) { cap.t(p0, p1, c0); cap.t(p1, c1, c0); cap.t(p1, p2, c1); cap.t(p2, c2, c1); } else { cap.t(p0, c0, p1); cap.t(p1, c0, c1); cap.t(p1, c1, p2); cap.t(p2, c1, c2); }
+          }
+          prev = [a, c, [c0, c1, c2]];
+          // (a clipped hedge or a bank of oleander along the top, in stretches)
+          if ((i / step) % 3 === 0 && Math.sin(along / 37 + sd) > -0.2) hedge.add(hb, mat(ox - fx * 0.5, y + H + 0.3 + 0.55, oz - fz * 0.5, -Math.atan2(tr.ty[k], tr.tx[k]), 6.2, 1.1 + 0.4 * Math.sin(along / 5), 0.9), col(Math.sin(along / 23) > 0.6 ? '#4e6a2c' : '#3f5a26'));
+        }
+      }
+      add(wl.geo(), M.retWall || (M.retWall = std({ map: ashlar(), roughness: 0.9, normalMap: T.has('concrete_n') ? T.photo('concrete_n', 1, false) : null })), { cast: true });
+      add(cap.geo(), M.concrete, { cast: true });
+      add(hedge.geo(), M.vcol, { cast: true });
     }
     return water;
   }
@@ -1711,7 +1875,7 @@
       if (k % 2) return;
       const back = -f * (it.d / 2 + 18 + 6.5);
       const x = it.x - Math.sin(it.h) * back, y = it.y + Math.cos(it.h) * back;
-      place(x, y, it.h, 26, 13, 2 + ((k / 2) % 3 === 1 ? 1 : 0), (k / 2) % 2 ? 'brick' : 'office');
+      place(x, y, it.h, 26, 13, 2 + ((k / 2) % 3 === 1 ? 1 : 0), (k / 2) % 2 && !W2.town ? 'brick' : 'office');
     });
     // race control: a glass tower at the head of the pit lane
     if (garages.length) {

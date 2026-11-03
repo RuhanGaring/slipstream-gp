@@ -402,15 +402,20 @@
     const roofs = ['#c9a27a', '#b9805a', '#d8cfc2', '#a7a39b', '#c4b59f', '#9c6b4e', '#e3ddd2', '#b4775a'];
     const bgrid = new Map(), bk = (x, y) => Math.floor(x / 40) + ',' + Math.floor(y / 40);
     // (only those over the detailed ground the 3D view lays round the circuit)
-    const B = W.bounds, far = 540;
+    const B = W.bounds, far = 880;
     for (const b of town.city.buildings) {
       if (b.c[0] < B.x0 - far || b.c[0] > B.x1 + far || b.c[1] < B.y0 - far || b.c[1] > B.y1 + far) continue;
-      const p = b.poly, w = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), d = Math.hypot(p[2][0] - p[1][0], p[2][1] - p[1][1]);
       let front = false;
       tr.hash.near(b.c[0], b.c[1], 40 + b.rad, () => { front = true; });
-      const it = { type: 'building', x: b.c[0], y: b.c[1], w, h: d, a: Math.atan2(p[1][1] - p[0][1], p[1][0] - p[0][0]), hgt: b.h, col: roofs[Math.floor(rnd() * roofs.length)], seed: Math.floor(rnd() * 1e6), r: b.rad, front, tower: b.tower, poly: p };
-      addDecor(W, it);
-      const k = bk(it.x, it.y); if (!bgrid.has(k)) bgrid.set(k, []); bgrid.get(k).push(it);
+      const col = roofs[Math.floor(rnd() * roofs.length)], seed = Math.floor(rnd() * 1e6);
+      // (an L, T or U block as the boxes it is made of)
+      for (const p of b.parts || [b.poly]) {
+        const w = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), d = Math.hypot(p[2][0] - p[1][0], p[2][1] - p[1][1]);
+        const cx = (p[0][0] + p[1][0] + p[2][0] + p[3][0]) / 4, cy = (p[0][1] + p[1][1] + p[2][1] + p[3][1]) / 4;
+        const it = { type: 'building', x: cx, y: cy, w, h: d, a: Math.atan2(p[1][1] - p[0][1], p[1][0] - p[0][0]), hgt: b.h, col, seed, r: Math.hypot(w, d) / 2, front, tower: b.tower, poly: p };
+        addDecor(W, it);
+        const k = bk(it.x, it.y); if (!bgrid.has(k)) bgrid.set(k, []); bgrid.get(k).push(it);
+      }
     }
     const inBuilding = (x, y, m) => {
       const k0 = Math.floor(x / 40), k1 = Math.floor(y / 40);
@@ -422,6 +427,7 @@
     };
     // street trees on the pavements; palms within a block of the shore
     for (const rd of site.roads) {
+      if (rd.kind === 'rail' || rd.kind === 'steps') continue;
       for (let k = 0; k < rd.pts.length - 1; k++) {
         const a = rd.pts[k], b = rd.pts[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
         if (l < 0.5) continue;
@@ -436,6 +442,18 @@
         }
       }
     }
+    // trees along the circuit itself, on the pavement behind its barriers: plane trees, and palms
+    // near the water, every 15 to 25 m, their crowns reaching out over the road
+    {
+      const tun = i => town.tunnel && i >= town.tunnel.i0 - 6 && i <= town.tunnel.i1 + 6;
+      for (let i = 0; i < tr.N; i += Math.max(1, Math.round((15 + rnd() * 10) / tr.ds))) for (const sd of [-1, 1]) {
+        if (rnd() < 0.45 || tun(i)) continue;
+        const o = (sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 2.6 + rnd() * 1.4, x = tr.x[i] + tr.nx[i] * o * sd, y = tr.y[i] + tr.ny[i] * o * sd, u = site.inland(x, y);
+        if (u < 4 || inBuilding(x, y, 1.5)) continue;
+        if (u < 70 && rnd() < 0.7) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
+        else addDecor(W, { type: 'tree', x, y, r: 3.4 + rnd() * 2.4, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
+      }
+    }
     // gardens and scrub on the unbuilt ground (ravine walls, parks): umbrella pines and broadleaf
     // trees, kept off the streets and the buildings
     {
@@ -446,7 +464,7 @@
       }
       const onRoad = (x, y) => { const i0 = Math.floor(x / 20), j0 = Math.floor(y / 20); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of rg.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], y - q[1]) < q[2]) return true; return false; };
       const B = W.bounds;
-      for (let y = B.y0 - 520; y < B.y1 + 520; y += 9) for (let x = B.x0 - 520; x < B.x1 + 520; x += 9) {
+      for (let y = B.y0 - 860; y < B.y1 + 860; y += 9) for (let x = B.x0 - 860; x < B.x1 + 860; x += 9) {
         const px = x + (rnd() - 0.5) * 7, py = y + (rnd() - 0.5) * 7;
         if (site.inland(px, py) < 8) continue;
         const e = 3, g = Math.hypot(site.H(px + e, py) - site.H(px - e, py), site.H(px, py + e) - site.H(px, py - e)) / (2 * e);

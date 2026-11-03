@@ -195,10 +195,12 @@
   // half the time so the lap runs either way round.
   const pseg = (x, y, a, b) => { const vx = b[0] - a[0], vy = b[1] - a[1], l2 = vx * vx + vy * vy || 1, t = U.clamp(((x - a[0]) * vx + (y - a[1]) * vy) / l2, 0, 1); return Math.hypot(x - a[0] - vx * t, y - a[1] - vy * t); };
   const cfail = {}, no = w => { cfail[w] = (cfail[w] || 0) + 1; return null; };
+  // the steepest a street climbs over any 40 m of it
+  const steepest = (T, pts) => { const q = resample(pts, 4); let g = 0; for (let k = 10; k < q.length; k++) g = Math.max(g, Math.abs(T.H(q[k][0], q[k][1]) - T.H(q[k - 10][0], q[k - 10][1])) / 40); return g; };
   // the site: the coastline, distance inland and the ground, on a 5 m raster
   function cityTerrain(r) {
     const L = (a, b) => a + (b - a) * r(), s = 1 + Math.floor(r() * 1e6);
-    const D = L(500, 600), Wb = L(330, 470), th = L(0.25, 0.6), Wr = L(260, 420), Hr = r() < 0.65 ? L(170, 260) : 0;   // a rocky headland across the basin's mouth, or open sea
+    const D = L(500, 600), Wb = L(330, 470), th = L(0.25, 0.6), Wr = L(180, 520), Hr = r() < 0.6 ? L(120, 320) : 0, hTilt = L(-0.45, 0.45);   // a rocky headland across the basin's mouth, or open sea
     // the side quay leans off square to the head quay, as real basins' quays do
     const sx = Math.tan(L(8, 22) * Math.PI / 180);
     const pr = { x: Wb + L(10, 60), w: L(80, 120), d: L(40, 60) };
@@ -206,7 +208,9 @@
     // ravines down the hillside to the sea, 20 to 60 m deep: the contours, and the roads on
     // them, bend deep into them and out round the spurs between
     const rav = [];
-    for (let k = 0, n = 2 + Math.floor(r() * 3); k < 40 && rav.length < n; k++) { const x = L(-800, 1600); if (rav.every(q => Math.abs(q.x - x) > 320)) rav.push({ x, d: L(20, 60), w: L(50, 125) }); }
+    for (let k = 0, n = 2 + Math.floor(r() * 3); k < 40 && rav.length < n; k++) { const x = L(-800, 1600); if (rav.every(q => Math.abs(q.x - x) > 320)) rav.push({ x, d: L(20, 60), w: L(50, 125), k: L(-0.3, 0.3), m: L(10, 35), l: L(120, 220) }); }
+    // (and gullies between them, 6 to 18 m deep)
+    for (let k = 0, n = 4 + Math.floor(r() * 5); k < 80 && rav.length < n + 4; k++) { const x = L(-900, 1700); if (rav.every(q => Math.abs(q.x - x) > 130)) rav.push({ x, d: L(6, 18), w: L(22, 45), k: L(-0.4, 0.4), m: L(8, 25), l: L(80, 160) }); }
     const soft = z => 40 * Math.log1p(Math.exp(U.clamp(z / 40, -30, 30)));
     // the open coast beyond the basin, and the promontory on it
     // (round the promontory the coast swings further inland: the coast road's long bend, through
@@ -220,8 +224,10 @@
     // the headland's tip is rounded, its far shore and the coast beyond wander
     const tipX = y => Wr * (0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - ((y + D + Hr / 2) / (Hr / 2)) ** 2)));
     const seaRaw0 = (x, y) => {
-      if (y < -D - Hr + 25 * Math.sin(x / 260 + s) + 15 * Math.sin(x / 97 + 2 * s)) return true;
-      if (x > sx * y && y < cl(x) - prom(x)) return y > -D || x > tipX(y);
+      // (the headland's frame is turned about its root on the side quay's foot)
+      const hy = -D + (y + D) * Math.cos(hTilt) - x * Math.sin(hTilt);
+      if (hy < -D - Hr + 25 * Math.sin(x / 260 + s) + 15 * Math.sin(x / 97 + 2 * s)) return true;
+      if (x > sx * y && y < cl(x) - prom(x)) return hy > -D || x > tipX(hy);
       return false;
     };
     // natural shores wander; the basin's quays are built straight
@@ -265,19 +271,28 @@
       for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++) { const ii = U.clamp(i + a, 0, nx - 1), jj = U.clamp(j + b, 0, ny - 1); t += u[jj * nx + ii]; w++; }
       u2[j * nx + i] = t / w;
     }
+    // a far smoother distance inland for the hillside (separable box blur, about 60 m): contours
+    // that follow the coast's every bend at a fixed offset crease like folded paper
+    const ub = new Float32Array(u2), tmp = new Float32Array(n), R = 12;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = 0; j < ny; j++) { let acc = 0; for (let i = -R; i <= R; i++) acc += ub[j * nx + U.clamp(i, 0, nx - 1)]; for (let i = 0; i < nx; i++) { tmp[j * nx + i] = acc / (2 * R + 1); acc += ub[j * nx + U.clamp(i + R + 1, 0, nx - 1)] - ub[j * nx + U.clamp(i - R, 0, nx - 1)]; } }
+      for (let i = 0; i < nx; i++) { let acc = 0; for (let j = -R; j <= R; j++) acc += tmp[U.clamp(j, 0, ny - 1) * nx + i]; for (let j = 0; j < ny; j++) { ub[j * nx + i] = acc / (2 * R + 1); acc += tmp[U.clamp(j + R + 1, 0, ny - 1) * nx + i] - tmp[U.clamp(j - R, 0, ny - 1) * nx + i]; } }
+    }
     // the ground: valley floor, hillside, headland
     const h = new Float32Array(n);
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-      const k = j * nx + i, x = X0 + i * C, y = Y0 + j * C, uu = u2[k];
+      const k = j * nx + i, x = X0 + i * C, y = Y0 + j * C, uu = u2[k], us = Math.max(ub[k], 0) * U.smooth(uu / 60) + uu * (1 - U.smooth(uu / 60));
       if (uu < 0) { h[k] = Math.max(-14, uu * 0.08) - 1; continue; }
-      const wr = Hr > 0 ? U.smooth((x + 30) / 50) * U.smooth((Wr + 20 - x) / 50) * U.smooth((-D + 10 - y) / 40) * U.smooth((y + D + Hr + 30) / 40) : 0;
+      // (the headland rises gently from the land behind it, in cliffs from the sea)
+      const hy = -D + (y + D) * Math.cos(hTilt) - x * Math.sin(hTilt);
+      const wr = Hr > 0 ? U.smooth((x + 200) / 230) * U.smooth((Wr + 20 - x) / 50) * U.smooth((-D + 10 - hy) / 40) * U.smooth((hy + D + Hr + 30) / 40) : 0;
       const wv = U.smooth((sx * y - x - 10) / 70) * U.smooth((140 - y) / 140) * U.smooth((y + D + Hr) / 60);
       const det = fbm(x / 420, y / 420, s, 2);
-      const hill = 2 + 0.03 * Math.min(uu, flat) + slope * Math.max(0, uu - flat) * (1 + 0.12 * det) + 260 * U.smooth((uu - 750) / 600);
+      const hill = 2 + 0.03 * Math.min(uu, flat) + slope * Math.max(0, us - flat) * (1 + 0.12 * det) + (260 + 120 * ridged(x / 520, y / 520, s + 9, 3)) * U.smooth((us - 750) / 600) + 6 * fbm(x / 130, y / 130, s + 13, 3) * U.smooth((us - flat) / 120);
       const valley = 2 + 0.012 * uu + vs * Math.max(0, xv - x) * (1 + 0.3 * det) + 1.5 * det;
-      const rock = 2 + rockH * U.smooth(uu / 18) + 3 * fbm(x / 60, y / 60, s + 7, 2);   // cliffs, then the plateau
+      const rock = 2 + rockH * (0.8 + 0.2 * fbm(x / 140, y / 140, s + 3, 2)) * U.smooth((uu - 1) / 14) + 6 * fbm(x / 70, y / 70, s + 7, 2) * U.smooth(uu / 30);   // cliffs to the water, an uneven top
       let hh = wr * rock + (1 - wr) * (wv * valley + (1 - wv) * hill);
-      for (const q of rav) hh -= q.d * Math.exp(-(((x - q.x) / q.w) ** 2)) * U.smooth((uu - flat - 20) / 160) * (1 - wr);
+      for (const q of rav) hh -= q.d * Math.exp(-(((x - q.x - q.k * y - q.m * Math.sin(y / q.l + q.x)) / q.w) ** 2)) * U.smooth((uu - flat - 20) / 160) * (1 - wr);
       h[k] = Math.max(hh, 2 + 0.02 * uu);
     }
     const bil = (f, x, y) => {
@@ -286,7 +301,7 @@
     };
     const H = (x, y) => bil(h, x, y), inland = (x, y) => bil(u2, x, y);
     const grad = (x, y) => [(H(x + 6, y) - H(x - 6, y)) / 12, (H(x, y + 6) - H(x, y - 6)) / 12];
-    return { L, s, D, Wb, th, Wr, Hr, sx, rav, pr, flat, slope, xv, rockH, cl, prom, H, inland, grad, X0, X1, Y0, Y1, C, u: u2, h, nx, ny };
+    return { L, s, D, Wb, th, Wr, Hr, hTilt, sx, rav, pr, flat, slope, xv, rockH, cl, prom, H, inland, grad, X0, X1, Y0, Y1, C, u: u2, h, nx, ny };
   }
   // the town's streets, segments hashed so each new one is kept clear of the rest
   function streetIndex() {
@@ -326,7 +341,17 @@
       }
       return { d: best, rd: brd, p: bp, dir: bdir };
     };
-    return { roads, add, near };
+    const reset = (rd, pts) => {
+      for (const list of grid.values()) for (let i = list.length - 1; i >= 0; i--) if (list[i][0] === rd) list.splice(i, 1);
+      rd.pts = pts;
+      for (let k = 0; k < pts.length - 1; k++) {
+        const a = pts[k], b = pts[k + 1];
+        for (let cx = Math.floor(Math.min(a[0], b[0]) / cell); cx <= Math.floor(Math.max(a[0], b[0]) / cell); cx++) for (let cy = Math.floor(Math.min(a[1], b[1]) / cell); cy <= Math.floor(Math.max(a[1], b[1]) / cell); cy++) {
+          const kk = cx + ',' + cy; if (!grid.has(kk)) grid.set(kk, []); grid.get(kk).push([rd, a, b]);
+        }
+      }
+    };
+    return { roads, add, near, reset };
   }
   // a smooth street from P (heading h0) to Q (arriving at heading h1): a cubic Hermite curve,
   // its tangents three quarters of the chord, finely sampled
@@ -375,15 +400,16 @@
   function trace(T, S, p0, hd, o) {
     const step = 4, out = [[p0[0], p0[1]]], skip = o.skip || [];
     let x = p0[0], y = p0[1], len = 0, why = 'length', hit = null;
+    const p0hd = hd;
     const maxA = o.maxA || 0.9, Rmin = o.Rmin || 30;
     while (len < o.maxLen) {
       const g = T.grad(x, y), sl = Math.hypot(g[0], g[1]);
-      let want = hd;
+      let want = o.straight && o.bend ? p0hd + o.bend * Math.sin(len / 140 + (o.bendP || 0)) : hd;
       if (sl > 0.015 && !o.straight) {
         let tdir = Math.atan2(g[0], -g[1]);                      // along the contour
         if (Math.cos(tdir - hd) < 0) tdir += Math.PI;
         let gr = o.grade;
-        if (o.hold != null) gr = U.clamp((o.hold - T.H(x, y)) * 0.04, -0.06, 0.06) + (o.grade || 0);
+        if (o.hold != null) gr = U.clamp((o.hold + (o.holdW ? o.holdW(len) : 0) - T.H(x, y)) * 0.04, -0.06, 0.06) + (o.grade || 0);
         const a = Math.asin(U.clamp(gr / sl, -1, 1)), sgn = Math.sign(U.wrapAngle(Math.atan2(g[1], g[0]) - tdir)) || 1;
         want = tdir + sgn * U.clamp(a, -maxA, maxA);
       }
@@ -436,12 +462,12 @@
       const d = (T.cl(x + 1) - T.cl(x - 1)) / 2, l = Math.hypot(1, d);
       coast.push([x - d / l * qq, T.cl(x) + qq / l]);
     }
-    const coastRd = street(coast, 13, 'coast', { lap: true, cls: 'primary' });
+    const coastRd = street(coast, L(11, 14), 'coast', { lap: true, cls: 'primary' });   // (the seafront: a dual carriageway)
     // the boulevard a block behind the side quay, from the headland's foot to the basin's head
     const yJ = qq + L(32, 44);
     const blvd = [];
     for (let y = -T.D + 20; y <= yJ + L(40, 90); y += 5) blvd.push([blvdX(y), y]);
-    const blvdRd = street(blvd, 13, 'boulevard', { lap: true, cls: 'primary' });
+    const blvdRd = street(blvd, L(10, 13), 'boulevard', { lap: true, cls: 'primary' });
     // ---- the lap ----
     const pieces = [];
     const add = (pts, role) => pieces.push([pts, role]);
@@ -449,12 +475,12 @@
     const Ttop = L(30, 36), gc = L(0.055, 0.08);
     const climb = trace(T, S, [blvdX(yJ), yJ], 0, { grade: gc, maxA: 0.6, Rmin: 70, toH: Ttop, maxLen: 900, skip: [blvdRd], w: 12, free: 30 });
     if (climb.why !== 'height' || climb.len < 250) return { fail: 'climb ' + climb.why };
-    const climbRd = street(climb.pts, 12, 'street', { lap: true, cls: 'primary' });
+    const climbRd = street(climb.pts, L(7, 8.5), 'street', { lap: true, cls: 'primary' });
     // along the top, holding its height round the hillside, to the square
     const top = trace(T, S, climb.pts[climb.pts.length - 1], climb.hd, { hold: Ttop, grade: 0, Rmin: 45, maxLen: L(140, 280), w: 12, skip: [climbRd] });
     if (top.why !== 'length') return { fail: 'top ' + top.why };
     // a long left up round the square's gardens, a short straight past them
-    const ga = arc(top.pts[top.pts.length - 1], top.hd, L(30, 45), 1, L(45, 70) * D2), gs = [];
+    const ga = arc(top.pts[top.pts.length - 1], top.hd, L(40, 60), 1, L(20, 40) * D2), gs = [];
     for (let k = 1, n = Math.round(L(20, 40) / 4); k <= n; k++) gs.push([ga.end[0] + Math.cos(ga.hd) * k * 4, ga.end[1] + Math.sin(ga.hd) * k * 4]);
     top.pts = top.pts.concat(ga.pts, gs); top.hd = ga.hd;
     // the square: a right turn round its garden, then down the far side
@@ -464,7 +490,7 @@
     for (let k = 1; k <= Math.round(sqLen / 4); k++) sq.push([ca.end[0] + Math.cos(hdc) * k * 4, ca.end[1] + Math.sin(hdc) * k * 4]);
     const plaza = [pc[0] + Math.cos(top.hd - cTurn / 2 - Math.PI / 2) * 30, pc[1] + Math.sin(top.hd - cTurn / 2 - Math.PI / 2) * 30];
     const avoidPlaza = (x, y) => Math.hypot(x - plaza[0], y - plaza[1]) < 26;
-    const sqEnd = sq[sq.length - 1], topRd = street(top.pts.concat(sq), 12, 'street', { lap: true, cls: 'primary' });
+    const sqEnd = sq[sq.length - 1], topRd = street(top.pts.concat(sq), L(6, 7.5), 'street', { lap: true, cls: 'primary' });
     // down the hill toward the coast, to a sharp corner
     const hCoast = 4;
     const d1 = trace(T, S, sqEnd, hdc, { grade: -L(0.08, 0.11), maxA: 0.8, Rmin: 40, toH: hCoast + L(24, 30), maxLen: L(150, 300), w: 11, skip: [topRd] });
@@ -472,11 +498,11 @@
     // the sharp corner, a short steep drop, and the hairpin
     const ma = arc(d1.pts[d1.pts.length - 1], d1.hd, L(12, 16), -1, L(95, 120) * D2), hm = ma.hd, p1 = ma.end;
     d1.pts = d1.pts.concat(ma.pts);
-    const d1Rd = street(d1.pts, 11, 'street', { lap: true, cls: 'primary' });
-    const drop = trace(T, S, p1, hm, { grade: -L(0.09, 0.12), maxA: 1.1, Rmin: 35, maxLen: L(30, 60), w: 11, free: 14, skip: [d1Rd] });
+    const d1Rd = street(d1.pts, L(6, 7.5), 'street', { lap: true, cls: 'primary' });
+    const drop = trace(T, S, p1, hm, { grade: -L(0.07, 0.095), maxA: 1.1, Rmin: 35, maxLen: L(30, 60), w: 11, free: 14, skip: [d1Rd] });
     if (drop.why !== 'length') return { fail: 'drop ' + drop.why };
     const hp = hairpin(drop.pts[drop.pts.length - 1], drop.hd, L(10.5, 12.5), 1);
-    const dropRd = street(drop.pts.concat(hp.pts), 11, 'street', { lap: true, cls: 'primary' });
+    const dropRd = street(drop.pts.concat(hp.pts), L(5.5, 6.5), 'street', { lap: true, cls: 'primary' });
     // out of the hairpin, down to the coast road, and two right turns onto it
     const d2 = trace(T, S, hp.pts[hp.pts.length - 1], hp.hd, { grade: -L(0.05, 0.08), maxA: 0.9, Rmin: 35, maxLen: L(30, 60), w: 11, free: 14, skip: [dropRd] });
     if (d2.why !== 'length') return { fail: 'after hairpin ' + d2.why };   // room for two separate corners before the coast road
@@ -582,9 +608,9 @@
       if (side.length > 70) swing(side[Math.round(side.length * L(0.15, 0.3))], L(20, 24), L(40, 90), L(16, 19), () => [-1 / cs, sx / cs]);
     }
     // the coast road climbs from the junction into the tunnel and drops to the chicane after it
-    const xP = join[0] - L(15, 40), xTe = T.pr.x - T.pr.w / 2, xDn = xTe - L(200, 300), Bc = L(10, 14);
+    const xP = join[0] - L(15, 40), xTe = T.pr.x - T.pr.w / 2, xDn = xTe - L(200, 300), Bc = L(6, 9);
     const coastRise = x => x >= xP ? 0 : x > xTe ? Bc * U.smooth((xP - x) / Math.max(40, xP - xTe)) : Bc * U.smooth((x - xDn) / Math.max(40, xTe - xDn));
-    return { T, S, rail: [], pts, roles, plaza, avoidPlaza, coastRd, blvdRd, qq, qw, sb, xA, yJ, yR, R1, Ttop, blvdX, quayX, hs, coastRise, topDip: L(6, 9) };
+    return { T, S, rail: [], squares: [], pts, roles, plaza, avoidPlaza, coastRd, blvdRd, qq, qw, sb, xA, yJ, yR, R1, Ttop, blvdX, quayX, hs, coastRise, topDip: L(6, 9) };
   }
   // ---------- the rest of the town's streets ----------
   // As on a real hillside town's map: a few corniches along the contours at irregular heights
@@ -619,6 +645,14 @@
       return true;
     };
     const avoid = (x, y) => town.avoidPlaza(x, y) || nearLap(x, y, 12) < 12;
+    // a corniche may cross the lap (a junction closed for the race), squarely enough that it never
+    // runs alongside it for more than 50 m
+    const lapRoads = S.roads.filter(q => q.lap);
+    const crosses = t => {
+      let run = 0;
+      for (const p of t.pts) { if (nearLap(p[0], p[1], 18) < 18) { run += 4; if (run > 50) return false; } else run = 0; }
+      return true;
+    };
     const steep = (x, y) => { const g = T.grad(x, y); return Math.hypot(g[0], g[1]) > 0.14; };
     const upSide = (p, hd) => { const g = T.grad(p[0], p[1]); return Math.sign(U.wrapAngle(Math.atan2(g[1], g[0]) - hd)) || 1; };
     // a dead end gets a turning circle
@@ -659,25 +693,49 @@
       }
       return out;
     };
+    // ---- the seafront and the boulevard as dual carriageways: the lap on the one by the water, the
+    // other a few metres inland across a planted median ----
+    const dual = [];
+    for (const lr of [town.coastRd, town.blvdRd]) {
+      if (r() < (lr === town.coastRd ? 0.3 : 0.5)) continue;
+      const w2 = L(7.5, 10), off = lr.w / 2 + L(2, 4) + w2 / 2, pl = resample(lr.pts, 4);
+      let run = [];
+      // (each end turned in to the nearest street, the lap's own most often)
+      const flush = () => {
+        if (run.length > 30) { const e0 = S.near(run[0][0], run[0][1], off + 6).p, e1 = S.near(run[run.length - 1][0], run[run.length - 1][1], off + 6).p; dual.push(S.add({ pts: (e0 ? [e0] : []).concat(run, e1 ? [e1] : []), w: w2, kind: 'street', cls: 'primary', dual: true })); }
+        run = [];
+      };
+      for (let k = 1; k < pl.length - 1; k++) {
+        const a = pl[k - 1], b = pl[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l;
+        const sd = T.inland(pl[k][0] + nx * 20, pl[k][1] + ny * 20) > T.inland(pl[k][0] - nx * 20, pl[k][1] - ny * 20) ? 1 : -1;
+        const q = [pl[k][0] + nx * off * sd, pl[k][1] + ny * off * sd];
+        const fine = T.inland(q[0], q[1]) > 12 && !town.avoidPlaza(q[0], q[1]) && S.near(q[0], q[1], w2 / 2 + 4, [lr]).d > 3 && nearLap(q[0], q[1], off - 1) >= off - 1.5;
+        if (!fine || (run.length && Math.hypot(q[0] - run[run.length - 1][0], q[1] - run[run.length - 1][1]) > 8)) flush();
+        if (fine) run.push(q);
+      }
+      flush();
+    }
     // ---- corniches ----
     const corn = [];
-    for (let hh = L(10, 14); hh < 200; hh += L(10, 26)) {
+    for (let hh = L(9, 13); hh < 320; hh += L(10, 30)) {
       const main = r() < 0.35, w = main ? L(10, 12) : L(6.5, 7.5);
-      for (let x0 = T.X0 + 200 + L(0, 500); x0 < T.X1 - 200; x0 += L(700, 1100)) {
+      for (let x0 = T.X0 + 200 + L(0, 300); x0 < T.X1 - 200; x0 += L(220, 420)) {
         let a = 0, b = T.Y1 - 100;
         if (T.H(x0, b) < hh || T.H(x0, a) > hh) continue;
         for (let it = 0; it < 30; it++) { const m = (a + b) / 2; if (T.H(x0, m) < hh) a = m; else b = m; }
         const y0 = (a + b) / 2, g = T.grad(x0, y0);
         if (Math.hypot(g[0], g[1]) < 0.05 || Math.hypot(g[0], g[1]) > 0.3 || T.inland(x0, y0) < 30) continue;
         if (S.near(x0, y0, 30).d < 30 || nearLap(x0, y0, 30) < 30) continue;
-        const gr = (r() - 0.5) * 0.02;
-        const halves = [0, Math.PI].map(dir => trace(T, S, [x0, y0], dir, { hold: hh, grade: gr * (dir ? -1 : 1), Rmin: 45, maxLen: 2500, w, avoid: (x, y) => avoid(x, y) || (() => { const q = T.grad(x, y); return Math.hypot(q[0], q[1]) > 0.36; })(), sep: 25 }));
-        if (halves.some(t => !ok(t, 0))) continue;
+        const gr = (r() - 0.5) * 0.02, wa = L(2, 6), wp = L(25, 50), wph = r() * 6.28;
+        const halves = [0, Math.PI].map(dir => trace(T, S, [x0, y0], dir, { hold: hh, holdW: l => wa * Math.sin((dir ? -l : l) / wp + wph), grade: gr * (dir ? -1 : 1), Rmin: 28, maxLen: L(150, 480), w, skip: lapRoads, avoid: (x, y) => town.avoidPlaza(x, y) || T.prom(x) > 3 && nearLap(x, y, 30) < 30 || (() => { const q = T.grad(x, y); return Math.hypot(q[0], q[1]) > 0.36; })(), sep: 25 }));
+        if (halves.some(t => !crosses(t) || t.pts.some(p => town.avoidPlaza(p[0], p[1])))) continue;
         // one street: the westward half reversed, then the eastward one
         let pts = untongue(halves[1].pts.slice().reverse().concat(halves[0].pts.slice(1)));
         if (polyLen(pts) < 150) continue;
         const ends = halves.map(t => t.why !== 'hit' && t.why !== 'edge' && t.why !== 'sea' ? joinUp(t.pts, t.hd, w, []) : []);
-        corn.push(S.add({ pts: ends[1].slice().reverse().concat(pts, ends[0]), w, kind: 'street', cls: main ? 'secondary' : 'residential', h: hh }));
+        const through = halves.every((t, k) => t.why === 'hit' || t.why === 'edge' || ends[k].length);
+        const ww = main && through ? w : Math.min(w, L(5, 6.5));
+        corn.push(S.add({ pts: ends[1].slice().reverse().concat(pts, ends[0]), w: ww, kind: 'street', cls: main && through ? 'secondary' : 'residential', h: hh }));
       }
     }
     // ---- the valley floor's grid, ending at T-junctions on the first corniche ----
@@ -696,11 +754,19 @@
         const hd = town.hs + jit(), w = L(6, 8);
         if (steep(x, ym) || T.inland(x, ym) < 20) { misses++; continue; }
         misses = 0;
-        const up = trace(T, S, [x, ym], hd, { straight: true, Rmin: 400, maxLen: 1500, w, avoid: steep, free: 2 });
-        const dn = trace(T, S, [x, ym], hd + Math.PI, { straight: true, Rmin: 400, maxLen: 1500, w, avoid: steep, free: 2 });
-        if (up.len + dn.len > 80) valley.push(S.add({ pts: dn.pts.slice().reverse().concat(up.pts.slice(1)), w, kind: 'street', cls: 'residential' }));
+        const bnd = L(0.05, 0.16), bp = r() * 6.28;
+        const up = trace(T, S, [x, ym], hd, { straight: true, bend: bnd, bendP: bp, Rmin: 150, maxLen: L(160, 520), w, avoid: steep, free: 2 });
+        const dn = trace(T, S, [x, ym], hd + Math.PI, { straight: true, bend: -bnd, bendP: bp + Math.PI, Rmin: 150, maxLen: L(160, 520), w, avoid: steep, free: 2 });
+        if (up.len + dn.len > 80) {
+          const run = t => t.why === 'length' || t.why === 'avoid' ? joinUp(t.pts, t.hd, w, []) : [], eu = run(up), ed = run(dn);
+          valley.push(S.add({ pts: ed.slice().reverse().concat(dn.pts.slice().reverse(), up.pts.slice(1), eu), w, kind: 'street', cls: 'residential' }));
+        }
       }
-      for (let y = town.yJ - sy; y > -T.D - 10; y -= sy * L(0.75, 1.25)) {
+      // a diagonal avenue across the grid
+      { const y = (town.yJ + town.yR) / 2 + L(-80, 80), t = trace(T, S, [town.blvdX(y) - 9, y], town.hs + Math.PI / 2 + L(30, 50) * D2 * (r() < 0.5 ? 1 : -1), { straight: true, Rmin: 400, maxLen: 900, w: 9, free: 2, skip: valley.concat([town.blvdRd]), avoid: steep }); if (t.len > 120) { t.pts.unshift([town.blvdX(y), y]); S.add({ pts: t.pts, w: 9, kind: 'street', cls: 'secondary' }); } }
+      // a square or two where streets cross
+      for (let k = 0, n = 1 + Math.floor(r() * 2); k < n && valley.length > 2; k++) { const v = valley[1 + Math.floor(r() * (valley.length - 1))], q = v.pts[Math.floor(v.pts.length * L(0.3, 0.7))]; town.squares.push([q[0], q[1], L(22, 34)]); }
+      for (let y = town.yJ - sy; y > -T.D - 10; y -= sy * L(0.6, 1.4)) {
         const t = trace(T, S, [town.blvdX(y) - 9, y], town.hs + Math.PI / 2 + jit(), { straight: true, Rmin: 400, maxLen: 1600, w: 7, free: 2, skip: valley.slice(0, -1).concat([town.blvdRd]), avoid: steep });   // (across all but the last: they end on it)
         if (t.len > 40) { t.pts.unshift([town.blvdX(y), y]); finish(t, 7, 'residential'); }
       }
@@ -708,8 +774,8 @@
     // ---- switchback climbers between the corniches ----
     const climber = (p0, hd0, w) => {
       let p = p0, hd = hd0, out = [p0.slice()], legs = 0, total = 0;
-      while (legs < 6) {
-        const g = L(0.08, 0.12), leg = trace(T, S, p, hd, { grade: g, maxA: 1.0, Rmin: 22, maxLen: L(45, 95), w, avoid, free: legs ? 6 : 12, skip: [] });
+      while (legs < 3) {
+        const g = L(0.08, 0.12), leg = trace(T, S, p, hd, { grade: g, maxA: 1.0, Rmin: 22, maxLen: L(100, 220), w, avoid, free: legs ? 6 : 12, skip: [] });
         out = out.concat(leg.pts.slice(1)); total += leg.len; legs++;
         if (leg.why === 'hit') return { pts: out, ok: legs > 0 && total > 40, hit: leg.hit };
         if (leg.why !== 'length') { no('climber ' + leg.why); return { ok: false }; }
@@ -727,7 +793,7 @@
     };
     for (const rd of corn) {
       const pl = resample(rd.pts, 4);
-      for (let k = Math.round(L(15, 40)); k < pl.length - 10; k += Math.round(L(25, 50))) {
+      for (let k = Math.round(L(15, 35)); k < pl.length - 10; k += Math.round(L(15, 35))) {
         const p = pl[k], q = pl[k + 1], hd = Math.atan2(q[1] - p[1], q[0] - p[0]), up = upSide(p, hd);
         if (nearLap(p[0], p[1], 40) < 40) continue;
         const w = L(4.5, 5.5), start = [p[0] - Math.sin(hd) * up * (rd.w / 2 + 1), p[1] + Math.cos(hd) * up * (rd.w / 2 + 1)];
@@ -736,7 +802,7 @@
           // degrees) where it is close, round hairpins where it is far
           const gg = T.grad(p[0], p[1]), sl = Math.hypot(gg[0], gg[1]), g0 = L(0.09, 0.13);
           const diag = Math.max(Math.asin(U.clamp(g0 / Math.max(sl, 0.01), 0, 1)), L(35, 50) * D2);
-          const straight = trace(T, S, start, hd + up * diag, { straight: true, Rmin: 400, maxLen: 140, w, free: 10, avoid });
+          const straight = trace(T, S, start, hd + up * diag, { grade: g0, maxA: 1.0, Rmin: 30, maxLen: 160, w, free: 10, avoid });
           if (straight.why === 'hit' && straight.hit.rd !== rd && straight.len > 20 && ok(straight, 20)) { S.add({ pts: [p].concat(straight.pts), w, kind: 'street', cls: 'residential' }); continue; }
           const c = climber(start, hd + up * L(60, 95) * D2, w);
           if (!c.ok) no('climber notok'); else if (c.hit.rd === rd) no('climber same'); else if (!ok({ pts: c.pts, len: polyLen(c.pts), hit: c.hit }, 30)) no('climber ok()'); else S.add({ pts: [p].concat(c.pts), w, kind: 'street', cls: 'residential' });
@@ -752,21 +818,53 @@
     // ---- stairs straight up the slope between the streets, every 60 to 120 m ----
     for (const rd of corn) {
       const pl = resample(rd.pts, 4);
-      for (let k = Math.round(L(8, 25)); k < pl.length - 4; k += Math.round(L(15, 30))) {
+      for (let k = Math.round(L(10, 40)); k < pl.length - 4; k += Math.round(L(30, 70))) {
         const p = pl[k], g = T.grad(p[0], p[1]); if (Math.hypot(g[0], g[1]) < 0.08 || nearLap(p[0], p[1], 30) < 30) continue;
         const hd = Math.atan2(g[1], g[0]), st = [p[0] + Math.cos(hd) * (rd.w / 2 + 1), p[1] + Math.sin(hd) * (rd.w / 2 + 1)];
-        const t = trace(T, S, st, hd, { straight: true, Rmin: 400, maxLen: 150, w: 2, free: 3, avoid });
+        const t = trace(T, S, st, hd, { straight: true, Rmin: 400, maxLen: L(40, 100), w: 2, free: 3, avoid });
         if (t.why === 'hit' && t.len > 25 && t.hit.rd !== rd) S.add({ pts: [p].concat(t.pts), w: 2, kind: 'steps', cls: 'steps' });
+      }
+    }
+    // ---- cul-de-sacs: a ramp down off a corniche, then along the slope to a turning circle ----
+    for (const rd of corn) {
+      const pl = resample(rd.pts, 4);
+      for (let k = Math.round(L(15, 40)); k < pl.length - 10; k += Math.round(L(20, 45))) {
+        if (r() < 0.75) continue;
+        const p = pl[k], q = pl[k + 1], hd = Math.atan2(q[1] - p[1], q[0] - p[0]), dn = -upSide(p, hd);
+        if (nearLap(p[0], p[1], 40) < 40) continue;
+        const w = L(4, 5), h0 = hd + dn * L(55, 80) * D2, st = [p[0] + Math.cos(h0) * (rd.w / 2 + 1), p[1] + Math.sin(h0) * (rd.w / 2 + 1)];
+        const t1 = trace(T, S, st, h0, { straight: true, Rmin: 400, maxLen: L(18, 30), w, free: 3, avoid });
+        if (t1.why !== 'length') continue;
+        const t2 = trace(T, S, t1.pts[t1.pts.length - 1], r() < 0.5 ? hd : hd + Math.PI, { grade: -L(0.02, 0.06), maxA: 0.8, Rmin: 16, maxLen: L(30, 80), w, free: 6, avoid, sep: 12 });
+        if (t2.why !== 'length') continue;
+        const pts = [p].concat(t1.pts, t2.pts.slice(1)), Rt = L(5, 7), tc = turning(pts, t2.hd, Rt);
+        if (!ok({ pts, len: polyLen(pts), hit: null }, 40) || steepest(T, pts) > 0.18 || tc.some(z => S.near(z[0], z[1], 12).d < Rt + 2 || T.inland(z[0], z[1]) < 10)) continue;
+        S.add({ pts: pts.concat(tc), w, kind: 'street', cls: 'residential', cds: true });
       }
     }
     // ---- side streets off the coast road and the head quay, inland to the next street ----
     {
       const cr = town.coastRd, pl = resample(cr.pts, 4);
-      for (let k = Math.round(L(10, 25)); k < pl.length - 2; k += Math.round(L(15, 30))) {
+      for (let k = Math.round(L(5, 12)); k < pl.length - 2; k += Math.round(L(7, 16))) {
         const p = pl[k], q = pl[k + 1], hd = Math.atan2(q[1] - p[1], q[0] - p[0]) + Math.PI / 2;
         if (T.prom(p[0]) > 3 || T.inland(p[0] + Math.cos(hd) * 20, p[1] + Math.sin(hd) * 20) < T.inland(p[0], p[1])) continue;
-        const w = L(5, 7.5), t = trace(T, S, [p[0] + Math.cos(hd) * (cr.w / 2 + 1), p[1] + Math.sin(hd) * (cr.w / 2 + 1)], hd + L(-8, 8) * D2, { straight: true, Rmin: 400, maxLen: 220, w, free: 3, avoid: (x, y) => town.avoidPlaza(x, y) });
-        if (t.why === 'hit' && t.len > 15 && t.hit.rd !== cr) S.add({ pts: [p].concat(t.pts), w, kind: 'street', cls: 'residential' });
+        const w = L(5, 7.5), t = trace(T, S, [p[0] + Math.cos(hd) * (cr.w / 2 + 1), p[1] + Math.sin(hd) * (cr.w / 2 + 1)], hd + L(-8, 8) * D2, { straight: true, Rmin: 400, maxLen: 220, w, free: 3, skip: dual, avoid: (x, y) => town.avoidPlaza(x, y) });
+        if (t.why === 'hit' && t.len > 15 && t.hit.rd !== cr) { const st = steepest(T, [p].concat(t.pts)); if (st < 0.18) S.add({ pts: [p].concat(t.pts), w, kind: 'street', cls: 'residential' }); else if (t.len < 150) S.add({ pts: [p].concat(t.pts), w: 2.5, kind: 'steps', cls: 'steps' }); }
+      }
+    }
+    // ---- side streets off the lap's hill streets, up and down the slope to the next street ----
+    for (const lr of S.roads.filter(q => q.lap && q.kind === 'street')) {
+      const pl = resample(lr.pts, 4);
+      for (let k = Math.round(L(4, 10)); k < pl.length - 3; k += Math.round(L(6, 14))) {
+        const p = pl[k], q = pl[k + 1];
+        for (const sd of [-1, 1]) {
+          if (r() < 0.35) continue;
+          const hd = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * (Math.PI / 2 + L(-12, 12) * D2), w = L(4.5, 6.5);
+          const st = [p[0] + Math.cos(hd) * (lr.w / 2 + 1), p[1] + Math.sin(hd) * (lr.w / 2 + 1)];
+          if (T.inland(st[0], st[1]) < 12 || town.avoidPlaza(st[0], st[1])) continue;
+          const t = trace(T, S, st, hd, { straight: true, Rmin: 400, maxLen: 200, w, free: 3, avoid: (x, y) => town.avoidPlaza(x, y) });
+          if (t.why === 'hit' && t.len > 12 && t.hit.rd !== lr) { const st = steepest(T, [p].concat(t.pts)); if (st < 0.18) S.add({ pts: [p].concat(t.pts), w, kind: 'street', cls: 'residential' }); else if (t.len < 150) S.add({ pts: [p].concat(t.pts), w: 2.5, kind: 'steps', cls: 'steps' }); }
+        }
       }
     }
     // ---- the boulevard carries on up to the first street on the hill ----
@@ -775,13 +873,98 @@
       const t = trace(T, S, e, town.hs, { grade: 0.08, maxA: 0.6, Rmin: 60, maxLen: 300, w: 10, free: 8, skip: [town.blvdRd], avoid: (x, y) => town.avoidPlaza(x, y) });
       if (t.why === 'hit') S.add({ pts: t.pts, w: 10, kind: 'street', cls: 'secondary' });
     }
-    // ---- a railway along the hillside at a steady height, in tunnels under the spurs ----
+    // ---- dead ends: a street running on past its last junction into nothing is cut back to it
+    // (one that runs off the map, or to the shore, is not a dead end) ----
+    const prune = (passes, maxTail) => { for (let pass = 0; pass < passes; pass++) for (const rd of S.roads.slice()) {
+      if (rd.lap || rd.dead || rd.cds || rd.dual || rd.kind !== 'street' || rd.pts.length < 2) continue;
+      let pts = rd.pts, changed = false;
+      for (const end of [0, 1]) {
+        const e = end ? pts[pts.length - 1] : pts[0];
+        if (S.near(e[0], e[1], 4, [rd]).d < 1.5 || T.inland(e[0], e[1]) < 16 || e[0] < T.X0 + 100 || e[0] > T.X1 - 100 || e[1] < T.Y0 + 100 || e[1] > T.Y1 - 100) continue;
+        const q = resample(end ? pts.slice().reverse() : pts, 4);
+        let j = -1;
+        for (let i = 1; i < q.length; i++) if (S.near(q[i][0], q[i][1], rd.w / 2 + 3, [rd]).d < rd.w / 2 + 1) { j = i; break; }
+        if (j < 0) break;   // (touching nothing: the network pass deals with it)
+        if (j * 4 < 8 || j * 4 > maxTail || (j * 4 > 40 && j * 4 < 150 && r() < 0.17)) continue;
+        const keep = q.slice(j);
+        pts = end ? keep.reverse() : keep; changed = true;
+      }
+      if (changed) { if (polyLen(pts) < 25) { rd.dead = true; S.reset(rd, []); } else S.reset(rd, pts); }
+    } };
+    prune(2, 1e9);
+    // ---- infill: a street through every gap of more than 50 m from the nearest street ----
     {
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (const p of town.pts) { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); }
+      const townTop = L(260, 340), gap = L(30, 40), cand = [];
+      for (let x = Math.max(T.X0 + 150, bx0 - 650); x < Math.min(T.X1 - 150, bx1 + 650); x += 15) for (let y = Math.max(T.Y0 + 150, by0 - 650); y < Math.min(T.Y1 - 150, by1 + 650); y += 15) {
+        if (T.inland(x, y) < 25 || T.H(x, y) > townTop || town.avoidPlaza(x, y)) continue;
+        const g = T.grad(x, y); if (Math.hypot(g[0], g[1]) > 0.6) continue;
+        cand.push([x + L(-5, 5), y + L(-5, 5)]);
+      }
+      // (twice over: the first pass's streets are the second's to join)
+      for (let pass = 0; pass < 2; pass++) {
+      for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)), t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+      for (const c of cand) {
+        if (S.near(c[0], c[1], gap).d < gap || nearLap(c[0], c[1], gap) < gap) continue;
+        const g = T.grad(c[0], c[1]), sl = Math.hypot(g[0], g[1]), w = L(5.5, 8);
+        let o, hd0;
+        if (sl > 0.06) {
+          const wa = L(1, 4), wp = L(20, 40), wph = r() * 6.28, h0 = T.H(c[0], c[1]);
+          hd0 = Math.atan2(g[0], -g[1]);
+          o = d => ({ hold: h0, holdW: l => wa * Math.sin((d ? -l : l) / wp + wph), grade: 0, Rmin: 20, maxLen: 450, w, free: 2, avoid, sep: 18 });
+        } else {
+          const nr = S.near(c[0], c[1], 160);
+          hd0 = nr.dir ? Math.atan2(nr.dir[1], nr.dir[0]) + (r() < 0.5 ? Math.PI / 2 : 0) + L(-6, 6) * D2 : r() * 6.28;
+          const bnd = L(0.02, 0.08), bp = r() * 6.28;
+          o = d => ({ straight: true, bend: d ? -bnd : bnd, bendP: d ? bp + Math.PI : bp, Rmin: 150, maxLen: 450, w, free: 2, avoid: (x, y) => avoid(x, y) || steep(x, y) });
+        }
+        const h2 = [0, Math.PI].map(d => trace(T, S, c, hd0 + d, o(d)));
+        if (!h2.some(t => t.why === 'hit')) continue;
+        const ends = h2.map(t => t.why === 'hit' || t.why === 'edge' || t.why === 'sea' ? [] : joinUp(t.pts, t.hd, w, []));
+        // (a through street joined at both ends; or one end running on 150 m or more into open
+        // ground, the way out of town that the next streets will join)
+        const loose = h2.filter((t, k) => t.why !== 'hit' && t.why !== 'edge' && t.why !== 'sea' && !ends[k].length);
+        if (loose.length && loose.some(t => t.len < 150)) continue;
+        const pts = ends[1].slice().reverse().concat(h2[1].pts.slice().reverse(), h2[0].pts.slice(1), ends[0]);
+        if (polyLen(pts) < 60 || steepest(T, pts) > 0.16 || pts.some(q => town.avoidPlaza(q[0], q[1]))) continue;
+        S.add({ pts, w, kind: 'street', cls: 'residential' });
+      }
+      }
+    }
+    prune(1, 60);
+    // ---- one network: a group of streets that cannot reach the rest is joined to it by a link
+    // road, or left out ----
+    {
+      const R = S.roads.filter(q => !q.dead && q.pts.length > 1), id = new Map(); R.forEach((q, i) => id.set(q, i));
+      const par = R.map((_, i) => i), find = i => (par[i] === i ? i : (par[i] = find(par[i]))), uni = (a, b) => { par[find(a)] = find(b); };
+      for (const q of R) for (const e of resample(q.pts, 8)) { const nr = S.near(e[0], e[1], 4, [q]); if (nr.rd && nr.d < q.w / 2 + 1 && id.has(nr.rd)) uni(id.get(q), id.get(nr.rd)); }
+      const main = find(id.get(town.coastRd));
+      const comps = new Map();
+      R.forEach((q, i) => { const c = find(i); if (c === main) return; if (!comps.has(c)) comps.set(c, []); comps.get(c).push(q); });
+      for (const list of comps.values()) {
+        let done = false;
+        for (const q of list) {
+          if (done) break;
+          for (const e of [q.pts[0], q.pts[q.pts.length - 1]]) {
+            const nr = S.near(e[0], e[1], 160, list);
+            if (!nr.rd || find(id.get(nr.rd)) !== main) continue;
+            const link = resample([e, nr.p], 4);
+            if (link.slice(2, -2).some(z => S.near(z[0], z[1], 6, list.concat([nr.rd])).d < 3 || T.inland(z[0], z[1]) < 6 || nearLap(z[0], z[1], 8) < 8)) continue;
+            S.add({ pts: link, w: 5, kind: 'street', cls: 'residential' });
+            uni(id.get(q), main); done = true; break;
+          }
+        }
+        if (!done) for (const q of list) q.dead = true;
+      }
+    }
+    // ---- a railway along the hillside at a steady height, in tunnels under the spurs ----
+    if (r() < 0.6) {
       const hr = L(16, 34), y0 = (() => { let a = 0, b = T.Y1 - 100; for (let it = 0; it < 30; it++) { const m = (a + b) / 2; if (T.H(T.X0 + 120, m) < hr) a = m; else b = m; } return (a + b) / 2; })();
-      const t = trace(T, S, [T.X0 + 120, y0], 0, { hold: hr, grade: 0, Rmin: 400, maxLen: 4500, w: 6, free: 1e9, shore: 2 });
+      const t = trace(T, S, [T.X0 + 120, y0], 0, { hold: hr, grade: 0, Rmin: 400, maxLen: 4500, w: 6, free: 1e9, shore: -50 });   // (on a viaduct where it crosses an inlet)
       if (t.len > 800) {
         let run = [], tun = null;
-        const flush = () => { if (run.length > 2) { if (tun) town.rail.push({ pts: run, tunnel: true }); else town.rail.push({ pts: run, tunnel: false }); } };
+        const flush = () => { if (run.length > 2) { town.rail.push({ pts: run, tunnel: !!tun }); if (!tun) S.add({ pts: run, w: 7, kind: 'rail', cls: 'rail' }); } };
         for (const q of t.pts) {
           const inside = T.H(q[0], q[1]) > hr + 5 || S.near(q[0], q[1], 8).d < 4;
           if (tun === null) tun = inside;
@@ -792,27 +975,53 @@
     }
     // ---- the headland: a street along its top, narrow lanes off it, a zig-zag up from the quay ----
     if (T.Hr > 0) {
-      const top = (x, y) => T.H(x, y) < T.rockH * 0.75 || T.inland(x, y) < 20;
-      // a promenade round the cliff top, a street along the middle, lanes between them
+      const hP = (x, rel) => [x, -T.D + (rel + x * Math.sin(T.hTilt)) / Math.cos(T.hTilt)];   // (x, depth into the headland) to the town frame
+      const smp = [];
+      for (let a = 0.08; a < 0.95; a += 0.06) for (let b = 0.08; b < 0.95; b += 0.06) { const q = hP(T.Wr * a, -T.Hr * b); if (T.inland(q[0], q[1]) > 22) smp.push([q[0], q[1], T.H(q[0], q[1])]); }
+      const hs = smp.map(q => q[2]).sort((a, b) => a - b), plat = hs.length > 8 ? hs[Math.floor(hs.length * 0.35)] : 0;
+      const top = (x, y) => T.H(x, y) < plat * 0.7 || T.inland(x, y) < 16;
       // (it starts on its contour, found going out from the middle toward the basin)
-      let lp = [T.Wr * 0.5, -T.D - T.Hr * 0.5];
-      for (let k = 0; k < 80 && T.H(lp[0], lp[1]) > T.rockH * 0.8; k++) lp = [lp[0], lp[1] + 4];
-      const loop = trace(T, S, lp, 0, { hold: T.rockH * 0.8, grade: 0, Rmin: 22, maxLen: 2000, w: 6, free: 40, closeLoop: true, avoid });
-      if (loop.why === 'loop') S.add({ pts: loop.pts, w: 6, kind: 'street', cls: 'residential' });
-      const sp = trace(T, S, [T.Wr * 0.25, -T.D - T.Hr * L(0.4, 0.6)], L(-0.12, 0.12), { straight: true, Rmin: 400, maxLen: T.Wr, w: 7, free: 4, avoid: top });
+      for (const f of plat > 20 ? [0.88, 0.78, 0.68] : []) {
+        const hold = plat * f;
+        let lp = hP(T.Wr * 0.5, -T.Hr * 0.5);
+        for (let k = 0; k < 90 && T.H(lp[0], lp[1]) > hold; k++) lp = [lp[0], lp[1] + 4];
+        const loop = trace(T, S, lp, 0, { hold, grade: 0, Rmin: 16, maxLen: 2600, w: 6, free: 40, closeLoop: true, avoid, shore: 5 });
+        if (loop.why === 'loop') { S.add({ pts: loop.pts, w: 6, kind: 'street', cls: 'residential' }); break; }
+      }
+      // the streets along the middle, from the plateau's centre both ways
+      const mid = smp.filter(q => q[2] > plat * 0.9), c = mid.length ? [mid.reduce((a, q) => a + q[0], 0) / mid.length, mid.reduce((a, q) => a + q[1], 0) / mid.length] : hP(T.Wr * 0.4, -T.Hr * 0.5);
+      const along = (o, w) => {
+        const st = [c[0] - Math.sin(T.hTilt) * o, c[1] + Math.cos(T.hTilt) * o];
+        if (top(st[0], st[1]) || S.near(st[0], st[1], 12).d < 10) return null;
+        const hd = T.hTilt + L(-0.1, 0.1), h2 = [0, Math.PI].map(d => trace(T, S, st, hd + d, { straight: true, bend: L(0.05, 0.15), bendP: r() * 6, Rmin: 120, maxLen: T.Wr, w, free: 4, avoid: top }));
+        const pts = h2[1].pts.slice().reverse().concat(h2[0].pts.slice(1));
+        return polyLen(pts) > 100 ? S.add({ pts, w, kind: 'street', cls: 'residential' }) : null;
+      };
+      const spine = along(0, 7);
+      if (T.Hr > 180) { along(L(35, 50), 5); along(-L(35, 50), 5); }
+      const sp = spine ? { pts: spine.pts, len: polyLen(spine.pts) } : { pts: [], len: 0 };
       if (sp.len > 120) {
-        const spine = S.add({ pts: sp.pts, w: 7, kind: 'street', cls: 'residential' });
         const pl = resample(sp.pts, 4);
-        for (let k = Math.round(L(8, 14)); k < pl.length - 6; k += Math.round(L(12, 20))) {
+        for (let k = Math.round(L(6, 12)); k < pl.length - 6; k += Math.round(L(9, 16))) {
           const sd = r() < 0.5 ? 1 : -1, p = pl[k], q = pl[k + 1], hd = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * L(75, 105) * D2;
           const t = trace(T, S, [p[0] + Math.cos(hd) * 5, p[1] + Math.sin(hd) * 5], hd, { straight: true, Rmin: 400, maxLen: 140, w: 4, free: 3, skip: [spine], avoid });
           if (t.why === 'hit' && t.len > 15) S.add({ pts: [p].concat(t.pts), w: 4, kind: 'street', cls: 'residential' });
         }
-        // a ramp up from the foot of the boulevard to the street along the top
+        // a road up from the foot of the boulevard to the street along the top, climbing the
+        // headland's landward slope at 10 % round its contours (a hairpin where it must)
         const a = [town.blvdX(-T.D - 25) + 8, -T.D - 25], b = sp.pts[0];
-        S.add({ pts: resample(hermite(a, 0, b, Math.atan2(sp.pts[1][1] - b[1], sp.pts[1][0] - b[0])), 4), w: 6, kind: 'street', cls: 'residential' });
+        // (laid from the top down, at 10 % round the landward slope, to the first street it meets)
+        let down = null;
+        for (let t = 0; t < 4 && !(down && down.why === 'hit'); t++) {
+          const hd0 = Math.atan2(a[1] - b[1], a[0] - b[0]) + (t - 1.5) * 0.5;
+          down = trace(T, S, [b[0] + Math.cos(hd0) * 8, b[1] + Math.sin(hd0) * 8], hd0, { grade: -0.1, maxA: 1.1, Rmin: 25, maxLen: 1200, w: 6, free: 8, skip: [spine] });
+        }
+        if (down && down.why === 'hit') S.add({ pts: [b].concat(down.pts), w: 6, kind: 'street', cls: 'residential' });
+        else S.add({ pts: resample(hermite(a, Math.atan2(b[1] - a[1], b[0] - a[0]), b, Math.atan2(sp.pts[1][1] - b[1], sp.pts[1][0] - b[0])), 4), w: 6, kind: 'street', cls: 'residential' });
       }
     }
+    // (and the loose ends left by everything since)
+    prune(2, 120);
   }
   // the town in the circuit's frame (mirrored when m is -1)
   function citySite(r, town, xf) {
@@ -820,20 +1029,32 @@
     const mirror = pts => pts.map(W);
     // the breakwaters: one from the head quay's far corner out across the basin's mouth, one
     // from the headland's tip
-    const L = T.L, pierW = L(14, 20);
-    const pa = [T.Wb + 20, T.cl(T.Wb + 20) - 4], pa1 = [pa[0] + L(-30, 10), pa[1] - T.D * L(0.45, 0.6)], pa2 = [pa1[0] - L(60, 110), pa1[1] - L(20, 50)];
-    let pb = T.Hr > 0 ? [T.Wr * 0.5, -T.D - T.Hr * 0.5] : [T.sx * -T.D + 6, -T.D - 4];
+    const L = T.L, pierW = L(18, 32);
+    const pa = [T.Wb + 20, T.cl(T.Wb + 20) - 4], kind = r();
+    let armA;
+    if (kind < 0.3) { const pa1 = [pa[0] + L(-30, 10), pa[1] - T.D * L(0.45, 0.6)]; armA = [pa, pa1, [pa1[0] - L(60, 110), pa1[1] - L(20, 50)]]; }
+    else if (kind < 0.55) armA = [pa, [pa[0] + L(-60, 40), pa[1] - T.D * L(0.5, 0.75)]];
+    else { const a0 = L(-0.3, 0.2), bendA = L(0.5, 1.0), len = T.D * L(0.5, 0.8); armA = [pa]; for (let k = 1; k <= 4; k++) { const ang = -Math.PI / 2 + a0 - bendA * k / 4, q = armA[armA.length - 1]; armA.push([q[0] + Math.cos(ang) * len / 4, q[1] + Math.sin(ang) * len / 4]); } }
+    let pb = T.Hr > 0 ? [T.Wr * 0.5, -T.D + (-T.Hr * 0.5 + T.Wr * 0.5 * Math.sin(T.hTilt)) / Math.cos(T.hTilt)] : [T.sx * -T.D + 6, -T.D - 4];
     { const a = L(15, 45) * Math.PI / 180; for (let k = 0; k < 200 && T.inland(pb[0], pb[1]) > 3; k++) pb = [pb[0] + Math.cos(a) * 4, pb[1] + Math.sin(a) * 4]; }
     const pbA = L(20, 50) * Math.PI / 180, pbL = L(90, 150), pb1 = [pb[0] + Math.cos(pbA) * pbL, pb[1] + Math.sin(pbA) * pbL];
-    const piers = [[pa, pa1, pa2], [pb, pb1]];
+    let piers = [armA];
+    {
+      // the second mole runs out to leave a narrow mouth at the first one's head
+      const E = armA[armA.length - 1], dx = pb[0] - E[0], dy = pb[1] - E[1], dl = Math.hypot(dx, dy), mouth = L(60, 120);
+      if (dl > mouth + 60 && dl < 700) piers = [armA, [pb, [E[0] + dx / dl * mouth, E[1] + dy / dl * mouth]]];
+      else piers = [armA, [pb, pb1]];
+    }
     // pontoons off the quays into the basin
     const pontoons = [];
     const fingers = [];
-    for (let k = 0, n = 4 + Math.floor(r() * 4); k < n; k++) {
+    const crossesP = (a, b) => pontoons.some(([c, d]) => segDist(a, b, c, d) < 25);
+    for (let k = 0, n = 6 + Math.floor(r() * 6), t = 0; pontoons.length < n && t < 60; t++) {
       const onSide = r() < 0.5;
       let a, b;
-      if (onSide) { const y = -T.D * L(0.15, 0.85), x = T.sx * y; a = [x, y]; b = [x + L(60, 140), y + L(-10, 10)]; }
-      else { const x = T.Wb * L(0.15, 0.85); a = [x, 0]; b = [x + L(-10, 10), -L(70, 170)]; }
+      if (onSide) { const y = -T.D * L(0.12, 0.88), x = T.sx * y; a = [x + 1, y]; b = [x + L(60, 140), y + L(-10, 10)]; }
+      else { const x = T.Wb * L(0.1, 0.9), yq = T.cl(x) - T.prom(x); a = [x, yq - 1]; b = [x + L(-10, 10), yq - L(70, 170)]; }
+      if (crossesP(a, b) || T.inland(b[0], b[1]) > -8) continue;
       pontoons.push([a, b]);
       // berths either side every 12 to 16 m
       const l = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l, fl = L(9, 14);
@@ -842,12 +1063,13 @@
     const pierDist = (x, y) => { let best = Infinity; for (const pl of piers) for (let k = 0; k < pl.length - 1; k++) best = Math.min(best, pseg(x, y, pl[k], pl[k + 1])); return best; };
     const H = (x, y) => { const q = Lc(x, y); let h = T.H(q[0], q[1]); if (h < 2.6 && pierDist(q[0], q[1]) < pierW / 2) h = 2.6; return h; };
     const inland = (x, y) => { const q = Lc(x, y); return T.inland(q[0], q[1]); };
-    const roads = S.roads.map(rd => ({ pts: mirror(rd.pts), w: rd.w, kind: rd.kind, lap: !!rd.lap, cls: rd.cls }));
+    const roads = S.roads.filter(rd => !rd.dead).map(rd => ({ pts: mirror(rd.pts), w: rd.w, kind: rd.kind, lap: !!rd.lap, cls: rd.cls }));
     return {
       H, inland, roads, piers: piers.map(mirror), pierW, pontoons: pontoons.map(mirror), fingers: fingers.map(mirror), plaza: W(town.plaza), townEdge: 900,
       rail: (town.rail || []).map(q => ({ pts: mirror(q.pts), tunnel: q.tunnel })),
       park: (x, y) => { const q = Lc(x, y); return fbm(q[0] / 230, q[1] / 230, T.s + 21, 2) < -0.42 && T.inland(q[0], q[1]) > 60; },
       sea: (x, y) => inland(x, y) < 0, xf,
+      squares: (town.squares || []).map(q => { const w = W(q); return [w[0], w[1], q[2]]; }),
     };
   }
   // the route as corner vertices for the track builder: the polyline simplified (within 0.8 m),
@@ -952,13 +1174,14 @@
     };
     // placed footprints, for overlap tests (separating axes)
     const bgrid = new Map(), bkey = (x, y) => Math.floor(x / 40) + ',' + Math.floor(y / 40);
-    const axes = q => [[q[1][0] - q[0][0], q[1][1] - q[0][1]], [q[2][0] - q[1][0], q[2][1] - q[1][1]]];
+    const axes = q => q.map((a, k) => { const b = q[(k + 1) % q.length]; return [b[1] - a[1], a[0] - b[0]]; });
     const overlap = (a, b) => {
       for (const ax of axes(a).concat(axes(b))) {
         let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
         for (const p of a) { const d = p[0] * ax[0] + p[1] * ax[1]; a0 = Math.min(a0, d); a1 = Math.max(a1, d); }
         for (const p of b) { const d = p[0] * ax[0] + p[1] * ax[1]; b0 = Math.min(b0, d); b1 = Math.max(b1, d); }
-        if (a1 <= b0 || b1 <= a0) return false;
+        const l = Math.hypot(ax[0], ax[1]) || 1;
+        if (a1 <= b0 + 0.15 * l || b1 <= a0 + 0.15 * l) return false;
       }
       return true;
     };
@@ -967,6 +1190,35 @@
     const sgrid = new Map();
     for (const q of segs) { const k = Math.floor(q[0] / 60) + ',' + Math.floor(q[1] / 60); if (!sgrid.has(k)) sgrid.set(k, []); sgrid.get(k).push(q); }
     const facing = (x, y) => { let best = null, bd = 90; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const q of sgrid.get((Math.floor(x / 60) + a) + ',' + (Math.floor(y / 60) + b)) || []) { const d = Math.hypot(q[0] - x, q[1] - y); if (d < bd) { bd = d; best = q; } } return best; };
+    // a lot's footprint (any convex quad), if it is clear of the streets, the sea, the circuit and
+    // every building already standing
+    const placePoly = (poly, lv) => {
+      const cx = poly.reduce((a, q) => a + q[0], 0) / poly.length, cy = poly.reduce((a, q) => a + q[1], 0) / poly.length;
+      const probe = [[cx, cy]];
+      poly.forEach((a, k) => { const b = poly[(k + 1) % poly.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); for (let t = 0; t < l; t += 3) probe.push([a[0] + (b[0] - a[0]) * t / l, a[1] + (b[1] - a[1]) * t / l]); });
+      for (const q of probe) if (street(q[0], q[1]) < 0.6 || site.inland(q[0], q[1]) < 8) return null;
+      let rad = 0; for (const q of poly) rad = Math.max(rad, Math.hypot(q[0] - cx, q[1] - cy));
+      if (Math.hypot(cx - site.plaza[0], cy - site.plaza[1]) < 30 + rad) return null;
+      if (site.squares && site.squares.some(q => Math.hypot(cx - q[0], cy - q[1]) < q[2] + rad * 0.7)) return null;
+      const hs = poly.map(q => site.H(q[0], q[1]));
+      const nearT = distToTrack(tr, cx, cy, 90) < 90;
+      if (Math.max(...hs) - Math.min(...hs) > (nearT ? 24 : rad > 25 ? 14 : 10)) return null;
+      const k0 = Math.floor(cx / 40), k1 = Math.floor(cy / 40);
+      for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (const o of bgrid.get((k0 + a) + ',' + (k1 + b)) || []) if (Math.hypot(o.c[0] - cx, o.c[1] - cy) < o.rad + rad && overlap(o.poly, poly)) return null;
+      if (!polyClear(tr, poly, tr.hw + 4.5)) return null;
+      // (the blocks on the circuit are four to eight storeys; a tower needs a broad plot set back from it)
+      if (lv > 8) {
+        let mn = Infinity; poly.forEach((a, k) => { const b = poly[(k + 1) % poly.length]; mn = Math.min(mn, Math.hypot(b[0] - a[0], b[1] - a[1])); });
+        const dt = distToTrack(tr, cx, cy, 60);
+        if (dt < 30 || (lv >= 13 && (mn < 16 || dt < 60))) lv = 5 + Math.floor(r() * 4);
+      }
+      const bd = { poly, h: Math.round(lv * 3.1 + 1.5), tone: r(), c: [cx, cy], rad, tower: lv >= 16, levels: lv };
+      out.push(bd);
+      const kk = bkey(cx, cy);
+      if (!bgrid.has(kk)) bgrid.set(kk, []);
+      bgrid.get(kk).push(bd);
+      return bd;
+    };
     const tryPlace = (cx, cy, ax, ay, f, d, lv) => {
       const bx = -ay, by = ax;
       const poly = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([p, q]) => [cx + ax * p * f / 2 + bx * q * d / 2, cy + ay * p * f / 2 + by * q * d / 2]);
@@ -974,9 +1226,9 @@
       for (const p of probe) if (street(p[0], p[1]) < 1.5 || site.inland(p[0], p[1]) < 10) return false;
       if (Math.hypot(cx - site.plaza[0], cy - site.plaza[1]) < 30 + Math.max(f, d) / 2) return false;
       const hs = poly.map(p => site.H(p[0], p[1]));
-      if (Math.max(...hs) - Math.min(...hs) > 10) return false;
-      const k0 = Math.floor(cx / 40), k1 = Math.floor(cy / 40);
-      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const o of bgrid.get((k0 + a) + ',' + (k1 + b)) || []) if (overlap(o.poly, poly)) return false;
+      if (Math.max(...hs) - Math.min(...hs) > (f * d > 1200 ? 14 : 10)) return false;   // (a big block steps down its slope)
+      const k0 = Math.floor(cx / 40), k1 = Math.floor(cy / 40), sh = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([p, q]) => [cx + ax * p * (f / 2 - 0.9) + bx * q * (d / 2 - 0.9), cy + ay * p * (f / 2 - 0.9) + by * q * (d / 2 - 0.9)]);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const o of bgrid.get((k0 + a) + ',' + (k1 + b)) || []) if (overlap(o.poly, sh)) return false;
       if (!polyClear(tr, poly, tr.hw + 4.5)) return false;
       const bd = { poly, h: Math.round(lv * 3.1 + 1.5), tone: r(), c: [cx, cy], rad: Math.hypot(f, d) / 2, tower: lv >= 16, levels: lv };
       out.push(bd);
@@ -988,7 +1240,7 @@
     // the old town by the harbour and on the lower slopes is a continuous street wall; higher up
     // the slopes are villas in gardens; the steepest ground (ravine walls) and a few parks stay green
     const gauss = () => Math.sqrt(-2 * Math.log(1 - r() * 0.999)) * Math.cos(6.2832 * r());
-    const villa = (x, y) => site.H(x, y) > 70 || site.inland(x, y) > 520;
+    const villa = (x, y) => site.H(x, y) > 130 || site.inland(x, y) > 800;
     const green = (x, y) => { const e = 3, g = Math.hypot(site.H(x + e, y) - site.H(x - e, y), site.H(x, y + e) - site.H(x, y - e)) / (2 * e); return g > 0.42 || (site.park && site.park(x, y)); };
     const storeys = (x, y) => {
       if (villa(x, y)) return 2 + Math.floor(r() * 3);
@@ -1001,58 +1253,102 @@
     {
       const P = site.plaza, spots = [[50, 34, 3], [70, 34, 9], [90, 30, 8], [64, 40, 7]];
       for (const [f, d, lv] of spots) for (let t = 0; t < 30; t++) { const a = r() * 6.283, R = 50 + r() * 70; if (landmark(P[0] + Math.cos(a) * R, P[1] + Math.sin(a) * R, f, d, lv)) break; }
-      for (let n = 0, t = 0; n < 3 && t < 400; t++) {
+      for (let n = 0, t = 0; n < 5 && t < 600; t++) {
         const rd = site.roads[Math.floor(r() * site.roads.length)]; if (!rd || !rd.lap) continue;
         const q = rd.pts[Math.floor(r() * rd.pts.length)], a = r() * 6.283, x = q[0] + Math.cos(a) * 35, y = q[1] + Math.sin(a) * 35, u = site.inland(x, y);
         if (u > 12 && u < 60 && landmark(x, y, L(50, 90), L(14, 20), 2)) n++;            // a shed on the quay
-        else if (u > 60 && u < 260 && n < 3 && r() < 0.3 && landmark(x, y, L(60, 110), L(24, 38), L(7, 12) | 0)) n++;
+        else if (u > 40 && u < 300 && r() < 0.4 && landmark(x, y, L(70, 140), L(30, 60), L(5, 12) | 0)) n++;   // a hotel, a garage, a hall
       }
     }
-    // Footprint areas as measured on Monaco's map: lognormal, median 190 m2, from 40 m2 sheds to
-    // 8000 m2 hotels; most built to the pavement (1 m back) wall to wall with their neighbours, one
-    // in six an L. A big one that will not fit (a slope, a bend) is tried again smaller, so the big
-    // blocks end up on the flat by the harbour. None is more than about 25 m from a street.
-    const area = vil => vil ? U.clamp(150 * Math.exp(0.5 * gauss()), 60, 600) : U.clamp(190 * Math.exp(1.05 * gauss()), 30, 8000);
-    for (const rd of site.roads) {
-      if (rd.pts.length < 2 || rd.kind === 'steps' || rd.kind === 'rail') continue;
-      const pl = resample(rd.pts, 2), cum = [0];
-      for (let i = 1; i < pl.length; i++) cum.push(cum[i - 1] + Math.hypot(pl[i][0] - pl[i - 1][0], pl[i][1] - pl[i - 1][1]));
-      const at = s => { let i = 1; while (i < cum.length - 1 && cum[i] < s) i++; const a = pl[i - 1], b = pl[i], l = cum[i] - cum[i - 1] || 1, t = (s - cum[i - 1]) / l; return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, (b[0] - a[0]) / l, (b[1] - a[1]) / l]; };
-      const total = cum[cum.length - 1];
+    // The blocks, as on a real town's map: each street's frontage cut into lots (frontage
+    // lognormal about 14 m), each lot running back to the middle of its block (or 35 m), the lots
+    // on either side of a corner meeting at the same point so neighbours share their walls. In the
+    // old town every lot is built over, wall to wall, a third of them merged into longer slabs and
+    // big blocks; on the villa slopes each lot keeps a garden round its house. Main streets first.
+    const order = site.roads.filter(rd => rd.kind !== 'steps' && rd.kind !== 'rail' && rd.cls !== 'service' && rd.pts.length > 1)
+      .sort((a, b) => (b.lap ? 2 : 0) + (b.cls === 'primary' || b.cls === 'secondary' ? 1 : 0) - (a.lap ? 2 : 0) - (a.cls === 'primary' || a.cls === 'secondary' ? 1 : 0));
+    for (const rd of order) {
+      const pl = resample(rd.pts, 2), n = pl.length;
+      if (n < 4) continue;
+      const cum = [0];
+      for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(pl[i][0] - pl[i - 1][0], pl[i][1] - pl[i - 1][1]));
+      const total = cum[n - 1];
+      const at = s => { let i = 1; while (i < n - 1 && cum[i] < s) i++; const a = pl[i - 1], b = pl[i], l = cum[i] - cum[i - 1] || 1, t = (s - cum[i - 1]) / l; return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, (b[0] - a[0]) / l, (b[1] - a[1]) / l]; };
       for (const side of [-1, 1]) {
-        let s = r() * 3;
-        while (s < total - 5) {
-          const p0 = at(s), vil = villa(p0[0], p0[1]);
-          let A = area(vil), placed = false, f = 0, d = 0, back = 0;
-          for (let tryN = 0; tryN < 4 && !placed; tryN++, A *= 0.45) {
-            d = U.clamp(Math.sqrt(A) * L(0.8, 1.4), vil ? 8 : 6, vil ? 18 : 45); f = U.clamp(A / d, 5, 110);
-            back = rd.w / 2 + (vil ? L(4, 10) : L(0.6, 1.6));
-            const p = at(s + f / 2), nx = -p[3] * side, ny = p[2] * side;
-            const cx = p[0] + nx * (back + d / 2), cy = p[1] + ny * (back + d / 2);
-            if (green(cx, cy)) break;
-            const lv = A > 2500 && !vil ? 5 + Math.floor(r() * 8) : storeys(cx, cy);
-            placed = tryPlace(cx, cy, p[2], p[3], f, d, lv);
-            if (placed && !vil && A > 150 && r() < 0.18) {
-              // an L: a wing back from one end
-              const e = r() < 0.5 ? 1 : -1, ww = f * L(0.3, 0.45), dd = d * L(0.5, 0.9);
-              tryPlace(cx + p[2] * e * (f / 2 - ww / 2) + nx * (d / 2 + dd / 2), cy + p[3] * e * (f / 2 - ww / 2) + ny * (d / 2 + dd / 2), p[2], p[3], ww, dd, lv);
-            }
-            if (placed && vil && r() < 0.35) tryPlace(cx + nx * (d / 2 + 4), cy + ny * (d / 2 + 4), p[2], p[3], L(5, 8), L(5, 7), 1);
+        // how deep the block is behind the street at s: to the middle of the way to the next street
+        // (or the shore, or ground too steep to build on), at most 35 m (16 m for a villa plot)
+        const back = (rd.lap ? Math.max(rd.w * 0.65, tr.hw + 4.6) : rd.w * 0.65) + L(1.5, 3);   // (behind the pavement)
+        const depthAt = s => {
+          const p = at(s), nx = -p[3] * side, ny = p[2] * side, vil = villa(p[0], p[1]), dmax = vil ? 30 : L(34, 48);
+          for (let d = 2; d <= dmax * 2; d += 2) {
+            const x = p[0] + nx * (back + d), y = p[1] + ny * (back + d);
+            if (d >= 4 && street(x, y) < 1) return Math.min(dmax, d / 2 - 0.5);
+            if (site.inland(x, y) < 9 || (green(x, y) && distToTrack(tr, x, y, 90) >= 90)) return Math.min(dmax, d - 2);
           }
-          s += placed ? f + (vil ? L(6, 14) : r() < 0.75 ? 0 : L(1, 4)) : 3;
+          return dmax;
+        };
+        const corner = (s, dep) => { const p = at(s), nx = -p[3] * side, ny = p[2] * side; return [[p[0] + nx * back, p[1] + ny * back], [p[0] + nx * (back + dep), p[1] + ny * (back + dep)]]; };
+        let s0 = r() * 2;
+        while (s0 < total - 6) {
+          const p0 = at(s0), vil = villa(p0[0], p0[1]);
+          // (districts differ: fine-grained old quarters, broad blocks of flats and hotels)
+          const dist = fbm(p0[0] / 320, p0[1] / 320, 77, 2);
+          let f = vil ? L(14, 26) : U.clamp(13 * Math.exp(0.7 * dist + 0.55 * gauss()), 4, 40);
+          // a run of lots merged into one long block on the old town's streets
+          if (!vil && r() < 0.33 + 0.25 * dist) f = Math.min(f * L(2, 5), 110);
+          let s1 = Math.min(total - 1, s0 + f);
+          const d0 = depthAt(s0);
+          const whole = d0 > 26 && r() < 0.22, dc = d0 > 26 && !whole ? 18 : d0;
+          if (s1 - s0 > 3 * dc) s1 = s0 + 3 * Math.max(dc, 6);   // no range longer than three times its depth (a deep lot's front range is under 18 m)
+          const d1 = depthAt(s1);
+          if (Math.min(d0, d1) < (vil ? 9 : 6)) { s0 += 3; continue; }
+          const [a0, b0] = corner(s0, d0), [a1, b1] = corner(s1, d1);
+          let poly = side > 0 ? [a0, a1, b1, b0] : [a1, a0, b0, b1];
+          if (vil) {
+            // the house in its garden: set back from the street, clear of its neighbours
+            const cx = (a0[0] + a1[0] + b0[0] + b1[0]) / 4, cy = (a0[1] + a1[1] + b0[1] + b1[1]) / 4, sh = (q, k) => [cx + (q[0] - cx) * k, cy + (q[1] - cy) * k];
+            poly = poly.map(q => sh(q, L(0.5, 0.7)));
+          }
+          // the inside of a bend pinches the back of a lot: then it is shallower
+          const crossed = Math.hypot(b1[0] - b0[0], b1[1] - b0[1]) < 0.3 * Math.hypot(a1[0] - a0[0], a1[1] - a0[1]);
+          if (!crossed) {
+            const area = Math.abs(poly.reduce((acc, q, k) => { const o = poly[(k + 1) % 4]; return acc + q[0] * o[1] - o[0] * q[1]; }, 0)) / 2;
+            const cxy = [(a0[0] + b1[0]) / 2, (a0[1] + b1[1]) / 2];
+            const lv = area > 2000 && !vil ? 5 + Math.floor(r() * 7) : storeys(cxy[0], cxy[1]);
+            // a deep old-town lot: the range on the street, a yard, a lower range behind
+            const dmin = Math.min(d0, d1);
+            if (!vil && dmin > 26 && !whole) {
+              const fr = L(12, 18), yard = L(4, 9), cut = (q0, q1, a, b) => [q0[0] + (q1[0] - q0[0]) * a / b, q0[1] + (q1[1] - q0[1]) * a / b];
+              const f0 = cut(a0, b0, fr, d0), f1 = cut(a1, b1, fr, d1), r0 = cut(a0, b0, fr + yard, d0), r1 = cut(a1, b1, fr + yard, d1);
+              const front = side > 0 ? [a0, a1, f1, f0] : [a1, a0, f0, f1], rear = side > 0 ? [r0, r1, b1, b0] : [r1, r0, b0, b1];
+              const ok1 = placePoly(front, lv);
+              if (ok1) {
+                placePoly(rear, Math.max(2, lv - 1 - Math.floor(r() * 3)));
+                // a shed or a kiosk in the yard
+                if (r() < 0.6) { const c = cut(cut(a0, b0, fr + yard / 2, d0), cut(a1, b1, fr + yard / 2, d1), 1, 2), e = L(2, 3.5); placePoly([[c[0] - e, c[1] - e], [c[0] + e, c[1] - e], [c[0] + e, c[1] + e], [c[0] - e, c[1] + e]], 1); }
+                s0 = s1; continue;
+              }
+            }
+            if (placePoly(poly, lv)) { s0 = s1 + (vil ? L(0, 4) : 0); continue; }
+          }
+          s0 += 3;
         }
       }
     }
-    // in the old town's deep blocks a second row, still within reach of the street
-    {
-      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
-      for (const q of segs) { bx0 = Math.min(bx0, q[0]); by0 = Math.min(by0, q[1]); bx1 = Math.max(bx1, q[0]); by1 = Math.max(by1, q[1]); }
-      for (let gy = by0; gy < by1; gy += 14) for (let gx = bx0; gx < bx1; gx += 14) {
-        const cx = gx + (r() - 0.5) * 8, cy = gy + (r() - 0.5) * 8, q = facing(cx, cy);
-        if (!q || villa(cx, cy) || green(cx, cy) || street(cx, cy) > 22) continue;
-        const A = U.clamp(150 * Math.exp(0.8 * gauss()), 30, 1500), d = U.clamp(Math.sqrt(A) * L(0.8, 1.3), 6, 30);
-        tryPlace(cx, cy, q[2], q[3], U.clamp(A / d, 5, 60), d, storeys(cx, cy));
-      }
+    // not every building a box: two in five of the larger ones notched at the back into a T, a U
+    // round a light well, a stepped block or an L (their parts kept as boxes for the 3D town)
+    for (const b of out) {
+      const p = b.poly;
+      if (p.length !== 4 || b.tower) continue;
+      const fw = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), dp = Math.hypot(p[3][0] - p[0][0], p[3][1] - p[0][1]);
+      if (fw < 12 || dp < 10 || r() > 0.7) continue;
+      const B = (s, v) => { const f = [p[0][0] + (p[1][0] - p[0][0]) * s, p[0][1] + (p[1][1] - p[0][1]) * s], k = [p[3][0] + (p[2][0] - p[3][0]) * s, p[3][1] + (p[2][1] - p[3][1]) * s]; return [f[0] + (k[0] - f[0]) * v, f[1] + (k[1] - f[1]) * v]; };
+      const Q = (s0, s1, v0, v1) => [B(s0, v0), B(s1, v0), B(s1, v1), B(s0, v1)];
+      const u = L(0.4, 0.62), kind = r() * 0.92, t1 = L(0.22, 0.38), t2 = L(0.62, 0.78);
+      if (kind < 0.3) { b.poly = [B(0, 0), B(1, 0), B(1, u), B(t2, u), B(t2, 1), B(t1, 1), B(t1, u), B(0, u)]; b.parts = [Q(0, 1, 0, u), Q(t1, t2, u, 1)]; }
+      else if (kind < 0.6) { b.poly = [B(0, 0), B(1, 0), B(1, 1), B(t2, 1), B(t2, u), B(t1, u), B(t1, 1), B(0, 1)]; b.parts = [Q(0, 1, 0, u), Q(0, t1, u, 1), Q(t2, 1, u, 1)]; }
+      else if (kind < 0.8) { const u2 = Math.min(0.92, u + L(0.2, 0.35)); b.poly = [B(0, 0), B(1, 0), B(1, u), B(t2, u), B(t2, u2), B(t1, u2), B(t1, 1), B(0, 1)]; b.parts = [Q(0, 1, 0, u), Q(0, t2, u, u2), Q(0, t1, u2, 1)]; }
+      else { const lf = r() < 0.5; b.poly = lf ? [B(0, 0), B(1, 0), B(1, 1), B(t1, 1), B(t1, u), B(0, u)] : [B(0, 0), B(1, 0), B(1, u), B(t2, u), B(t2, 1), B(0, 1)]; b.parts = lf ? [Q(0, 1, 0, u), Q(t1, 1, u, 1)] : [Q(0, 1, 0, u), Q(0, t2, u, 1)]; }
     }
     return out;
   }
@@ -1347,10 +1643,7 @@
         for (let i = tunnel.i0 - 8; i < tunnel.i1 + 8; i++) raw[(i + N) % N] = U.lerp(a, b, (i - tunnel.i0 + 8) / (tunnel.i1 - tunnel.i0 + 16));
       }
       for (let i = 0; i < tr.N; i++) if (role[i] === 'sea' || role[i] === 'tunnel') raw[i] += town.coastRise(xf.toLocal(tr.x[i], tr.y[i])[0]);
-      // along the top the street dips through a gully and climbs again to the square
-      let t0 = -1, t1 = -1;
-      for (let i = 0; i < tr.N; i++) if (role[i] === 'top') { if (t0 < 0) t0 = i; t1 = i; }
-      if (t1 - t0 > 20) { const dd = town.topDip; for (let i = t0; i <= t1; i++) raw[i] -= dd * Math.sin(Math.PI * (i - t0) / (t1 - t0)); }
+      // (the street along the top keeps to the ground: a dip below it would cut a gorge through the town)
     }
     const gr = grade(tr, raw, st);
     applyProfile(tr, gr.z, s0.H, st);
