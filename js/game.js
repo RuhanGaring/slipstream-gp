@@ -489,6 +489,9 @@
     }
     p.ctl.steer = inp.steer; p.ctl.throttle = inp.thr; p.ctl.brake = inp.brk;
     p.ctl.drs = keys.has('Space') || (pad && pad.drs) || touch.drs || false;
+    // analogue steering (mouse, stick, touch, tilt): the driver can hold the front at its limit,
+    // so the steering assist lets the tyres reach their peak (see steerLimit in js/car.js)
+    p.ctl.analog = !!((pad && pad.active) || (ms != null && st === 0) || (Game.mobile() && st === 0));
   }
 
   // ---------- camera ----------

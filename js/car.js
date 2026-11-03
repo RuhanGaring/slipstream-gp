@@ -172,8 +172,11 @@
     const aMax = sp.mu * c.assist.gripMul * (GRAV + down / (sp.mass + c.fuel));
     const kin = Math.atan(sp.wb * aMax / (v * v));
     const peakAlpha = sp.alphaPk;
-    // assisted: stop just short of peak front slip, which keeps the rear planted on a keyboard
-    const k = c.assist.stability ? 0.8 : c.assist.steerAssist ? 0.6 : 1.4;
+    // assisted: stop short of peak front slip, which keeps the rear planted on a keyboard (all or
+    // nothing). With analogue steering (mouse, stick) the driver modulates the angle, and a cap
+    // at 60 % of the peak made every medium-speed corner understeer: the cap is the peak itself
+    const k0 = c.assist.stability ? 0.8 : c.assist.steerAssist ? 0.6 : 1.4;
+    const k = c.ctl.analog ? Math.max(k0, 1.0) : k0;
     return Math.min(sp.lockF, kin + peakAlpha * k);
   }
 

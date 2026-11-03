@@ -358,6 +358,9 @@ b { font-weight: 700; }
 .opt .pips { display: flex; gap: 3px; justify-content: center; margin-top: 5px; }
 .opt .pips i { width: 16px; height: 3px; background: rgba(255,255,255,.14); transform: skewX(-30deg); }
 .opt .pips i.on { background: var(--f1); }
+.opt .pips.bar { position: relative; height: 3px; margin: 7px 30px 0; background: rgba(255,255,255,.14); }
+.opt .pips.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--f1); }
+.opt.f .pips.bar { background: rgba(0,0,0,.14); }
 .opt.f { background: #fff; color: #111; }
 .opt.f .on small { color: #55555f; }
 .opt.f .ar { color: var(--f1); }

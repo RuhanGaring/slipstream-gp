@@ -147,20 +147,35 @@
     return f;
   }
 
+  // evenly spaced values, rounded so they compare equal to what was saved
+  const fineRange = (a, b, st) => { const r = []; for (let k = 0; a + k * st <= b + 1e-9; k++) r.push(Math.round((a + k * st) * 1000) / 1000); return r; };
+
   // ---------- option row ----------
   function optRow(label, sub, values, get, set, fmt) {
     const el = h('div', 'opt');
     el.innerHTML = `<div class="on">${label}${sub ? `<small>${sub}</small>` : ''}</div><div><div class="val"><span class="ar ar-l">&#9664;</span><span class="v"></span><span class="ar ar-r">&#9654;</span></div><div class="pips"></div></div>`;
     const vEl = el.querySelector('.v'), pips = el.querySelector('.pips');
-    pips.innerHTML = values.map(() => '<i></i>').join('');
+    // a long list of fine steps shows as a slider bar instead of a pip per value
+    const fine = values.length > 12;
+    pips.innerHTML = fine ? '<b class="fill"></b>' : values.map(() => '<i></i>').join('');
+    if (fine) pips.classList.add('bar');
+    // the current value's place in the list (a saved value between two steps takes the nearer)
+    const at = () => {
+      const v = get(), k = values.indexOf(v);
+      if (k >= 0 || typeof v !== 'number') return k;
+      let best = 0;
+      values.forEach((x, i) => { if (Math.abs(x - v) < Math.abs(values[best] - v)) best = i; });
+      return best;
+    };
     const render = () => {
-      const v = get();
-      const k = values.indexOf(v);
+      const v = get(), k = at();
       vEl.textContent = fmt ? fmt(v) : v;
-      Array.from(pips.children).forEach((p, i) => p.classList.toggle('on', i === k));
+      if (fine) pips.firstChild.style.width = (Math.max(0, k) / (values.length - 1) * 100) + '%';
+      else Array.from(pips.children).forEach((p, i) => p.classList.toggle('on', i === k));
     };
     render();
-    const move = d => { const k = values.indexOf(get()); set(values[(k + d + values.length) % values.length]); render(); };
+    // fine lists stop at their ends instead of wrapping round
+    const move = d => { const k = at(); set(values[fine ? Math.max(0, Math.min(values.length - 1, k + d)) : (k + d + values.length) % values.length]); render(); };
     return { el, left: () => move(-1), right: () => move(1), render };
   }
 
@@ -654,17 +669,18 @@
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; touched(); }, v => v.toUpperCase()));
     add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; touched(); }, v => v.toUpperCase()));
-    add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tSens || 1, v => { st.tSens = v; touched(); }, v => Math.round(v * 100) + '%'));
-    add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', [0.5, 0.75, 1, 1.25, 1.5, 2], () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', fineRange(0.25, 2.5, 0.05), () => st.tSens || 1, v => { st.tSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', fineRange(0.25, 2.5, 0.05), () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; touched(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; touched(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
     add(optRow('Name tags', 'Driver codes above nearby cars', [true, false], () => st.tags, v => { st.tags = v; touched(); }, v => (v ? 'ON' : 'OFF')));
-    add(optRow('Sensitivity', 'Right click in a race to switch mouse steering on', [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], () => st.mSens, v => { st.mSens = v; touched(); }, v => v.toFixed(2) + 'x'), 'MOUSE STEERING');
-    add(optRow('Deadzone', 'Movement ignored around the centre', [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15], () => st.mDead, v => { st.mDead = v; touched(); }, v => Math.round(v * 100) + '%'));
+    // fine steps: 0.05x apart below 1x, so a low-sensitivity setting can be found exactly
+    add(optRow('Sensitivity', 'Right click in a race to switch mouse steering on. Hold left / right to scroll', fineRange(0.05, 1, 0.05).concat(fineRange(1.1, 3, 0.1)), () => st.mSens, v => { st.mSens = v; touched(); }, v => v.toFixed(2) + 'x'), 'MOUSE STEERING');
+    add(optRow('Deadzone', 'Movement ignored around the centre', fineRange(0, 0.2, 0.01), () => st.mDead, v => { st.mDead = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Steering curve', 'Progressive is gentle near the centre', ['linear', 'progressive', 'aggressive'], () => st.mCurve, v => { st.mCurve = v; touched(); }, v => v.toUpperCase()));
-    add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', [0, 0.6, 1.5, 3], () => st.mCentre, v => { st.mCentre = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1.5: 'MEDIUM', 3: 'HIGH' })[v]));
-    add(optRow('Smoothing', '', [0, 0.04, 0.1], () => st.mSmooth, v => { st.mSmooth = v; touched(); }, v => ({ 0: 'OFF', 0.04: 'LOW', 0.1: 'HIGH' })[v]));
+    add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', fineRange(0, 4, 0.1), () => st.mCentre, v => { st.mCentre = v; touched(); }, v => (v ? v.toFixed(1) : 'OFF')));
+    add(optRow('Smoothing', 'Time the steering takes to follow the mouse', fineRange(0, 0.2, 0.01), () => st.mSmooth, v => { st.mSmooth = v; touched(); }, v => (v ? Math.round(v * 1000) + ' MS' : 'OFF')));
     add(optRow('Invert', '', [false, true], () => st.mInvert, v => { st.mInvert = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     {
       const wb = h('div', 'btn', '<span>WHEEL SETTINGS</span><span class="arrow">&#8594;</span>');
@@ -900,23 +916,23 @@
         Object.assign(p, JSON.parse(JSON.stringify(W.DEFAULTS)), keep, { hw: (W.KNOWN.find(k => k[2] === dev.name) || [0, 0, 0, 900])[3] });
         save(); go('wheel', o);
       }, '&#8634;');
-      row(c2, 'Maximum wheel rotation', 'The wheel angle that gives full lock. 360° is a real F1 car', 'rot', [180, 240, 270, 300, 360, 400, 450, 540, 720, 900, 1080], deg, 'STEERING');
+      row(c2, 'Maximum wheel rotation', 'The wheel angle that gives full lock. 360° is a real F1 car', 'rot', range(90, 1080, 10), deg, 'STEERING');
       row(c2, 'Wheel hardware rotation', 'Set it to the rotation your wheel’s own software uses', 'hw', [270, 360, 540, 720, 900, 1080, 1440, 1800, 2520], deg);
       row(c2, 'Steering deadzone', 'Movement ignored around the centre', 'sDead', range(0, 20, 1), pct);
-      row(c2, 'Steering linearity', 'Higher makes the centre less sensitive', 'sLin', range(0, 100, 5), pct);
-      row(c2, 'Steering saturation', 'Higher reaches full lock before full rotation', 'sSat', range(0, 50, 5), pct);
+      row(c2, 'Steering linearity', 'Higher makes the centre less sensitive', 'sLin', range(0, 100, 1), pct);
+      row(c2, 'Steering saturation', 'Higher reaches full lock before full rotation', 'sSat', range(0, 50, 1), pct);
       row(c2, 'Throttle deadzone', '', 'tDead', range(0, 30, 1), pct, 'PEDALS');
-      row(c2, 'Throttle linearity', '', 'tLin', range(0, 100, 5), pct);
-      row(c2, 'Throttle saturation', 'Full throttle before the pedal is fully down', 'tSat', range(0, 50, 5), pct);
+      row(c2, 'Throttle linearity', '', 'tLin', range(0, 100, 1), pct);
+      row(c2, 'Throttle saturation', 'Full throttle before the pedal is fully down', 'tSat', range(0, 50, 1), pct);
       row(c2, 'Brake deadzone', '', 'bDead', range(0, 30, 1), pct);
-      row(c2, 'Brake linearity', 'Higher gives finer control of light braking', 'bLin', range(0, 100, 5), pct);
-      row(c2, 'Brake saturation', 'Full braking before the pedal is fully down', 'bSat', range(0, 50, 5), pct);
+      row(c2, 'Brake linearity', 'Higher gives finer control of light braking', 'bLin', range(0, 100, 1), pct);
+      row(c2, 'Brake saturation', 'Full braking before the pedal is fully down', 'bSat', range(0, 50, 1), pct);
       row(c2, 'Vibration & force feedback', dev.logitech ? 'Needs CONNECT FORCE FEEDBACK (Chrome or Edge)' : 'Logitech G29 / G27 / G25 / DFGT only in a browser', 'ffb', [true, false], onOff, 'VIBRATION & FORCE FEEDBACK');
-      row(c2, 'Vibration & force feedback strength', '', 'ffbK', range(0, 150, 5), pct);
-      row(c2, 'On track effects', 'The front tyres’ grip through the wheel', 'ffbTrack', range(0, 100, 5), pct);
-      row(c2, 'Rumble strip effects', '', 'ffbKerb', range(0, 100, 5), pct);
-      row(c2, 'Off track effects', 'Grass and gravel', 'ffbOff', range(0, 100, 5), pct);
-      row(c2, 'Wheel damper', 'Resists fast wheel movement', 'ffbDamp', range(0, 100, 5), pct);
+      row(c2, 'Vibration & force feedback strength', '', 'ffbK', range(0, 150, 1), pct);
+      row(c2, 'On track effects', 'The front tyres’ grip through the wheel', 'ffbTrack', range(0, 100, 1), pct);
+      row(c2, 'Rumble strip effects', '', 'ffbKerb', range(0, 100, 1), pct);
+      row(c2, 'Off track effects', 'Grass and gravel', 'ffbOff', range(0, 100, 1), pct);
+      row(c2, 'Wheel damper', 'Resists fast wheel movement', 'ffbDamp', range(0, 100, 1), pct);
       row(c2, 'Invert force feedback', 'If the wheel pushes the wrong way', 'ffbInv', [false, true], onOff);
       const cal = p.cal || {};
       if (!cal.clu) panel.querySelector('.clu').classList.add('off');
