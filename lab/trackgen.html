@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="trackgen.css">
 </head>
 <body>
+<!-- the lab lays itself out inside #app, so elements that browser extensions insert into the page body cannot take its place -->
+<div id="app">
 <aside id="side">
   <header>
     <div class="brand"><b>TRACK LAB</b><span>Procedural circuits with real elevation</span></div>
@@ -82,6 +84,7 @@
   <div id="busy" class="busy"><div><b>GENERATING</b><span id="busyt"></span></div></div>
   <div id="drivehud" class="drivehud"></div>
 </main>
+</div>
 
 <script src="../js/vendor/three.min.js"></script>
 <script src="../js/util.js"></script>
