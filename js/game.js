@@ -354,11 +354,13 @@
     if (UIm.UI.cur) UIm.key(code);
   }
 
-  // gamepad
+  // gamepad (a racing wheel is read separately, in pollWheel)
   let padPrev = [];
   function pollPad() {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const gp = pads && Array.from(pads).find(x => x);
+    const pads = F1.Wheel ? F1.Wheel.pads() : Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
+    const wheel = F1.Wheel ? F1.Wheel.find(pads) : null;
+    Game.wheelDev = wheel;
+    const gp = pads.find(x => !wheel || x !== wheel.gp);
     if (!gp) return null;
     const b = i => (gp.buttons[i] ? gp.buttons[i].value : 0);
     const pressed = i => b(i) > 0.5 && !(padPrev[i] > 0.5);
@@ -400,8 +402,54 @@
     act.playEffect('dual-rumble', { duration: 90, strongMagnitude: strong, weakMagnitude: weak }).catch(() => {});
   }
 
-  function applyInput(p, dt, pad) {
+  // Racing wheel: the steering is the wheel's real angle (through the soft lock and the F1-style
+  // settings in js/wheel.js) and goes to the car as a direct front-wheel angle, so the car turns
+  // exactly as far as the wheel does, with no speed-dependent limit. The pedals only count once
+  // calibrated. Mapped buttons drive the race and the menus.
+  let wheelHint = 0;
+  function pollWheel(dt) {
+    const dev = Game.wheelDev;
+    if (!dev) { if (F1.Wheel) F1.Wheel.ffbStop(); return null; }
+    const Wh = F1.Wheel, r = Wh.read(dev);
+    // the wheel's own calibration screens read it themselves
+    const cur = UIm.UI.cur;
+    if (cur && cur.wheelOwn) return r;
+    if (Game.state === 'race' && !Game.paused) {
+      if (Wh.pressed(dev, 'pause')) pause();
+      if (Wh.pressed(dev, 'gearUp')) onKey('KeyE');
+      if (Wh.pressed(dev, 'gearDown')) onKey('KeyQ');
+      if (Wh.pressed(dev, 'pit')) onKey('KeyP');
+      if (Wh.pressed(dev, 'camera')) onKey('KeyC');
+      if (Wh.pressed(dev, 'reset')) onKey('KeyR');
+      r.drs = Wh.held(dev, 'overtake');
+      Wh.ffbUpdate(dev, Game.race && !Game.spectate ? Game.race.player : null, dt, r);
+      if (!r.pedals && Game.race && Game.race.time > 1 && performance.now() - wheelHint > 20000) {
+        wheelHint = performance.now();
+        HUD.message('WHEEL DETECTED', 'blue', 'CALIBRATE IT IN SETTINGS > WHEEL TO USE THE PEDALS', 4);
+      }
+    } else {
+      Wh.ffbStop();
+      for (const [a, k] of [['menuUp', 'ArrowUp'], ['menuDown', 'ArrowDown'], ['menuLeft', 'ArrowLeft'], ['menuRight', 'ArrowRight'], ['menuOk', 'Enter'], ['menuBack', 'Escape']]) if (Wh.pressed(dev, a)) onKey(k);
+      if (Wh.pressed(dev, 'pause') && Game.paused) onKey('Escape');
+    }
+    return r;
+  }
+
+  function applyInput(p, dt, pad, wh) {
     const arcade = Game.race.mode === 'arcade';
+    // a wheel steers the car directly; it lets go when unplugged
+    if (wh) {
+      p.ctl.steerDirect = p.ctl.wheelSteer = wh.steer * p.spec.lockF; p.ctl.wheelDeg = wh.deg; p.ctl.wheelLock = wh.lock;
+      p.ctl.byWheel = true;
+      const thrK = keys.has('KeyW') || keys.has('ArrowUp'), brkK = keys.has('KeyS') || keys.has('ArrowDown');
+      inp.steer = wh.steer;
+      inp.thr = Math.max(wh.pedals ? wh.thr : 0, thrK ? 1 : 0, pad && pad.active ? pad.thr : 0);
+      inp.brk = Math.max(wh.pedals ? wh.brk : 0, brkK ? 1 : 0, pad && pad.active ? pad.brk : 0);
+      p.ctl.steer = inp.steer; p.ctl.throttle = inp.thr; p.ctl.brake = inp.brk;
+      p.ctl.drs = keys.has('Space') || wh.drs || (pad && pad.drs) || false;
+      return;
+    }
+    if (p.ctl.byWheel) { p.ctl.steerDirect = p.ctl.wheelSteer = p.ctl.wheelDeg = null; p.ctl.byWheel = false; }
     let st = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
     const thrK = keys.has('KeyW') || keys.has('ArrowUp'), brkK = keys.has('KeyS') || keys.has('ArrowDown');
     const ms = mouse.on ? mouseSteer(dt) : null;
@@ -1417,6 +1465,7 @@
     perf.frames++; perf.t += dt;
     if (perf.t > 1) { perf.fps = perf.frames / perf.t; perf.frames = 0; perf.t = 0; }
     const pad = pollPad();
+    const wh = pollWheel(dt);
     const race = Game.race;
     if (race && (Game.state === 'race' && !Game.paused || Game.state === 'menu')) {
       acc += dt;
@@ -1427,7 +1476,7 @@
       // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
       const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.catchup || 40;
       while (acc >= DT && n < maxSteps) {
-        if (Game.state === 'race' && !Game.spectate) applyInput(race.player, DT, pad);
+        if (Game.state === 'race' && !Game.spectate) applyInput(race.player, DT, pad, wh);
         snapPoses(race);
         Race.step(race, DT);
         acc -= DT; n++;

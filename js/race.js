@@ -893,7 +893,8 @@
         AI.drive(race, c, dt);
         if (c.finished) { c.ctl.throttle *= 0.55; }
       } else {
-        c.ctl.steerDirect = null;
+        // a racing wheel sets the front-wheel angle itself (js/game.js); anything else steers by ctl.steer
+        c.ctl.steerDirect = c.ctl.wheelSteer != null ? c.ctl.wheelSteer : null;
         if (c.brain.pit && c.brain.pit.phase === 'approach') {
           const i = c.loc.i;
           if (!isNaN(tr.pit.off[i]) && Tracks.fwd(tr, tr.pit.sIn, c.loc.s) < 150 && Math.abs(c.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 + 1 && Math.abs(c.loc.d) > tr.hw - 1) {

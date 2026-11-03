@@ -228,7 +228,7 @@
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
       ['SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }],
       ['SETTINGS', 'Audio, camera, units and HUD.', () => go('settings', { back: 'main' })],
-      ['CONTROLS', 'Keyboard and gamepad layout.', () => go('controls', { back: 'main' })],
+      ['CONTROLS', 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })],
     ];
     const items = entries.map(([t, s, fn]) => {
       const e = h('div', 'mi', `${t}<small>${s}</small>`);
@@ -593,13 +593,14 @@
   // batch). The advanced graphics screen edits the same copy. Leaving with changes not yet
   // applied asks once, then discards them.
   let SD = null;
-  const draftOf = () => JSON.parse(JSON.stringify(F1.Game.settings));
-  const draftDirty = () => !!SD && JSON.stringify(SD) !== JSON.stringify(F1.Game.settings);
+  const noWheel = st => { const o = JSON.parse(JSON.stringify(st)); delete o.wheel; return o; };
+  const draftOf = () => noWheel(F1.Game.settings);
+  const draftDirty = () => !!SD && JSON.stringify(SD) !== JSON.stringify(noWheel(F1.Game.settings));
   function applyDraft() {
     const G = F1.Game, gx = SD.gfx;
     if (gx.boot == null) gx.boot = F1.R3 && F1.R3.bootTier ? F1.R3.bootTier() : '';
     Object.assign(G.settings.gfx, gx);
-    const { gfx, ...rest } = SD; void gfx;
+    const { gfx, wheel, ...rest } = SD; void gfx; void wheel;
     Object.assign(G.settings, rest);
     G.applySettings();
     SD = draftOf();
@@ -665,6 +666,12 @@
     add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', [0, 0.6, 1.5, 3], () => st.mCentre, v => { st.mCentre = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1.5: 'MEDIUM', 3: 'HIGH' })[v]));
     add(optRow('Smoothing', '', [0, 0.04, 0.1], () => st.mSmooth, v => { st.mSmooth = v; touched(); }, v => ({ 0: 'OFF', 0.04: 'LOW', 0.1: 'HIGH' })[v]));
     add(optRow('Invert', '', [false, true], () => st.mInvert, v => { st.mInvert = v; touched(); }, v => (v ? 'ON' : 'OFF')));
+    {
+      const wb = h('div', 'btn', '<span>WHEEL SETTINGS</span><span class="arrow">&#8594;</span>');
+      wb.style.marginTop = '14px';
+      col.appendChild(wb);
+      items.push({ el: wb, activate: () => go('wheel', { back: o.back, from: 'settings' }) });
+    }
     // graphics: a preset sets everything below it; touching any single option makes it CUSTOM
     if (F1.R3 && document.body.classList.contains('three')) {
       col = opts2;
@@ -808,14 +815,284 @@
     const g = h('div', 'ctl-grid');
     g.innerHTML = `<div><div class="crumbs" style="margin-top:6px">DRIVING</div>${rows([['Throttle', 'W &#8593;'], ['Brake / reverse', 'S &#8595;'], ['Steer', 'A D'], ['Overtake mode (simulation)', 'SPACE'], ['Shift up / down (manual)', 'E Q'], ['Pit strategy (simulation)', 'P'], ['Reset car (arcade)', 'R']])}</div>
       <div><div class="crumbs" style="margin-top:6px">GENERAL</div>${rows([['Pause', 'ESC'], ['Camera mode', 'C'], ['Zoom near / standard / far', 'Z'], ['Mouse steering on / off', 'RMB'], ['Mute', 'M'], ['Hide HUD', 'H'], ['Menu select', 'ENTER'], ['Back', 'ESC']])}
-      <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Pause', 'START']])}</div>`;
+      <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Pause', 'START']])}
+      <div class="crumbs" style="margin-top:22px">RACING WHEEL</div>${rows([['Calibrate, map buttons, force feedback', 'WHEEL SETTINGS']])}</div>`;
     wrap.appendChild(g);
+    const wb = h('div', 'btn', '<span>WHEEL SETTINGS</span><span class="arrow">&#8594;</span>');
+    wb.style.maxWidth = '420px';
+    wrap.appendChild(wb);
     const back = h('div', 'btn', '<span>BACK</span><span class="arrow">&#8592;</span>');
     back.style.maxWidth = '420px';
     wrap.appendChild(back);
     el.appendChild(wrap);
     const doBack = () => { if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
-    return { el, items: [{ el: back, activate: doBack }], back: doBack };
+    return { el, items: [{ el: wb, activate: () => go('wheel', { back: o.back, from: 'controls' }) }, { el: back, activate: doBack }], back: doBack };
+  };
+
+  // ---------- racing wheel ----------
+  // Settings > Wheel: the connected wheel with its live inputs, the F1-game input settings,
+  // force feedback, and the way to the calibration and the button mapping. Changes save at once.
+  // Each screen polls the wheel itself while it is up (a loop that ends with the screen).
+  function live(el, fn) {
+    const loop = () => { if (!el.isConnected && el.dataset.started) return; el.dataset.started = 1; fn(); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+  const range = (a, b, st) => { const r = []; for (let v = a; v <= b + 1e-9; v += st) r.push(Math.round(v * 100) / 100); return r; };
+  const meter = (label, cls) => `<div class="wh-m ${cls || ''}"><span class="wh-l">${label}</span><div class="wh-bar"><i class="raw"></i><i class="out"></i></div><b class="wh-v"></b></div>`;
+  function setMeter(m, raw, out, txt) {
+    m.querySelector('.raw').style.width = (U.clamp(raw, 0, 1) * 100) + '%';
+    m.querySelector('.out').style.width = (U.clamp(out, 0, 1) * 100) + '%';
+    m.querySelector('.wh-v').textContent = txt;
+  }
+  function wheelBack(o) {
+    if (o.from === 'settings') go('settings', { back: o.back, keep: true });
+    else if (o.from === 'controls') go('controls', { back: o.back });
+    else if (o.back === 'pause') F1.Game.showPause();
+    else go(o.back || 'main');
+  }
+  S.wheel = o => {
+    const W = F1.Wheel, G2 = F1.Game;
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    wrap.innerHTML = `<div class="crumbs">OPTIONS  /  CONTROLS</div><div class="h1">WHEEL</div>`;
+    const dev = W.find(W.pads());
+    const items = [];
+    const c1 = h('div', 'opts'), c2 = h('div', 'opts');
+    const save = () => G2.saveSettings();
+    const add = (col, row, sec) => { if (sec) col.appendChild(h('div', 'opt sec', sec)); col.appendChild(row.el); items.push(row); };
+    const button = (col, label, fn, arrow) => { const b = h('div', 'btn', `<span>${label}</span><span class="arrow">${arrow || '&#8594;'}</span>`); col.appendChild(b); const it = { el: b, activate: fn }; items.push(it); return b; };
+    // the device and its live inputs
+    const panel = h('div', 'wh-dev');
+    panel.innerHTML = `<div class="wh-name"></div><div class="wh-st"></div>
+      <div class="wh-steer"><div class="wh-l">STEERING</div><div class="wh-sbar"><i class="lock"></i><i class="mid"></i><i class="pos"></i></div><b class="wh-deg"></b></div>
+      ${meter('THROTTLE', 'thr')}${meter('BRAKE', 'brk')}${meter('CLUTCH', 'clu')}<div class="wh-ffb"></div>`;
+    c1.appendChild(panel);
+    const name = panel.querySelector('.wh-name'), stat = panel.querySelector('.wh-st'), ffbEl = panel.querySelector('.wh-ffb');
+    const all = W.pads();
+    if (!dev) {
+      name.textContent = 'NO WHEEL FOUND';
+      stat.textContent = all.length ? 'A controller is connected but it does not look like a wheel. If it is one, set it below.' : 'Plug the wheel in, then turn it or press a pedal: browsers only report a device once it is used.';
+      panel.classList.add('none');
+      // a device the detection missed (or a pad it took for a wheel) can be set by hand
+      all.forEach(gp => {
+        const d = W.ids(gp), cfg = W.cfgOf();
+        add(c1, optRow('Use as', d.name, ['pad', 'wheel'], () => (cfg.force[d.key] || (W.isWheel(gp, cfg) ? 'wheel' : 'pad')), v => { cfg.force[d.key] = v; save(); go('wheel', o); }, v => (v === 'wheel' ? 'RACING WHEEL' : 'GAMEPAD')), all.indexOf(gp) ? null : 'DEVICES');
+      });
+    } else {
+      const p = dev.prof;
+      name.textContent = dev.name.toUpperCase();
+      // settings rows (F1 game names), saved as they change
+      const row = (col, label, sub, key, values, fmt, sec) => add(col, optRow(label, sub, values, () => p[key], v => { p[key] = v; save(); after(key); }, fmt), sec);
+      const pct = v => v + '';
+      const deg = v => v + '°';
+      const onOff = v => (v ? 'ON' : 'OFF');
+      const after = key => { if ((key === 'rot' || key === 'hw') && W.FFB.dev) W.setRange(Math.min(p.rot, p.hw)); };
+      button(c1, 'CALIBRATE', () => go('wheelcal', o));
+      button(c1, 'BUTTON MAPPING', () => go('wheelmap', o));
+      const ffbBtn = button(c1, W.FFB.dev ? 'FORCE FEEDBACK CONNECTED' : 'CONNECT FORCE FEEDBACK', async () => {
+        ffbBtn.querySelector('span').textContent = 'CHOOSE THE WHEEL IN THE BROWSER PROMPT';
+        if (await W.connect()) { W.setRange(Math.min(p.rot, p.hw)); ffbBtn.querySelector('span').textContent = 'FORCE FEEDBACK CONNECTED'; }
+        else ffbBtn.querySelector('span').textContent = 'CONNECT FORCE FEEDBACK';
+      });
+      if (!dev.logitech) ffbBtn.classList.add('dim');
+      button(c1, 'RESET TO DEFAULTS', () => {
+        const keep = { cal: p.cal, binds: p.binds };
+        Object.assign(p, JSON.parse(JSON.stringify(W.DEFAULTS)), keep, { hw: (W.KNOWN.find(k => k[2] === dev.name) || [0, 0, 0, 900])[3] });
+        save(); go('wheel', o);
+      }, '&#8634;');
+      row(c2, 'Maximum wheel rotation', 'The wheel angle that gives full lock. 360° is a real F1 car', 'rot', [180, 240, 270, 300, 360, 400, 450, 540, 720, 900, 1080], deg, 'STEERING');
+      row(c2, 'Wheel hardware rotation', 'Set it to the rotation your wheel’s own software uses', 'hw', [270, 360, 540, 720, 900, 1080, 1440, 1800, 2520], deg);
+      row(c2, 'Steering deadzone', 'Movement ignored around the centre', 'sDead', range(0, 20, 1), pct);
+      row(c2, 'Steering linearity', 'Higher makes the centre less sensitive', 'sLin', range(0, 100, 5), pct);
+      row(c2, 'Steering saturation', 'Higher reaches full lock before full rotation', 'sSat', range(0, 50, 5), pct);
+      row(c2, 'Throttle deadzone', '', 'tDead', range(0, 30, 1), pct, 'PEDALS');
+      row(c2, 'Throttle linearity', '', 'tLin', range(0, 100, 5), pct);
+      row(c2, 'Throttle saturation', 'Full throttle before the pedal is fully down', 'tSat', range(0, 50, 5), pct);
+      row(c2, 'Brake deadzone', '', 'bDead', range(0, 30, 1), pct);
+      row(c2, 'Brake linearity', 'Higher gives finer control of light braking', 'bLin', range(0, 100, 5), pct);
+      row(c2, 'Brake saturation', 'Full braking before the pedal is fully down', 'bSat', range(0, 50, 5), pct);
+      row(c2, 'Vibration & force feedback', dev.logitech ? 'Needs CONNECT FORCE FEEDBACK (Chrome or Edge)' : 'Logitech G29 / G27 / G25 / DFGT only in a browser', 'ffb', [true, false], onOff, 'VIBRATION & FORCE FEEDBACK');
+      row(c2, 'Vibration & force feedback strength', '', 'ffbK', range(0, 150, 5), pct);
+      row(c2, 'On track effects', 'The front tyres’ grip through the wheel', 'ffbTrack', range(0, 100, 5), pct);
+      row(c2, 'Rumble strip effects', '', 'ffbKerb', range(0, 100, 5), pct);
+      row(c2, 'Off track effects', 'Grass and gravel', 'ffbOff', range(0, 100, 5), pct);
+      row(c2, 'Wheel damper', 'Resists fast wheel movement', 'ffbDamp', range(0, 100, 5), pct);
+      row(c2, 'Invert force feedback', 'If the wheel pushes the wrong way', 'ffbInv', [false, true], onOff);
+      const cal = p.cal || {};
+      if (!cal.clu) panel.querySelector('.clu').classList.add('off');
+      live(el, () => {
+        const d2 = G2.wheelDev && G2.wheelDev.key === dev.key ? G2.wheelDev : W.find(W.pads());
+        if (!d2) { stat.textContent = 'DISCONNECTED'; return; }
+        const r = W.read(d2);
+        stat.textContent = !cal.steer ? 'NOT CALIBRATED: the pedals stay off until you calibrate' : !r.pedals ? 'PEDALS NOT CALIBRATED' : 'CALIBRATED';
+        stat.classList.toggle('warn', !r.pedals);
+        const hw = p.hw / 2;
+        panel.querySelector('.lock').style.cssText = `left:${50 - r.lock / hw * 50}%;width:${r.lock / hw * 100}%`;
+        panel.querySelector('.pos').style.left = (50 + r.raw * 50) + '%';
+        panel.querySelector('.wh-deg').textContent = (r.deg > 0 ? '+' : '') + Math.round(r.deg) + '°   ' + Math.round(r.steer * 100) + '%';
+        setMeter(panel.querySelector('.thr'), r.thrR, r.thr, Math.round(r.thr * 100) + '%');
+        setMeter(panel.querySelector('.brk'), r.brkR, r.brk, Math.round(r.brk * 100) + '%');
+        setMeter(panel.querySelector('.clu'), r.cluR, r.clu, Math.round(r.clu * 100) + '%');
+        ffbEl.textContent = W.FFB.dev ? 'FORCE FEEDBACK: CONNECTED' : W.FFB.err ? 'FORCE FEEDBACK: ' + W.FFB.err.toUpperCase() : dev.logitech ? 'FORCE FEEDBACK: NOT CONNECTED' : 'FORCE FEEDBACK: NOT AVAILABLE FOR THIS WHEEL IN A BROWSER';
+      });
+    }
+    // a wheel plugged in (or out) while the screen is up rebuilds it
+    live(el, () => { const d2 = W.find(W.pads()); if ((d2 && d2.key) !== (dev && dev.key) && UI.cur && UI.cur.id === 'wheel') go('wheel', o); });
+    button(c1, 'BACK', () => wheelBack(o), '&#8592;');
+    const two = h('div', 'two wh');
+    two.appendChild(c1); two.appendChild(c2);
+    wrap.appendChild(two);
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8593;&#8595;', 'select'], ['&#8592;&#8594;', 'change'], ['ENTER', 'confirm'], ['ESC', 'back']]));
+    return { el, items, back: () => wheelBack(o) };
+  };
+
+  // Calibration: centre, both locks, each pedal. The axis that moves is found by itself; each step
+  // waits for the input to be held still, then moves on.
+  S.wheelcal = o => {
+    const W = F1.Wheel, G2 = F1.Game;
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    wrap.innerHTML = `<div class="crumbs">WHEEL</div><div class="h1">CALIBRATE</div>
+      <div class="wc"><div class="wc-steps"></div><div class="wc-t"></div><div class="wc-s"></div><div class="wc-hold"><i></i></div><div class="wc-live"></div></div>`;
+    el.appendChild(wrap);
+    el.appendChild(foot([['ENTER', 'confirm / skip'], ['ESC', 'cancel']]));
+    const STEPS = [
+      ['CENTRE', 'Centre the wheel and take your feet off every pedal, then press ENTER.'],
+      ['FULL LEFT', 'Turn the wheel all the way to the left and hold it there.'],
+      ['FULL RIGHT', 'Now all the way to the right, and hold.'],
+      ['THROTTLE', 'Back to the centre. Press the throttle all the way down and hold.'],
+      ['BRAKE', 'Release the throttle. Press the brake all the way down and hold.'],
+      ['CLUTCH', 'Release the brake. Press the clutch all the way down and hold, or press ENTER if you have none.'],
+      ['DONE', 'Calibrated. Press ENTER to save, then map your buttons.'],
+    ];
+    const stepsEl = wrap.querySelector('.wc-steps'), tEl = wrap.querySelector('.wc-t'), sEl = wrap.querySelector('.wc-s'), holdEl = wrap.querySelector('.wc-hold i'), liveEl = wrap.querySelector('.wc-live');
+    stepsEl.innerHTML = STEPS.map(([t]) => `<span>${t}</span>`).join('');
+    let k = 0, base = null, hold = 0, last = null, t0 = performance.now();
+    const cal = {};
+    const show = () => {
+      Array.from(stepsEl.children).forEach((e, i) => { e.classList.toggle('on', i === k); e.classList.toggle('done', i < k); });
+      tEl.textContent = STEPS[k][0]; sEl.textContent = STEPS[k][1]; hold = 0; last = null;
+    };
+    show();
+    const used = () => [cal.steer && cal.steer.axis, cal.thr && cal.thr.axis, cal.brk && cal.brk.axis].filter(x => x != null);
+    // the value must hold still (within 1%) for this long before it is taken
+    const HOLD = 0.6;
+    live(el, () => {
+      const now = performance.now(), dt = Math.min(0.1, (now - t0) / 1000); t0 = now;
+      const dev = W.find(W.pads());
+      if (!dev) { sEl.textContent = 'Waiting for the wheel: turn it or press a pedal.'; return; }
+      const gp = dev.gp;
+      liveEl.textContent = 'AXES  ' + gp.axes.map((v, i) => (i + 1) + ': ' + v.toFixed(2)).join('   ');
+      if (!base || k === 0) { holdEl.style.width = '0%'; return; }
+      let axis = -1, v = 0, need = 0.3, skip = [];
+      if (k === 1) { const m = W.movedAxis(gp, base, []); axis = m.axis; v = gp.axes[axis]; need = 0.25; if (m.d < need) axis = -1; }
+      else if (k === 2) { axis = cal.steer.axis; v = gp.axes[axis]; if (Math.sign(v - cal.steer.c) === Math.sign(cal.steer.l - cal.steer.c) || Math.abs(v - cal.steer.c) < 0.25) axis = -1; }
+      else if (k >= 3 && k <= 5) {
+        skip = k === 3 ? [cal.steer.axis] : used();
+        // the brake may share the throttle's axis (combined pedals): then it moves the other way
+        if (k === 4 && cal.thr) skip = skip.filter(a => a !== cal.thr.axis);
+        const m = W.movedAxis(gp, base, skip);
+        axis = m.d >= 0.4 ? m.axis : -1; v = axis >= 0 ? gp.axes[axis] : 0;
+        if (k === 4 && axis === cal.thr.axis && Math.sign(v - cal.thr.rest) === Math.sign(cal.thr.full - cal.thr.rest)) axis = -1;
+      }
+      if (axis < 0) { hold = 0; last = null; holdEl.style.width = '0%'; return; }
+      if (last && last.axis === axis && Math.abs(v - last.v) < 0.01) hold += dt; else hold = 0;
+      last = { axis, v };
+      holdEl.style.width = Math.min(100, hold / HOLD * 100) + '%';
+      if (hold < HOLD) return;
+      if (k === 1) cal.steer = { axis, c: base.axes[axis], l: v, r: null };
+      else if (k === 2) cal.steer.r = v;
+      else if (k === 3) cal.thr = { axis, rest: base.axes[axis], full: v };
+      else if (k === 4) cal.brk = { axis, rest: base.axes[axis], full: v };
+      else if (k === 5) cal.clu = { axis, rest: base.axes[axis], full: v };
+      Audio.ui.tick();
+      k++; show();
+    });
+    const finish = () => {
+      const dev = W.find(W.pads());
+      if (dev) { dev.prof.cal = cal; G2.saveSettings(); W.sync(dev); }
+      go(dev && !Object.keys(dev.prof.binds).length ? 'wheelmap' : 'wheel', o);
+    };
+    return {
+      el, items: [], wheelOwn: true,
+      onKey: code => {
+        if (code !== 'Enter' && code !== 'NumpadEnter' && code !== 'Space') return false;
+        const dev = W.find(W.pads());
+        if (k === 0 && dev) { base = W.snapshot(dev.gp); k = 1; show(); Audio.ui.select(); }
+        else if (k === 5) { k = 6; show(); Audio.ui.select(); }
+        else if (k === 6) { Audio.ui.select(); finish(); }
+        return true;
+      },
+      back: () => go('wheel', o),
+    };
+  };
+
+  // Button mapping: pick an action, press the wheel control for it. Backspace clears one.
+  S.wheelmap = o => {
+    const W = F1.Wheel, G2 = F1.Game;
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    wrap.innerHTML = `<div class="crumbs">WHEEL</div><div class="h1">BUTTON MAPPING</div><div class="wm-cap"></div>`;
+    const cap = wrap.querySelector('.wm-cap');
+    const dev0 = W.find(W.pads());
+    const c1 = h('div', 'opts'), c2 = h('div', 'opts'), items = [];
+    let waiting = null, base = null;
+    const scr = { el, items, wheelOwn: false };
+    const rows = W.ACTIONS.map(([a, label], i) => {
+      const r = h('div', 'opt', `<div class="on">${label}</div><div class="wm-b"></div>`);
+      (i < 7 ? c1 : c2).appendChild(r);
+      const it = { el: r, act: a, activate: () => start(a, label) };
+      items.push(it);
+      return it;
+    });
+    if (rows.length) c1.insertBefore(h('div', 'opt sec', 'DRIVING'), c1.firstChild), c2.insertBefore(h('div', 'opt sec', 'MENUS'), c2.firstChild);
+    const render = () => { const dev = W.find(W.pads()); rows.forEach(it => { it.el.querySelector('.wm-b').textContent = dev ? W.bindName(dev.prof.binds[it.act]) : '-'; }); };
+    const start = (a, label) => {
+      const dev = W.find(W.pads());
+      if (!dev) { cap.textContent = 'NO WHEEL CONNECTED'; return; }
+      waiting = a; base = W.snapshot(dev.gp); scr.wheelOwn = true;
+      cap.textContent = 'PRESS THE WHEEL BUTTON FOR  ' + label.toUpperCase() + '   (ESC CANCELS, BACKSPACE CLEARS)';
+      cap.classList.add('on');
+    };
+    const stop = () => { waiting = null; scr.wheelOwn = false; cap.classList.remove('on'); cap.textContent = ''; const dev = W.find(W.pads()); if (dev) W.sync(dev); render(); };
+    live(el, () => {
+      if (!waiting) return;
+      const dev = W.find(W.pads());
+      if (!dev) return;
+      const cal = dev.prof.cal || {};
+      const skip = [cal.steer, cal.thr, cal.brk, cal.clu].filter(Boolean).map(c => c.axis);
+      if (!cal.steer) skip.push(0);
+      const c = W.detectControl(dev.gp, base, skip);
+      if (!c) return;
+      dev.prof.binds[waiting] = c; G2.saveSettings(); Audio.ui.select();
+      stop();
+    });
+    const back = h('div', 'btn', '<span>DONE</span><span class="arrow">&#10003;</span>');
+    c2.appendChild(back);
+    items.push({ el: back, activate: () => go('wheel', o) });
+    const two = h('div', 'two wh');
+    two.appendChild(c1); two.appendChild(c2);
+    wrap.appendChild(two);
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8593;&#8595;', 'select'], ['ENTER', 'map'], ['BKSP', 'clear'], ['ESC', 'back']]));
+    if (!dev0) cap.textContent = 'NO WHEEL CONNECTED';
+    render();
+    scr.onKey = code => {
+      if (waiting) {
+        if (code === 'Escape') { stop(); return true; }
+        if (code === 'Backspace') { const dev = W.find(W.pads()); if (dev) { delete dev.prof.binds[waiting]; G2.saveSettings(); } stop(); return true; }
+        return true;
+      }
+      if (code === 'Backspace' || code === 'Delete') {
+        const it = items[UI.focus], dev = W.find(W.pads());
+        if (it && it.act && dev) { delete dev.prof.binds[it.act]; G2.saveSettings(); render(); }
+        return true;
+      }
+      return false;
+    };
+    scr.back = () => go('wheel', o);
+    return scr;
   };
 
   S.loading = o => {

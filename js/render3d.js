@@ -1899,7 +1899,7 @@
         RC.setLod(body, L, d2 < 100 || c === hideHelmet);
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
-        RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel
+        RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.ctl && c.ctl.wheelDeg != null ? c.ctl.wheelDeg * 0.36 / 180 : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel; a real wheel turns it by its own angle
         RC.updateHead(body, c, dt);
       }
     }

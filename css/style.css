@@ -547,3 +547,47 @@ table.res tr.cutline td { padding: 4px 10px; font-size: 11px; font-weight: 800; 
 .btn.apply.dim { opacity: .45; }
 .two.adv .opts { max-height: 68vh; overflow-y: auto; scrollbar-width: thin; padding-right: 6px; }
 .opt.sec .adv-pre { margin-left: 10px; color: var(--ink); }
+
+/* ---------- racing wheel screens ---------- */
+.two.wh { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
+#scr-wheel .menu-wrap, #scr-wheelmap .menu-wrap { width: min(1180px, 88vw); }
+#scr-wheelcal .menu-wrap { width: min(900px, 88vw); }
+.two.wh .opts { max-height: 70vh; overflow-y: auto; scrollbar-width: thin; padding-right: 6px; }
+#scr-wheelmap .opt { grid-template-columns: 1fr auto; }
+.wh-dev { background: var(--carbon); padding: 18px 20px 16px; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+.wh-name { font-size: 20px; font-weight: 900; font-style: italic; letter-spacing: .04em; }
+.wh-st { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--green); margin: 4px 0 14px; text-transform: uppercase; }
+.wh-st.warn, .wh-dev.none .wh-st { color: var(--yellow); }
+.wh-dev.none .wh-steer, .wh-dev.none .wh-m, .wh-dev.none .wh-ffb { display: none; }
+.wh-l { font-size: 11px; font-weight: 900; letter-spacing: .16em; color: var(--m-ink-3); }
+.wh-steer { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin-bottom: 12px; }
+.wh-steer .wh-l { grid-column: 1 / -1; }
+.wh-sbar { position: relative; height: 14px; background: rgba(255,255,255,.07); }
+.wh-sbar .lock { position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,.12); }
+.wh-sbar .mid { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--m-ink-3); }
+.wh-sbar .pos { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; background: var(--f1); }
+.wh-deg { font-size: 14px; font-weight: 900; min-width: 112px; text-align: right; font-variant-numeric: tabular-nums; }
+.wh-m { display: grid; grid-template-columns: 76px 1fr 48px; gap: 12px; align-items: center; margin-top: 8px; }
+.wh-m.off { opacity: .35; }
+.wh-bar { position: relative; height: 10px; background: rgba(255,255,255,.07); }
+.wh-bar i { position: absolute; left: 0; top: 0; bottom: 0; }
+.wh-bar .raw { background: rgba(255,255,255,.22); }
+.wh-bar .out { background: var(--green); }
+.wh-m.brk .out { background: var(--f1); }
+.wh-m.clu .out { background: var(--blue); }
+.wh-v { font-size: 13px; font-weight: 900; text-align: right; font-variant-numeric: tabular-nums; }
+.wh-ffb { margin-top: 14px; font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--m-ink-3); }
+.btn.dim { opacity: .45; }
+.wc { max-width: 760px; }
+.wc-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 28px; }
+.wc-steps span { padding: 6px 12px; font-size: 12px; font-weight: 900; letter-spacing: .12em; background: var(--carbon); color: var(--m-ink-3); }
+.wc-steps span.done { color: var(--ink); }
+.wc-steps span.on { background: #fff; color: #111; }
+.wc-t { font-size: 40px; font-weight: 900; font-style: italic; }
+.wc-s { font-size: 18px; color: var(--ink-2); margin: 6px 0 22px; }
+.wc-hold { height: 8px; background: rgba(255,255,255,.08); max-width: 520px; }
+.wc-hold i { display: block; height: 100%; width: 0; background: var(--f1); }
+.wc-live { margin-top: 24px; font: 12px/1.6 Consolas, monospace; color: var(--m-ink-3); white-space: pre-wrap; }
+.wm-cap { min-height: 28px; margin: -8px 0 12px; font-size: 14px; font-weight: 900; letter-spacing: .1em; color: var(--yellow); }
+.wm-b { text-align: right; font-weight: 900; font-size: 14px; letter-spacing: .08em; padding-right: 14px; }
+.opt.f .wm-b { color: var(--f1); }
