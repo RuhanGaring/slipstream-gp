@@ -289,6 +289,8 @@
     US: `<svg viewBox="0 0 38 20" preserveAspectRatio="none"><path fill="#b22234" d="M0 0h38v20H0z"/><path stroke="#fff" stroke-width="1.54" d="M0 2.3h38M0 5.4h38M0 8.5h38M0 11.5h38M0 14.6h38M0 17.7h38"/><path fill="#3c3b6e" d="M0 0h15.2v10.8H0z"/><g fill="#fff">${[2, 5, 8, 11].map(y => [2, 5, 8, 11, 13.5].map(x => `<circle cx="${x + (y % 2 ? 0 : 1.2) - 0.5}" cy="${y * 0.82 + 0.8}" r=".6"/>`).join('')).join('')}</g></svg>`,
   };
   const flag = code => `<span class="flg">${FLAGS[code] || `<em>${code}</em>`}</span>`;
+  // what the menus draw and list of a circuit (a premade generated one has a light copy, js/premade.js)
+  const peek = id => (F1.Premade && F1.Premade[id]) || F1.Race.getTrack(id);
   const statCells = (tr, best) => `<div><b>${(tr.L / 1000).toFixed(3)}<small>KM</small></b><span>Circuit length</span></div><div><b>${tr.apexes.length}</b><span>Corners</span></div><div><b>${tr.drs.length}</b><span>Overtake zones</span></div><div><b>${best ? U.fmtTime(best) : '--:--.---'}</b><span>Your best</span></div>`;
 
   S.mode = () => {
@@ -343,7 +345,7 @@
       return {
         el: e,
         onFocus: () => {
-          const tr = F1.Race.getTrack(d.id);
+          const tr = peek(d.id);
           setInfo(d.name, `${flag(d.flag)}<span>${d.country.toUpperCase()}</span><span class="dot"></span><span>ROUND ${k + 1} OF ${F1.Tracks.DEFS.length}</span>`, d.blurb, statCells(tr, F1.Game.bestLap(d.id, flow.mode)));
           F1.Game.previewTrack(d.id);
           requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true, w: 6, pad: 30 }));
@@ -368,7 +370,7 @@
     // the small maps on the cards, one per frame so opening the screen does not stall
     F1.Tracks.DEFS.forEach((d, k) => setTimeout(() => {
       const c = tiles[k].querySelector('canvas');
-      if (c.isConnected) drawTrackMap(c, F1.Race.getTrack(d.id), { mono: true, w: 2.4, pad: 8, bare: true });
+      if (c.isConnected) drawTrackMap(c, peek(d.id), { mono: true, w: 2.4, pad: 8, bare: true });
     }, 60 + k * 50));
     setTimeout(() => { const c = tiles[tiles.length - 1].querySelector('canvas'); if (c.isConnected) drawTrackMap(c, F1.Race.getTrack('gen-' + (flow.genSeed || 1)), { mono: true, w: 2.4, pad: 8, bare: true }); }, 400);
     el.appendChild(wrap);
@@ -632,7 +634,7 @@
           ${sim && kind !== 'tt' ? `<div><span>Weather</span><b>${wx}</b></div>` : ''}
         </div>`;
       const cv = info.querySelector('canvas');
-      if (cv) requestAnimationFrame(() => drawTrackMap(cv, F1.Race.getTrack(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
+      if (cv) requestAnimationFrame(() => drawTrackMap(cv, peek(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
     }
     updSummary();
     return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1, pickable: false,

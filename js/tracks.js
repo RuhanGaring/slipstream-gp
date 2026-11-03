@@ -99,6 +99,13 @@
       v: [[780, 0, 22], [580, -160, 70], [540, -320, 80], [420, -420, 80], [380, -580, 70], [200, -700, 40], [-900, -760, 18],
         [-650, -560, 40], [-560, -380, 30], [-720, -300, 25], [-640, -150, 30], [-420, -120, 120], [-380, 0, 80]],
     },
+    {
+      id: 'montaurele', name: 'Circuit de Mont-Aurele', country: 'Riviera', flag: 'MC',
+      blurb: 'A harbour town on a hillside. Up from the quay past the casino square, down the hairpin and through the tunnel to the seafront, with stone walls either side of every metre.',
+      width: 10, style: 'street', look: 'lucerne', seed: 2115,
+      // (built by the frozen generator, js/trackgen2-fixed.js: seed 2115, candidate 26)
+      fixed: { style: 'city', seed: 2115, cand: 26 },
+    },
   ];
 
   // ---------- filleted polygon ----------
@@ -212,6 +219,8 @@
   const SURF = F1.SURF = { ASPHALT: 0, KERB: 1, TARMAC: 2, GRASS: 3, GRAVEL: 4, PIT: 5, WALL: 6 };
 
   function build(def) {
+    // a premade generated circuit comes from the frozen generator its AI data was learned on
+    if (def.fixed && F1.TrackGenFixed) return F1.TrackGenFixed.premade(def);
     // a finished elevation-aware circuit comes from its generator, profile, ground and town
     if (def.gen2 && def.gen2.cand != null && F1.TrackGen2) return F1.TrackGen2.trackById(def.id);
     const tt = fillet(def.v);

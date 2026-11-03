@@ -5,7 +5,7 @@ const vm = require('vm');
 const CORE = ['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'ai.js', 'race.js'];
 module.exports = function load(files = CORE) {
   // generated circuits ride along with the track module everywhere
-  if (files.includes('tracks.js') && !files.includes('trackgen.js')) files = files.flatMap(f => (f === 'tracks.js' ? [f, 'trackgen.js'] : [f]));
+  if (files.includes('tracks.js') && !files.includes('trackgen.js')) files = files.flatMap(f => (f === 'tracks.js' ? [f, 'trackgen.js', 'trackgen2-fixed.js'] : [f]));
   for (const f of files) {
     const p = path.join(__dirname, '..', 'js', f);
     if (!fs.existsSync(p)) continue;
