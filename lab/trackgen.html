@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track Lab</title>
+<link href="../assets/fonts/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="trackgen.css">
+</head>
+<body>
+<aside id="side">
+  <header>
+    <div class="brand"><b>TRACK LAB</b><span>Procedural circuits with real elevation</span></div>
+  </header>
+
+  <section>
+    <div class="lbl">STYLE</div>
+    <div class="seg" id="styles">
+      <button data-s="city" class="on">City</button><button data-s="park">Park</button><button data-s="mountain">Mountain</button><button data-s="modern">Modern</button>
+    </div>
+    <div class="lbl">SEED</div>
+    <div class="seed">
+      <button id="prev" title="Previous seed">&#9664;</button>
+      <input id="seed" type="number" min="1" max="999999" value="1">
+      <button id="next" title="Next seed">&#9654;</button>
+      <button id="rand" class="wide">RANDOM</button>
+    </div>
+    <div id="status" class="status">Loading</div>
+  </section>
+
+  <section>
+    <div class="title"><span id="name">-</span><small id="sub"></small></div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section>
+    <div class="lbl">ELEVATION <small>hover to find the spot on the 3D view</small></div>
+    <canvas id="profile" height="150"></canvas>
+    <div class="legend"><i class="g0"></i>0 %<i class="g1"></i>4 %<i class="g2"></i>8 %<i class="g3"></i>12 %+</div>
+  </section>
+
+  <section>
+    <div class="lbl">AGAINST REAL F1 CIRCUITS <small>measured from real elevation data</small></div>
+    <table class="real" id="real"></table>
+    <div class="lbl">MOST SIMILAR <small id="simname"></small></div>
+    <canvas id="simprof" height="110"></canvas>
+    <div class="legend"><i style="background:#e10600"></i>this lap<i style="background:#7d8794"></i><span id="simleg">real</span></div>
+  </section>
+
+  <section>
+    <div class="lbl">PLAN VIEW</div>
+    <canvas id="map" height="230"></canvas>
+  </section>
+
+  <section>
+    <div class="lbl">CHECKS <small>every circuit must pass all of them</small></div>
+    <ul class="checks" id="checks"></ul>
+  </section>
+
+  <section>
+    <div class="lbl">VIEW</div>
+    <div class="row">
+      <span>Height scale</span>
+      <div class="seg small" id="ex"><button data-x="1" class="on">1x</button><button data-x="2">2x</button><button data-x="3">3x</button></div>
+    </div>
+    <div class="row"><span>Road colour</span><div class="seg small" id="roadc"><button data-r="asphalt" class="on">Asphalt</button><button data-r="grade">Gradient</button></div></div>
+    <div class="row"><span>Buildings</span><div class="seg small" id="bld"><button data-b="1" class="on">On</button><button data-b="0">Off</button></div></div>
+    <button id="drive" class="big">DRIVE A LAP</button>
+  </section>
+
+  <section>
+    <div class="lbl">BATCH TEST <small>generates seeds and re-checks each one</small></div>
+    <div class="row"><span>Seeds per style</span><input id="bn" type="number" min="1" max="2000" value="25"></div>
+    <button id="batch" class="big ghost">RUN BATCH</button>
+    <div id="bout" class="bout"></div>
+  </section>
+</aside>
+
+<main id="view">
+  <canvas id="gl"></canvas>
+  <div class="hint">Drag to orbit &nbsp; Right drag to pan &nbsp; Wheel to zoom &nbsp; Esc stops the lap</div>
+  <div id="busy" class="busy"><div><b>GENERATING</b><span id="busyt"></span></div></div>
+  <div id="drivehud" class="drivehud"></div>
+</main>
+
+<script src="../js/vendor/three.min.js"></script>
+<script src="../js/util.js"></script>
+<script src="../js/tracks.js"></script>
+<script src="../js/trackgen.js"></script>
+<script src="../js/trackgen2.js"></script>
+<script src="../js/gen2pool.js"></script>
+<script src="f1ref.js"></script>
+<script src="trackgen-lab.js"></script>
+</body>
+</html>

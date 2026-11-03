@@ -260,5 +260,6 @@
   }
   const randomSeed = () => 1 + Math.floor(Math.random() * 999999);
 
-  F1.TrackGen = { make, randomSeed, check };
+  // (the layout pieces are shared with the elevation-aware generator, js/trackgen2.js)
+  F1.TrackGen = { make, randomSeed, check, _layout: layout, _radii: radii, _pip: pointInPoly, _word: word };
 })(typeof window !== 'undefined' ? window : globalThis);
