@@ -374,7 +374,7 @@
     el.appendChild(wrap);
     el.appendChild(rail);
     el.appendChild(foot([['&#8592;&#8594;', 'Circuit'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
-    const gi = /^gen-/.test(flow.track || '') ? items.length - 1 : -1;
+    const gi = /^gen2?-/.test(flow.track || '') ? items.length - 1 : -1;
     const idx = gi >= 0 ? gi : Math.max(0, F1.Tracks.DEFS.findIndex(d => d.id === flow.track));
     const onKey = c => {
       if (c === 'ArrowUp' || c === 'KeyW') { setFocus(UI.focus - 1); return true; }
@@ -385,11 +385,14 @@
   };
 
   // ---------- circuit generator ----------
+  const GEN_STYLES = { city: 'Harbour City', park: 'Parkland', mountain: 'Mountain Pass', modern: 'Modern Autodrome', classic: 'Classic Layout' };
+  const cityIds = new Map(); // style and seed to built circuit, this session
   S.gen = () => {
     const el = h('div', 'wk');
     const wrap = h('div', 'wk-body stage');
     const flow = F1.Game.flow;
     if (!flow.genSeed) flow.genSeed = F1.TrackGen.randomSeed();
+    if (!flow.genStyle) flow.genStyle = 'city';
     el.appendChild(header('track'));
     wrap.innerHTML = `<h1 class="pg-t">Circuit generator</h1>`;
     const split = h('div', 'split');
@@ -401,12 +404,15 @@
     const race = h('div', 'li', `<span class="flag">GO</span><span><div class="nm">Race This Circuit</div><div class="sub">CHOOSE A TEAM NEXT</div></span><span class="sub"></span>`);
     const roll = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">New Circuit</div><div class="sub">RANDOM SEED</div></span><span class="sub">R</span>`);
     const seedRow = h('div', 'li gen-seed', `<span class="flag">#</span><span><div class="nm"></div><div class="sub">TYPE A SEED, OR &#9664; &#9654; TO STEP</div></span><span class="sub"></span>`);
-    [race, roll, seedRow].forEach(x => list.appendChild(x));
+    const styleRow = h('div', 'li gen-seed', `<span class="flag">&#9670;</span><span><div class="nm"></div><div class="sub">&#9664; &#9654; TO CHANGE THE STYLE</div></span><span class="sub"></span>`);
+    [race, roll, styleRow, seedRow].forEach(x => list.appendChild(x));
     let typed = 0; // time of the last digit typed (digits within a moment build one number)
     let settle = null;
+    let shown = null, job = 0; // the circuit on show (null while a town is being laid out), the latest request
     // the AI learns a circuit once (its racing line and limits), in the background
     const aiStatus = () => {
-      const st = F1.LearnJob.status('gen-' + flow.genSeed);
+      if (!shown) { aiEl.className = 'gen-ai'; aiEl.querySelector('span').textContent = ''; return; }
+      const st = F1.LearnJob.status(shown);
       aiEl.className = 'gen-ai ' + st.state;
       aiEl.style.setProperty('--p', st.p || 0);
       aiEl.querySelector('span').textContent =
@@ -416,8 +422,8 @@
               : 'AI DRIVERS WILL LEARN THIS CIRCUIT';
     };
     const offAI = F1.LearnJob.onChange(() => { if (UI.cur && UI.cur.el === el) aiStatus(); });
-    const show = () => {
-      const def = F1.Tracks.byId('gen-' + flow.genSeed);
+    const paint = def => {
+      shown = def.id;
       F1.LearnJob.restore(def.id);
       const tr = F1.Race.getTrack(def.id);
       aiStatus();
@@ -425,7 +431,6 @@
       // start learning once the player stops flicking through seeds
       settle = setTimeout(() => { if (UI.cur && UI.cur.el === el) F1.LearnJob.start(def.id); }, 700);
       flow.track = def.id;
-      seedRow.querySelector('.nm').textContent = String(flow.genSeed);
       det.querySelector('.country').textContent = `${def.country.toUpperCase()}  /  ${def.style.toUpperCase()}`;
       det.querySelector('h2').textContent = def.name;
       det.querySelector('.blurb').textContent = def.blurb;
@@ -433,7 +438,38 @@
       det.querySelector('.stats').innerHTML = `<div><b>${(tr.L / 1000).toFixed(3)} km</b><span>LENGTH</span></div><div><b>${tr.apexes.length}</b><span>CORNERS</span></div><div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div><div><b>${best ? U.fmtTime(best) : '--:--.---'}</b><span>YOUR BEST</span></div>`;
       requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true }));
     };
+    // A classic circuit is ready at once. The elevation-aware styles take some seconds, tried on
+    // the worker pool in the background; a seed already built this session comes straight back.
+    const show = () => {
+      const seed = flow.genSeed, my = ++job, style = flow.genStyle, key = style + seed;
+      styleRow.querySelector('.nm').textContent = GEN_STYLES[style];
+      seedRow.querySelector('.nm').textContent = String(seed);
+      if (style === 'classic') { paint(F1.Tracks.byId('gen-' + seed)); return; }
+      const known = cityIds.get(key);
+      if (known) { paint(F1.Tracks.byId(known)); return; }
+      shown = null; flow.track = null;
+      clearTimeout(settle);
+      aiStatus();
+      const what = style === 'city' ? 'Streets, buildings and a lap through them.' : 'Terrain and a lap graded to fit it.';
+      det.querySelector('.country').textContent = GEN_STYLES[style].toUpperCase();
+      det.querySelector('h2').textContent = style === 'city' ? 'Laying out the town' : 'Laying out the circuit';
+      det.querySelector('.blurb').textContent = what + ' This takes a few seconds.';
+      det.querySelector('.stats').innerHTML = '';
+      cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+      const live = () => my === job && UI.cur && UI.cur.el === el;
+      F1.Gen2Pool.make(seed, style, n => { if (live()) det.querySelector('.blurb').textContent = `${what} ${n} layouts tried.`; }).then(res => {
+        if (!live()) return;
+        const def = F1.TrackGen2.adopt(res);
+        cityIds.set(key, def.id);
+        paint(def);
+      }).catch(() => {
+        if (!live()) return;
+        det.querySelector('h2').textContent = 'No circuit for this seed';
+        det.querySelector('.blurb').textContent = 'Press R for a new one.';
+      });
+    };
     const setSeed = v => { flow.genSeed = U.clamp(Math.floor(v) || 1, 1, 999999); show(); };
+    const styles = Object.keys(GEN_STYLES), turn = k => { flow.genStyle = styles[(styles.indexOf(flow.genStyle) + k + styles.length) % styles.length]; show(); };
     split.appendChild(list); split.appendChild(det);
     wrap.appendChild(split);
     el.appendChild(wrap);
@@ -452,11 +488,12 @@
       return false;
     };
     const items = [
-      { el: race, activate: () => go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team') },
+      { el: race, activate: () => { if (shown) go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team'); } },
       { el: roll, activate: () => setSeed(F1.TrackGen.randomSeed()) },
+      { el: styleRow, activate: () => turn(1), left: () => turn(-1), right: () => turn(1) },
       { el: seedRow, left: () => setSeed(flow.genSeed - 1), right: () => setSeed(flow.genSeed + 1) },
     ];
-    return { el, items, onKey, focus: 0, back: () => { offAI(); clearTimeout(settle); go('track'); } };
+    return { el, items, onKey, focus: 0, back: () => { job++; offAI(); clearTimeout(settle); go('track'); } };
   };
 
   // team performance as segmented meters, scaled across the grid (the slowest still shows some)
@@ -509,7 +546,7 @@
     wrap.appendChild(list);
     el.appendChild(wrap);
     el.appendChild(foot([['&#8593;&#8595;', 'Team'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
-    return { el, items, focus: flow.team || 0, back: () => go(flow.kind === 'champ' ? 'mode' : /^gen-/.test(flow.track || '') ? 'gen' : 'track') };
+    return { el, items, focus: flow.team || 0, back: () => go(flow.kind === 'champ' ? 'mode' : /^gen2?-/.test(flow.track || '') ? 'gen' : 'track') };
   };
 
   // Driver select: the two race numbers, large, in the team's colour
