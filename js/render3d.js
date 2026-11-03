@@ -568,7 +568,7 @@
     // onboard pictures of a harbour circuit are high-key
     const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
     // (+1.1 EV in all: broadcast onboard pictures of a Riviera noon are high key, whites clip)
-    if (rivi) { state.exposure *= 1.35; sun.intensity *= 1.1; }
+    if (rivi) { state.exposure *= 1.4; sun.intensity *= 1.1; }
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
@@ -576,7 +576,7 @@
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
     for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? 1 : L.env;
     // (the light bounced off sunlit stucco into the street's shade)
-    if (rivi) { hemi.color.set('#f2e6d2'); hemi.groundColor.set('#b8a88e'); hemi.intensity = 0.45; }
+    if (rivi) { hemi.color.set('#f2e6d2'); hemi.groundColor.set('#b8a88e'); hemi.intensity = 0.7; }
     state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
   }
 
@@ -751,7 +751,7 @@
               // (a town: the ground by the circuit stays at the road's level out past the barrier,
               // the cutting held by the retaining wall; an 8 m grid drawn up its face would show
               // as a ramp in front of the wall)
-              if (W2.town && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 5) y = Math.min(y, Tracks.surfZ(tr, bi, Math.sign(dl) * Math.min(Math.abs(dl), tr.hw)) - 0.05);
+              if (W2.town && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 9) y = Math.min(y, Tracks.surfZ(tr, bi, Math.sign(dl) * Math.min(Math.abs(dl), tr.hw)) - 0.05);
               // A wide gravel or tarmac run-off is a ribbon in the road's own plane; out at its far
               // edge a rising hillside can stand above it and show through as bare turf. The ground
               // under the whole run-off is kept below it (and its neighbours' minimum, below).

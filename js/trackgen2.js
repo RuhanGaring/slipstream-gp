@@ -730,8 +730,8 @@
         const y0 = (a + b) / 2, g = T.grad(x0, y0);
         if (Math.hypot(g[0], g[1]) < 0.05 || Math.hypot(g[0], g[1]) > 0.3 || T.inland(x0, y0) < 30) continue;
         if (S.near(x0, y0, 30).d < 30 || nearLap(x0, y0, 30) < 30) continue;
-        const gr = (r() - 0.5) * 0.02, wa = L(2, 6), wp = L(25, 50), wph = r() * 6.28;
-        const halves = [0, Math.PI].map(dir => trace(T, S, [x0, y0], dir, { hold: hh, holdW: l => wa * Math.sin((dir ? -l : l) / wp + wph), grade: gr * (dir ? -1 : 1), Rmin: 28, maxLen: L(150, 480), w, skip: lapRoads, avoid: (x, y) => town.avoidPlaza(x, y) || T.prom(x) > 3 && nearLap(x, y, 30) < 30 || (() => { const q = T.grad(x, y); return Math.hypot(q[0], q[1]) > 0.36; })(), sep: 25 }));
+        const gr = (r() - 0.5) * 0.02, wa = L(0.8, 2.5), wp = L(45, 90), wph = r() * 6.28;
+        const halves = [0, Math.PI].map(dir => trace(T, S, [x0, y0], dir, { hold: hh, holdW: l => wa * Math.sin((dir ? -l : l) / wp + wph), grade: gr * (dir ? -1 : 1), Rmin: 42, maxLen: L(150, 480), w, skip: lapRoads, avoid: (x, y) => town.avoidPlaza(x, y) || T.prom(x) > 3 && nearLap(x, y, 30) < 30 || (() => { const q = T.grad(x, y); return Math.hypot(q[0], q[1]) > 0.36; })(), sep: 25 }));
         if (halves.some(t => !crosses(t) || t.pts.some(p => town.avoidPlaza(p[0], p[1])))) continue;
         // one street: the westward half reversed, then the eastward one
         let pts = untongue(halves[1].pts.slice().reverse().concat(halves[0].pts.slice(1)));
@@ -914,9 +914,9 @@
         const g = T.grad(c[0], c[1]), sl = Math.hypot(g[0], g[1]), w = r() < 0.3 ? L(3, 4.2) : L(4.5, 7.5);
         let o, hd0;
         if (sl > 0.06) {
-          const wa = L(1, 4), wp = L(20, 40), wph = r() * 6.28, h0 = T.H(c[0], c[1]);
+          const wa = L(0.5, 2), wp = L(40, 80), wph = r() * 6.28, h0 = T.H(c[0], c[1]);
           hd0 = Math.atan2(g[0], -g[1]);
-          o = d => ({ hold: h0, holdW: l => wa * Math.sin((d ? -l : l) / wp + wph), grade: 0, Rmin: 20, maxLen: 450, w, free: 2, avoid, sep: 18 });
+          o = d => ({ hold: h0, holdW: l => wa * Math.sin((d ? -l : l) / wp + wph), grade: 0, Rmin: 34, maxLen: 450, w, free: 2, avoid, sep: 18 });
         } else {
           const nr = S.near(c[0], c[1], 160);
           hd0 = nr.dir ? Math.atan2(nr.dir[1], nr.dir[0]) + (r() < 0.5 ? Math.PI / 2 : 0) + L(-6, 6) * D2 : r() * 6.28;
