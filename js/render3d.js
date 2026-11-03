@@ -266,7 +266,8 @@
       ['HALCYON', '#16224a', '#ff7a1a'], ['GRAND PRIX', '#f4f4f4', '#c8102e'], ['KODIAK', '#1a2f8f', '#f2c230'], ['AUREX', '#b7e000', '#121212']];
     // (one sponsor alone: its panel repeated down a whole run of wall, as the real ones are sold)
     if (only != null) {
-      const [t, bg, fg] = ads[only % ads.length];
+      let [t, bg, fg] = ads[only % ads.length];
+      if (t === 'AUREX') { bg = '#1d5c37'; fg = '#f4f1e6'; }   // (a deep green, as the luxury brands' boards are)
       g.fillStyle = bg; g.fillRect(0, 0, 512, 128);
       g.fillStyle = fg; g.font = 'italic 900 56px Titillium Web, Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(t, 256, 70, 440);
@@ -1158,7 +1159,7 @@
       const mainStraight = k => { const s = k * tr.ds; return s < 260 || s > tr.L - 320; };
       const postG = new THREE.BoxGeometry(0.12, 1, 0.12);
       const fenceH = 4.2;
-      // (in a town each sponsor buys a run of 60 to 150 m of wall; one run in seven is bare)
+      // (in a town each sponsor buys a sector of 150 to 350 m of wall)
       const adRuns = W2.town ? [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Acc()) : null, rnA = U.rng(911 + (tr.def.seed || 1));
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
@@ -1169,7 +1170,7 @@
         for (const [i0, i1] of runs(N, k => !skip(k) && isConc(k))) {
           if (adRuns && style !== 'park') {
             for (let i = i0; i < i1;) {
-              const j = Math.min(i1, i + Math.round((60 + rnA() * 90) / tr.ds)), bare = rnA() < 0.14, acc = bare ? conc : adRuns[Math.floor(rnA() * 8)];
+              const j = Math.min(i1, i + Math.round((150 + rnA() * 200) / tr.ds)), bare = false, acc = adRuns[Math.floor(rnA() * 8)];
               wallRun(acc, tr, i, j, d, -0.07, 1.05, bare ? 8 : 4.4, 1.12, 0.55);
               i = j;
             }
