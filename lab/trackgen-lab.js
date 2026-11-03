@@ -5,8 +5,17 @@
 // the speed profile's pace, and batch-tests many seeds.
 (function () {
   'use strict';
-  const F1 = window.F1, U = F1.U, TG2 = F1.TrackGen2, THREE = window.THREE;
   const $ = id => document.getElementById(id);
+  // anything that goes wrong is shown in the status line, never a page stuck on 'Loading'
+  const fatal = msg => { const st = $('status'); st.className = 'status bad'; st.textContent = msg; $('busy').classList.remove('on'); };
+  addEventListener('error', e => fatal('Error: ' + (e.message || e.error) + (e.filename ? ' (' + e.filename.split('/').slice(-2).join('/') + ':' + e.lineno + ')' : '')));
+  addEventListener('unhandledrejection', e => fatal('Error: ' + (e.reason && e.reason.message || e.reason)));
+  const F1 = window.F1;
+  // the lab needs the current game modules; an old copy (from a browser or offline cache) lacks
+  // what the new generator uses
+  const missing = !F1 ? 'the game modules' : !window.THREE ? 'three.js' : !F1.TrackGen || !F1.TrackGen._layout ? 'js/trackgen.js (an old copy)' : !F1.TrackGen2 ? 'js/trackgen2.js' : !F1.Gen2Pool ? 'js/gen2pool.js' : '';
+  if (missing) { fatal('Could not load ' + missing + '. Reload with Ctrl+Shift+R to fetch the current files.'); return; }
+  const U = F1.U, TG2 = F1.TrackGen2, THREE = window.THREE;
   const state = { style: 'city', seed: 1, res: null, ex: 1, roadc: 'asphalt', bld: true, drive: null, hoverI: -1 };
 
   // ---------- three.js scene ----------

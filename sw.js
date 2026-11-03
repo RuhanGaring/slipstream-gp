@@ -14,5 +14,9 @@ self.addEventListener('fetch', e => {
   let rel = url.pathname.slice(new URL(scope).pathname.length);
   if (rel === '' || rel.endsWith('/')) rel += 'index.html';
   if (rel === 'assets/manifest.json') return;
+  // the Track Lab (lab/) always loads the current files: a cached copy of a game file from an
+  // older download would not match the lab's own, newer scripts
+  const from = req.referrer ? new URL(req.referrer).pathname.slice(new URL(scope).pathname.length) : '';
+  if (rel.startsWith('lab/') || from.startsWith('lab/')) return;
   e.respondWith(caches.open(CACHE).then(c => c.match(scope + rel)).then(hit => hit || fetch(req)));
 });

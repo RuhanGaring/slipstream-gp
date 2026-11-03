@@ -7,7 +7,7 @@
 (function (G) {
   'use strict';
   const F1 = G.F1;
-  let pool = null, seq = 0;
+  let pool = null, seq = 0, broken = false;
   const waiting = new Map();
 
   function start() {
@@ -36,6 +36,12 @@
       for (let i = 0; i < n; i++) {
         const w = new Worker(url);
         w.onmessage = e => { const f = waiting.get(e.data.id); if (f) { waiting.delete(e.data.id); f(e.data); } };
+        // a worker that cannot run the generator (a script error) sends the pool back to the page
+        w.onerror = err => {
+          console.warn('gen2pool: worker failed, generating on the page', err.message || err);
+          broken = true;
+          for (const [id, f] of waiting) { waiting.delete(id); f({ id, broken: true, ok: false, why: [] }); }
+        };
         pool.push(w);
       }
     } catch (e) { console.warn('gen2pool: no workers, generating on the page', e); pool = []; }
@@ -49,7 +55,7 @@
   function make(seed, style, onProgress) {
     const T = F1.TrackGen2, P = start();
     style = T.styleOf(seed, style);
-    if (!P.length) return Promise.resolve().then(() => T.make(seed, style));
+    if (!P.length || broken) return Promise.resolve().then(() => T.make(seed, style));
     const t0 = performance.now(), reasons = {}, failed = new Set();
     let next = 0, best = Infinity, settled = false;
     return new Promise((resolve, reject) => {
@@ -67,6 +73,7 @@
         if (settled || next >= T.MAX_TRIES || next > best) return finish();
         const k = next++;
         ask(w, { kind: 'attempt', seed, style, k }).then(o => {
+          if (o.broken) { if (!settled) { settled = true; try { resolve(T.make(seed, style)); } catch (e) { reject(e); } } return; }
           if (o.ok) best = Math.min(best, k);
           else { failed.add(k); if (k < best) for (const why of o.why) reasons[why] = (reasons[why] || 0) + 1; }
           if (onProgress) onProgress(failed.size + (best < Infinity ? 1 : 0));
@@ -79,7 +86,7 @@
   // many seeds at once, one per worker at a time; onEach gets every summary as it arrives
   function batch(jobs, onEach) {
     const P = start();
-    if (!P.length) return Promise.reject(new Error('no workers'));
+    if (!P.length || broken) return Promise.reject(new Error('no workers'));
     let next = 0;
     const run = w => (next < jobs.length ? ask(w, Object.assign({ kind: 'make' }, jobs[next++])).then(o => { onEach(o); return run(w); }) : Promise.resolve());
     return Promise.all(P.map(run));
