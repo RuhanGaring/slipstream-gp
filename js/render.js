@@ -336,6 +336,7 @@
         // clumps
         const cx = W.bounds.x0 + rnd() * (W.bounds.x1 - W.bounds.x0), cy = W.bounds.y0 + rnd() * (W.bounds.y1 - W.bounds.y0);
         if (!th.palms && grove(cx, cy) < 0.15) continue;   // (woods and copses with open fields between)
+        if (th.palms && tr.def.style === 'modern' && rnd() > 0.14) continue;   // (oases, not an orchard across the sand)
         const m = th.palms ? 3 + Math.floor(rnd() * 4) : 1 + Math.floor(rnd() * 6);
         for (let q = 0; q < m; q++) {
           const x = cx + (rnd() - 0.5) * 26, y = cy + (rnd() - 0.5) * 26;

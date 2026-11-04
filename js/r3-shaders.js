@@ -30,6 +30,14 @@
   };
   { const t = new THREE.DataTexture(new Uint8Array([128, 0, 0, 255]), 1, 1); t.needsUpdate = true; U.uTurf.value = t; }
   { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; U.uGrassMask.value = t; }
+  // value noise for the lawn: random texels, read with bilinear filtering
+  {
+    const n = 256, d = new Uint8Array(n * n * 4), r = F1.U.rng(1187);
+    for (let k = 0; k < d.length; k += 4) d[k] = Math.floor(r() * 256);
+    const t = new THREE.DataTexture(d, n, n, THREE.RGBAFormat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
+    U.uTfTex = { value: t };
+  }
   if (F1.R3Shadow) Object.assign(U, F1.R3Shadow.U); // the cascaded sun shadow (js/r3-shadow.js)
 
   // Lawn shading shared by the park ground and the grass blades, so the two always agree.
@@ -63,8 +71,8 @@
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
     'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
-    'float tfN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-    '  return mix(mix(tfH(i), tfH(i + vec2(1.0, 0.0)), f.x), mix(tfH(i + vec2(0.0, 1.0)), tfH(i + vec2(1.0, 1.0)), f.x), f.y); }',
+    'uniform sampler2D uTfTex;',
+    'float tfN(vec2 p) { return texture2D(uTfTex, p / 256.0).r; }',
     'float tfF(vec2 p) { return tfN(p) * 0.5 + tfN(p * 2.03 + 7.1) * 0.3 + tfN(p * 4.07 + 3.3) * 0.2; }',
     'float lawnFarK(vec3 wp, vec3 eye) { vec3 v = normalize(eye - wp); return smoothstep(5.0, 32.0, distance(wp.xz, eye.xz)) * (0.45 + 0.55 * (1.0 - clamp(v.y, 0.0, 1.0))); }',
     'float lawnTuft(vec2 w) { return tfN(w * 1.7) * 0.4 + tfN(w * 3.9 + 2.0) * 0.35 + tfN(w * 8.3 + 5.1) * 0.25; }',
@@ -113,6 +121,9 @@
     '  float sdE = site.b * 63.75;',
     '  float ew = (1.0 - smoothstep(0.1, 1.4 + 1.6 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
     '  c *= mix(vec3(1.0), vec3(1.04, 0.86, 0.58), ew * 0.75);',
+    '  { float rg = smoothstep(14.0, 34.0, site.b * 63.75 + (tfN(w / 11.0) - 0.5) * 12.0);',
+    '    c *= mix(vec3(1.0), mix(vec3(1.12, 1.02, 0.74), vec3(0.94, 0.95, 0.8), tfN(w / 6.0)), rg * 0.8); }',
+    '  c *= mix(vec3(0.9, 0.93, 0.92), vec3(1.1, 1.06, 0.98), tfN(w / 90.0) * 0.6 + tfN(w / 37.0) * 0.4);',
     '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
     // mowing stripes: the mower runs alongside the track, so the bands lie at constant distances
     // from its edge (site.b, quarter metres from the tarmac up to 63 m), 4 m wide, fading out past 40 m; light along the
