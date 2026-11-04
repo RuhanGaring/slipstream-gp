@@ -301,12 +301,8 @@
 
   // ---------- wear: a raced-on circuit, not a new one ----------
   // value noise on a hash (stable at world coordinates of kilometres)
-  const NOISE = [
-    'float wHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }',
-    'float wNoise(vec2 p) {',
-    '  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-    '  return mix(mix(wHash(i), wHash(i + vec2(1.0, 0.0)), f.x), mix(wHash(i + vec2(0.0, 1.0)), wHash(i + vec2(1.0, 1.0)), f.x), f.y);',
-    '}'].join('\n');
+  // (value noise read from a tiling texture: the road shaders ask for it many times a pixel)
+  const NOISE = 'uniform sampler2D uTfTex;\nfloat wNoise(vec2 p) { return texture2D(uTfTex, p / 256.0).r; }';
   const LUM = 'vec3(0.2126, 0.7152, 0.0722)';
   const ext = (m, key, fn) => { m.userData.patchExtra = fn; m.userData.patchKey = key; return m; };
 
@@ -316,9 +312,10 @@
   // rubbered in, and tyre streaks run along the lap, densest on the line and heaviest where
   // cars brake and turn (with short skid marks there), while the edges stay dusty.
   function asphaltWear(m, gain) {
+    if (!U.uRubber) U.uRubber = { value: F1.R3T.photo('rubber', 1, false) };
     return ext(m, 'asph', sh => {
       sh.vertexShader = 'attribute vec4 trk; varying vec4 vTrk;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTrk = trk;');
-      sh.fragmentShader = 'varying vec4 vTrk;\n' + NOISE + '\n' + sh.fragmentShader
+      sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber;\n' + NOISE + '\n' + sh.fragmentShader
         .replace('#include <map_fragment>', [
           '#include <map_fragment>',
           '  float aLum = dot(diffuseColor.rgb, ' + LUM + ');',
@@ -334,20 +331,8 @@
           '  float aBreak = 0.55 + 0.45 * smoothstep(0.25, 0.8, wNoise(vec2(vTrk.y * 4.0, vTrk.x * 0.09)) * 0.65 + wNoise(vec2(vTrk.y * 13.0, vTrk.x * 0.3) + 9.0) * 0.35);',
           '  float aLoad = 0.3 + 0.7 * aW;',
           '  float aSkid = smoothstep(0.72, 0.95, wNoise(vec2(vTrk.y * 3.2, vTrk.x * 0.03) + 41.0)) * aW * aWide;',
-          // many separate tyre-track pairs, each a car's own path: they cross the road in lazy
-          // curves, clustered loosely round the racing line (not following the road's edges),
-          // fading in and out along their length, more spread out in corners
-          '  float aMany = 0.0;',
-          '  for (int k = 0; k < 16; k++) {',
-          '    float fk = float(k), h1 = wHash(vec2(fk, 1.7)), h2 = wHash(vec2(fk, 5.3)), h3 = wHash(vec2(fk, 9.1)), h4 = wHash(vec2(fk, 13.9)), h5 = wHash(vec2(fk, 21.7));',
-          '    float off = (h1 + h2 - 1.0) * (3.2 + 2.2 * aW);',
-          '    off += sin(vTrk.x * (0.008 + 0.02 * h3) + h4 * 6.283) * (0.5 + 1.5 * h5) + sin(vTrk.x * (0.031 + 0.03 * h2) + h1 * 6.283) * 0.35;',
-          '    float dd = aL - off;',
-          '    float tr2 = max(exp(-pow(dd - 0.8, 2.0) / 0.022), exp(-pow(dd + 0.8, 2.0) / 0.022));',
-          '    float seg = smoothstep(0.38, 0.62, wNoise(vec2(vTrk.x * (0.02 + 0.03 * h3) + fk * 13.0, fk)));',
-          '    aMany += tr2 * seg * (0.22 + 0.4 * h4) * (0.7 + 0.3 * wNoise(vec2(vTrk.y * 14.0, vTrk.x * 0.6 + fk)));',
-          '  }',
-          '  aMany *= 1.0 - smoothstep(0.0, 1.0, (abs(vTrk.y) - 6.0) / 3.0) * 0.0;',
+          // many separate tyre-track pairs, each a car's own path, baked (tools/rubber_bake.py)
+          '  float aMany = texture2D(uRubber, vec2(vTrk.x / 512.0, clamp(aL / 20.0 + 0.5, 0.01, 0.99))).r * 1.6;',
           '  float aRub = aTr * aBreak * (0.28 + 0.5 * aLoad) + aBand * 0.14 * aLoad + aWide * 0.1 + aWider * 0.05 + aSkid * 0.35 + aMany * (0.5 + 0.5 * aLoad);',
           '  diffuseColor.rgb *= (1.0 - clamp(aRub, 0.0, 0.78));',
           '  float aMar = smoothstep(2.4, 4.5, abs(aL)) * (1.0 - smoothstep(0.0, 1.3, min(abs(vTrk.y) - 0.0, 20.0) * 0.0)) * (0.35 + 0.65 * aW) * smoothstep(0.45, 0.85, wNoise(vec2(vTrk.y * 5.0, vTrk.x * 0.35) + 3.0));',

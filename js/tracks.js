@@ -651,7 +651,7 @@
   // the scenery and sky set a circuit borrows (generated circuits reuse a venue's)
   const lookOf = tr => (tr.def && tr.def.look) || tr.id;
   // which trees line the circuit: firs, quiver trees or broadleaf
-  const treesOf = tr => (tr.def && tr.def.trees) || ({ hakone: 'fir', rimal: 'quiver' })[lookOf(tr)] || 'broad';
+  const treesOf = tr => (tr.def && tr.def.trees) || ({ hakone: 'fir', rimal: 'quiver', kestrel: 'oak' })[lookOf(tr)] || 'broad';
 
   F1.Tracks = { DEFS, byId, lookOf, treesOf, build, locate, surfaceAt, pointAt, fwd, inRange, DS, surfZ, surfS, roadZ, groundAt, crossZ };
 })(typeof window !== 'undefined' ? window : globalThis);

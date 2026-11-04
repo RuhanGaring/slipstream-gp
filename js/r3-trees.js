@@ -15,6 +15,7 @@
     fir: { names: ['fir_0', 'fir_1', 'fir_2'], h: r => 6 + r * 2.1 },
     quiver: { names: ['quiver'], h: r => 3.2 + r * 0.6 },
     broad: { names: ['broad1', 'broad2', 'broad4'], h: r => 5 + r * 1.55 },
+    oak: { names: ['oak_0', 'oak_1'], h: r => 11 + r * 1.0 },
   };
   // where the baked crown sits in a view (fraction of the height): centre and half-height
   const CROWN = [0.66, 0.36];

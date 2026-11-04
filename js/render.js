@@ -429,6 +429,22 @@
       }
       return false;
     };
+    // nothing grows on a carriageway, whichever street it was planted along
+    const onStreet = (() => {
+      const g = new Map(), key = (x, y) => Math.floor(x / 20) + ',' + Math.floor(y / 20);
+      for (const rd of site.roads) {
+        if (rd.kind === 'rail' || rd.kind === 'steps') continue;
+        for (let k = 0; k < rd.pts.length - 1; k++) {
+          const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          for (let t = 0; t <= l; t += 3) { const x = a[0] + (c[0] - a[0]) * t / (l || 1), y = a[1] + (c[1] - a[1]) * t / (l || 1), q = key(x, y); if (!g.has(q)) g.set(q, []); g.get(q).push([x, y, rd.w / 2 + 1]); }
+        }
+      }
+      return (x, y) => {
+        const i0 = Math.floor(x / 20), j0 = Math.floor(y / 20);
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of g.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], y - q[1]) < q[2]) return true;
+        return false;
+      };
+    })();
     // street trees on the pavements; palms within a block of the shore
     for (const rd of site.roads) {
       if (rd.kind === 'rail' || rd.kind === 'steps') continue;
@@ -440,7 +456,7 @@
           if (rnd() < 0.35) continue;
           const o = rd.w / 2 + 1.6, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
           const u = site.inland(x, y);
-          if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2)) continue;
+          if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2) || onStreet(x, y)) continue;
           if (u < 70) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
           else addDecor(W, { type: 'tree', x, y, r: 2.8 + rnd() * 2.2, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
         }
@@ -453,7 +469,7 @@
       for (let i = 0; i < tr.N; i += Math.max(1, Math.round((15 + rnd() * 10) / tr.ds))) for (const sd of [-1, 1]) {
         if (rnd() < 0.45 || tun(i)) continue;
         const o = (sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 3.6 + rnd() * 1.6, x = tr.x[i] + tr.nx[i] * o * sd, y = tr.y[i] + tr.ny[i] * o * sd, u = site.inland(x, y);
-        if (u < 4 || inBuilding(x, y, 1.5)) continue;
+        if (u < 4 || inBuilding(x, y, 1.5) || onStreet(x, y)) continue;
         if (u < 70 && rnd() < 0.7) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
         else addDecor(W, { type: 'tree', x, y, r: 3.4 + rnd() * 2.4, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
       }
