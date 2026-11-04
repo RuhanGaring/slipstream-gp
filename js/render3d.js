@@ -1137,7 +1137,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // two points across; the shader softens the edges (crisp middle, a soft rim)
           for (const sd of [-1, 1]) {
             const [x, z] = Tracks.pointAt(tr, sq, d + sd * w / 2);
-            mk.p.push(x, Tracks.surfZ(tr, k, d + sd * w / 2) + 0.014, z); mk.c.push(255, 255, 255, Math.round(al * 255)); mk.a.push(sd);
+            const nearL = W2.townLineDist ? U.smooth((W2.townLineDist(x, z) - 0.2) / 1.3) : 1;
+            mk.p.push(x, Tracks.surfZ(tr, k, d + sd * w / 2) + 0.014, z); mk.c.push(255, 255, 255, Math.round(al * nearL * 255)); mk.a.push(sd);
           }
           if (q) { const a0 = base + (q - 1) * 2, b0 = base + q * 2; mk.ix.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0); }
         }
@@ -1259,12 +1260,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         let last = -1; for (let k = 0; k < N; k++) if (!isNaN(tr.pit.off[k]) && isNaN(tr.pit.off[(k + 1) % N])) last = k;
         if (last >= 0) {
           let back = 0; while (back < N / 4 && !isNaN(tr.pit.off[mod(last - back - 1, N)]) && Math.abs(innerOf(mod(last - back - 1, N))) < hw + 0.3) back++;
-          const m = Math.round(240 / tr.ds), keep = sdp * (hw - 0.62), D = [];
-          for (let q = -back; q <= m; q++) { const k = mod(last + q, N); D.push(q <= 0 && !isNaN(tr.pit.off[k]) ? U.clamp(innerOf(k), -hw + 0.5, hw - 0.5) : keep); }
-          const R = Math.round(20 / tr.ds);
-          for (let it = 0; it < 2; it++) { const c = D.slice(); for (let q = 0; q < D.length; q++) { let t = 0, n = 0; for (let r = Math.max(0, q - R); r <= Math.min(D.length - 1, q + R); r++) { t += c[r]; n++; } D[q] = t / n; } }
-          const fade = Math.max(1, Math.round(120 / tr.ds)), off = k => { const q = mod(k - last + back, N), t = U.smooth(q / fade); return D[Math.min(q, D.length - 1)] * (1 - t) + keep * t; };
+          const m = Math.round(240 / tr.ds), keep = sdp * (hw - 0.62), d0 = U.clamp(innerOf(mod(last - back, N)), -hw + 0.5, hw - 0.5), span = Math.max(1, back + Math.round(120 / tr.ds));
+          const off = k => { const t = U.smooth(mod(k - last + back, N) / span); return d0 + (keep - d0) * t; };
           ribbon(pa, tr, last - back, last + m, k => off(k) - 0.1, k => off(k) + 0.1, 0.016, 9, yl);
+          quad((last + m) * tr.ds, (last + m) * tr.ds + 0.15, -hw + 0.3, hw - 0.3, white, 0.016);
         }
         // green paint a race lays on the run out of its slowest corners
         const green = col('#4f7168');
@@ -1898,7 +1897,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     };
     const paintY = (x, z) => { const m = lapAt(tr, x, z); return m && m.bar < 0.6 ? Tracks.surfS(tr, m.s, m.dl) + 0.016 : yRoad(x, z) + 0.016; };
     const iron = col('#343436');
-    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 14, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
+    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 14, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#45454a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
     for (const e of edges) {
       const s0 = setOf(e, 0), s1 = e.L - setOf(e, 1);
       if (s1 - s0 < 1) continue;
@@ -1957,6 +1956,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     {
       const idx = new Map(edges.map((e, k) => [e, k])), used = new Set(), STEP = 1.6;
       let tone = white, flaky = 0;
+      const lg = new Map(), lk = (x, z) => Math.floor(x / 4) + ',' + Math.floor(z / 4), holes = [];
+      const noteLine = (x, z) => { const k = lk(x, z); let a = lg.get(k); if (!a) lg.set(k, a = []); a.push(x, z); };
+      const lineDist = (x, z) => {
+        let b = 1e9; const i0 = Math.floor(x / 4), j0 = Math.floor(z / 4);
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const a = lg.get((i0 + i) + ',' + (j0 + j)); if (a) for (let k = 0; k < a.length; k += 2) { const d = (a[k] - x) ** 2 + (a[k + 1] - z) ** 2; if (d < b) b = d; } }
+        return Math.sqrt(b);
+      };
       const yellowP = col('#d9b02a'), wordA = new Acc(), wordsP = U.rng(9173);
       const tri = (a, b, c) => { const v = q => mark.v(q[0], paintY(q[0], q[1]), q[1], 0, 1, 0, q[0] / 9, q[1] / 9, tone); const i = v(a); v(b); v(c); mark.t(i, i + 1, i + 2); };
       // a line along any curve
@@ -2008,7 +2014,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const n = Math.max(1, Math.ceil((t1 - t0) / STEP));
           let prev = null;
           for (let k = 0; k <= n; k++) {
-            const t = t0 + (t1 - t0) * k / n, c = typeof q === 'function' ? q(t) : q, a = at(t, c - w / 2), b = at(t, c + w / 2);
+            const t = t0 + (t1 - t0) * k / n, c = typeof q === 'function' ? q(t) : q, thin = w < 0.3, wob = thin ? 1 + 0.2 * Math.sin(t * 0.9 + e0.L) * Math.sin(t * 0.37 + c) + (wordsP() - 0.5) * 0.12 : 1, frayed = thin && (k === 0 || k === n) ? 0.72 : 1, wv = w * wob * frayed, a = at(t, c - wv / 2), b = at(t, c + wv / 2);
+            if (thin) noteLine(a[0], a[1]);
             if (!ok(a) || !ok(b) || (flaky && wordsP() < flaky)) { prev = null; continue; }
             const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, a[0] / 9, a[1] / 9, tone), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, b[0] / 9, b[1] / 9, tone);
             if (prev != null) { mark.t(prev, prev + 1, v0); mark.t(prev + 1, v1, v0); }
@@ -2020,15 +2027,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const minW = Math.min(...parts.map(q => q.e.w)), cls = Math.min(...parts.map(q => q.e.cls)), mk = first.e.mark || { type: 0, mid: 0 }, mid = mk.mid * 0.5;
         const blocks = [], throughBars = [], gaps = { '-1': [], 1: [] };
         // each road's paint has its own age: bright on the newest, thin and broken on the oldest
-        const age = wordsP(), fresh = white.clone().multiplyScalar(1 - 0.42 * age);
-        tone = fresh; flaky = age > 0.72 ? 0.1 : 0;
+        const age = wordsP(), fresh = white.clone().multiplyScalar(age > 0.75 ? 0.68 : 1 - 0.34 * age);
+        tone = fresh; flaky = age > 0.75 ? 0.3 : 0;
         // a crossing's bars lie along the road, kerb to kerb, the centre line stopping a metre short
         const zebra = (z0, z1) => {
           if (z0 < 2 || z1 > L - 2 || blocks.some(b => z1 > b[0] - 8 && z0 < b[1] + 8)) return false;
           const h = Math.min(hAt(z0), hAt(z1)), keepT = tone, tracks = [(mid + h) / 2, (mid - h) / 2];
           for (const sd of [-1, 1]) for (let q = 0.65; Math.abs(mid + sd * q) < h - 0.35; q += 1.3) {
             const c = mid + sd * q, worn = tracks.some(l => Math.abs(Math.abs(c - l) - 0.8) < 0.4);
-            tone = worn ? keepT.clone().multiplyScalar(0.62) : keepT;
+            tone = worn ? keepT.clone().multiplyScalar(0.46) : keepT;
             band(z0, z1, c, 0.6);
           }
           tone = keepT;
@@ -2037,8 +2044,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           return true;
         };
         const giveWay = (st, sd) => {
-          const a = sd > 0 ? mid : -hAt(st) + 0.3, b = sd > 0 ? hAt(st) - 0.3 : mid;
-          if (wordsP() < 0.6) { for (let q = a + 0.1; q + 1 <= b; q += 1.6) band(st, st + 0.4, q + 0.5, 1); }
+          const wide = wordsP() < 0.33, a = wide || sd < 0 ? -hAt(st) + 0.3 : mid, b = wide || sd > 0 ? hAt(st) - 0.3 : mid;
+          if (wordsP() < 0.66) { const few = (b - a) / 1.6 < 3, w = few ? 0.7 : 1, pitch = few ? 1.1 : 1.6; for (let q = a + 0.1; q + w <= b; q += pitch) band(st, st + 0.4, q + w / 2, w); }
           else band(st, st + 0.4, (a + b) / 2, b - a);
         };
         // the ends of the road
@@ -2070,7 +2077,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             gaps[sd].push([t0 - half, t0 + half]); reach = Math.max(reach, half);
             if (a.e.w >= 5 && wordsP() < 0.66) {
               const f = wordsP() < 0.5 ? 1 : -1, q = sd * (hAt(t0) - 0.75), P0 = at(t0 + f * half, q), Ci = at(t0 + f * (a.hw - 0.75), q), c0 = cut(a.pts, 0, Math.max(a.set, 1) + 0.5), Ep = c0[c0.length - 1], l = [-a.u[1], a.u[0]], ls = l[0] * u[0] * f + l[1] * u[1] * f > 0 ? 1 : -1;
-              curve(bez(P0, Ci, [Ep[0] + l[0] * ls * (a.hw - 0.75), Ep[1] + l[1] * ls * (a.hw - 0.75)], 12), 0.15);
+              const fromMid = wordsP() < 0.4, S0 = fromMid ? at(t0 + f * half, mid) : P0, Cm = fromMid ? at(t0 + f * (a.hw * 0.4), mid) : Ci;
+              curve(bez(S0, Cm, [Ep[0] + l[0] * ls * (a.hw - 0.75), Ep[1] + l[1] * ls * (a.hw - 0.75)], 12), 0.15);
+              // the stop line joined to a long diagonal running along the main road
+              if (a.hw >= 4 && wordsP() < 0.34) { const fd = -f, T = at(t0 + fd * (a.hw + 11), sd * (hAt(t0) - 1.8)), Ms = at(t0 + fd * (a.hw + 1), sd * (hAt(t0) * 0.5)); curve([Ep, [(Ep[0] + Ms[0]) / 2, (Ep[1] + Ms[1]) / 2], Ms, [(Ms[0] + T[0]) / 2, (Ms[1] + T[1]) / 2], T], 0.15); }
+              // a tapered wedge running up the middle of the side street
+              if (a.e.L > 30 && wordsP() < 0.25) {
+                const arm = cut(a.pts, Math.max(a.set, 1) + 1, Math.min(a.e.L - 2, Math.max(a.set, 1) + 14));
+                for (const sg of [-1, 1]) curve(arm.map((q, k) => { const g = arm[Math.min(arm.length - 1, k + 1)], h = arm[Math.max(0, k - 1)], d = unit(g[0] - h[0], g[1] - h[1]), o = sg * 0.75 * (1 - k / Math.max(1, arm.length - 1)); return [q[0] - d[1] * o, q[1] + d[0] * o]; }), 0.15);
+              }
             }
           }
           if (minW < 6) return;
@@ -2081,22 +2096,26 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const solid = (q, w, a, b, cut0) => { for (const [p, r] of free(a, b, cut0)) band(p, r, q, w); };
         const dashes = (q, w, on, off, a0 = lo, b0 = hi) => { for (let t = a0; t + on <= b0; t += on + off) if (!blocks.some(g => t + on > g[0] && t < g[1])) band(t, t + on, q, w); };
         if (minW >= 6 && hi - lo > 8) {
-          const stretch = [lo];
-          joints.forEach((j, k) => { if (k < joints.length - 1 && Sj[k] - stretch[stretch.length - 1] > 100 && hi - Sj[k] > 60 && wordsP() < 0.5) stretch.push(Sj[k]); });
+          const stretch = [lo], real = [];
+          joints.forEach((j, k) => { if (k < joints.length - 1 && arms[j.n].length >= 3 && Sj[k] - lo > 100 && hi - Sj[k] > 100) real.push(Sj[k]); });
+          if (real.length && wordsP() < 0.5) stretch.push(real[Math.floor(wordsP() * real.length)]);
           stretch.push(hi);
-          const barsOut = blocks.filter(b => !throughBars.includes(b));
+          const barsOut = blocks.filter(b => !throughBars.includes(b)), dashQ = mk.type >= 0.78 ? mid + 0.3 : mid, busy = mk.bays && minW < 12;
           for (let k = 0; k < stretch.length - 1; k++) {
             const a0 = stretch[k], b0 = stretch[k + 1], ty = k ? wordsP() : mk.type;
             if (minW >= 11.5 && cls === 0) { dashes(mid - minW / 6, 0.15, 2.5, 1.1, a0, b0); solid(mid + minW / 6, 0.15, a0, b0, barsOut); }
-            else if (ty < 0.56) dashes(mid, 0.15, 2.5, 1.1, a0, b0);
-            else if (ty < 0.78) dashes(mid, 0.13, 0.9, 0.9, a0, b0);
+            else if (minW >= 9 && ty < 0.18) dashes(dashQ, 0.12, 0.4, 8.6, a0, b0);
+            else if (ty < 0.56) dashes(dashQ, 0.15, 2.5, 1.1, a0, b0);
+            else if (ty < 0.78) dashes(dashQ, 0.13, 0.9, 0.9, a0, b0);
             else { solid(mid, 0.17, a0, b0, barsOut); dashes(mid + 0.3, 0.15, 0.9, 0.9, a0, b0); }
+            // the ghost of an older line, burnt off but still there
+            if (wordsP() < 0.17) { const keepT = tone, gq = mid + (wordsP() < 0.5 ? -1 : 1) * (1.1 + wordsP()); tone = white.clone().multiplyScalar(0.3); dashes(gq, 0.13, 2.5, 1.1, a0, b0); tone = keepT; }
           }
-          if (mk.edge) for (const sd of [-1, 1]) solid(t => sd * (hAt(t) - 0.75), 0.15, lo, hi, blocks.concat(gaps[sd]));
+          if (mk.edge && !busy) for (const sd of [-1, 1]) solid(t => sd * (hAt(t) - 0.75), 0.15, lo, hi, blocks.concat(gaps[sd]));
           // a thin yellow line near the kerb on some stretches, and a slanted bus bay
           if (hi - lo > 60) {
             const sd = wordsP() < 0.5 ? -1 : 1;
-            if (wordsP() < 0.28) { const t0 = lo + wordsP() * (hi - lo - 50), keepT = tone; tone = yellowP; solid(t => sd * (hAt(t) - 0.35), 0.1, t0, Math.min(hi, t0 + 40 + wordsP() * 50), blocks.concat(gaps[sd])); tone = keepT; }
+            if (wordsP() < 0.28 && !mk.edge && !mk.bays) { const t0 = lo + wordsP() * (hi - lo - 50), keepT = tone; tone = yellowP; solid(t => sd * (hAt(t) - 0.35), 0.1, t0, Math.min(hi, t0 + 40 + wordsP() * 50), blocks.concat(gaps[sd])); tone = keepT; }
             if (minW >= 8 && wordsP() < 0.2) {
               const t0 = lo + wordsP() * (hi - lo - 24), cuts = blocks.concat(gaps[sd]);
               if (!cuts.some(g => t0 + 18 > g[0] && t0 < g[1])) {
@@ -2125,6 +2144,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               prev = v0;
             }
           };
+          const sideways = (t, f, q) => { const sd = q > mid ? -1 : 1, c = at(t, q), g = at(t + f * 1.1, q + sd * 0.7), r = at(t + f * 0.7, q + sd * 1), h = at(t + f * 1.5, q + sd * 0.4); curve([c, g], 0.14); tri(f > 0 ? h : r, f > 0 ? r : h, at(t + f * 1.55, q + sd * 1.15)); };
+          if (dA >= 3 && hi - lo > 60 && wordsP() < 0.22) sideways(lo + 30, -1, (mid - hAt(lo + 30)) / 2);
+          if (dB >= 3 && hi - lo > 60 && wordsP() < 0.22) sideways(hi - 30, 1, (mid + hAt(hi - 30)) / 2);
           if (dA >= 3 && hi - lo > 30) { const q = (mid - hAt(lo + 12)) / 2; arrow(lo + 12, -1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(lo + 22, -1, q); }
           if (dB >= 3 && hi - lo > 30) { const q = (mid + hAt(hi - 12)) / 2; arrow(hi - 12, 1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(hi - 22, 1, q); }
         }
@@ -2133,9 +2155,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           solid(t => sd * (hAt(t) - 2.05), 0.1, lo + 3, hi - 3, cuts);
           for (let t = lo + 3; t < hi - 3; t += 6) if (!cuts.some(g => t > g[0] && t < g[1])) band(t, t + 0.1, u => sd * (hAt(u) - 1.03), 2.05);
         }
-        if (minW >= 5) for (let t = 14 + rnd() * 30; t < L - 8; t += 45 + rnd() * 35) { const q = at(t, (rnd() - 0.5) * hAt(t)); if (ok(q)) manhole(q, rnd() < 0.3 ? 0.5 : 0.4); }
+        if (minW >= 5) for (let t = 14 + rnd() * 30; t < L - 8; t += 45 + rnd() * 35) { const q = at(t, (rnd() - 0.5) * hAt(t)); if (ok(q)) holes.push(q); }
       }
-      if (wordA.k) add(wordA.geo(), M.roadWords || (M.roadWords = F1.R3S.wear.paint(std({ map: wordsTex(), transparent: true, depthWrite: false, roughness: 0.6 }))), { receive: true, order: 2 });
+      for (const q of holes) if (lineDist(q[0], q[1]) > 1.1) manhole(q, rnd() < 0.3 ? 0.5 : 0.4);
+      W2.townLineDist = lineDist;
+      if (wordA.k) add(wordA.geo(), M.roadWords || (M.roadWords = F1.R3S.wear.paint(std({ map: wordsTex(), color: '#a8a8a2', transparent: true, depthWrite: false, roughness: 0.6 }))), { receive: true, order: 2 });
     }
     const rg = road.geo();
     if (rg) { rg.setAttribute('trk', offLine(rg)); add(rg, M.asphalt); }
@@ -2387,7 +2411,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     g.clearRect(0, 0, 256, 512); g.fillStyle = '#efefe9'; g.font = 'bold 92px Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     ['STOP', 'BUS', 'TAXI', 'LENT'].forEach((w, k) => g.fillText(w, 128, 64 + (3 - k) * 128));
     g.globalCompositeOperation = 'destination-out';
-    for (let k = 0; k < 900; k++) { g.fillStyle = `rgba(0,0,0,${0.3 + r() * 0.7})`; g.fillRect(r() * 256, r() * 512, 1 + r() * 7, 1 + r() * 4); }
+    for (let k = 0; k < 1400; k++) { g.fillStyle = `rgba(0,0,0,${0.3 + r() * 0.7})`; g.fillRect(r() * 256, r() * 512, 1 + r() * 7, 1 + r() * 4); }
+    for (let k = 0; k < 46; k++) { g.fillStyle = 'rgba(0,0,0,.9)'; g.beginPath(); g.ellipse(r() * 256, r() * 512, 8 + r() * 26, 6 + r() * 20, r() * 3, 0, 7); g.fill(); }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
     return t;
   }

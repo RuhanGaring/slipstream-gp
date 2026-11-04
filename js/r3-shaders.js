@@ -370,6 +370,7 @@
         '  vec2 pW = vFogWorld.xz;',
         // fine pitting, thin in places, a little dirt: paint stays paint, it does not go patchy
         '  float pN = wNoise(pW * 9.0) * 0.5 + wNoise(pW * 31.0) * 0.5;',
+        '  if (wNoise(pW * 53.0) * 0.6 + wNoise(pW * 17.0) * 0.4 > 0.9 - 0.16 * wNoise(pW * 1.1 + 9.0)) discard;',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14), smoothstep(0.62, 0.86, pN) * 0.4);',
         '  diffuseColor.rgb *= (1.0 - smoothstep(0.5, 0.9, wNoise(pW * 0.5 + 5.0)) * 0.14) * 0.9;',
       ].join('\n'));
