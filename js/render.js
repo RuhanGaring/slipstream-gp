@@ -457,7 +457,7 @@
           const o = rd.w / 2 + 1.6, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
           const u = site.inland(x, y);
           if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2) || onStreet(x, y)) continue;
-          if (u < 70) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
+          if (u < 70 && rnd() < 0.15) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
           else addDecor(W, { type: 'tree', x, y, r: 2.8 + rnd() * 2.2, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
         }
       }
@@ -470,7 +470,7 @@
         if (rnd() < 0.45 || tun(i)) continue;
         const o = (sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 3.6 + rnd() * 1.6, x = tr.x[i] + tr.nx[i] * o * sd, y = tr.y[i] + tr.ny[i] * o * sd, u = site.inland(x, y);
         if (u < 4 || inBuilding(x, y, 1.5) || onStreet(x, y)) continue;
-        if (u < 70 && rnd() < 0.7) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
+        if (u < 70 && rnd() < 0.12) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
         else addDecor(W, { type: 'tree', x, y, r: 3.4 + rnd() * 2.4, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
       }
     }

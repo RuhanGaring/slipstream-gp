@@ -446,6 +446,28 @@
     return pts.every(p => distToTrack(tr, p[0], p[1], need + 1) >= need);
   }
   function cityBuildings(r, tr, site) {
+    const out = cityBlocks(r, tr, site), cell = 12, g = new Map();
+    for (const rd of site.roads) {
+      if (rd.kind === 'steps' || rd.kind === 'rail') continue;
+      for (let k = 0; k < rd.pts.length - 1; k++) {
+        const a = rd.pts[k], b = rd.pts[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        for (let t = 0; t <= l; t += 2.5) { const x = a[0] + (b[0] - a[0]) * t / (l || 1), y = a[1] + (b[1] - a[1]) * t / (l || 1), c = Math.floor(x / cell) + ',' + Math.floor(y / cell); if (!g.has(c)) g.set(c, []); g.get(c).push([x, y, rd.w / 2 + 0.3]); }
+      }
+    }
+    const inPoly = (pl, x, y) => { let c = false; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) if ((pl[i][1] > y) !== (pl[j][1] > y) && x < (pl[j][0] - pl[i][0]) * (y - pl[i][1]) / (pl[j][1] - pl[i][1]) + pl[i][0]) c = !c; return c; };
+    return out.filter(b => {
+      for (const pl of b.parts || [b.poly]) {
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (const p of pl) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+        for (let i = Math.floor(x0 / cell) - 1; i <= Math.floor(x1 / cell) + 1; i++) for (let j = Math.floor(y0 / cell) - 1; j <= Math.floor(y1 / cell) + 1; j++) for (const q of g.get(i + ',' + j) || []) {
+          if (q[0] < x0 - q[2] || q[0] > x1 + q[2] || q[1] < y0 - q[2] || q[1] > y1 + q[2]) continue;
+          if (inPoly(pl, q[0], q[1])) return false;
+        }
+      }
+      return true;
+    });
+  }
+  function cityBlocks(r, tr, site) {
     const L = (a, b) => a + (b - a) * r();
     // the streets and the pit lane, as points with the half width to keep clear of
     const cell = 16, grid = new Map(), key = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
@@ -911,8 +933,8 @@
     const unlink = e => { e.dead = true; e.a.e.splice(e.a.e.indexOf(e), 1); e.b.e.splice(e.b.e.indexOf(e), 1); };
     // the junction at a point of an edge: the edge cut in two there
     const nodeAt = (e, i) => {
-      if (i < 2) return e.a;
-      if (i > e.pts.length - 3) return e.b;
+      if (i <= 2) return e.a;
+      if (i >= e.pts.length - 3) return e.b;
       const p = e.pts[i], n = addNode(p[0], p[1]);
       unlink(e);
       addEdge(e.a, n, e.pts.slice(0, i + 1), e.w, e.cls, e.kind); addEdge(n, e.b, e.pts.slice(i), e.w, e.cls, e.kind);
@@ -940,16 +962,34 @@
     };
     // a street from a point, turning no faster than a street turns, until it meets another or runs
     // out of ground: { pts, hit, why }
+    const crossing = (ax, ay, bx, by, skip) => {
+      const c0 = Math.floor((Math.min(ax, bx) - 10) / CELL), c1 = Math.floor((Math.max(ax, bx) + 10) / CELL), r0 = Math.floor((Math.min(ay, by) - 10) / CELL), r1 = Math.floor((Math.max(ay, by) + 10) / CELL);
+      for (let a = c0; a <= c1; a++) for (let b = r0; b <= r1; b++) {
+        const A = grid.get((a + 4096) * 8192 + b + 4096);
+        if (A) for (let k = 0; k < A.length; k += 2) {
+          const e = A[k], i = A[k + 1];
+          if (e.dead || e === skip || i >= e.pts.length - 1) continue;
+          const p = e.pts[i], q = e.pts[i + 1], d1 = (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax), d2 = (bx - ax) * (q[1] - ay) - (by - ay) * (q[0] - ax), d3 = (q[0] - p[0]) * (ay - p[1]) - (q[1] - p[1]) * (ax - p[0]), d4 = (q[0] - p[0]) * (by - p[1]) - (q[1] - p[1]) * (bx - p[0]);
+          if (d1 * d2 < 0 && d3 * d4 < 0) return { e, i: d1 * d1 < d2 * d2 ? i : i + 1, d: 0 };
+        }
+      }
+      return null;
+    };
     const trace = (p0, h0, field, o) => {
       const pts = [p0.slice()], mt = o.turn || 0.17;
-      let x = p0[0], y = p0[1], d = [Math.cos(h0), Math.sin(h0)], len = 0, hit = null, why = 'length';
+      let x = p0[0], y = p0[1], d = [Math.cos(h0), Math.sin(h0)], len = 0, hit = null, why = 'length', bent = 0;
       while (len < o.max) {
         const q = field(x, y, d), a = U.clamp(Math.atan2(d[0] * q[1] - d[1] * q[0], d[0] * q[0] + d[1] * q[1]), -mt, mt), ca = Math.cos(a), sa = Math.sin(a);
         d = [d[0] * ca - d[1] * sa, d[0] * sa + d[1] * ca];
+        // (a street does not hook round to rejoin where it came from)
+        bent += a;
+        if (o.bend && Math.abs(bent) > o.bend) { why = 'hook'; break; }
         const nx = x + d[0] * STEP, ny = y + d[1] * STEP;
         if (!land(nx, ny, o.shore || 12)) { why = 'edge'; break; }
         if (Math.abs(T.H(nx, ny) - T.H(x, y)) / STEP > o.gmax) { why = 'steep'; break; }
         if (len > (o.clear || 20)) {
+          const cr = crossing(x, y, nx, ny, null);
+          if (cr) { hit = cr; why = 'hit'; break; }
           const n = nearest(nx, ny, o.hit, null);
           if (n) {
             const pv = n.e.pts[Math.max(0, n.i - 1)], nv = n.e.pts[Math.min(n.e.pts.length - 1, n.i + 1)], tn = unit(nv[0] - pv[0], nv[1] - pv[1]);
@@ -1022,8 +1062,8 @@
           if (r() < 0.25) continue;
           const p = pts[i], q = pts[i + 1], h = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * Math.PI / 2;
           if (!land(p[0] + Math.cos(h) * 16, p[1] + Math.sin(h) * 16, 12)) continue;
-          const t = trace(p, h, across(gmax), { max: maxLen, gmax: gmax * 1.25, hit: hitAt, shore: 12, clear: 14, turn: 0.2 });
-          if (t.len < 24 || t.why === 'parallel' || (!t.hit && !keepDead)) continue;
+          const t = trace(p, h, across(gmax), { max: maxLen, gmax: gmax * 1.25, hit: hitAt, shore: 12, clear: 14, turn: 0.2, bend: 1.05 });
+          if (t.len < 24 || t.why === 'parallel' || t.why === 'hook' || (!t.hit && !keepDead)) continue;
           if (e.dead) break;
           if (t.hit && t.hit.e === e) continue;
           const pe = e.pts[Math.min(i, e.pts.length - 1)], m = nearest(pe[0], pe[1], 3, null);
@@ -1055,6 +1095,18 @@
     links(L(70, 100), 5.5, 7, 2, 0.12, 9, 300, false, 1);
     rows(L(44, 54), 22000, 5.5, 6.5, 2, 'street', 0.12);
     links(L(60, 85), 5, 6.5, 2, 0.13, 8, 180, true, 2);
+    links(L(130, 170), 5.5, 6.5, 2, 0.14, 8, 260, false, 2);
+    // lanes: short, narrow, ending inside the blocks
+    for (const e of edges.slice()) {
+      if (e.dead || e.cls < 1 || e.pts.length < 7) continue;
+      for (let i = 3 + Math.floor(r() * 5); i < e.pts.length - 3; i += Math.round(L(50, 95) / STEP)) {
+        if (e.dead || r() < 0.35) continue;
+        const p = e.pts[i], q = e.pts[i + 1], sd = r() < 0.5 ? -1 : 1, h = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * (Math.PI / 2 + L(-0.25, 0.25));
+        const t = trace(p, h, (x, y, d) => d, { max: L(40, 80), gmax: 0.16, hit: 9, shore: 12, clear: 10 });
+        if (t.len < 30 || t.hit || t.why === 'parallel') continue;
+        lay(nodeAt(e, i), t, Math.round(L(3.5, 4.5) * 2) / 2, 3, 'street');
+      }
+    }
     close(2);
     // one network: a district cut off from the rest gets a road to it, or goes
     for (let pass = 0; pass < 6; pass++) {
@@ -1090,13 +1142,26 @@
     }
     // short dead stubs are tidied away; the graph is what is left
     for (let pass = 0; pass < 3; pass++) for (const e of edges) {
-      if (e.dead || e.cls < 2) continue;
+      if (e.dead || e.cls !== 2) continue;
       if ((e.a.e.length === 1 || e.b.e.length === 1) && polyLen(e.pts) < 34) unlink(e);
+    }
+    // two junctions a few metres apart are one junction
+    for (const e of edges) {
+      if (e.dead || e.a === e.b || e.a.e.length < 3 || e.b.e.length < 3 || polyLen(e.pts) > 24 || e.cls === 0) continue;
+      const m = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 }, keep = e.a, gone = e.b;
+      unlink(e);
+      keep.x = m.x; keep.y = m.y;
+      for (const q of gone.e.slice()) { if (q.a === gone) q.a = keep; if (q.b === gone) q.b = keep; keep.e.push(q); }
+      gone.e.length = 0;
+      for (const q of keep.e) {
+        if (q.a === keep) q.pts[0] = [m.x, m.y];
+        if (q.b === keep) q.pts[q.pts.length - 1] = [m.x, m.y];
+      }
     }
     // some of the side streets that join two bigger roads carry traffic between them, and are
     // built wider for it
     for (const e of edges) {
-      if (e.dead || e.cls < 2) continue;
+      if (e.dead || e.cls !== 2) continue;
       const big = n => n.e.some(q => q.cls < 2);
       if (big(e.a) && big(e.b) && polyLen(e.pts) > 40 && r() < 0.5) { e.w = Math.round(L(8, 9) * 2) / 2; e.cls = 1; }
     }
@@ -1242,7 +1307,13 @@
         while (d < 40 && inside(tr.x[i] + tr.nx[i] * sg * d, tr.y[i] + tr.ny[i] * sg * d)) d += 0.3;
         b[i] = Math.max(tr.hw + 0.3, d - 0.7);
       }
-      // a light smoothing, the wall has no steps; the pit lane's opening is left as built
+      // the wall has no steps: it closes in on the road no faster than it can bend, both ways round
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < N; i++) b[(i + 1) % N] = Math.min(b[(i + 1) % N], b[i] + 0.45 * tr.ds);
+        for (let i = N - 1; i >= 0; i--) b[i] = Math.min(b[i], b[(i + 1) % N] + 0.45 * tr.ds);
+      }
+      for (let i = 0; i < N; i++) b[i] = Math.max(b[i], tr.hw + 0.3);
+      // a light smoothing; the pit lane's opening is left as built
       for (let i = 0; i < N; i++) {
         let m = 0; for (let q = -2; q <= 2; q++) m += b[(i + q + N) % N];
         const v = m / 5;
@@ -1287,6 +1358,28 @@
       }
       if (!lay) return { fail: 'no straight' };
       town = { T, net, lp: lay.lp };
+      {
+        const lapE = new Set(lay.lp.hs.map(h => h.e)), mouths = [];
+        let s = 0;
+        lay.lp.hs.forEach(h => {
+          const n = h.to, a = h.pts[Math.max(0, h.pts.length - 3)], b = h.pts[h.pts.length - 1];
+          s += polyLen(h.pts);
+          for (const e of n.e) {
+            if (lapE.has(e)) continue;
+            const q = e.a === n ? e.pts[Math.min(2, e.pts.length - 1)] : e.pts[Math.max(0, e.pts.length - 3)];
+            mouths.push({ s, e, side: Math.sign((b[0] - a[0]) * (q[1] - b[1]) - (b[1] - a[1]) * (q[0] - b[0])) });
+          }
+        });
+        mouths.sort((p, q) => p.s - q.s);
+        const last = {};
+        for (const m0 of mouths) {
+          const o = last[m0.side];
+          if (o != null && m0.s - o < 30 && m0.e.cls >= 2) { m0.e.drop = true; continue; }
+          last[m0.side] = m0.s;
+        }
+        for (const e of net.edges) if (e.drop) { e.a.e.splice(e.a.e.indexOf(e), 1); e.b.e.splice(e.b.e.indexOf(e), 1); }
+        net.edges = net.edges.filter(e => !e.drop);
+      }
     } else {
       lay = openLayout(r, style, st);
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
