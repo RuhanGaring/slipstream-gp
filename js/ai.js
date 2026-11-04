@@ -456,6 +456,15 @@
     const inLimit = Tracks.inRange(tr, s, pit.limitIn, pit.limitOut);
     const workLat = i => (isNaN(pit.off[i]) ? pit.side * (tr.hw - 2) : pit.off[i] + pit.side * 2.6);
     const laneLat = i => (isNaN(pit.off[i]) ? pit.side * (tr.hw - 2) : pit.off[i] - pit.side * 1.8);
+    // A car at rest or facing backwards on its way in or out, spun by a touch on the entry road say.
+    // drive() never runs for it, so without this it sits there for good and the field, which queues
+    // behind a stopped car rather than call itself stuck, sits behind it and the race never ends.
+    if (p.phase === 'stop') b.stuckT = 0;
+    else {
+      const wrongWay = Math.abs(U.wrapAngle(car.h - Math.atan2(tr.ty[car.loc.i], tr.tx[car.loc.i]))) > 1.9;
+      b.stuckT = car.speed < 1.5 || wrongWay ? b.stuckT + dt : Math.max(0, b.stuckT - dt);
+      if (b.stuckT > (inLimit ? 8 : 3)) { race.recover(car); b.stuckT = 0; return; }
+    }
     let vt;
     if (p.phase === 'in') {
       vt = toLimit < 400 && !inLimit ? Math.sqrt(pit.limit ** 2 + 2 * 9 * toLimit) : pit.limit;
