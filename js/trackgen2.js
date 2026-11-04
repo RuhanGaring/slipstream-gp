@@ -1440,7 +1440,7 @@
     tr.waterY = null;     // a town's sea comes from its coastline, not the first generator's harbour
     const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed };
     if (city) {
-      res.city = { buildings: cityBuildings(r, tr, s0), roads: s0.roads };
+      res.city = { buildings: F1.roadOnly ? [] : cityBuildings(r, tr, s0), roads: s0.roads };
       res.role = role;
       res.tunnel = tunnel;
     }
@@ -1581,7 +1581,7 @@
       const B = res.city.buildings;
       for (const b of B) if (!polyClear(tr, b.poly, tr.hw + 4) || b.poly.some(p => site.inland(p[0], p[1]) < 2.5)) { fail('building on the road'); break; }
       info.buildings = B.length;
-      if (B.length < 150) fail('too few buildings', String(B.length));
+      if (B.length < 150 && !F1.roadOnly) fail('too few buildings', String(B.length));
     }
     return { ok: !fails.length, fails, info };
   }

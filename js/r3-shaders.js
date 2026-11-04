@@ -17,6 +17,7 @@
     // lawn: xy the direction the mower laid the stripes, z stripe width (m), w stripe strength
     uLawn: { value: new THREE.Vector4(1, 0, 10, 0) },
     uWet: { value: 0 }, // how wet the road is, 0..1
+    uRooms: { value: 1 }, // rooms behind town windows, 1 on, 0 off
     // the venue's turf map (render3d.js turfMap): r how dry the site is (0.5 neutral), g wear
     // beside the track; uTurfB its world rectangle (x0, z0, width, depth)
     uTurf: { value: null },

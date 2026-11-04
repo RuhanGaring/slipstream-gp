@@ -29,7 +29,8 @@
     };`;
   function workerPool() {
     if (typeof Worker === 'undefined' || !G.F1simMods || !G.Blob || !G.URL) return null;
-    const src = G.F1simMods.map(m => '(' + m.toString() + ')(self);').join('\n') + WORKER_MAIN;
+    // (the workers share one browser process: they build the road alone, not a town each)
+    const src = G.F1simMods.map(m => '(' + m.toString() + ')(self);').join('\n') + '\nself.F1.roadOnly = true;\n' + WORKER_MAIN;
     let url;
     try { url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' })); } catch (e) { return null; }
     const n = Math.max(2, Math.min(14, (navigator.hardwareConcurrency || 4) - 2));

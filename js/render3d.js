@@ -290,9 +290,11 @@
   function interiors(m, tile) {
     m.userData.patchKey = 'rooms' + tile;
     m.userData.patchExtra = sh => {
-      sh.fragmentShader = `float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n` + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      sh.uniforms.uRooms = F1.R3S.U.uRooms;
+      sh.fragmentShader = `uniform float uRooms;
+float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n` + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   { vec3 wp = vFogWorld, vd = wp - cameraPosition; float dist = length(vd), lm = dot(sampledDiffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float wm = (1.0 - smoothstep(0.25, 0.45, texelRoughness.g)) * smoothstep(320.0, 160.0, dist) * smoothstep(0.012, 0.05, sampledDiffuseColor.b - sampledDiffuseColor.r) * smoothstep(0.5, 0.35, lm);
+    float wm = uRooms * (1.0 - smoothstep(0.25, 0.45, texelRoughness.g)) * smoothstep(320.0, 160.0, dist) * smoothstep(0.012, 0.05, sampledDiffuseColor.b - sampledDiffuseColor.r) * smoothstep(0.5, 0.35, lm);
     if (wm > 0.01) {
       vec3 Nf = normalize(cross(dFdx(wp), dFdy(wp))); if (dot(Nf, vd) > 0.0) Nf = -Nf;
       if (abs(Nf.y) < 0.5) {
@@ -1288,8 +1290,9 @@
           for (let copy = 0; copy < (hard ? 2 : 1); copy++) {
             const cc = copy === 0 && hard ? (lastB % 2 ? red : wht) : c;
             for (const pr of prof) {
-              const d = dOf(pr[0], t, k), w = Tracks.pointAt(tr, sq, d);
-              row.push(kb.v(w[0], Tracks.surfZ(tr, k, d) + pr[1] * t + 0.003, w[1], tr.nx[k] * pr[2] * Math.sign(d || 1), pr[3], tr.ny[k] * pr[2] * Math.sign(d || 1), sq / 1.5, pr[0] / 1.5, cc));
+              const d = dOf(pr[0], t, k), w = Tracks.pointAt(tr, sq, d), fk = ((sq % tr.L) + tr.L) % tr.L / tr.ds - Math.floor(((sq % tr.L) + tr.L) % tr.L / tr.ds), k2 = (k + 1) % N;
+              const yb = W2.town ? roadY(tr, w[0], w[1]) + 0.03 : U.lerp(Tracks.surfZ(tr, k, d), Tracks.surfZ(tr, k2, d), fk) + 0.003;
+              row.push(kb.v(w[0], yb + pr[1] * t, w[1], tr.nx[k] * pr[2] * Math.sign(d || 1), pr[3], tr.ny[k] * pr[2] * Math.sign(d || 1), sq / 1.5, pr[0] / 1.5, cc));
             }
           }
           const m = prof.length;
@@ -1861,7 +1864,8 @@
         prev = [c0, c1, c2, a0, a1];
       }
     };
-    const quad = (a, b, c, d, y, cc = white) => { const v0 = mark.v(a[0], y, a[1], 0, 1, 0, 0, 0, cc), v1 = mark.v(b[0], y, b[1], 0, 1, 0, 0.1, 0, cc), v2 = mark.v(c[0], y, c[1], 0, 1, 0, 0.1, 0.3, cc), v3 = mark.v(d[0], y, d[1], 0, 1, 0, 0, 0.3, cc); mark.t(v0, v1, v3); mark.t(v1, v2, v3); };
+    const paintY = (x, z) => { const m = lap(x, z); return m && Math.abs(m.dl) < tr.hw + 0.3 ? Tracks.surfZ(tr, m.i, U.clamp(m.dl, -tr.hw, tr.hw)) + 0.018 : yRoad(x, z) + 0.016; };
+    const quad = (a, b, c, d, y, cc = white) => { const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, 0, 0, cc), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, 0.1, 0, cc), v2 = mark.v(c[0], paintY(c[0], c[1]), c[1], 0, 1, 0, 0.1, 0.3, cc), v3 = mark.v(d[0], paintY(d[0], d[1]), d[1], 0, 1, 0, 0, 0.3, cc); mark.t(v0, v1, v3); mark.t(v1, v2, v3); };
     const across = (p, u, a, b, h0, h1, cc) => {  // a patch of paint on a road: a..b along, h0..h1 across
       const l = [-u[1], u[0]], P = (s, h) => [p[0] + u[0] * s + l[0] * h, p[1] + u[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014, hm = (h0 + h1) / 2, s0 = P(a, hm), s1 = P(b, hm);
       if (foreign(s0[0], s0[1]) || foreign(s1[0], s1[1])) return;
@@ -1873,7 +1877,7 @@
       for (let k = 0; k < C.length - 1; k++) {
         const a = C[k], b = C[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]), u = unit(b[0] - a[0], b[1] - a[1]);
         for (s0 = 0; s0 < l;) {
-          const inOn = run < on, left = (inOn ? on - run : on + off - run), step = Math.min(left, l - s0);
+          const inOn = run < on, left = (inOn ? on - run : on + off - run), step = Math.min(left, l - s0, 1.6);
           if (inOn && step > 0.05) across([a[0] + u[0] * s0, a[1] + u[1] * s0], u, 0, step, q - w / 2, q + w / 2, cc);
           s0 += step; run += step;
           if (run >= on + off - 1e-6) run = 0;
@@ -1887,7 +1891,7 @@
       quad(P(2.6, h0 - 0.42), P(2.6, h0 + 0.42), P(3.8, h0 + 0.02), P(3.8, h0 - 0.02), y);
     };
     const iron = col('#2a2a2c'), tar = col('#1a1a1c'), yellow = col('#d8b83a');
-    const manhole = (p, R) => { const y = yRoad(p[0], p[1]) + 0.012, n = 10, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
+    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 10, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
     for (const e of edges) {
       const s0 = setOf(e, 0), s1 = e.L - setOf(e, 1);
       if (s1 - s0 < 1) continue;

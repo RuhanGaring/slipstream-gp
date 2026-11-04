@@ -32,7 +32,7 @@
           }
         };`;
       const url = URL.createObjectURL(new Blob([body], { type: 'text/javascript' }));
-      const n = Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 4) - 1));
+      const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));   // (one process: a town each costs memory)
       for (let i = 0; i < n; i++) {
         const w = new Worker(url);
         w.onmessage = e => { const f = waiting.get(e.data.id); if (f) { waiting.delete(e.data.id); f(e.data); } };
