@@ -1185,6 +1185,40 @@
     return { nodes: nodes.filter(n => n.e.length), edges: edges.filter(e => !e.dead) };
   }
 
+  // The town's road markings, part of the town. Streets that carry straight on through a junction
+  // are one road and share one paint; that road has priority there, its lines run on across the
+  // junction, and the streets that meet it stop at a line. Crossings go where a town needs them.
+  // None of this knows where any lap goes: a race drives over the paint the town already has.
+  function roadMarks(net, r) {
+    const up = new Map(), find = e => { let q = e; while (up.get(q) !== q) q = up.get(q); return q; };
+    for (const e of net.edges) up.set(e, e);
+    const heading = (n, e) => { const P = e.a === n ? e.pts : e.pts.slice().reverse(), q = P[Math.min(2, P.length - 1)]; return Math.atan2(q[1] - n.y, q[0] - n.x); };
+    for (const n of net.nodes) {
+      n.through = null;
+      let best = -1;
+      for (let i = 0; i < n.e.length; i++) for (let j = i + 1; j < n.e.length; j++) {
+        const a = n.e[i], b = n.e[j];
+        if (a === b || Math.abs(U.wrapAngle(heading(n, a) - heading(n, b))) < 2.65 || Math.abs(a.w - b.w) > 2.2) continue;
+        const sc = (4 - Math.max(a.cls, b.cls)) * 100 + a.w + b.w;
+        if (sc > best) { best = sc; n.through = [a, b]; }
+      }
+      if (n.through) { const a = find(n.through[0]), b = find(n.through[1]); if (a !== b) up.set(a, b); }
+    }
+    const marks = new Map();
+    for (const e of net.edges) {
+      const k = find(e);
+      if (!marks.has(k)) marks.set(k, { type: r(), mid: (r() - 0.5) * (e.w >= 9 ? 1.5 : 0.35), edge: r() < 0.42, bays: r() < 0.45 ? (r() < 0.5 ? -1 : 1) : 0 });
+      e.mark = marks.get(k); e.zeb = [false, false];
+    }
+    for (const n of net.nodes) {
+      if (n.e.length < 3) continue;
+      for (const e of n.e) {
+        const main = n.through && n.through.includes(e), end = e.a === n ? 0 : 1;
+        if (e.w >= 6 && r() < (main ? 0.14 : 0.4)) e.zeb[end] = true;
+      }
+    }
+  }
+
   // The roads wide enough to race on, as a planar map: its faces are the big blocks between them,
   // and the boundary of any solid group of faces is a loop along streets that never crosses or
   // touches itself. That is what a lap of a town is. Half edges keep their face on the left.
@@ -1348,6 +1382,7 @@
     if (style === 'city') {
       const T = cityTerrain(r), net = roadSystem(T, r);
       if (!net) return { fail: 'shore road' };
+      roadMarks(net, r);
       const laps = lapsOf(net, T, r, st);
       if (!laps.length) return { fail: 'no lap in the streets' };
       m = r() < 0.5 ? 1 : -1;
@@ -1439,7 +1474,8 @@
       s0 = citySite(r, { T: town.T, S, plaza: lapPt[Math.floor(lapPt.length * 0.4)], rail: [], squares: [] }, xf);
       // (the graph itself, in the world, for the renderer's road mesh)
       const ids = new Map(); town.net.nodes.forEach((n, k) => ids.set(n, k));
-      s0.net = { nodes: town.net.nodes.map(n => { const w = xf.toWorld([n.x, n.y]); return { x: w[0], y: w[1] }; }), edges: town.net.edges.map(e => ({ a: ids.get(e.a), b: ids.get(e.b), pts: e.pts.map(xf.toWorld), w: e.w, cls: e.cls, lap: !!e.lap })) };
+      const eid = new Map(); town.net.edges.forEach((e, k) => eid.set(e, k));
+      s0.net = { nodes: town.net.nodes.map(n => { const w = xf.toWorld([n.x, n.y]), th = n.through && eid.has(n.through[0]) && eid.has(n.through[1]) ? [eid.get(n.through[0]), eid.get(n.through[1])] : null; return { x: w[0], y: w[1], through: th }; }), edges: town.net.edges.map(e => ({ a: ids.get(e.a), b: ids.get(e.b), pts: e.pts.map(xf.toWorld), w: e.w, cls: e.cls, lap: !!e.lap, mark: e.mark, zeb: e.zeb })) };
       role = new Array(tr.N).fill('street');
     }
     // grade the road over the natural ground

@@ -1238,39 +1238,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         pa.t(k, k + 1, k + 2); pa.t(k, k + 2, k + 3);
       };
       if (W2.town) {
-        const rz = U.rng(733), Tg = W2.townGates, grey = (t, d0, d1) => {};
-        void grey;
-        const dash = (t0, t1, d, w, on, off) => { for (let t = t0; t < t1; t += on + off) { const e = Math.min(t + on, t1); for (let a = t; a < e; a += 1.5) quad(a, Math.min(a + 1.5, e), d - w / 2, d + w / 2, white, 0.016); } };
-        // lanes change from one stretch to the next, and are not quite central
-        for (let t = 8; t < tr.L - 16;) {
-          const e = Math.min(tr.L - 12, t + 100 + rz() * 200), ty = rz(), mid = (rz() - 0.5) * 1.1;
-          if (ty < 0.45) dash(t, e, mid, 0.15, 2.5, 1.1);
-          else if (ty < 0.75) dash(t, e, mid, 0.13, 0.8, 0.8);
-          else { dash(t, e, mid, 0.17, 1e5, 0); dash(t, e, mid + 0.3, 0.15, 2.5, 1.1); }
-          t = e + 6;
-        }
-        // edge lines on some stretches, 0.3 m off the kerb, broken at each side street
-        for (const side of [0, 1]) {
-          const sg = side ? 1 : -1, on = new Uint8Array(N);
-          for (let t = 0; t < tr.L;) { const e = t + 80 + rz() * 220, y = rz() < 0.45; for (let q = t; q < e && q < tr.L; q += tr.ds) on[Math.floor(q / tr.ds) % N] = y ? 1 : 0; t = e; }
-          const ok = k => on[k] && !Tg.side[side][k] && isNaN(tr.pit.off[k]);
-          const off0 = k => sg * (tr.barr[side][k] + 0.45 - 0.72), off1 = k => sg * (tr.barr[side][k] + 0.45 - 0.57);
-          for (const [i0, i1] of runs(N, ok)) { if (i1 - i0 < 6) continue; ribbon(pa, tr, i0, i1 - 1, k => (sg > 0 ? off0(k) : off1(k)), k => (sg > 0 ? off1(k) : off0(k)), 0.016, 9, white); }
-        }
-        // crossings beside the junctions, about two and a half a km, on straight road only
-        {
-          const list2 = Tg.list.slice().sort((p, q) => p.i - q.i), want = Math.round(tr.L / 400), gap = tr.L / Math.max(1, want);
-          let last = -1e9, gridS = tr.L - 240;
-          for (const g of list2) {
-            const sq = g.i * tr.ds + (g.n * tr.ds + 3), k = Math.floor(sq / tr.ds) % N;
-            if (sq - last < gap * 0.7 || sq > gridS || sq < 60 || !isNaN(tr.pit.off[k])) continue;
-            let bent = false; for (let q = -6; q <= 6; q++) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 50) bent = true;
-            if (bent) continue;
-            const a = -tr.barr[0][k] - 0.3, b = tr.barr[1][k] + 0.3;
-            for (let q = a + 0.2; q < b - 0.7; q += 1.3) quad(sq, sq + 3, q, q + 0.6, white, 0.017);
-            last = sq;
-          }
-        }
+        const Tg = W2.townGates;
         // the gutter: a pale concrete channel along the foot of the wall, the street's oldest line
         {
           const gt = new Acc(), pS = tr.pit.side > 0 ? 1 : 0;
@@ -1886,10 +1854,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // Paint belongs to its own street. It stops at the kerb line of any street it would run on to;
     // only a road carrying straight on through a junction keeps its lines across it (its mates).
     const pair = (a, b) => (a.mates || (a.mates = new Set())).add(b);
-    for (const A of arms) for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
-      const a = A[i], b = A[j], d = Math.abs(U.wrapAngle(a.ang - b.ang));
-      if (d > 2.75 && a.e !== b.e && Math.abs(a.e.w - b.e.w) < 1.5) { pair(a.e, b.e); pair(b.e, a.e); }
-    }
+    for (const n of nodes) if (n.through) { const a = edges[n.through[0]], b = edges[n.through[1]]; pair(a, b); pair(b, a); }
     let own = null;
     const foreign = (x, z) => {
       if (!own) return false;
@@ -1967,28 +1932,28 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // to street: long dashes, short dashes, a solid line with a dash beside it; lanes that are not
       // quite central; an edge line on some; arrows into junctions; manholes and old seams in the road.
       own = e;
-      if (e.lap) continue;
-      const carries = (n, en) => arms[n].some(a => a.e !== e && !!a.e.lap === !!e.lap && e.mates && e.mates.has(a.e) && Math.abs(U.wrapAngle(a.ang - arms[n].find(b => b.e === e && b.end === en).ang)) > 2.75);
-      const Cl = cut(e.pts, s0 + (carries(e.a, 0) ? 0 : 5.5), s1 - (carries(e.b, 1) ? 0 : 5.5));
-      if (e.w >= 6 && s1 - s0 > 16) {
-        const h1 = Math.abs(Math.sin(e.w * 12.9898 + e.cls * 4.1) * 43758.5453) % 1, h2 = (h1 * 7.13) % 1, h3 = (h1 * 13.7) % 1;
-        const style = h1, mid = (h2 - 0.5) * (e.w >= 9 ? 1.6 : 0.4), lanes = e.w >= 11.5 ? [mid - e.w / 4 - 0.4, mid + e.w / 4 + 0.4] : [];
-        if (style < 0.4) lane(Cl, mid, 2.5, 1.1, 0.15);
-        else if (style < 0.7) lane(Cl, mid, 0.8, 0.8, 0.13);
+      // A street's lines stop short of a junction unless it is the road that carries on through it;
+      // edge lines always break there
+      const carries = n => !!nodes[n].through && nodes[n].through.includes(edges.indexOf(e));
+      const Cl = cut(e.pts, s0 + (carries(e.a) ? 0 : 5.5), s1 - (carries(e.b) ? 0 : 5.5)), Ce = cut(e.pts, s0 + 5.5, s1 - 5.5);
+      if (e.w >= 6 && s1 - s0 > 16 && e.mark) {
+        const m = e.mark, mid = m.mid, lanes = e.w >= 11.5 ? [mid - e.w / 4 - 0.4, mid + e.w / 4 + 0.4] : [];
+        if (m.type < 0.4) lane(Cl, mid, 2.5, 1.1, 0.15);
+        else if (m.type < 0.7) lane(Cl, mid, 0.8, 0.8, 0.13);
         else { lane(Cl, mid, 900, 0, 0.17); lane(Cl, mid + 0.3, 2.5, 1.1, 0.15); }
         for (const q of lanes) lane(Cl, q, 2.5, 1.1, 0.14);
         e.laneMid = mid;
-        if (h3 < 0.45) for (const sd of [-1, 1]) lane(Cl, sd * (hw - 0.55), 900, 0, 0.15);
+        if (m.edge) for (const sd of [-1, 1]) lane(Ce, sd * (hw - 0.55), 900, 0, 0.15);
         if (C.length > 12) {
           const a = C[3], b = C[4], u = unit(b[0] - a[0], b[1] - a[1]), z = C[C.length - 5], y = C[C.length - 4], w2 = unit(y[0] - z[0], y[1] - z[1]);
-          if (rnd() < 0.5) arrow(a, u, -e.w / 4, -1);
-          if (rnd() < 0.5) arrow(z, w2, -e.w / 4, 1);
+          if (!carries(e.a) && m.type > 0.5) arrow(a, u, -e.w / 4, -1);
+          if (!carries(e.b) && m.type < 0.5) arrow(z, w2, -e.w / 4, 1);
         }
       }
-      if (e.w >= 8.5 && !e.lap && e.L > 50 && rnd() < 0.5) {
-        const sd = rnd() < 0.5 ? -1 : 1;
-        lane(C, sd * (hw - 2.05), 900, 0, 0.1);
-        for (let k = 2; k < C.length - 2; k++) { const a = C[k], b = C[k + 1], u = unit(b[0] - a[0], b[1] - a[1]); if (k % 2 === 0) across(a, u, 0, 0.1, sd > 0 ? hw - 2.05 : -hw + 0.1, sd > 0 ? hw - 0.1 : -hw + 2.05); }
+      if (e.w >= 8.5 && e.L > 50 && e.mark && e.mark.bays) {
+        const sd = e.mark.bays;
+        lane(Ce, sd * (hw - 2.05), 900, 0, 0.1);
+        for (let k = 2; k < Ce.length - 2; k++) { const a = Ce[k], b = Ce[k + 1], u = unit(b[0] - a[0], b[1] - a[1]); if (k % 2 === 0) across(a, u, 0, 0.1, sd > 0 ? hw - 2.05 : -hw + 0.1, sd > 0 ? hw - 0.1 : -hw + 2.05); }
       }
       if (e.w >= 5) {
         for (let k = 5 + Math.floor(rnd() * 12); k < C.length - 1; k += 12 + Math.floor(rnd() * 9)) manhole([C[k][0] - (C[k + 1][1] - C[k][1]) / 4 * (rnd() - 0.5) * hw, C[k][1] + (C[k + 1][0] - C[k][0]) / 4 * (rnd() - 0.5) * hw], rnd() < 0.3 ? 0.5 : 0.4);
@@ -2032,22 +1997,22 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       const yO = yRoad(O.x, O.y), c = road.v(O.x, yO, O.y, 0, 1, 0, O.x / 9, O.y / 9), vs = ring.map(p => road.v(p[0], yRoad(p[0], p[1]), p[1], 0, 1, 0, p[0] / 9, p[1] / 9));
       for (let k = 0; k < vs.length; k++) road.t(c, vs[(k + 1) % vs.length], vs[k]);
+      const thru = nodes[n].through;
       for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
         const a = A[i], b = A[j];
-        if (a.e.lap || b.e.lap || a.e.w < 6 || !a.e.mates || !a.e.mates.has(b.e) || a.e.laneMid == null || !!a.e.lap !== !!b.e.lap) continue;
+        if (!thru || !thru.includes(edges.indexOf(a.e)) || !thru.includes(edges.indexOf(b.e)) || a.e.w < 6 || a.e.laneMid == null) continue;
         own = a.e;
         const Ea = endAt(a), Eb = endAt(b), sg = a.end ? -1 : 1;
         lane([Ea.p, Eb.p], sg * a.e.laneMid, 2.5, 1.1, 0.15);
       }
-      // crossings on the bigger junctions' arms, stop lines where a smaller street meets a bigger one
+      // stop lines on the streets that give way, crossings where the town has them
       if (A.length >= 3) {
-        const top = Math.min(...A.map(a => a.e.cls));
         for (const a of A) {
-          if (a.e.L < 30 || a.e.lap) continue;
+          if (a.e.L < 26) continue;
           own = a.e;
-          const E = endAt(a);
-          if (a.e.cls > top) { if (rnd() < 0.5) across(E.p, E.u, 0.4, 0.8, -a.hw + 0.3, 0); else for (let q = -a.hw + 0.3; q < -0.2; q += 1.5) across(E.p, E.u, 0.4, 0.8, q, q + 1); }
-          if (a.e.w >= 6 && rnd() < (a.e.lap ? 0.16 : 0.4)) for (let q = -a.hw + 0.35; q < a.hw - 0.6; q += 1.3) across(E.p, E.u, 1.2, 4.2, q, q + 0.6);
+          const E = endAt(a), yields = !thru || !thru.includes(edges.indexOf(a.e));
+          if (yields) { if (a.e.cls >= 2) for (let q = -a.hw + 0.3; q < -0.2; q += 1.5) across(E.p, E.u, 0.4, 0.8, q, q + 1); else across(E.p, E.u, 0.4, 0.8, -a.hw + 0.3, 0); }
+          if (a.e.zeb && a.e.zeb[a.end]) for (let q = -a.hw + 0.35; q < a.hw - 0.6; q += 1.3) across(E.p, E.u, 1.3, 4.3, q, q + 0.6);
         }
       }
     });
