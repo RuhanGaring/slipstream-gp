@@ -37,6 +37,18 @@
     }
     return (gripCache[key] = g);
   }
+  // The speed plan's settings. A coached circuit's plan is the fastest lap the car was found to do.
+  // One that has not been coached has its grip limits only, and those need a margin: flat out on
+  // them the car is slower than it is 5 per cent inside, and 15 under braking. (A slower driver gives
+  // away more in the corners than on the brakes, or would back the whole field up into every stop.)
+  function planOpts(tr, sim, pace, k = 1) {
+    const g0 = learnedGrip(tr, sim ? 'sim' : 'arcade');
+    if (!sim) return { pace, grip: !g0 || k === 1 ? g0 : Float64Array.from({ length: tr.N }, (_, i) => g0[i] * k) };
+    const gB0 = learnedBrake(tr), kC = gB0 ? 1 : 0.95, kB = gB0 ? 1 : 0.85;
+    const grip = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => g0[i] * k * kC);
+    const gripB = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => (gB0 ? gB0[i] : g0[i]) * k * kB);
+    return { pace, grip, gripB, brakePace: Math.min(1, 0.8 + 0.2 * pace), brake: 1 };
+  }
   // the coached plan's grip under braking, where a circuit has one (tools/coach.js)
   function learnedBrake(tr) {
     const L = F1.Limits && F1.Limits[tr.id] && F1.Limits[tr.id].simB, key = tr.id + 'simB';
@@ -63,7 +75,7 @@
   const Strategy = {
     wearGrip(w) { let f = 1 - 0.09 * w; if (w > 0.7) f -= 1.4 * (w - 0.7) * (w - 0.7); return f; },
     lap(base, comp, wear) { return base * (1 + 0.6 * (1 - Car.COMPOUNDS[comp].mu * this.wearGrip(wear))); },
-    pitLoss(tr) { const p = tr.pit; return p.len / p.limit - p.len / 62 + 2.6 + 4; },
+    pitLoss(tr) { const p = tr.pit, l = (p.limitOut - p.limitIn + tr.L) % tr.L; return l / p.limit - l / 62 + 2.6 + 4; },
     wearEstimate(tr, comp, rate) { return 4.4e-6 * tr.L * Car.COMPOUNDS[comp].wear * rate; },
     // o: { base, laps, comp (null = free choice of start tyre), wear, wpl: {S,M,H}, loss, bias: {S,M,H} }
     plan(o) {
@@ -159,15 +171,8 @@
       const key = team.id + ':' + pace.toFixed(4) + ':' + k.toFixed(2);
       if (!profCache.has(key)) {
         const spec = Object.assign({}, Car.SPEC, teamSpec(team)), g0 = learnedGrip(tr, sim ? 'sim' : 'arcade');
-        // A coached circuit's plan is the fastest lap the car was found to do. One that has not
-        // been coached has its grip limits only, and those need a margin: flat out on them the car
-        // is slower than it is 5 per cent inside, and 15 under braking.
-        const gB0 = learnedBrake(tr), coached = sim && gB0, kC = coached ? 1 : sim ? 0.95 : 1, kB = coached ? 1 : sim ? 0.85 : 1;
-        const grip = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => g0[i] * k * kC);
-        const gripB = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => (coached ? gB0[i] : g0[i]) * k * kB);
-        // (a slower driver gives away more in the corners than on the brakes, or he would back the
-        // whole field up into every stop)
-        profCache.set(key, sim ? Raceline.speedProfile(tr, tr.line, spec, { pace, grip, gripB, brakePace: Math.min(1, 0.8 + 0.2 * pace), brake: 1 }) : Raceline.speedProfile(tr, tr.line, spec, { pace, grip }));
+        void g0;
+        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, planOpts(tr, sim, pace, k)));
       }
       return profCache.get(key);
     };
@@ -214,14 +219,14 @@
       car.wearRate = wearRate;
       car.fuelRate = 1;
       car.wheels.forEach(w => Car.setTyreTemp(w, sim ? 78 : 95));
-      const pace = isPlayer ? 0.9 : diff.pace * (0.97 + (r.d[4] - 0.95) * 0.75) / 0.9875 * (r.team.rating > 0 ? 1 : 1);
+      const pace = isPlayer && !cfg.spectate ? 0.9 : diff.pace * (0.97 + (r.d[4] - 0.95) * 0.75) / 0.9875 * (r.team.rating > 0 ? 1 : 1);
       // arcade cars carry extra grip, so their target speeds scale with it
       const gripK = sim ? 1 : 1.12;
       car.profPace = U.clamp(pace, 0.5, 1.0) * gripK;
       car.brain = AI.makeBrain(car, profFor(r.team, car.profPace), {
         pace: 1, aggr: diff.aggr * (0.8 + rng() * 0.4), seed: 100 + race.cars.length * 7, react: 0.18 + rng() * 0.25 + (1 - diff.pace) * 0.6,
         // (a time trial's ghost and the player's autopilot drive the plan as it is)
-        skill: (isPlayer && !cfg.autoStyle) || mode === 'tt' || cfg.noStyle ? null : U.clamp((diff.pace - 0.58) / 0.42 * 0.7 + (r.d[4] - 0.9) * 3, 0, 1),
+        skill: (isPlayer && !cfg.spectate) || mode === 'tt' || cfg.noStyle ? null : U.clamp((diff.pace - 0.62) / 0.38 * 0.7 + (r.d[4] - 0.9) * 3, 0, 1),
       });
       Object.assign(car, {
         dist: 0, prevS: 0, lap: 0, lapStart: 0, secStart: 0, sector: 0, curSec: [null, null, null],
@@ -232,7 +237,7 @@
         stratBias, plan: startPlan, stintLaps: 0, stintWear0: 0, lastPitLap: -9,
         jumped: false, topSpeed: 0, contactT: 0,
       });
-      if (F1.Damage && F1.Damage.mode(car)) F1.Damage.init(car);
+      if (F1.Damage && F1.Damage.mode(car)) { F1.Damage.init(car); car.dm.rng = (car.dm.rng ^ (rng() * 4294967296)) >>> 0; }
       race.cars.push(car);
     }
     race.player = race.cars.find(c => c.isPlayer);
@@ -399,6 +404,7 @@
     const rn = rx * bny - ry * bnx;
     const j = -(1 + 0.25) * vn / (1 / m + rn * rn / I);
     applyImpulse(c, bnx * j, bny * j, rx, ry);
+    c.rubT = 0.1; // touching: js/audio.js holds the grind while this runs
     // scrape friction
     const tx = -bny, ty = bnx;
     const vt = vcx * tx + vcy * ty;
@@ -406,6 +412,7 @@
     let jt = -vt / (1 / m + rt * rt / I);
     jt = U.clamp(jt, -0.35 * j, 0.35 * j);
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
+    c.r = U.clamp(c.r, -7, 7); // (the part that hits would snap off, not turn the whole car)
     const power = -vn;
     if (c.dm) { if (F1.Damage.impact(race, c, bx, by, bnx, bny, power, 0, -vt * tx, -vt * ty)) race.fx.push({ type: 'break', x: bx, y: by, power, car: c }); }
     if (power > 2) {
@@ -452,6 +459,7 @@
     const j = -(1 + 0.15) * vn / (1 / ma + 1 / mb + ran * ran / a.spec.Iz + rbn * rbn / b.spec.Iz);
     applyImpulse(a, -nx * j, -ny * j, rax, ray);
     applyImpulse(b, nx * j, ny * j, rbx, rby);
+    a.r = U.clamp(a.r, -7, 7); b.r = U.clamp(b.r, -7, 7);
     const power = -vn;
     // each car takes the hit on its own side of the contact (normal into it)
     // the crush is shared: each car's structure takes about half the energy of the closing speed
@@ -579,7 +587,8 @@
     const mate = race.cars.find(o => o !== c && o.team === c.team && !o.finished);
     const mateIn = mate && (mate.inPit || (mate.brain.pit && mate.brain.pit.phase === 'approach'));
     const worst0 = Math.max(...c.wheels.map(w => w.wear));
-    if (box && mateIn && worst0 < 0.85 && c.wingDmg < 0.3 && remain > 1) box = false;
+    const lastChance = race.mandatory && new Set(c.tyreHist).size < 2 && remain <= 2;
+    if (box && mateIn && worst0 < 0.85 && c.wingDmg < 0.3 && remain > 1 && !lastChance) box = false;
     if (c.wingDmg > 0.3 || (c.dm && c.dm.needsPit && remain > 1)) box = true;
     if (box && !c.brain.pit) {
       c.brain.pit = { phase: 'approach', service: 2.2 + race.rng() * 0.8, served: false };
@@ -638,8 +647,12 @@
     const tr = race.track;
     const s = (c.loc.s - 20 + tr.L) % tr.L;
     const i = Math.floor(s / tr.ds);
-    const [x, y, h] = Tracks.pointAt(tr, s, tr.line.off[i]);
+    const lane = c.brain && c.brain.pit && c.brain.pit.phase !== 'approach' && !isNaN(tr.pit.off[i]);
+    const [x, y, h] = Tracks.pointAt(tr, s, lane ? tr.pit.off[i] - tr.pit.side * 1.8 : tr.line.off[i]);
     const keepDist = c.dist - 20;
+    // (three resets in a minute is a car that cannot go on)
+    if (!c.isPlayer && race.time - (c.recT || -1e9) < 25) { c.recN = (c.recN || 0) + 1; if (c.recN >= 2) c.incident = true; } else c.recN = 0;
+    c.recT = race.time;
     Car.place(c, x, y, h);
     Tracks.locate(tr, x, y, i, c.loc);
     c.vx = Math.cos(h) * 12; c.vy = Math.sin(h) * 12;
@@ -748,7 +761,7 @@
   // nobody boxes back and forth on the edge of a threshold)
   function tyreFor(race, c) {
     // a downpour soaks the track within a lap: count it as wetter than it is yet
-    const w = Math.max(race.wet, race.rain > 0.3 ? Math.min(1, race.wet + 0.3) : 0), id = c.compound.id;
+    const w = Math.max(race.wet, race.rain > 0.3 ? Math.min(1, race.rain * 1.15) : 0), id = c.compound.id;
     if (id === 'W') return w < 0.1 ? 'M' : w < 0.42 ? 'I' : null;
     if (id === 'I') return w > 0.8 ? 'W' : w < 0.08 ? 'M' : null;
     return w > 0.65 ? 'W' : w > 0.24 ? 'I' : null;
@@ -801,6 +814,7 @@
       // the AI uses the slow lap: those with tired tyres or a rain mismatch come in
       if (race.sim) for (const c of race.cars) {
         if ((c.isPlayer && !race.autoPlayer) || c.retired || c.finished || c.inPit || c.brain.pit || c.incident || race.laps - c.lap < 2) continue;
+        if (race.cars.some(o => o !== c && o.team === c.team && !o.retired && (o.inPit || o.brain.pit))) continue;
         const worst = Math.max(...c.wheels.map(w => w.wear)), want = race.wet > 0.05 || c.compound.wet ? tyreFor(race, c) : null;
         if (want || worst > 0.3 || race.rng() < 0.25) {
           c.brain.pit = { phase: 'approach', service: 2.2 + race.rng() * 0.8, served: false };
@@ -862,6 +876,7 @@
       }
       car.vx = car.vy = car.r = 0; car.retired = true;
       event(race, 'retire', car, 'RETIRED');
+      if (race.sc && !race.sc.fired && race.rng() < 0.5) scTrigger(race, car);
     }
   }
 
@@ -900,6 +915,7 @@
         if (Math.min(g, L - g) > (race.physLodDist || 150)) { if ((race.tickN + c.id) & 1) continue; half = true; }
       }
       const dt = half ? dt2 : dt1;
+      if (c.rubT > 0) c.rubT -= dt;
       if (c.dm && race.green) {
         F1.Damage.step(race, c, dt);
         if (c.dm.failed && !c.dm.handled) {
@@ -912,6 +928,8 @@
           if (Math.abs(c.loc.d) < race.track.hw + 1) scTrigger(race, c);
         }
       }
+      // (a broken wing is a stop for a new one; this is a car that can no longer be driven)
+      if (!c.isPlayer && c.dm && !c.incident && !c.retired && !c.finished && c.dm.paceK < 0.62) c.incident = true;
       const pitAuto = c.brain.pit && (c.brain.pit.phase !== 'approach' || Tracks.fwd(tr, c.loc.s, tr.pit.sIn) < 300);
       const auto = !c.isPlayer || pitAuto || c.finished || race.autoPlayer;
       if (auto) {
@@ -1100,7 +1118,7 @@
     event(race, 'done', null, '');
   }
 
-  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, classifyRest, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
+  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, planOpts, classifyRest, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
   // pit service hook used by AI.pitDrive
   F1.Race.attach = race => {
     race.servicePit = c => servicePit(race, c);

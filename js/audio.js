@@ -17,10 +17,13 @@
   const A = { ctx: null, on: false, vol: { master: 0.8, sfx: 0.9, music: 0.5 }, worklet: false };
 
   function init() {
-    if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
+    if (A.ctx) { if (A.ctx.state !== 'running' && !document.hidden) A.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     const ctx = A.ctx = new AC();
+    // a hidden page gets no frames, so everything would hold its last value and drone on
+    document.addEventListener('visibilitychange', () => { if (document.hidden) ctx.suspend(); else ctx.resume(); });
+    window.addEventListener('pagehide', () => ctx.suspend());
     A.master = ctx.createGain(); A.master.gain.value = A.vol.master;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -12; comp.ratio.value = 3.5; comp.attack.value = 0.003; comp.release.value = 0.18;
@@ -28,7 +31,7 @@
     A.sfx = ctx.createGain(); A.sfx.gain.value = A.vol.sfx; A.sfx.connect(A.master);
     A.musicBus = ctx.createGain(); A.musicBus.gain.value = A.vol.music * 0.5; A.musicBus.connect(A.master);
     // shared noise buffers: white, and a brown (integrated) one for rumble
-    const len = ctx.sampleRate * 2;
+    const len = ctx.sampleRate * 6;
     const nb = ctx.createBuffer(1, len, ctx.sampleRate), d = nb.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     A.noise = nb;
@@ -87,7 +90,8 @@
 
   function noiseSrc(brown) {
     const s = A.ctx.createBufferSource(); s.buffer = brown ? A.brown : A.noise; s.loop = true;
-    s.loopStart = Math.random(); s.loopEnd = s.loopStart + 0.9;
+    // (every bed its own length and rate: the same 0.9 s loop everywhere can be heard repeating)
+    s.loopStart = Math.random(); s.loopEnd = s.loopStart + 3.3 + Math.random() * 0.7; s.playbackRate.value = 0.94 + Math.random() * 0.12;
     return s;
   }
   const at = (param, v, tc) => param.setTargetAtTime(v, A.ctx.currentTime, tc || 0.04);
@@ -132,7 +136,7 @@
   function stopVoice(v) {
     if (!v) return;
     try { v.out.gain.setTargetAtTime(0, A.ctx.currentTime, 0.05); } catch (x) { /* already stopped */ }
-    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
+    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); else if (v.node.port) v.node.port.postMessage({ stop: 1 }); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
   }
   // the fallback: oscillators through a waveshaper (the original engine sound)
   function legacyEngine(cheap) {
@@ -207,6 +211,18 @@
     noiseBurst(0.5, 500, 0.7, 0.5, 'lowpass', 0, 0.9);
     for (let k = 0; k < 6; k++) noiseBurst(0.04, 900 + Math.random() * 1500, 3, 0.25, 'bandpass', 0.1 + k * 0.07 + Math.random() * 0.05, 0.5);
   }
+  // a contact that is not the listener's own: as loud as it is near
+  function impactAt(x, y, lx, ly, power) {
+    if (!A.on) return;
+    const d = Math.hypot(x - lx, y - ly), k = 0.75 / (1 + (d / 9) ** 1.6), v = U.clamp(power / 25, 0.05, 1) * k;
+    if (v < 0.02) return;
+    blip(60 + Math.random() * 25, 0.15 + v * 0.2, 'sine', 0.5 * v, 0.45);
+    noiseBurst(0.1 + v * 0.3, 800 + Math.random() * 400, 0.8, 0.45 * v, 'lowpass', 0, 0.6);
+  }
+  // the moments a grandstand gets up for
+  function crowdRoar(k) { R.crowdUp = Math.max(R.crowdUp || 0, k); }
+  // a stop: the guns on all four corners
+  function pitGuns() { if (!A.on) return; for (let k = 0; k < 4; k++) noiseBurst(0.09, 2200, 2.5, 0.16, 'bandpass', 0.05 + k * 0.28, 0.3); }
   function light(n) { blip(n === 5 ? 520 : 440, 0.16, 'square', 0.05); }
   function go() { blip(880, 0.35, 'square', 0.06); }
   // a seamless-shift gearbox: the engine voice makes the ignition cut (up) or the rev-matching
@@ -221,14 +237,14 @@
 
   // ---------- the race layer ----------
   const R = { engine: null, others: [], loops: null, scrape: 0, shiftT: 0, kerbT: 0, gravelT: 0, limT: 0, failed: false, pending: false };
-  const N_OTHERS = 5;
+  const N_OTHERS = 8;
 
   function loop(chain) {
     // a looping noise through a chain of filters into a gain (level 0 to start)
     const ctx = A.ctx, s = noiseSrc(chain.brown), g = ctx.createGain(); g.gain.value = 0;
     let n = s; const fs = [];
     for (const [type, f, q] of chain.f) { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q || 0.7; n.connect(b); n = b; fs.push(b); }
-    n.connect(g); g.connect(R.carBus || A.sfx); if (chain.verb) { const vg = ctx.createGain(); vg.gain.value = chain.verb; g.connect(vg); vg.connect(A.verbIn); }
+    n.connect(g); g.connect(chain.world ? A.sfx : R.carBus || A.sfx); if (chain.verb) { const vg = ctx.createGain(); vg.gain.value = chain.verb; g.connect(vg); vg.connect(A.verbIn); }
     s.start();
     return { s, g, f: fs };
   }
@@ -262,8 +278,8 @@
       const mobile = F1.Game && F1.Game.mobile && F1.Game.mobile();
       for (let k = 0; k < (mobile ? Math.min(2, N_OTHERS) : N_OTHERS); k++) R.others.push(makeVoice(true));
       R.loops = {
-        squeal: loop({ f: [['bandpass', 1500, 9]] }),
-        squeal2: loop({ f: [['bandpass', 2400, 12]] }),
+        squeal: loop({ f: [['bandpass', 1500, 4]] }),
+        squeal2: loop({ f: [['bandpass', 2400, 5]] }),
         scrub: loop({ f: [['bandpass', 700, 1.2]] }),
         judder: loop({ brown: true, f: [['lowpass', 180, 1]] }),
         road: loop({ brown: true, f: [['lowpass', 300, 0.7]] }),
@@ -276,9 +292,9 @@
         grass: loop({ f: [['lowpass', 500, 0.7]] }),
         scrape: loop({ f: [['bandpass', 3200, 2], ['highpass', 1200, 0.7]], verb: 0.4 }),
         plank: loop({ f: [['bandpass', 4800, 3]] }),
-        rain: loop({ f: [['highpass', 3000, 0.6]] }),
+        rain: loop({ world: true, f: [['highpass', 3000, 0.6]] }),
         spray: loop({ f: [['bandpass', 1100, 0.6]] }),
-        crowd: loop({ brown: false, f: [['bandpass', 600, 0.4], ['lowpass', 1400, 0.6]], verb: 0.8 }),
+        crowd: loop({ world: true, brown: false, f: [['bandpass', 600, 0.4], ['lowpass', 1400, 0.6]], verb: 0.8 }),
       };
       // each turn of the wheels thumps a little through the rumble (a tyre is never perfectly round)
       const ctx = A.ctx, lfo = ctx.createOscillator(), dep = ctx.createGain();
@@ -314,6 +330,7 @@
       R.engine.out.gain.setTargetAtTime(0, t, 0.05);
       R.others.forEach(e => e.out.gain.setTargetAtTime(0, t, 0.05));
       for (const k in L) L[k].g.gain.setTargetAtTime(0, t, 0.05);
+      if (R.wheelLfo) at(R.wheelLfo.dep.gain, 0, 0.05);
       return;
     }
     const mode = cam && cam.mode || 'chase', onboard = mode === 'cockpit' || mode === 'helmet' || mode === 'tcam';
@@ -324,6 +341,8 @@
     // pit limiter: the ignition cuts in and out against the speed limit
     let on = 1;
     if (p.limiter && p.u > p.limitSpeed - 1) { R.limT += dt; on = Math.sin(R.limT * 2 * Math.PI * 9) > -0.2 ? 1 : 0.15; }
+    // the rev limiter: a manual driver hears it bounce
+    else if (p.spec && p.rpm >= p.spec.rpmLimit - 30 && thr0 > 0.5) { R.limT += dt; on = Math.sin(R.limT * 2 * Math.PI * 30) > 0 ? 1 : 0.15; }
     R.onboard = onboard;
     // The listener: on board, the driver; outside, the camera itself, so a trackside camera hears
     // the car arrive, pass with the Doppler drop in pitch and fade away, and a chase camera hears
@@ -388,7 +407,9 @@
     const lock = W.reduce((a, w) => Math.max(a, w.lock || 0), 0), spin = W.reduce((a, w) => Math.max(a, w.spin || 0), 0);
     const slideL = Math.max(0, (p.slipLat || 0) - 1.2) * 0.05, slip = slideL + (p.slipLong || 0) * 0.04;
     const tarmac = (p.surfMask & 0b100111) !== 0, wet = race.wet || 0;
-    const sq = tarmac ? U.clamp(slip, 0, 0.24) * (1 - 0.7 * wet) : 0;
+    // how near the tyres are to their limit is what a driver hears, at any speed
+    const sat = U.clamp((Math.max(p.satF || 0, p.satR || 0) - 0.85) * 0.9, 0, 0.45);
+    const sq = tarmac ? U.clamp(Math.max(slip, sat), 0, 0.6) * (1 - 0.7 * wet) : 0;
     at(L.squeal.g.gain, sq, 0.04); at(L.squeal2.g.gain, sq * 0.6, 0.05);
     at(L.squeal.f[0].frequency, 1200 + Math.min(900, v * 7) + (Math.random() - 0.5) * 160, 0.05);
     at(L.scrub.g.gain, tarmac ? U.clamp(slip * 0.6 + spin * 0.06, 0, 0.12) : 0, 0.05);
@@ -428,6 +449,7 @@
     at(L.buffet.g.gain, onboard ? Math.min(0.2, v * v / 70000) * (0.75 + 0.25 * Math.sin(t * 7.3)) : 0, 0.05);
     // --- contact: walls, the plank, a corner with no wheel ---
     R.scrape *= Math.pow(0.02, dt);
+    if (p.rubT > 0) R.scrape = Math.max(R.scrape, Math.min(1, v / 40) * 0.3); // grinding along a barrier
     const wheelGone = dm && dm.wheelOff.some(x => x) ? 1 : 0;
     at(L.scrape.g.gain, Math.min(0.4, R.scrape * Math.min(1, v / 15) + wheelGone * Math.min(0.35, v / 30)), 0.03);
     at(L.plank.g.gain, Math.min(0.18, (p.bottoming || 0) * Math.min(1, v / 40) * 0.3), 0.02);
@@ -435,7 +457,8 @@
     const rain = race.rain || 0;
     at(L.rain.g.gain, rain * (onboard ? 0.16 : 0.1), 0.3);
     at(L.spray.g.gain, wet * Math.min(0.2, v / 250), 0.1);
-    at(L.crowd.g.gain, 0.025 + 0.015 * Math.max(0, Math.sin(t * 0.13)), 0.5);
+    R.crowdUp = (R.crowdUp || 0) * Math.pow(0.25, dt);
+    at(L.crowd.g.gain, 0.025 + 0.015 * Math.max(0, Math.sin(t * 0.13)) + 0.1 * R.crowdUp, 0.3);
 
     // --- the nearest cars ---
     const near = race.cars.filter(c => c !== p && !c.retired).map(c => ({ c, d: Math.hypot(c.x - lx, c.y - ly) })).sort((a, b) => a.d - b.d).slice(0, R.others.length);
@@ -466,6 +489,8 @@
     lp.connect(A.musicBus); lp.connect(dly); dly.connect(fb); fb.connect(dly); dly.connect(A.musicBus);
     M.nodes = { lp, dly, fb };
     const bar = () => {
+      // (a stopped clock: chords scheduled now would all stack up on the moment it resumes)
+      if (ctx.state !== 'running') return;
       const ch = CHORDS[M.step % CHORDS.length];
       const t = ctx.currentTime;
       ch.forEach((n, k) => {
@@ -504,5 +529,5 @@
     A.musicBus.gain.value = A.vol.music * 0.5;
   }
 
-  F1.Audio = { A, init, ui, impact, crack, engineBlow, light, go, shiftClack, chime, startRace, stopRace, updateRace, musicStart, musicStop, setVolumes, blip, _race: R };
+  F1.Audio = { impactAt, crowdRoar, pitGuns, A, init, ui, impact, crack, engineBlow, light, go, shiftClack, chime, startRace, stopRace, updateRace, musicStart, musicStop, setVolumes, blip, _race: R };
 })(typeof window !== 'undefined' ? window : globalThis);

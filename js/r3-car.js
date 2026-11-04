@@ -801,7 +801,7 @@
     }
     if (u.wheelsLow) put(u.wheelsLow, merged, root);
     if (u.far) u.far.visible = far;
-    if (u.nose) u.nose.visible = !far;
+    if (u.nose) u.nose.visible = lod === 0;
     const ck = u.cockpit;
     if (ck) {
       put(ck.group, lod === 0, root);

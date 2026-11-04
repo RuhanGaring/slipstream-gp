@@ -253,7 +253,8 @@
     '  c = agxCurve(c);',
     // "punchy" look in the AgX log domain: a power curve for contrast plus saturation
     '  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
-    '  c = pow(max(c, 0.0), vec3(1.3));',
+    // (the punch is for the mid tones: full strength in the shadows crushed foliage to black)
+    '  vec3 tSh = smoothstep(vec3(0.12), vec3(0.42), max(c, 0.0)); c = pow(max(c, 0.0), 1.0 + 0.3 * tSh);',
     '  l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
     '  c = l + 1.3 * (c - l);',
     '  c = outset * c;',

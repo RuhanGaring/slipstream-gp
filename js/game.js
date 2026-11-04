@@ -202,6 +202,9 @@
   });
   window.addEventListener('keyup', e => { keys.delete(e.code); if (F1.Viewer) F1.Viewer.keyUp(e.code); });
   window.addEventListener('blur', () => { keys.clear(); if (Game.state === 'race' && !Game.paused) pause(); });
+  // (a phone counts the end of a tap as the gesture that may start sound, not the start)
+  window.addEventListener('pointerup', () => Audio.init());
+  window.addEventListener('touchend', () => Audio.init());
   window.addEventListener('pointerdown', e => {
     Audio.init();
     if (e.button === 0 && UIm.UI.cur && UIm.UI.cur.id === 'title') UIm.key('Enter');
@@ -729,7 +732,7 @@
       const lineMode = race.mode === 'arcade' ? Game.raceDefaults.lineArcade : Game.raceDefaults.lineSim;
       if (!race.assistProf) {
         const handling = race.handling === 'arcade' || race.mode === 'arcade' ? 'arcade' : 'sim';
-        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, { pace: 0.94 * (handling === 'arcade' ? 1.12 : 1), grip: Race.learnedGrip(race.track, handling) });
+        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', 0.94 * (handling === 'arcade' ? 1.12 : 1)));
       }
       if (!race.cornerMarks) race.cornerMarks = F1.Raceline.cornerMarks(race.track, race.track.line, race.assistProf);
       assist = { tr: race.track, car: p, mode: lineMode, prof: race.assistProf, marks: race.cornerMarks };
@@ -753,12 +756,19 @@
       ctx.font = '700 11px Titillium Web, Segoe UI, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const me = vw ? vw.focus : p;
-      for (const c of race.cars) {
-        if (c === me) continue;
-        const d = Math.hypot(c.x - me.x, c.y - me.y);
-        if (d > 140) continue;
+      // nearest first, and no tag on top of another: at a start they would stack into a bar
+      TAGS.length = 0;
+      for (const c of race.cars) { if (c === me) continue; const d = Math.hypot(c.x - me.x, c.y - me.y); if (d <= 140) TAGS.push({ c, d }); }
+      TAGS.sort((u, v) => u.d - v.d);
+      PLACED.length = 0;
+      for (const { c, d } of TAGS) {
+        if (PLACED.length >= 10) break;
         const q = R3.project(c.x, c.y, 1.7);
         if (!q) continue;
+        let clash = false;
+        for (let k = 0; k < PLACED.length && !clash; k += 2) clash = Math.abs(PLACED[k] - q.x) < 42 && Math.abs(PLACED[k + 1] - q.y) < 16;
+        if (clash) continue;
+        PLACED.push(q.x, q.y);
         const a = U.clamp((140 - d) / 40, 0, 1) * 0.9;
         ctx.globalAlpha = a;
         ctx.fillStyle = 'rgba(8,10,13,0.82)'; ctx.fillRect(q.x - 20, q.y - 22, 40, 15);
@@ -769,6 +779,7 @@
     }
   }
 
+  const TAGS = [], PLACED = [];
   function render(race, dt, mode) {
     if (R3ok) { render3d(race, dt, mode); return; }
     const W2 = Game.world;
@@ -787,7 +798,7 @@
       // braking cues follow the limits the AI learned, with a small margin for a human
       if (!race.assistProf) {
         const handling = race.handling === 'arcade' || race.mode === 'arcade' ? 'arcade' : 'sim';
-        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, { pace: 0.94 * (handling === 'arcade' ? 1.12 : 1), grip: Race.learnedGrip(race.track, handling) });
+        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', 0.94 * (handling === 'arcade' ? 1.12 : 1)));
       }
       if (!race.cornerMarks) race.cornerMarks = F1.Raceline.cornerMarks(race.track, race.track.line, race.assistProf);
       Render.drawAssistLine(ctx, race.track, p, lineMode, race.assistProf, race.cornerMarks);
@@ -967,7 +978,7 @@
     FX.parts.length = 0; FX.skidN = 0; FX.skidHead = 0; FX.debris.length = 0;
     evIdx = 0; finishT = -1; retireT = -1; acc = 0;
     trace.cur = []; trace.best = null;
-    for (const c of race.cars) c.onShift = c.isPlayer ? d => Audio.shiftClack(d) : null;
+    for (const c of race.cars) c.onShift = d => { if (c === (race.lodFocus || race.player)) Audio.shiftClack(d); };
     return race;
   }
 
@@ -1020,7 +1031,7 @@
   const sessionOf = race => (race.quali != null ? QSEG[race.quali] : race.practice ? FP : null);
   // the AI's real laps run slower than the ideal of its speed profile (braking points, line
   // errors, kerbs): measured on Kestrel Park the quickest race laps came out about 13 per cent over
-  const AI_LAP_K = 1.13;
+  const AI_LAP_K = 1.08;
   function weekendStart(o) {
     const f = Game.flow, R = Game.raceDefaults;
     const roster = [];
@@ -1047,13 +1058,16 @@
     if (W.ai) return W.ai;
     const tr = Race.getTrack(W.track), R = Game.raceDefaults, sim = Game.flow.mode === 'sim';
     const diff = F1.Data.DIFFICULTY[R.difficulty == null ? 2 : R.difficulty];
-    const grip = Race.learnedGrip(tr, sim ? 'sim' : 'arcade'), gripK = sim ? 1 : 1.12;
+    const gripK = sim ? 1 : 1.12;
     W.ai = {};
+    // from the plan the AI will really race on, set against the lap a lone car really does on it
+    const L = F1.Limits && F1.Limits[tr.id], model1 = sim && L && L.simLap ? F1.Raceline.lapTime(tr, tr.line, F1.Car.SPEC, Object.assign(Race.planOpts(tr, sim, 1), { real: true })) : 0;
+    W.aiK = model1 ? L.simLap[0] / model1 : AI_LAP_K;
     for (const code in W.info) {
       if (code === W.me) continue;
       const I = W.info[code];
       const pace = U.clamp(diff.pace * (0.97 + (I.skill - 0.95) * 0.75) / 0.9875, 0.5, 1) * gripK;
-      W.ai[code] = F1.Raceline.lapTime(tr, tr.line, Object.assign({}, F1.Car.SPEC, Race.teamSpec(I.team)), { pace, grip });
+      W.ai[code] = F1.Raceline.lapTime(tr, tr.line, Object.assign({}, F1.Car.SPEC, Race.teamSpec(I.team)), Object.assign(Race.planOpts(tr, sim, pace), { real: true }));
     }
     return W.ai;
   }
@@ -1065,7 +1079,7 @@
       if (code === W.me) return { code, t: playerTime };
       // a session's best of a few runs: driver error shrinks the more consistent they are
       const err = Math.abs(gauss()) * 0.0035 * (1.6 - W.info[code].skill);
-      return { code, t: base[code] * AI_LAP_K * (1 - 0.0025 * seg + err) };
+      return { code, t: base[code] * W.aiK * (1 - 0.0025 * seg + err) };
     });
     rows.sort((a, b) => (a.t == null ? 1e9 : a.t) - (b.t == null ? 1e9 : b.t));
     W.res[seg] = rows;
@@ -1078,7 +1092,7 @@
       if (code === W.me) return { code, t: playerTime };
       const err = Math.abs(gauss()) * 0.006 * (1.6 - W.info[code].skill);
       // fuel and programmes cost about 0.7 per cent, a greener track another 0.25
-      return { code, t: base[code] * AI_LAP_K * (1.0095 + err) };
+      return { code, t: base[code] * W.aiK * (1.0095 + err) };
     });
     rows.sort((a, b) => (a.t == null ? 1e9 : a.t) - (b.t == null ? 1e9 : b.t));
     W.fpRes = rows;
@@ -1370,6 +1384,7 @@
     if (F1.Viewer) F1.Viewer.stop();
     Game.state = 'results';
     Audio.stopRace();
+    Audio.musicStart();
     document.getElementById('hud').classList.add('off');
     document.getElementById('shade').className = 'full';
     UIm.go('results', { race });
@@ -1408,7 +1423,7 @@
       const mine = e.car === p;
       switch (e.type) {
         case 'light': Audio.light(e.n); break;
-        case 'go': Audio.go(); if (race.mode !== 'tt') HUD.big('GO GO GO', '#2bd66b'); break;
+        case 'go': Audio.go(); Audio.crowdRoar(1); if (race.mode !== 'tt') HUD.big('GO GO GO', '#2bd66b'); break;
         case 'fastest': HUD.message('FASTEST LAP', 'purple', `${e.car.driver.first} ${e.car.driver.last.toUpperCase()}  ${U.fmtTime(e.car.lastLap)}`); break;
         case 'lap':
           if (mine) {
@@ -1427,12 +1442,12 @@
         case 'penalty': if (mine) { HUD.message(e.text, 'red'); Audio.chime(false); } break;
         case 'damage': if (mine) HUD.message('FRONT WING DAMAGE', 'red', 'BOX FOR A NEW NOSE'); break;
         case 'pitentry': if (mine) HUD.message('PIT LANE', 'blue', 'AUTOPILOT ENGAGED'); break;
-        case 'pitdone': if (mine) HUD.message('PIT STOP COMPLETE', 'green', p.compound.name + ' TYRES FITTED'); break;
+        case 'pitdone': if (mine) { HUD.message('PIT STOP COMPLETE', 'green', p.compound.name + ' TYRES FITTED'); Audio.pitGuns(); } break;
         case 'engineer': if (mine) { HUD.message('ENGINEER: BOX THIS LAP', 'red', Game.mobile() ? `${Car.COMPOUNDS[e.compound].name} TYRES  /  PIT, THEN PICK THEM` : `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS P THEN ${['S', 'M', 'H', 'I', 'W'].indexOf(e.compound) + 1}`, 4); Audio.chime(true); } break;
         case 'strategy': if (mine) HUD.message('STRATEGY', 'blue', planText(e.plan), 5); break;
         case 'pb': HUD.message('NEW PERSONAL BEST', 'purple', U.fmtTime(p.bestLap)); Audio.chime(true); break;
         case 'recover': if (mine) HUD.message('CAR RESET', ''); break;
-        case 'chequered': HUD.big('CHEQUERED FLAG'); break;
+        case 'chequered': HUD.big('CHEQUERED FLAG'); Audio.crowdRoar(1); break;
         case 'part': if (mine) { HUD.message('DAMAGE', 'red', e.text + ' LOST'); Audio.chime(false); } break;
         case 'failure': if (mine) { HUD.message(e.text, 'red', 'PULL OVER'); Audio.chime(false); } else HUD.message(e.car.driver.code + '  ' + e.text, 'yellow', '', 2.5); break;
         case 'retire': if (mine) { HUD.message('RETIRED', 'red', '', 4); retireT = race.time; } else if (e.car) HUD.message(e.car.driver.code + '  RETIRED', 'yellow', '', 2); break;
@@ -1477,7 +1492,7 @@
   let last = performance.now();
   let perf = { frames: 0, t: 0, fps: 0 };
   let booted = 0;
-  let frameFails = 0;
+  let frameFails = 0, miniN = 0;
   function frame(now) {
     // frame rate limit (advanced graphics): skip display refreshes until the next frame is due
     const cap = Game.settings.gfx.fpsCap;
@@ -1546,6 +1561,7 @@
         impactFx(f);
         if (Game.state === 'race' && f.type === 'break' && f.car === race.player) Audio.crack(f.power);
         if (Game.state === 'race' && (f.car === race.player || f.other === race.player)) { Audio.impact(f.power); cam.shake = Math.min(1.2, cam.shake + f.power / 20); }
+        else if (Game.state === 'race' && f.power > 3 && f.x != null) { const L = race.lodFocus || race.player; if (L) Audio.impactAt(f.x, f.y, L.x, L.y, f.power); }
       }
       race.fx.length = 0;
       stepFx(dt);
@@ -1588,7 +1604,7 @@
         cam.mode = Game.settings.camera;
         HUD.update(race, p, dt, Game.settings, { delta });
         drawMouseGauge();
-        Render.drawMini(miniCtx, Game.world, race, 220, miniCv.width / 220);
+        if ((miniN = (miniN + 1) % 3) === 0) Render.drawMini(miniCtx, Game.world, race, 220, miniCv.width / 220);
         // the flag, or a car that will not go on: a few seconds to take it in, then the results
         if (((finishT > 0 && race.time - finishT > 5) || (retireT > 0 && race.time - retireT > 4)) && Game.state === 'race' && !sessionOf(race) && race.mode !== 'tt') {
           Race.classifyRest(race);

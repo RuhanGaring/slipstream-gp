@@ -61,6 +61,8 @@
       t.colorSpace = normal ? THREE.NoColorSpace : THREE.SRGBColorSpace;
       t.anisotropy = small ? 4 : 8;
       t.needsUpdate = true;
+      // (once on the GPU the decoded copy is only memory: nearly a gigabyte over nine cars)
+      if (img.close) t.onUpdate = () => { if (t.image && t.image.close) t.image.close(); };
       return t;
     });
     texCache.set(key, p);

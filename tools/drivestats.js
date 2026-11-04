@@ -1,7 +1,7 @@
 // How the AI really drives, corner by corner: where each car gets on the brakes, how hard, how
 // much that varies between cars and laps, and how far apart their lines are at the apex.
 // usage: node tools/drivestats.js [track] [laps] [difficulty]
-const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
+const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
 const id = process.argv[2] || 'kestrel', laps = +process.argv[3] || 6, diff = process.argv[4] != null ? +process.argv[4] : 3, DT = 1 / 240;
 const race = F1.Race.create({ track: id, mode: 'sim', laps, difficulty: diff, team: 0, driver: 0, grid: 10, field: 20, seed: +(process.env.SEED || 7), assists: {} });
 race.autoPlayer = true;

@@ -122,7 +122,9 @@
     e.lim.classList.toggle('show', !!p.limiter); e.lim.classList.toggle('on', !!p.limiter);
     const boxing = p.brain && p.brain.pit;
     e.box.classList.toggle('show', !!boxing); e.box.classList.toggle('on', !!boxing);
-    if (race.sim) {
+    H.slowT = (H.slowT || 0) - dt;
+    if (race.sim && H.slowT <= 0) {
+      H.slowT = 0.25;
       p.wheels.forEach((w, k) => { e.tyreEls[k].style.background = tyreColor(w.temp, w.wear, p.compound.topt); });
       e.comp.textContent = p.compound.name;
       e.comp.className = 'c-' + p.compound.id;

@@ -70,7 +70,7 @@
       id: 'sierra', name: 'Sierra Alta', country: 'Spain', flag: 'ES',
       blurb: 'High in the mountains. Climbing esses, a blind crest taken flat, a hairpin at the top and a long fast plunge back down.',
       width: 14, style: 'park', seed: 67,
-      startAt: 0.45, pit: { side: 1, entry: -400, exit: 240, offset: 22, lane: 12 },
+      startAt: 0.45, pit: { side: 1, entry: -320, exit: 240, offset: 22, lane: 12 },
       v: [[900, 0, 25], [940, 190, 60], [1090, 310, 70], [1110, 480, 80], [1420, 720, 250], [1480, 1080, 16], [1080, 780, 60],
         [880, 960, 45], [480, 1120, 150], [100, 1000, 90], [-160, 700, 40], [-230, 330, 200], [-80, 0, 60]],
     },
@@ -78,7 +78,7 @@
       id: 'bahia', name: 'Autódromo Bahia Dourada', country: 'Brazil', flag: 'BR', trees: 'broad',
       blurb: 'Anticlockwise in a natural bowl. A plunging left-right off the line, a knot of slow infield corners and a flat-out curving climb to the flag.',
       width: 14, style: 'park', seed: 71,
-      startAt: 0.45, pit: { side: -1, entry: -380, exit: 230, offset: 22, lane: 12 },
+      startAt: 0.45, pit: { side: -1, entry: -300, exit: 230, offset: 22, lane: 12 },
       v: [[700, 0, 35], [830, -110, 40], [1100, -200, 220], [1180, -560, 300], [1100, -900, 45], [760, -960, 60], [520, -780, 22],
         [640, -520, 25], [380, -420, 30], [160, -640, 35], [-200, -560, 160], [-320, -220, 250], [-340, 0, 150]],
     },
@@ -95,7 +95,7 @@
       id: 'lonestar', name: 'Lone Star Motor Course', country: 'United States', flag: 'US', trees: 'broad',
       blurb: 'Big modern venue on the prairie. A steep climb to a first-corner hairpin, fast esses, a kilometre back straight and a stadium finish.',
       width: 15, style: 'modern', seed: 79,
-      startAt: 0.45, pit: { side: -1, entry: -420, exit: 260, offset: 24, lane: 12 },
+      startAt: 0.45, pit: { side: -1, entry: -340, exit: 260, offset: 24, lane: 12 },
       v: [[780, 0, 22], [580, -160, 70], [540, -320, 80], [420, -420, 80], [380, -580, 70], [200, -700, 40], [-900, -760, 18],
         [-650, -560, 40], [-560, -380, 30], [-720, -300, 25], [-640, -150, 30], [-420, -120, 120], [-380, 0, 80]],
     },
@@ -353,7 +353,7 @@
       const o = Math.abs(pitOff[i]);
       barr[ps][i] = Math.max(barr[ps][i], o + pit.lane / 2 + 1.0);
       if (o > hw + pit.lane / 2 + 1.5) pitWall[i] = Math.min(o - pit.lane / 2 - 0.4, hw + 4.5);
-      runT[ps][i] = SURF.GRASS;
+      runT[ps][i] = def.style === 'street' ? SURF.TARMAC : SURF.GRASS;
     }
     pit.wall = pitWall;
 
@@ -381,7 +381,7 @@
 
     // --- sectors, DRS zones ---
     const sectors = [0, L * (def.s1 || 0.33), L * (def.s2 || 0.68)];
-    const straightRuns = [];
+    const straightRuns = [], city = def.gen2 && def.style2 === 'city';
     {
       let i0 = -1;
       // find a starting index inside a corner so runs do not wrap awkwardly
@@ -389,11 +389,12 @@
       for (let i = 0; i < N; i++) if (Math.abs(kap[i]) > 1 / 300) { start = i; break; }
       for (let k = 0; k <= N; k++) {
         const i = (start + k) % N;
-        const st = Math.abs(kap[i]) < 1 / 700;
+        // (a town street bends: a real street circuit's overtaking stretch is not ruler straight)
+        const st = Math.abs(kap[i]) < (city ? 1 / 250 : 1 / 700);
         if (st && i0 < 0) i0 = k;
         if ((!st || k === N) && i0 >= 0) {
           const len = (k - i0) * ds;
-          if (len > 380) straightRuns.push({ s0: ((start + i0) % N) * ds, len });
+          if (len > (city ? 300 : 380)) straightRuns.push({ s0: ((start + i0) % N) * ds, len });
           i0 = -1;
         }
       }

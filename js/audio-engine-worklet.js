@@ -62,7 +62,7 @@
         // near bank's firings, the 1.5 order, carry the note
         this.T = { jit: 0.04, asym: 1.0, vary: 0.4, mDecay: 0.00412, plF: 299, plQ: 1.89, plG: 0.555, p2F: 240, p2Q: 3.44, p2G: 0.571, lpF: 2490, lpG: 0, hiF: 1676, hiQ: 0.4, hiG: 0.3755, mix: 0.85, mGain: 1, oLP: 761 };
         if (opts && opts.processorOptions) { Object.assign(this.p, opts.processorOptions); if (opts.processorOptions.tune) Object.assign(this.T, opts.processorOptions.tune); }
-        this.port.onmessage = e => Object.assign(this.p, e.data);
+        this.port.onmessage = e => { if (e.data.stop) this.dead = true; else Object.assign(this.p, e.data); };
       }
       rnd() { this.seed = (this.seed * 1664525 + 1013904223) >>> 0; return this.seed / 4294967296; }
       // biquad band-pass (constant skirt), state in an array
@@ -73,6 +73,7 @@
         return y;
       }
       process(inputs, outputs) {
+        if (this.dead) return false; // (a node that keeps returning true runs for ever, connected or not)
         const out = outputs[0][0];
         if (!out) return true;
         const P = this.p, S = this.s, n = out.length, sr = sampleRate, cheap = P.cheap;
@@ -130,13 +131,12 @@
           if (this.ph >= 1) {
             this.ph -= 1;
             this.cyl = (this.cyl + 1) % 6;
-            let a = (0.16 + 0.84 * S.load + 0.12 * thr) * CYL[this.cyl] * (1 - this.T.jit / 2 + this.T.jit * this.rnd()); // combustion varies firing to firing
+            let a = (0.24 + 0.76 * S.load + 0.12 * thr) * CYL[this.cyl] * (1 - this.T.jit / 2 + this.T.jit * this.rnd()); // combustion varies firing to firing
             if (this.cut > 0) a *= 0.08;                // upshift ignition cut
             if (thr < 0.08) {
-              a *= 0.32;                                 // fuel cut on the overrun: just the pumping
-              if (this.crackle > 0.05 && this.rnd() < 0.09 * this.crackle) a = 1.1 + 1.2 * this.rnd(); // fuel lights in the exhaust
+              if (this.crackle > 0.05 && this.rnd() < 0.09 * this.crackle) a = 0.7 + 0.6 * this.rnd(); // fuel lights in the exhaust
             }
-            if (this.bark > 0.05) a *= 1 + 0.35 * this.bark; // the blip or the gear taking drive
+            if (this.bark > 0.05) a = Math.max(a * (1 + 0.35 * this.bark), 0.55 * this.bark); // the blip or the gear taking drive
             if (P.on < 0.5 && this.rnd() < 0.8) a *= 0.05;  // limiter or engine off
             this.env[BANK[this.cyl]] = Math.max(this.env[BANK[this.cyl]], a);
             // ONB: what a microphone on the airbox hears. The nearer bank's induction and the

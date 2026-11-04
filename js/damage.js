@@ -73,6 +73,7 @@
         if ((lx - P[0]) ** 2 + (ly - P[1]) ** 2 < 0.5 * 0.5 && vn > 7 && rand(dm) < sev * 0.7) dm.puncture[k] = 1;
       }
       if (sev > 0.55) dm.engH -= (sev - 0.55) * 1.4;
+      if (vn > 45) dm.engH = 0; // a hit like that ends the race
       return false; // what breaks is found as the structure gives way (in step)
     }
     if (vn < 2.5) return false;

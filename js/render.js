@@ -905,12 +905,20 @@
       W.miniPath = new Path2D();
       for (let i = 0; i <= tr.N; i++) { const q = i % tr.N; i ? W.miniPath.lineTo(tr.x[q], tr.y[q]) : W.miniPath.moveTo(tr.x[q], tr.y[q]); }
     }
+    // the circuit never changes, so it is stroked once and copied after that
+    const outline = g => {
+      g.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, dpr * oy);
+      g.lineJoin = 'round';
+      g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 9 / k; g.stroke(W.miniPath);
+      g.strokeStyle = 'rgba(235,238,242,0.92)'; g.lineWidth = 4 / k; g.stroke(W.miniPath);
+    };
+    if (!W.miniBg || W.miniBg.width !== ctx.canvas.width) {
+      const c = document.createElement('canvas'); c.width = ctx.canvas.width; c.height = ctx.canvas.height;
+      const g = c.getContext('2d');
+      if (g) { outline(g); W.miniBg = c; }
+    }
     ctx.save();
-    ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, dpr * oy);
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 9 / k; ctx.stroke(W.miniPath);
-    ctx.strokeStyle = 'rgba(235,238,242,0.92)'; ctx.lineWidth = 4 / k; ctx.stroke(W.miniPath);
-    // sector tints
+    if (W.miniBg) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(W.miniBg, 0, 0); } else outline(ctx);
     ctx.restore();
     const S = (x, y) => [ox + x * k, oy + y * k];
     // start line

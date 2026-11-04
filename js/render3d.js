@@ -9,13 +9,13 @@
 
   // Per-venue light: sun position (degrees), sky gradient, fog, horizon backdrop.
   const LOOKS = {
-    kestrel: { sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, fogK: 0.72, shaftK: 0.1, skyK: 2.7, expK: 1.25, exag: 4.2, lawnDesat: 0.42, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
+    kestrel: { roadSky: 1.5, sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, fogK: 0.72, shaftK: 0.1, skyK: 2.7, expK: 1.25, exag: 4.2, lawnDesat: 0.42, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
       ridge: ['#6f7f55', '#55703f', '#42602f'], ridgeH: 90, jag: 5 },
     varenna: { sunEl: 21, sunAz: 235, sun: '#ffcf96', sunI: 3.2, top: '#3f78c0', hor: '#f1d4ab', bot: '#8d8a6a', fog: '#e3d2b6', fogN: 500, fogF: 4800, cloud: 0.32, haze: 1.2, exp: 0.95, env: 0.85,
       ridge: ['#9c9a7a', '#6f7a52', '#515f3c'], ridgeH: 110, jag: 7 },
     lucerne: { sunEl: 55, sunAz: 160, sun: '#fff6e8', sunI: 3.2, top: '#2a70c4', hor: '#c2dcf0', bot: '#6f8a99', fog: '#c6dbea', fogN: 600, fogF: 5200, cloud: 0.28, haze: 0.7, exp: 0.92, env: 1.0,
       ridge: ['#74776a', '#4f5a46', '#3a4636'], ridgeH: 380, jag: 16 },
-    hakone: { sunEl: 30, sunAz: 110, sun: '#fff3e2', sunI: 2.5, top: '#7c9cc4', hor: '#e1e7ee', bot: '#7d8c78', fog: '#d6dee7', fogN: 260, fogF: 3000, cloud: 0.5, haze: 0.9, exp: 1.0, env: 0.95,
+    hakone: { sunNeutral: 0.75, sunEl: 30, sunAz: 110, sun: '#fff3e2', sunI: 2.5, top: '#7c9cc4', hor: '#e1e7ee', bot: '#7d8c78', fog: '#d6dee7', fogN: 260, fogF: 3000, cloud: 0.5, haze: 0.9, exp: 1.0, env: 0.95,
       ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 620, jag: 26 },
     rimal: { exag: 3.2, sunEl: 8, sunAz: 265, sun: '#ff9d5c', sunI: 2.8, top: '#2b3f72', hor: '#f4a466', bot: '#9a7a55', fog: '#e7b38a', fogN: 500, fogF: 5200, cloud: 0.18, haze: 1.6, exp: 1.05, env: 0.8,
       ridge: ['#d2a172', '#b88a5e', '#9c7350'], ridgeH: 60, jag: 4 },
@@ -250,7 +250,7 @@
     if (ph) {
       const m = MATS.asphalt, prev = m.userData.patchExtra || null;
       m.userData.patchKey = (m.userData.patchKey || '') + '_neut';
-      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= 3.2;').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
+      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.uniforms.uRoadSky = F1.R3S.U.uRoadSky; sh.fragmentShader = 'uniform float uRoadSky;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= uRoadSky;').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
     }
     const aN = ph ? T.photo('asphalt_n', 9 / 3.5, false) : null;
     // kerbs: painted concrete; UVs run 1.5 m along and across the kerb
@@ -357,7 +357,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         // furniture: a dark mass along the back and to one side of some rooms
         rc *= 1.0 - 0.5 * step(h.z, 0.98) * step(0.7, h.z) * step(h.y, 0.32) * step(r3, 0.7);
         float lit = r3 > 0.84 ? 1.9 : 0.62, fall = 1.0 - 0.55 * h.z;
-        vec3 room = rc * fall * lit * (r3 > 0.84 ? vec3(1.1, 0.95, 0.72) : vec3(1.0)) * 0.3;
+        vec3 room = rc * fall * lit * (r3 > 0.84 ? vec3(1.1, 0.95, 0.72) : vec3(1.0)) * 0.1;
         // a blind part way down, a sheer curtain to one side
         float blind = 0.86 - 0.5 * r2 * r2, cur = step(r1, 0.55) * smoothstep(0.34, 0.3, abs(f.x - (r2 < 0.5 ? 0.22 : 0.78)));
         room = mix(room, vec3(0.42, 0.4, 0.36) * 0.34, step(blind, f.y));
@@ -408,11 +408,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // a garage seen from the pit lane, in the shade of its own roof
       c.width = 1024; c.height = 320;
       const W = 1024, H = 320, x0 = 210, x1 = 814, y0 = 58, y1 = 232;
-      const fl = g.createLinearGradient(0, y1, 0, H); fl.addColorStop(0, '#6d7074'); fl.addColorStop(1, '#8c8f92');
+      const fl = g.createLinearGradient(0, y1, 0, H); fl.addColorStop(0, '#3a3c40'); fl.addColorStop(1, '#6d7074');
       g.fillStyle = fl; g.beginPath(); g.moveTo(0, H); g.lineTo(x0, y1); g.lineTo(x1, y1); g.lineTo(W, H); g.fill();
       g.fillStyle = '#26282c'; g.beginPath(); g.moveTo(0, 0); g.lineTo(x0, y0); g.lineTo(x1, y0); g.lineTo(W, 0); g.fill();
       g.fillStyle = '#3e4146'; g.beginPath(); g.moveTo(0, 0); g.lineTo(x0, y0); g.lineTo(x0, y1); g.lineTo(0, H); g.fill(); g.beginPath(); g.moveTo(W, 0); g.lineTo(x1, y0); g.lineTo(x1, y1); g.lineTo(W, H); g.fill();
-      g.fillStyle = '#5b5f65'; g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      g.fillStyle = '#2a2c30'; g.fillRect(x0, y0, x1 - x0, y1 - y0);
       for (let i = 0; i < 2; i++) { const u = 0.3 + i * 0.4; g.fillStyle = '#b9bcc0'; g.beginPath(); g.moveTo(W * u - 14, 0); g.lineTo(W * u + 14, 0); g.lineTo(x0 + (x1 - x0) * u + 4, y0); g.lineTo(x0 + (x1 - x0) * u - 4, y0); g.fill(); }
       // benches and racking along the back wall, a screen, wheel guns on the wall
       g.fillStyle = '#34373c'; g.fillRect(x0, 176, x1 - x0, 56);
@@ -554,7 +554,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // works and hidden pixels are never shaded. Without it the logarithmic buffer is the fallback.
     let hasClip = false;
     try { const t = document.createElement('canvas').getContext('webgl2'); hasClip = !POT && !!t && !!t.getExtension('EXT_clip_control'); const lc = t && t.getExtension('WEBGL_lose_context'); if (lc) lc.loseContext(); } catch (e) { /* none */ }
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: !POT, powerPreference: 'high-performance', logarithmicDepthBuffer: !POT && !hasClip, preserveDrawingBuffer: false });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: !POT && GFX.post === false, stencil: false, powerPreference: 'high-performance', logarithmicDepthBuffer: !POT && !hasClip, preserveDrawingBuffer: false });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
@@ -603,6 +603,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       };
     }
     scene = new THREE.Scene();
+    // (on auto the scene forces every static mesh under it to be recomposed each frame)
+    scene.matrixAutoUpdate = false;
     camera = new THREE.PerspectiveCamera(60, 1, 0.06, FAR);
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
     scene.add(hemi);
@@ -633,6 +635,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   function resize(w, h, dpr) {
     if (!renderer) return;
     W = w; H = h; DPR = Math.min(GFX.dprCap || (GFX.lite ? 1 : 2), dpr || 1);
+    // a pixel budget: a 4K screen at 200 per cent is 8 million pixels through everything. Render
+    // scale above 1 is the player asking for more, and gets it
+    if (GFX.scale <= 1) DPR = Math.min(DPR, Math.max(0.5, Math.sqrt(2.6e6 / Math.max(1, w * h))));
     applyScale();
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -773,6 +778,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (state.sunDir.y < 0.06) { state.sunDir.y = 0.06; state.sunDir.normalize(); }
       const e = H0.sunE, lum = e[0] * 0.2126 + e[1] * 0.7152 + e[2] * 0.0722;
       sun.color.setRGB(e[0] / lum, e[1] / lum, e[2] / lum, THREE.LinearSRGBColorSpace); sun.intensity = lum;
+      // (a probe's clipped sun can come out sunset orange at a midday height)
+      if (L.sunNeutral) sun.color.lerp(new THREE.Color(1, 1, 1), L.sunNeutral);
       hemi.intensity = 0;
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
       const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
@@ -789,6 +796,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (rivi) { state.exposure *= 1.4; sun.intensity *= 1.1; } else state.exposure *= L.expK || 1.15;
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
+    S3.uRoadSky.value = L.roadSky || 3.2;
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
@@ -1441,7 +1449,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45));
         for (const [i0, i1] of runs(N, on)) {
           if ((i1 - i0) * tr.ds < 6) continue;
-          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (0.25 + 0.75 * t), e0 = W2.town ? Math.max(hw, tr.barr[side][k] + 0.32 - wd) : hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, 5);
+          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = W2.town ? Math.max(hw, tr.barr[side][k] + 0.32 - wd) : hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, W2.town ? 5 : 9);
         }
         // a town's narrow painted kerb, 28 cm wide and 12 high, standing at the foot of the barrier
         if (W2.town) {
@@ -1657,7 +1665,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // seating slope: local x along the track, rising away from it (+z)
       const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
       slope.rotateX(-Math.PI / 2 - Math.atan2(8.5, 12)); slope.translate(0, 5.6, 0);
-      const suv = slope.attributes.uv; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 2, suv.getY(k) * 0.95);
+      const suv = slope.attributes.uv; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6, (1 - suv.getY(k)) * 0.95);
       const sideS = new THREE.Shape([new THREE.Vector2(-6, 0), new THREE.Vector2(6.3, 0), new THREE.Vector2(6.3, 10.5), new THREE.Vector2(-6, 1.4)]);
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
@@ -3486,18 +3494,19 @@ void main() {
         // grass and gravel dust is fine, low and brownish; tyre smoke is denser and grey
         const dirt = p.col === '120,140,70' || p.col === '214,196,150';
         sm.size.setX(ns, r * (dirt ? 1.2 : 1.5));
-        const [cr, cg, cb] = dirt ? [158, 146, 118] : p.col.split(',').map(Number);
-        sm.rgba.setXYZW(ns, cr / 255 * 0.8, cg / 255 * 0.8, cb / 255 * 0.8, p.a * (1 - f) * (dirt ? 0.5 : 0.55));
+        const rgb = dirt ? DIRT_RGB : (p.rgb || (p.rgb = p.col.split(',').map(Number)));
+        sm.rgba.setXYZW(ns, rgb[0] / 255 * 0.8, rgb[1] / 255 * 0.8, rgb[2] / 255 * 0.8, p.a * (1 - f) * (dirt ? 0.5 : 0.55));
         ns++;
       } else if (p.kind === 1 && nk < 600) {
         sp.position.setXYZ(nk, p.x, (p.z || 0) + 0.12 + f * 0.3, p.y);
-        sp.size.setX(nk, 0.16);
-        sp.rgba.setXYZW(nk, 1, (220 - f * 120) / 255, (120 - f * 100) / 255, 1 - f);
+        sp.size.setX(nk, 0.05);
+        sp.rgba.setXYZW(nk, 3 - f, 1.6 - f, 0.6 - f * 0.5, 1 - f);
         nk++;
       }
     }
     fx.smoke.geometry.setDrawRange(0, ns); fx.sparks.geometry.setDrawRange(0, nk);
-    for (const a of [sm.position, sm.size, sm.rgba, sp.position, sp.size, sp.rgba]) a.needsUpdate = true;
+    if (ns) { sm.position.needsUpdate = sm.size.needsUpdate = sm.rgba.needsUpdate = true; }
+    if (nk) { sp.position.needsUpdate = sp.size.needsUpdate = sp.rgba.needsUpdate = true; }
     const scale = (F1.R3Post.Q.on ? F1.R3Post.height : renderer.getDrawingBufferSize(new THREE.Vector2()).y) * camera.projectionMatrix.elements[5] / 2;
     fx.smoke.material.uniforms.scale.value = scale; fx.sparks.material.uniforms.scale.value = scale;
 
@@ -3523,15 +3532,19 @@ void main() {
 
     // debris
     let nd = 0;
-    const tmp = new THREE.Object3D();
+    const tmp = debrisTmp || (debrisTmp = new THREE.Object3D());
     for (const d of F.debris) {
       if (d.t > 4 || nd >= 200) continue;
       tmp.position.set(d.x, 0.05 + (d.z || 0), d.y); tmp.rotation.set(0, d.a, 0); tmp.scale.set(d.s * 2, 1, d.s * 2); tmp.updateMatrix();
       fx.debris.setMatrixAt(nd++, tmp.matrix);
     }
-    fx.debris.count = nd; fx.debris.instanceMatrix.needsUpdate = true;
+    if (nd || fx.debris.count) fx.debris.instanceMatrix.needsUpdate = true;
+    fx.debris.count = nd;
     void dt;
   }
+
+  const DIRT_RGB = [158, 146, 118];
+  let debrisTmp = null;
 
   // racing line ribbon and reference markers ahead of the player
   const ACOL = {
@@ -3926,6 +3939,8 @@ void main() {
     const p = Promise.all(ps);
     renderer.toneMapping = tm;
     renderer.setRenderTarget(prev);
+    // the cars' textures go up here too, not on the frame a car first comes close
+    if (renderer.initTexture) for (const m of live.values()) m.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const q of ms) for (const k of TEX_KEYS) { const t = q[k]; if (t && t.isTexture && t.image && t.image.close && t.image.width && !t.r3Up) { t.r3Up = true; try { renderer.initTexture(t); } catch (e) { /* best effort */ } } } });
     return Promise.all([p.catch(() => {}), F1.R3Post.Q.on ? F1.R3Post.precompile() : null]).then(() => rt.dispose());
   }
 

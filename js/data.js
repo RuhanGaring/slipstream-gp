@@ -32,10 +32,10 @@
 
   // pace = fraction of the grip the AI learned each circuit allows (js/limits.js)
   const DIFFICULTY = [
-    { id: 'rookie', name: 'ROOKIE', pace: 0.58, aggr: 0.25 },
-    { id: 'amateur', name: 'AMATEUR', pace: 0.66, aggr: 0.45 },
-    { id: 'pro', name: 'PRO', pace: 0.76, aggr: 0.7 },
-    { id: 'expert', name: 'EXPERT', pace: 0.88, aggr: 0.85 },
+    { id: 'rookie', name: 'ROOKIE', pace: 0.62, aggr: 0.25 },
+    { id: 'amateur', name: 'AMATEUR', pace: 0.68, aggr: 0.45 },
+    { id: 'pro', name: 'PRO', pace: 0.74, aggr: 0.7 },
+    { id: 'expert', name: 'EXPERT', pace: 0.82, aggr: 0.85 },
     { id: 'legend', name: 'LEGEND', pace: 1.0, aggr: 1.0 },
   ];
 

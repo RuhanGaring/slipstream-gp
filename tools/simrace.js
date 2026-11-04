@@ -1,6 +1,6 @@
 // Headless race: every car is AI driven (player car too). Reports lap times,
 // incidents and overtakes per track.  usage: node tools/simrace.js [track] [laps] [diff] [mode]
-const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
+const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
 const ids = process.argv[2] && process.argv[2] !== 'all' ? [process.argv[2]] : F1.Tracks.DEFS.map(d => d.id);
 const laps = +process.argv[3] || 3, diff = process.argv[4] != null ? +process.argv[4] : 4, mode = process.argv[5] || 'sim';
 const DT = 1 / 240;

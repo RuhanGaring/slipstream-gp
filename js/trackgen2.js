@@ -1564,7 +1564,7 @@
       if (Math.abs(tr.kap[i]) > (style === 'city' ? 1 / 200 : 1 / 900)) { fail('grid', 'start straight bends'); break; }
     }
     if (!pitClear(tr, style === 'city' ? 12 : 30)) fail('pit lane');
-    if (tr.drs.length < 1 && style !== 'city') fail('no straight');
+    if (tr.drs.length < 1) fail('no straight');
     // corners and variety
     const nc = tr.apexes.length;
     const geomOnly = res.geomOnly;

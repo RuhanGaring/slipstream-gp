@@ -53,7 +53,9 @@
     'varying vec2 vTUv0; varying vec2 vTUv1; varying float vTBl; varying vec2 vTAng; varying vec2 vTLoc;',
     'varying vec3 vTRight; varying vec3 vTFwd; varying vec3 vTTint;',
   ].join('\n');
-  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl);';
+  // (alpha from a softer level: at close range an atlas texel is several pixels and the 0.5 test
+  // would show it as a staircase along every branch)
+  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl);';
   const FRAG_NORMAL = [
     '  vec3 tN0 = texture2D(uTNrm, vTUv0).xyz * 2.0 - 1.0, tN1 = texture2D(uTNrm, vTUv1).xyz * 2.0 - 1.0;',
     // a baked view-space normal back to world space: x along that view's right, z toward it
@@ -77,7 +79,7 @@
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = FRAG_PARS + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint;')
+      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + FRAG_NORMAL)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_TRANS);
   }

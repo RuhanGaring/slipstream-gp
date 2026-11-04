@@ -65,7 +65,7 @@
   SURF_PROPS[SURF.PIT] = { mu: 0.98, roll: 0.012 };
   SURF_PROPS[SURF.KERB] = { mu: 0.9, roll: 0.02, bump: 1 };
   SURF_PROPS[SURF.TARMAC] = { mu: 0.9, roll: 0.016 };
-  SURF_PROPS[SURF.GRASS] = { mu: 0.58, roll: 0.07, dirt: 1 };
+  SURF_PROPS[SURF.GRASS] = { mu: 0.34, roll: 0.1, dirt: 1 };
   SURF_PROPS[SURF.GRAVEL] = { mu: 0.42, roll: 0.42, dirt: 2 };
 
   const COMPOUNDS = {
@@ -185,6 +185,7 @@
     if (c.dm && c.dm.stuck) return; // a broken gearbox stays in the gear it has
     const g = c.gear + dir;
     if (g < 1 || g > c.spec.gears.length) return;
+    if (dir < 0 && wheelRpm(c, g) > c.spec.rpmLimit + 200) return;
     c.gear = g; c.shiftT = 0.045 * (c.dm ? c.dm.shiftK : 1); c.shiftDir = dir;
     if (c.onShift) c.onShift(dir);
   }
@@ -256,7 +257,7 @@
 
     // --- aero (ground effect on ride height, active aero mode, dirty air) ---
     const q = 0.5 * RHO * speed * speed;
-    const xm = c.aeroX && !c.wingDmg ? 1 : 0;
+    const xm = c.aeroX && c.wingDmg < 0.5 ? 1 : 0;
     const hMean = (c.rhF + c.rhR) / 2;
     let ge = 1 + sp.geGain * (1 - U.clamp(hMean / sp.hRef, 0, 2));
     if (hMean < sp.hStall) ge *= U.lerp(0.72, 1, U.clamp(hMean / sp.hStall, 0, 1)); // floor stalls
@@ -264,10 +265,11 @@
     const down = ClA * q;
     const dirty = 1 - c.dfMul; // wake from a car ahead costs the front more than the rear
     let balF = sp.aeroBal + U.clamp(1.2 * ((c.rhR - c.rhF) - (sp.rh0R - sp.rh0F)), -0.05, 0.05);
+    const balR0 = 1 - balF;
     balF = balF * (1 - c.wingDmg * 0.45) - (xm ? 0.03 : 0);
     const D = c.dm; // full damage model (js/damage.js), when it is on
     const wingK = D ? 0 : c.wingDmg;
-    const downF = down * balF * (1 - dirty * 1.5) * (1 - wingK * 0.4) * (D ? D.kDownF : 1), downR = down * (1 - balF) * (1 - dirty * 0.55) * (D ? D.kDownR : 1);
+    const downF = down * balF * (1 - dirty * 1.5) * (1 - wingK * 0.4) * (D ? D.kDownF : 1), downR = down * Math.min(1 - balF, balR0 + (xm ? 0.03 : 0)) * (1 - dirty * 0.55) * (D ? D.kDownR : 1);
     const drag = sp.CdA * (xm ? sp.xModeCd : 1) * (1 + wingK * 0.07) * c.dragMul * q * (D ? D.kDrag : 1);
 
     // --- suspension: loads from springs, dampers and bars over the road surface ---
@@ -341,7 +343,7 @@
       const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - 0.12) / 0.3, 0, 1);
       if (throttle > 0.85) Pk = sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
       // super-clipping: with an almost flat battery the MGU-K harvests at full throttle at speed
-      if (c.soc < 0.06 && !c.overtake && kmh > 250) Pk = -90000 * kScale;
+      if (c.soc < 0.3 && !c.overtake && kmh > 270) Pk = -120000 * kScale;
     }
     let Tengine = 0;
     if (Pice + Pk !== 0) {
@@ -358,7 +360,10 @@
     if (throttle < 0.05 && omA > 8) {
       const liftHarvest = 120000 * kScale * U.clamp((kmh - 150) / 80, 0, 1) * U.clamp(1 - Math.abs(c.steer) * 12, 0, 1);
       const want = (brake > 0.05 ? sp.kMax * kScale * Math.min(1, brake * 1.6) : liftHarvest) * (c.soc < 1 ? 1 : 0);
-      regenAxleT = Math.min(2600, want / Math.max(30, omA)) * Math.min(W[2].bmod, W[3].bmod) * U.clamp((omA - 8) / 30, 0, 1);
+      // (under braking only as much as the rear brakes were asked for: ABS trims the friction brakes,
+      // which is what stops a rear lock, and the regen comes out of what they would have done)
+      const Tdem = brake > 0.05 ? sp.brakeMax * brake * (1 - sp.brakeBias) * sp.R * Math.min(W[2].bmod, W[3].bmod) : 1e9;
+      regenAxleT = Math.min(2600, want / Math.max(30, omA), Tdem) * U.clamp((omA - 8) / 30, 0, 1);
       regenP = regenAxleT * omA;
       Tengine -= (550 * U.clamp(omA / 40, 0, 1) + regenAxleT) * Math.sign(omAxle);
     }
@@ -445,8 +450,8 @@
       const bshare = w.front ? sp.brakeBias / 2 : (1 - sp.brakeBias) / 2;
       const bEff = w.brakeT < 300 ? 0.8 + 0.2 * w.brakeT / 300 : w.brakeT > 1100 ? Math.max(0.55, 1 - (w.brakeT - 1100) / 700) : 1;
       let Tb = brkF * bshare * sp.R * bEff;
-      if (!w.front) Tb = Math.max(0, Tb - regenT);
       if (a.abs) Tb *= w.bmod;
+      if (!w.front) Tb = Math.max(0, Tb - regenT);
       Tb += S.roll * Fz * sp.R * 0.3; // rolling resistance as a drag torque
       const kap0 = (w.omega * sp.R - vxw) / vDen;
       tyreForce(kap0, tanA, Dx, Dy, sp, TF);

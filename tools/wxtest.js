@@ -1,6 +1,6 @@
 // Headless weather and safety car test: every car AI driven.
 // usage: WEATHER=dry|light|heavy|mixed SC=on|off|always node tools/wxtest.js [track] [laps]
-const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
+const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
 const id = process.argv[2] || 'kestrel', laps = +process.argv[3] || 5;
 const DT = 1 / 120;
 const race = F1.Race.create({ track: id, mode: 'sim', laps, difficulty: 3, team: 0, driver: 0, grid: 10, field: 20, seed: +(process.env.SEED || 7), assists: {}, weather: process.env.WEATHER || 'dry', safetyCar: process.env.SC || 'off' });
