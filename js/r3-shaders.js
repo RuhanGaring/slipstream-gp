@@ -365,6 +365,7 @@
   // Road paint: worn through to the asphalt where wheels cross it, with dirt and rubber.
   function paintWear(m) {
     return ext(m, 'paint', sh => {
+      sh.vertexShader = '#define R3_ZK 1.006\n' + sh.vertexShader;
       sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <logdepthbuf_fragment>', '#include <logdepthbuf_fragment>\n#if defined( USE_LOGDEPTHBUF ) && defined( USE_LOGDEPTHBUF_EXT )\n  gl_FragDepthEXT -= 0.0012;\n#endif').replace('#include <color_fragment>', [
         '#include <color_fragment>',
         '  vec2 pW = vFogWorld.xz;',

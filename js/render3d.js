@@ -96,6 +96,47 @@
     return out;
   };
 
+  // World partition. A merged mesh is one draw and is either wholly on screen or wholly not, so a
+  // town's roads or buildings would all be drawn, and all drawn again for each shadow slice, whichever
+  // way the camera looks. Each big mesh is cut here into tiles of about CHUNK triangles: its triangles
+  // are sorted by tile in one index buffer, and each tile is a mesh with its own draw range and bounds,
+  // sharing the one set of vertex buffers. Then only the tiles in a view are drawn.
+  const CHUNK = 12000;
+  function partition(root) {
+    for (const m of root.children.slice()) {
+      if (!m.isMesh || m.isInstancedMesh || m.geometry.isInstancedBufferGeometry || m.userData.noSplit || m.customDepthMaterial || Array.isArray(m.material) || m.material.userData.grass) continue;
+      const g = m.geometry, pos = g.attributes.position, P = pos.array, I = g.index ? g.index.array : null, tn = (I ? I.length : pos.count) / 3;
+      if (tn < CHUNK * 1.5 || pos.itemSize !== 3 || pos.isInterleavedBufferAttribute) continue;
+      let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      for (let k = 0; k < P.length; k += 3) { const x = P[k], z = P[k + 2]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+      const cell = Math.max(40, Math.sqrt((x1 - x0 + 1) * (z1 - z0 + 1) / (tn / CHUNK))), nx = Math.ceil((x1 - x0 + 1) / cell), nz = Math.ceil((z1 - z0 + 1) / cell);
+      const keyOf = new Int32Array(tn), count = new Int32Array(nx * nz);
+      for (let t = 0; t < tn; t++) {
+        const a = I ? I[t * 3] : t * 3, b = I ? I[t * 3 + 1] : t * 3 + 1, c = I ? I[t * 3 + 2] : t * 3 + 2;
+        const x = (P[a * 3] + P[b * 3] + P[c * 3]) / 3, z = (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, k = Math.min(nz - 1, Math.floor((z - z0) / cell)) * nx + Math.min(nx - 1, Math.floor((x - x0) / cell));
+        keyOf[t] = k; count[k]++;
+      }
+      const start = new Int32Array(nx * nz + 1);
+      for (let k = 0; k < nx * nz; k++) start[k + 1] = start[k] + count[k];
+      const fill = start.slice(), out = pos.count > 65535 || !I ? new Uint32Array(tn * 3) : new Uint16Array(tn * 3);
+      for (let t = 0; t < tn; t++) { const q = fill[keyOf[t]]++ * 3; for (let j = 0; j < 3; j++) out[q + j] = I ? I[t * 3 + j] : t * 3 + j; }
+      const index = new THREE.BufferAttribute(out, 1);
+      root.remove(m);
+      for (let k = 0; k < nx * nz; k++) {
+        if (!count[k]) continue;
+        let bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9, bz0 = 1e9, bz1 = -1e9;
+        for (let q = start[k] * 3; q < start[k + 1] * 3; q++) { const v = out[q] * 3, x = P[v], y = P[v + 1], z = P[v + 2]; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; if (z < bz0) bz0 = z; if (z > bz1) bz1 = z; }
+        const g2 = new THREE.BufferGeometry();
+        g2.attributes = g.attributes; g2.index = index; g2.setDrawRange(start[k] * 3, count[k] * 3);
+        g2.boundingBox = new THREE.Box3(new THREE.Vector3(bx0, by0, bz0), new THREE.Vector3(bx1, by1, bz1));
+        g2.boundingSphere = g2.boundingBox.getBoundingSphere(new THREE.Sphere());
+        const c = new THREE.Mesh(g2, m.material);
+        c.castShadow = m.castShadow; c.receiveShadow = m.receiveShadow; c.renderOrder = m.renderOrder; c.userData = m.userData;
+        root.add(c);
+      }
+    }
+  }
+
   const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), SC = new THREE.Vector3(), PV = new THREE.Vector3();
   function mat(x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) {
     E.set(rx, ry, rz, 'YXZ'); Q.setFromEuler(E); SC.set(sx, sy, sz); PV.set(x, y, z);
@@ -469,11 +510,51 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     ROCK = pr === 'rock'; POT = ROCK || pr === 'potato';
   } catch (e) { /* no storage */ }
   const FAR = ROCK ? 1600 : POT ? 3000 : 14000; // the starting far plane; GFX.viewDist moves it (setView)
+  // Perspective drawing runs reversed (GL depth 1 near, 0 at infinity): the clip range goes to 0..1
+  // and every vertex shader ends by setting z to the camera's near distance. Depth tests, clears and
+  // polygon offsets are turned round at the GL calls, so three.js and the materials need no changes.
+  // Shadow slices, being orthographic, stay as they were.
+  const NEAR = 0.06;
+  function reverseDepth(r) {
+    const gl = r.getContext(), clip = gl.getExtension('EXT_clip_control');
+    const realFn = gl.depthFunc.bind(gl), realCl = gl.clearDepth.bind(gl), realPo = gl.polygonOffset.bind(gl), realSrc = gl.shaderSource.bind(gl), realMk = gl.createShader.bind(gl);
+    const flip = { [gl.LESS]: gl.GREATER, [gl.LEQUAL]: gl.GEQUAL, [gl.GREATER]: gl.LESS, [gl.GEQUAL]: gl.LEQUAL };
+    let rev = false, fn = gl.LEQUAL, cl = 1, pf = 0, pu = 0;
+    const kinds = new WeakMap();
+    gl.createShader = t => { const o = realMk(t); kinds.set(o, t); return o; };
+    gl.shaderSource = (o, src) => {
+      if (kinds.get(o) === gl.VERTEX_SHADER && src.includes('projectionMatrix')) {
+        const e = src.lastIndexOf('}');
+        src = src.slice(0, e) + `\n#ifndef R3_ZK\n#define R3_ZK 1.0\n#endif\n  if (projectionMatrix[3][3] == 0.0) gl_Position.z = ${NEAR} * R3_ZK;\n` + src.slice(e);
+      }
+      realSrc(o, src);
+    };
+    gl.depthFunc = f => { fn = f; realFn(rev ? flip[f] || f : f); };
+    gl.clearDepth = v => { cl = v; realCl(rev ? 1 - v : v); };
+    gl.polygonOffset = (a, b) => { pf = a; pu = b; realPo(rev ? -a : a, rev ? -b : b); };
+    const set = on => {
+      if (on === rev) return;
+      rev = on;
+      clip.clipControlEXT(clip.LOWER_LEFT_EXT, on ? clip.ZERO_TO_ONE_EXT : clip.NEGATIVE_ONE_TO_ONE_EXT);
+      gl.depthFunc(fn); gl.clearDepth(cl); gl.polygonOffset(pf, pu);
+    };
+    const render = r.render.bind(r), sm = r.shadowMap, shadow = sm.render.bind(sm), clear = r.clear.bind(r);
+    r.render = (sc, cam) => { set(!!cam.isPerspectiveCamera); render(sc, cam); };
+    sm.render = (l, sc, cam) => { const w = rev; set(false); shadow(l, sc, cam); set(w); };
+    r.clear = (c, d, st) => { clear(c, d, st); };
+    F1.R3Post.setReversed(NEAR);
+  }
+
   function init(canvas) {
     // (three always gives the canvas an alpha channel and keeps it opaque by clearing alpha to 1:
     // nothing drawn straight to the screen may write alpha below 1, or Edge shows the black page
     // through it; see r3SunA in js/r3-shadow.js)
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: !POT, powerPreference: 'high-performance', logarithmicDepthBuffer: !POT, preserveDrawingBuffer: false });
+    // Reversed depth, where the browser has clip control: 32 bit float depth holding near / w keeps
+    // precision from the cockpit to the far hills with no gl_FragDepth, so the GPU's early depth test
+    // works and hidden pixels are never shaded. Without it the logarithmic buffer is the fallback.
+    let hasClip = false;
+    try { const t = document.createElement('canvas').getContext('webgl2'); hasClip = !POT && !!t && !!t.getExtension('EXT_clip_control'); const lc = t && t.getExtension('WEBGL_lose_context'); if (lc) lc.loseContext(); } catch (e) { /* none */ }
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: !POT, powerPreference: 'high-performance', logarithmicDepthBuffer: !POT && !hasClip, preserveDrawingBuffer: false });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
@@ -516,6 +597,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     camera = new THREE.PerspectiveCamera(60, 1, 0.06, FAR);
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
     scene.add(hemi);
+    if (hasClip) reverseDepth(renderer);
     // the sun lights the scene; its shadow comes from the cascades (js/r3-shadow.js)
     sun = new THREE.DirectionalLight('#ffffff', 2.5);
     sun.castShadow = false;
@@ -833,6 +915,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const mesh = new THREE.Mesh(geo, m);
       mesh.receiveShadow = o.receive !== false; mesh.castShadow = !!o.cast;
       if (o.order) mesh.renderOrder = o.order;
+      if (o.far) mesh.userData.far = o.far;
       root.add(mesh);
       return mesh;
     };
@@ -1076,7 +1159,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           }
         }
         if (!M.wear) { M.wear = std({ map: T.wear(), transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); M.wear.userData.maskK = 0.5; }
-        add(wa.geo(), M.wear, { order: 1 });
+        add(wa.geo(), M.wear, { order: 1, far: 300 });
       }
       {
         const tm = std({ map: T.runoff(th.runoff), roughness: 0.96 }); tm.userData.wetK = [1, 1];
@@ -1252,7 +1335,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               ribbon(gt, tr, i0, i1 - 1, k => (sg > 0 ? wall(k) - 0.42 : -wall(k)), k => (sg > 0 ? wall(k) : -wall(k) + 0.42), 0.006, 3);
             }
           }
-          if (gt.k) add(gt.geo(), M.gutter, { receive: true });
+          if (gt.k) add(gt.geo(), M.gutter, { receive: true, far: 360 });
         }
       }
       if (W2.town) {
@@ -1301,7 +1384,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         rect(-3.2, 3.2, -1.4, -1.25, c); rect(-3.2, 3.2, 1.25, 1.4, c); rect(-3.2, -3.05, -1.4, 1.4, c); rect(3.05, 3.2, -1.4, 1.4, c);
         rect(-1.75, -1.57, -1.0, 1.0, white); rect(1.55, 1.73, -1.0, 1.0, white);
       }
-      add(pa.geo(), M.paint, { receive: true, order: 1 });
+      add(pa.geo(), M.paint, { receive: true, order: 1, far: W2.town ? 340 : 0 });
       // chequered start line
       const ck = new Acc();
       const s0 = -0.8, s1 = 0.8;
@@ -1472,9 +1555,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (armW.k) add(armW.geo(), M.railW || (M.railW = std({ color: '#cfd4d2', roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide, normalMap: T.corrugation() })), { cast: true });
       if (orn.k) add(orn.geo(), M.orangeEnd || (M.orangeEnd = std({ map: absorberTex(), roughness: 0.7, side: THREE.DoubleSide })), { cast: true });
       if (nose.k) add(nose.geo(), M.stripeEnd || (M.stripeEnd = std({ map: stripeTex(), roughness: 0.5, side: THREE.DoubleSide })), { cast: true });
-      if (cab.k) add(cab.geo(), M.dark, { cast: false });
+      if (cab.k) add(cab.geo(), M.dark, { cast: false, far: 160 });
       if (fpost.parts.length) add(fpost.geo(), M.fencePost || (M.fencePost = std({ color: '#5f6c64', roughness: 0.6, metalness: 0.3 })), { cast: true });
-      add(fen.geo(), fenceMat(M, W2), { cast: false });
+      add(fen.geo(), fenceMat(M, W2), { cast: false, far: 260 });
       add(posts.geo(), M.steel, { cast: true });
       // floodlight masts: 36 m poles with a lamp bank, every 90 m round a modern venue
       if (style === 'modern') {
@@ -1678,7 +1761,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           if (town && it.w * it.h > 90) { const [hx, hz] = W2L(it.w * 0.18 * ((it.seed & 1) * 2 - 1), it.h * 0.15); roofs.add(ub, mat(hx, hgt + 3 + gy + 1.3, hz, ry, 3.2, 2.2, 2.6), col('#c9c6bf')); }
         }
       }
-      add(relief.geo(), M.vcol, { cast: true });
+      add(relief.geo(), M.vcol, { cast: true, far: 480 });
       if (shops && shops.parts.length) add(shops.geo(), M.cityShop || (M.cityShop = interiors(pbr('city_shop', 1, { envMapIntensity: 0.8 }), 6.4)), { cast: false });
       if (cityB) for (const [k, b] of cityB) add(b.parts.length ? b.geo() : null, M[k] || (M[k] = interiors(pbr(k, 1, { vertexColors: true, envMapIntensity: 0.8 }), 6.4)), { cast: true });
       add(walls.geo(), T.has('facade') ? pbr('facade', 1, { vertexColors: true }) : std({ map: repTex(T.windows(), 1, 1), vertexColors: true, roughness: 0.75 }), { cast: true });
@@ -1707,6 +1790,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     buildBoards(root, W2, tr); tag('boards');
     buildBackdrop(root, W2, tr);
     const tvCams = buildTvCams(tr);
+    if (water) water.userData.noSplit = true;
+    partition(root);
+    // the scenery never moves: its matrices are made once, and the frame's walk skips it
+    root.updateMatrixWorld(true);
+    root.traverse(o => { o.matrixAutoUpdate = false; });
+    root.matrixWorldAutoUpdate = false;
+    root.userData.farList = root.children.filter(o => o.userData.far && o.geometry);
+    for (const o of root.userData.farList) if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
     return { tr, root, gantry, water, tvCams, grass, turf };
   }
 
@@ -2032,13 +2123,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         // a crossing's bars lie along the road, kerb to kerb, the centre line stopping a metre short
         const zebra = (z0, z1) => {
           if (z0 < 2 || z1 > L - 2 || blocks.some(b => z1 > b[0] - 8 && z0 < b[1] + 8)) return false;
-          const h = Math.min(hAt(z0), hAt(z1)), keepT = tone, tracks = [(mid + h) / 2, (mid - h) / 2];
+          const h = Math.min(hAt(z0), hAt(z1)), keepT = tone, keepF = flaky, tracks = [(mid + h) / 2, (mid - h) / 2];
+          flaky = 0;
           for (const sd of [-1, 1]) for (let q = 0.65; Math.abs(mid + sd * q) < h - 0.35; q += 1.3) {
             const c = mid + sd * q, worn = tracks.some(l => Math.abs(Math.abs(c - l) - 0.8) < 0.4);
             tone = worn ? keepT.clone().multiplyScalar(0.46) : keepT;
             band(z0, z1, c, 0.6);
           }
-          tone = keepT;
+          tone = keepT; flaky = keepF;
           blocks.push([z0 - 1, z1 + 1]);
           if (wordsP() < 0.5) throughBars.push(blocks[blocks.length - 1]);
           return true;
@@ -2098,11 +2190,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         if (minW >= 6 && hi - lo > 8) {
           const stretch = [lo], real = [];
           joints.forEach((j, k) => { if (k < joints.length - 1 && arms[j.n].length >= 3 && Sj[k] - lo > 100 && hi - Sj[k] > 100) real.push(Sj[k]); });
-          if (real.length && wordsP() < 0.5) stretch.push(real[Math.floor(wordsP() * real.length)]);
+          if (real.length && mk.type < 0.78 && wordsP() < 0.5) stretch.push(real[Math.floor(wordsP() * real.length)]);
           stretch.push(hi);
           const barsOut = blocks.filter(b => !throughBars.includes(b)), dashQ = mk.type >= 0.78 ? mid + 0.3 : mid, busy = mk.bays && minW < 12;
           for (let k = 0; k < stretch.length - 1; k++) {
-            const a0 = stretch[k], b0 = stretch[k + 1], ty = k ? wordsP() : mk.type;
+            const a0 = stretch[k], b0 = stretch[k + 1], ty = k ? wordsP() * 0.78 : mk.type;
             if (minW >= 11.5 && cls === 0) { dashes(mid - minW / 6, 0.15, 2.5, 1.1, a0, b0); solid(mid + minW / 6, 0.15, a0, b0, barsOut); }
             else if (minW >= 9 && ty < 0.18) dashes(dashQ, 0.12, 0.4, 8.6, a0, b0);
             else if (ty < 0.56) dashes(dashQ, 0.15, 2.5, 1.1, a0, b0);
@@ -2147,8 +2239,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const sideways = (t, f, q) => { const sd = q > mid ? -1 : 1, c = at(t, q), g = at(t + f * 1.1, q + sd * 0.7), r = at(t + f * 0.7, q + sd * 1), h = at(t + f * 1.5, q + sd * 0.4); curve([c, g], 0.14); tri(f > 0 ? h : r, f > 0 ? r : h, at(t + f * 1.55, q + sd * 1.15)); };
           if (dA >= 3 && hi - lo > 60 && wordsP() < 0.22) sideways(lo + 30, -1, (mid - hAt(lo + 30)) / 2);
           if (dB >= 3 && hi - lo > 60 && wordsP() < 0.22) sideways(hi - 30, 1, (mid + hAt(hi - 30)) / 2);
-          if (dA >= 3 && hi - lo > 30) { const q = (mid - hAt(lo + 12)) / 2; arrow(lo + 12, -1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(lo + 22, -1, q); }
-          if (dB >= 3 && hi - lo > 30) { const q = (mid + hAt(hi - 12)) / 2; arrow(hi - 12, 1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(hi - 22, 1, q); }
+          const laneQ = (t, sd) => (mid + sd * (mk.bays === sd && minW >= 8.5 ? hAt(t) - 2.05 : hAt(t))) / 2;
+          if (dA >= 3 && hi - lo > 30) { const q = laneQ(lo + 12, -1); arrow(lo + 12, -1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(lo + 22, -1, q); }
+          if (dB >= 3 && hi - lo > 30) { const q = laneQ(hi - 12, 1); arrow(hi - 12, 1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(hi - 22, 1, q); }
         }
         if (minW >= 8.5 && mk.bays && hi - lo > 30) {
           const sd = mk.bays, cuts = blocks.concat(gaps[sd]);
@@ -2170,11 +2263,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const ag = ap.geo();
       if (ag) { ag.setAttribute('trk', offLine(ag)); add(ag, M.asphalt); }
     }
-    add(kerb.geo(), M.kerbStone || (M.kerbStone = std({ map: stoneKerbTex(), roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.4 })));
-    add(gut.geo(), M.gutter || (M.gutter = std({ color: '#c9c6bc', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.3 })));
+    add(kerb.geo(), M.kerbStone || (M.kerbStone = std({ map: stoneKerbTex(), roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.4 })), { far: 480 });
+    add(gut.geo(), M.gutter || (M.gutter = std({ color: '#c9c6bc', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.3 })), { far: 360 });
     if (!M.townPave) { M.townPave = T.has('city_tile') ? pbr('city_tile', 1, { color: '#8f8b80', side: THREE.DoubleSide, envMapIntensity: 0.25 }) : M.concrete; if (M.townPave.roughnessMap) { M.townPave.roughnessMap = null; M.townPave.metalnessMap = null; M.townPave.roughness = 0.96; M.townPave.metalness = 0; } }
     add(pave.geo(), M.townPave);
-    add(mark.geo(), M.paint, { receive: true, order: 1 });
+    add(mark.geo(), M.paint, { receive: true, order: 1, far: 300 });
     // ---- what a town closed for a race looks like (from the Monaco onboard, frame by frame) ----
     // A side street has no closure of its own: the ordinary barrier carries straight on along the
     // kerb line, with asphalt and paint running under it, and only what stands beyond says a street
@@ -2293,7 +2386,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             }
           }
         }
-        if (pan.parts.length) add(pan.geo(), M.white, { cast: false });
+        if (pan.parts.length) add(pan.geo(), M.white, { cast: false, far: 220 });
       }
       // overhead banners on trusses, every 450 m or so
       {
@@ -2312,11 +2405,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         banK.forEach((a, k) => { if (a.k) add(a.geo(), M['banner' + k] || (M['banner' + k] = std({ map: adTexture(k * 2 + 1), roughness: 0.5, side: THREE.DoubleSide })), { cast: true }); });
       }
-      if (paint.parts.length) add(paint.geo(), M.vcol, { cast: true });
-      if (people.parts.length) add(people.geo(), M.vcol, { cast: false });
+      if (paint.parts.length) add(paint.geo(), M.vcol, { cast: true, far: 520 });
+      if (people.parts.length) add(people.geo(), M.vcol, { cast: false, far: 190 });
       if (steel.parts.length) add(steel.geo(), M.steel, { cast: true });
       if (glassB.parts.length) add(glassB.geo(), M.carGlass || (M.carGlass = std({ color: '#14191e', roughness: 0.12, metalness: 0.2 })), { cast: false });
-      if (discs.parts.length) add(discs.geo(), M.noEntry || (M.noEntry = new THREE.MeshBasicMaterial({ map: noEntryTex(), side: THREE.DoubleSide })), { cast: false });
+      if (discs.parts.length) add(discs.geo(), M.noEntry || (M.noEntry = new THREE.MeshBasicMaterial({ map: noEntryTex(), side: THREE.DoubleSide })), { cast: false, far: 200 });
     }
     // street lamps down every street of any size, staggered side to side
     {
@@ -2335,7 +2428,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           n++;
         }
       }
-      if (n) add(pole.geo(), M.dark, { cast: false });
+      if (n) add(pole.geo(), M.dark, { cast: false, far: 420 });
     }
     // cars parked along the streets; the streets nearest the race first
     {
@@ -2366,7 +2459,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           run -= l;
         }
       }
-      if (parked) { add(body.geo(), M.vcolMetal, { cast: true }); add(glass.geo(), M.carGlass || (M.carGlass = std({ color: '#14191e', roughness: 0.12, metalness: 0.2 })), { cast: false }); }
+      if (parked) { add(body.geo(), M.vcolMetal, { cast: true, far: 420 }); add(glass.geo(), M.carGlass || (M.carGlass = std({ color: '#14191e', roughness: 0.12, metalness: 0.2 })), { cast: false }); }
     }
     return { side, list, unit: unitM, absorb, net: true };
   }
@@ -3092,8 +3185,11 @@ void main() {
     const mesh = new THREE.Mesh(g, m);
     mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false; mesh.renderOrder = 6;
     mesh.userData.cat = 'backdrop';
-    root.add(mesh);
-    root.userData.backdropMesh = mesh;
+    const hills = new THREE.Group();
+    mesh.frustumCulled = true;
+    hills.add(mesh);
+    root.add(hills);
+    root.userData.backdropMesh = hills;
     // The land past the ranges: two rows of far blue hills at the edge of the view, flat colour
     // and part of the air, so no horizon is a ruled line (hardly any triangles, no shading)
     {
@@ -3132,7 +3228,11 @@ void main() {
 }`,
       });
       const far = new THREE.Mesh(sg, sm); far.frustumCulled = false; far.castShadow = false; far.receiveShadow = false;
-      mesh.add(far);
+      hills.add(far);
+      partition(hills);
+      hills.traverse(o => { o.renderOrder = 6; if (o.isMesh && !o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); });
+      far.frustumCulled = false;
+      root.updateMatrixWorld(true);
     }
   }
 
@@ -3827,6 +3927,10 @@ void main() {
     state.lastCars = o.cars;
     focusCar = o.focus || null; camMode = o.mode || '';
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null);
+    if (state.root && state.root.userData.farList) {
+      const cp = camera.position, lift = 1 + Math.max(0, cp.y - (o.focus ? o.focus.z || 0 : 0)) / 40;
+      for (const m of state.root.userData.farList) { const b = m.geometry.boundingSphere, c = b.center, dx = c.x - cp.x, dz = c.z - cp.z, r = m.userData.far * lift + b.radius; m.visible = dx * dx + dz * dz < r * r; }
+    }
     // tree draw distance (advanced graphics; 700 m in Rock): tiles whose nearest edge is further are skipped
     if (GFX.treeDist > 0 && state.dens) for (const m of state.dens) {
       const bs = m.isInstancedMesh ? m.boundingSphere : m.geometry.boundingSphere; // the tile's own sphere, not one tree's

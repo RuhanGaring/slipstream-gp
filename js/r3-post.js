@@ -44,10 +44,12 @@
   const DEPTH = [
     'uniform sampler2D tDepth; uniform float uLogFar; uniform vec2 uProj;',
     // log depth buffer: d = log2(1 + w) / log2(far + 1), so the view distance w = 2^(d * log2(far + 1)) - 1
-    'float viewW(vec2 uv){ return exp2(texture2D(tDepth, uv).x * uLogFar) - 1.0; }',
+    // (or reversed depth: uLogFar < 0 and d = near / w, uLogFar holding -near)
+    'float viewW(vec2 uv){ float d = texture2D(tDepth, uv).x; return uLogFar < 0.0 ? -uLogFar / max(d, 1e-7) : exp2(d * uLogFar) - 1.0; }',
     'vec3 viewPos(vec2 uv){ float w = viewW(uv); vec2 n = uv * 2.0 - 1.0; return vec3(n.x * w / uProj.x, n.y * w / uProj.y, -w); }'].join('\n');
   const ALL = []; // every pass material, for precompile()
   const mk = (frag, uniforms, o = {}) => { const m = new THREE.ShaderMaterial(Object.assign({ vertexShader: VS, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false }, o)); ALL.push(m); return m; };
+  let revNear = 0;
   const depthU = () => ({ tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) } });
 
   // ---------- SSAO ----------
@@ -339,7 +341,7 @@
     // 1. scene in linear HDR
     R.setRenderTarget(RT.scene);
     R.render(scene, camera);
-    const logFar = Math.log2(camera.far + 1), proj = new THREE.Vector2(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
+    const logFar = revNear ? -revNear : Math.log2(camera.far + 1), proj = new THREE.Vector2(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
     const setDepth = m => { m.uniforms.tDepth.value = RT.scene.depthTexture; m.uniforms.uLogFar.value = logFar; m.uniforms.uProj.value.copy(proj); };
     let src = RT.scene.texture;
     // 2. motion blur from camera movement
@@ -438,5 +440,5 @@
   }
   // which passes this GPU could not compile (switched off), for the graphics report
   function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, brokenPasses: b }; }
-  F1.R3Post = { setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
+  F1.R3Post = { setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
 })(typeof window !== 'undefined' ? window : globalThis);
