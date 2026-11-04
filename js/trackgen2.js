@@ -1392,6 +1392,9 @@
       // the first lap with a long enough easy stretch to line a grid up on: 240 m behind the line
       // and 90 ahead of it with no real corner
       for (const lp of laps) {
+        // (a town races on the streets wide enough for it: the ones a lap uses are its broad ones)
+        const was = lp.hs.map(h => h.e.w);
+        for (const h of lp.hs) h.e.w = Math.max(h.e.w, 10.6);
         const vt0 = lapVertices(lp), n = vt0.length, ls = [];
         let tot = 0;
         for (let k = 0; k < n; k++) { const l = Math.hypot(vt0[(k + 1) % n][0] - vt0[k][0], vt0[(k + 1) % n][1] - vt0[k][1]); ls.push(l); tot += l; }
@@ -1402,7 +1405,7 @@
           for (let q = 1; q < n && s0 < 330; q++) { s0 += ls[(k + q - 1) % n]; if (s0 < 330) turn += Math.abs(vt0[(k + q) % n][3] * 1) * (vt0[(k + q) % n][3] > 0.35 ? 3 : 1); }
           if (!best || turn < best.turn) best = { k, turn };
         }
-        if (!best || best.turn > 0.42) continue;
+        if (!best || best.turn > 0.42) { lp.hs.forEach((h, k) => { h.e.w = was[k]; }); continue; }
         // the line 240 m on from the start of that stretch
         let i = best.k, left = 240;
         while (left > ls[i % n]) { left -= ls[i % n]; i++; }

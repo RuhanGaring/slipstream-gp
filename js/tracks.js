@@ -101,10 +101,10 @@
     },
     {
       id: 'montaurele', name: 'Circuit de Mont-Aurele', country: 'Riviera', flag: 'MC',
-      blurb: 'A harbour town on a hillside. Up from the quay past the casino square, down the hairpin and through the tunnel to the seafront, with stone walls either side of every metre.',
-      width: 10, style: 'street', look: 'lucerne', seed: 2115,
-      // (built by the frozen generator, js/trackgen2-fixed.js: seed 2115, candidate 26)
-      fixed: { style: 'city', seed: 2115, cand: 26 },
+      blurb: 'A harbour town on a hillside, raced on its own streets. Up from the quay, round the town and down to the seafront, between the barriers the town puts up every year, its side streets closed and its road paint left as it is.',
+      width: 10, style: 'street', look: 'lucerne', seed: 212,
+      // (built by the frozen generator, js/trackgen2-fixed.js: seed 212, candidate 0)
+      fixed: { style: 'city', seed: 212, cand: 0 },
     },
   ];
 
@@ -651,7 +651,7 @@
   // the scenery and sky set a circuit borrows (generated circuits reuse a venue's)
   const lookOf = tr => (tr.def && tr.def.look) || tr.id;
   // which trees line the circuit: firs, quiver trees or broadleaf
-  const treesOf = tr => (tr.def && tr.def.trees) || ({ hakone: 'fir', rimal: 'quiver', kestrel: 'oak' })[lookOf(tr)] || 'broad';
+  const treesOf = tr => (tr.def && tr.def.trees) || ({ hakone: 'fir', rimal: 'quiver' })[lookOf(tr)] || 'broad';
 
   F1.Tracks = { DEFS, byId, lookOf, treesOf, build, locate, surfaceAt, pointAt, fwd, inRange, DS, surfZ, surfS, roadZ, groundAt, crossZ };
 })(typeof window !== 'undefined' ? window : globalThis);

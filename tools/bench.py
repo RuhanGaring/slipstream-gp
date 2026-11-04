@@ -60,6 +60,7 @@ with sync_playwright() as p:
     pg.evaluate("t => { __game.Game.raceDefaults = Object.assign(__game.Game.raceDefaults || {}, { laps: 30 }); __game.quick({ flow: { track: t } }); setInterval(() => { try { F1.LearnJob && F1.LearnJob.cancel(); } catch (e) {} }, 200); }", track)
     pg.wait_for_function("t => { const G = __game.Game; return G.state === 'race' && G.race && G.race.track && G.race.track.id === t && G.race.phase !== 'lights' && G.race.phase !== 'grid'; }", arg=track, timeout=280000)
     pg.evaluate(HOOK)
+    if os.environ.get('BENCH_JS'): pg.evaluate(os.environ['BENCH_JS'])
     pg.evaluate(FREE)
     time.sleep(6)
     res, views = [], pg.evaluate(VIEWS, NV)
