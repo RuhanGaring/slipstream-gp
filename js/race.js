@@ -37,6 +37,18 @@
     }
     return (gripCache[key] = g);
   }
+  // the coached plan's grip under braking, where a circuit has one (tools/coach.js)
+  function learnedBrake(tr) {
+    const L = F1.Limits && F1.Limits[tr.id] && F1.Limits[tr.id].simB, key = tr.id + 'simB';
+    if (!L) return null;
+    if (gripCache[key]) return gripCache[key];
+    const st = F1.Limits.stride, g = new Float64Array(tr.N);
+    for (let i = 0; i < tr.N; i++) {
+      const f = i / st, k = Math.floor(f) % L.length, t = f - Math.floor(f);
+      g[i] = L[k] + (L[(k + 1) % L.length] - L[k]) * t;
+    }
+    return (gripCache[key] = g);
+  }
   // drop a circuit's cached build and grip so new learned data (line, limits) takes effect
   function forgetTrack(id) {
     delete trackCache[id];
@@ -147,10 +159,15 @@
       const key = team.id + ':' + pace.toFixed(4) + ':' + k.toFixed(2);
       if (!profCache.has(key)) {
         const spec = Object.assign({}, Car.SPEC, teamSpec(team)), g0 = learnedGrip(tr, sim ? 'sim' : 'arcade');
-        const grip = k === 1 ? g0 : Float64Array.from({ length: tr.N }, (_, i) => (g0 ? g0[i] : 1) * k);
-        // (difficulty slows a driver's corners, not his brakes: a slower driver still brakes where
-        // the car can, or he backs the whole field up into every corner)
-        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, { pace, grip, brakePace: Math.max(pace, sim ? 0.99 : 1.1), brake: 0.97 }));
+        // A coached circuit's plan is the fastest lap the car was found to do. One that has not
+        // been coached has its grip limits only, and those need a margin: flat out on them the car
+        // is slower than it is 5 per cent inside, and 15 under braking.
+        const gB0 = learnedBrake(tr), coached = sim && gB0, kC = coached ? 1 : sim ? 0.95 : 1, kB = coached ? 1 : sim ? 0.85 : 1;
+        const grip = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => g0[i] * k * kC);
+        const gripB = !g0 ? null : Float64Array.from({ length: tr.N }, (_, i) => (coached ? gB0[i] : g0[i]) * k * kB);
+        // (a slower driver gives away more in the corners than on the brakes, or he would back the
+        // whole field up into every stop)
+        profCache.set(key, sim ? Raceline.speedProfile(tr, tr.line, spec, { pace, grip, gripB, brakePace: Math.min(1, 0.8 + 0.2 * pace), brake: 1 }) : Raceline.speedProfile(tr, tr.line, spec, { pace, grip }));
       }
       return profCache.get(key);
     };
@@ -202,7 +219,7 @@
       car.brain = AI.makeBrain(car, profFor(r.team, car.profPace), {
         pace: 1, aggr: diff.aggr * (0.8 + rng() * 0.4), seed: 100 + race.cars.length * 7, react: 0.18 + rng() * 0.25 + (1 - diff.pace) * 0.6,
         // (a time trial's ghost and the player's autopilot drive the plan as it is)
-        skill: isPlayer || mode === 'tt' || cfg.noStyle ? null : U.clamp((diff.pace - 0.58) / 0.42 * 0.7 + (r.d[4] - 0.9) * 3, 0, 1),
+        skill: (isPlayer && !cfg.autoStyle) || mode === 'tt' || cfg.noStyle ? null : U.clamp((diff.pace - 0.58) / 0.42 * 0.7 + (r.d[4] - 0.9) * 3, 0, 1),
       });
       Object.assign(car, {
         dist: 0, prevS: 0, lap: 0, lapStart: 0, secStart: 0, sector: 0, curSec: [null, null, null],
@@ -1059,7 +1076,7 @@
     event(race, 'done', null, '');
   }
 
-  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
+  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
   // pit service hook used by AI.pitDrive
   F1.Race.attach = race => {
     race.servicePit = c => servicePit(race, c);

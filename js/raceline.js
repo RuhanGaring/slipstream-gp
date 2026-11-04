@@ -67,6 +67,8 @@
       const soft = side => { const t = tr.runT && tr.runT[side] ? tr.runT[side][i] : SURF.GRASS; return t === SURF.GRASS || t === SURF.GRAVEL; };
       L[i] = under(tr.kerbL, i) ? tr.hw + over : tr.hw - (soft(0) ? 1.45 : 0.55);
       R[i] = under(tr.kerbR, i) ? tr.hw + over : tr.hw - (soft(1) ? 1.45 : 0.55);
+      // (and never so near a street's barrier that the car brushes it: half its width and a hand)
+      if (tr.barr) { L[i] = Math.min(L[i], tr.barr[0][i] - 1.3); R[i] = Math.min(R[i], tr.barr[1][i] - 1.3); }
     }
     return { L, R, clamp: (i, o) => (o < -L[i] ? -L[i] : o > R[i] ? R[i] : o) };
   }
@@ -298,7 +300,7 @@
     const g = opt.grip;
     const muAt = i => (g ? mu * g[i] : mu);
     // (the grip it brakes on, where that differs from what it corners on)
-    const muB = spec.mu * MU_G * (opt.brakePace || pace), muBrk = i => (g ? muB * g[i] : muB);
+    const muB = spec.mu * MU_G * (opt.brakePace || pace), gB = opt.gripB || g, muBrk = i => (gB ? muB * gB[i] : muB);
     const m = spec.mass + 20;
     const kA = 0.5 * Car.RHO * spec.ClA / m * (MU_A / MU_G);
     const acc = accelTable(spec, mu);
