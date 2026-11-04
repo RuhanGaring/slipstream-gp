@@ -222,6 +222,7 @@
     MATS.paint = std({ vertexColors: true, roughness: 0.55, normalMap: aN });
     MATS.paint.userData.wetK = [0.4, 1];
     if (aN) MATS.paint.normalScale.set(0.6, 0.6);
+    MATS.paint.depthWrite = false;   // (lying on the road, it is drawn after it and leaves its depth alone)
     F1.R3S.wear.paint(MATS.paint);
     // rubbered-in line: darker and smoother than the asphalt around it
     MATS.rubber = std({ color: '#0a0a0b', roughness: 0.5, transparent: true, opacity: 0.32, depthWrite: false, normalMap: aN });
@@ -294,7 +295,7 @@
       sh.fragmentShader = `uniform float uRooms;
 float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n` + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   { vec3 wp = vFogWorld, vd = wp - cameraPosition; float dist = length(vd), lm = dot(sampledDiffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float wm = uRooms * (1.0 - smoothstep(0.25, 0.45, texelRoughness.g)) * smoothstep(320.0, 160.0, dist) * smoothstep(0.012, 0.05, sampledDiffuseColor.b - sampledDiffuseColor.r) * smoothstep(0.5, 0.35, lm);
+    float wm = uRooms * (1.0 - smoothstep(0.25, 0.45, texelRoughness.g)) * smoothstep(190.0, 110.0, dist) * smoothstep(0.012, 0.05, sampledDiffuseColor.b - sampledDiffuseColor.r) * smoothstep(0.5, 0.35, lm);
     if (wm > 0.01) {
       vec3 Nf = normalize(cross(dFdx(wp), dFdy(wp))); if (dot(Nf, vd) > 0.0) Nf = -Nf;
       if (abs(Nf.y) < 0.5) {
@@ -970,10 +971,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (gn) gn.userData.wetK = [0.55, 0.25];
       const fineG = grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true);
       if (gn) townGround(fineG, W2, tr, gm);
-      add(fineG, gm);
+      add(fineG, gm, { order: 4 });
       turf = turfMap(hgrid, tr);
       const size = span + 9000;
-      add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gn || gm);
+      add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gn || gm, { order: 5 });
     }
     // water for the harbour circuit
     let water = null;
@@ -1232,9 +1233,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       const quad = (s0, s1, d0, d1, c, y = 0.012) => {
         const q1 = Tracks.pointAt(tr, s0, d0), q2 = Tracks.pointAt(tr, s0, d1), q3 = Tracks.pointAt(tr, s1, d1), q4 = Tracks.pointAt(tr, s1, d0);
-        const yy = q => y + Tracks.groundAt(tr, q[0], q[1]);
-        const k = pa.v(q1[0], yy(q1), q1[1], 0, 1, 0, 0, 0, c);
-        pa.v(q2[0], yy(q2), q2[1], 0, 1, 0, 0, 0, c); pa.v(q3[0], yy(q3), q3[1], 0, 1, 0, 0, 0, c); pa.v(q4[0], yy(q4), q4[1], 0, 1, 0, 0, 0, c);
+        const yy = (t, d) => y + Tracks.surfS(tr, t, d);
+        const k = pa.v(q1[0], yy(s0, d0), q1[1], 0, 1, 0, 0, 0, c);
+        pa.v(q2[0], yy(s0, d1), q2[1], 0, 1, 0, 0, 0, c); pa.v(q3[0], yy(s1, d1), q3[1], 0, 1, 0, 0, 0, c); pa.v(q4[0], yy(s1, d0), q4[1], 0, 1, 0, 0, 0, c);
         pa.t(k, k + 1, k + 2); pa.t(k, k + 2, k + 3);
       };
       if (W2.town) {
@@ -1282,7 +1283,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         rect(-3.2, 3.2, -1.4, -1.25, c); rect(-3.2, 3.2, 1.25, 1.4, c); rect(-3.2, -3.05, -1.4, 1.4, c); rect(3.05, 3.2, -1.4, 1.4, c);
         rect(-1.75, -1.57, -1.0, 1.0, white); rect(1.55, 1.73, -1.0, 1.0, white);
       }
-      add(pa.geo(), M.paint, { receive: true });
+      add(pa.geo(), M.paint, { receive: true, order: 1 });
       // chequered start line
       const ck = new Acc();
       const s0 = -0.8, s1 = 0.8;
@@ -1753,13 +1754,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
   // A town street's height: its own ground, easing on to the lap's surface where it meets the
   // circuit, at no more than a street's gradient (the lap's rubbered ribbon lies a whisker above)
-  function roadY(tr, x, z) {
+  function lapAt(tr, x, z) {
     let bi = -1, bd = 1e18;
     tr.hash.near(x, z, 40, i => { const q = (x - tr.x[i]) ** 2 + (z - tr.y[i]) ** 2; if (q < bd) { bd = q; bi = i; } });
-    const y0 = Tracks.groundAt(tr, x, z) + 0.1;
-    if (bi < 0) return y0;
-    const dl = (x - tr.x[bi]) * tr.nx[bi] + (z - tr.y[bi]) * tr.ny[bi], bar = Math.abs(dl) - tr.barr[dl > 0 ? 1 : 0][bi];
-    const lim = tr.barr[dl > 0 ? 1 : 0][bi] + 0.6, on = Tracks.surfZ(tr, bi, U.clamp(dl, -lim, lim)) - 0.05;
+    if (bi < 0) return null;
+    const dx = x - tr.x[bi], dz = z - tr.y[bi], tl = Math.hypot(tr.tx[bi], tr.ty[bi]) || 1, dl = dx * tr.nx[bi] + dz * tr.ny[bi], lim = tr.barr[dl > 0 ? 1 : 0][bi];
+    return { i: bi, s: bi * tr.ds + (dx * tr.tx[bi] + dz * tr.ty[bi]) / tl, dl, lim, bar: Math.abs(dl) - lim };
+  }
+  function roadY(tr, x, z) {
+    const y0 = Tracks.groundAt(tr, x, z) + 0.1, m = lapAt(tr, x, z);
+    if (!m) return y0;
+    const dl = m.dl, bar = m.bar, lim = m.lim + 0.6, on = Tracks.surfS(tr, m.s, U.clamp(dl, -lim, lim)) - 0.05;
     return y0 + (on - y0) * (1 - U.smooth((bar - 1) / Math.min(36, 9 + Math.abs(y0 - on) * 9)));
   }
 
@@ -1851,20 +1856,6 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of cg.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], z - q[1]) < q[2] - m) return true;
       return false;
     };
-    // Paint belongs to its own street. It stops at the kerb line of any street it would run on to;
-    // only a road carrying straight on through a junction keeps its lines across it (its mates).
-    const pair = (a, b) => (a.mates || (a.mates = new Set())).add(b);
-    for (const n of nodes) if (n.through) { const a = edges[n.through[0]], b = edges[n.through[1]]; pair(a, b); pair(b, a); }
-    let own = null;
-    const foreign = (x, z) => {
-      if (!own) return false;
-      const i0 = Math.floor(x / 14), j0 = Math.floor(z / 14);
-      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of cg.get((i0 + i) + ',' + (j0 + j)) || []) {
-        if (q[3] === own || (own.mates && own.mates.has(q[3]))) continue;
-        if (Math.hypot(x - q[0], z - q[1]) < q[2] + 0.2) return true;
-      }
-      return false;
-    };
     // a kerb and its pavement along a line, on the side given (+1 left of the way it runs)
     const kerbLine = (K, side, wide = 2.9, bare = false) => {
       let prev = null, gprev = null, along = 0;
@@ -1886,34 +1877,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         prev = [c0, c1, c2, a0, a1];
       }
     };
-    const paintY = (x, z) => { const m = lap(x, z); return m && m.bar < 0.6 ? Tracks.surfZ(tr, m.i, m.dl) + 0.016 : yRoad(x, z) + 0.016; };
-    const quad = (a, b, c, d, y, cc = white) => { const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, 0, 0, cc), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, 0.1, 0, cc), v2 = mark.v(c[0], paintY(c[0], c[1]), c[1], 0, 1, 0, 0.1, 0.3, cc), v3 = mark.v(d[0], paintY(d[0], d[1]), d[1], 0, 1, 0, 0, 0.3, cc); mark.t(v0, v1, v3); mark.t(v1, v2, v3); };
-    const across = (p, u, a, b, h0, h1, cc) => {  // a patch of paint on a road: a..b along, h0..h1 across
-      const l = [-u[1], u[0]], P = (s, h) => [p[0] + u[0] * s + l[0] * h, p[1] + u[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014, hm = (h0 + h1) / 2, s0 = P(a, hm), s1 = P(b, hm);
-      if (foreign(s0[0], s0[1]) || foreign(s1[0], s1[1])) return;
-      quad(P(a, h0), P(a, h1), P(b, h1), P(b, h0), y, cc);
-    };
-    // a painted line along a stretch of street, off the centre by q: on metres of line, off metres of gap
-    const lane = (C, q, on, off, w, cc) => {
-      let run = 0, s0 = 0;
-      for (let k = 0; k < C.length - 1; k++) {
-        const a = C[k], b = C[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]), u = unit(b[0] - a[0], b[1] - a[1]);
-        for (s0 = 0; s0 < l;) {
-          const inOn = run < on, left = (inOn ? on - run : on + off - run), step = Math.min(left, l - s0, 1.6);
-          if (inOn && step > 0.05) across([a[0] + u[0] * s0, a[1] + u[1] * s0], u, 0, step, q - w / 2, q + w / 2, cc);
-          s0 += step; run += step;
-          if (run >= on + off - 1e-6) run = 0;
-        }
-      }
-    };
-    const arrow = (p, u, q, f) => {
-      const uf = [u[0] * f, u[1] * f], l = [-uf[1], uf[0]], P = (s, h) => [p[0] + uf[0] * s + l[0] * h, p[1] + uf[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014, h0 = f * q;
-      for (const t of [0, 3.8]) { const c = P(t, h0); if (foreign(c[0], c[1])) return; }
-      quad(P(0, h0 - 0.1), P(0, h0 + 0.1), P(2.6, h0 + 0.1), P(2.6, h0 - 0.1), y);
-      quad(P(2.6, h0 - 0.42), P(2.6, h0 + 0.42), P(3.8, h0 + 0.02), P(3.8, h0 - 0.02), y);
-    };
-    const iron = col('#2a2a2c'), tar = col('#1a1a1c'), yellow = col('#d8b83a');
-    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 10, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
+    const paintY = (x, z) => { const m = lapAt(tr, x, z); return m && m.bar < 0.6 ? Tracks.surfS(tr, m.s, m.dl) + 0.016 : yRoad(x, z) + 0.016; };
+    const iron = col('#343436');
+    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 14, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
     for (const e of edges) {
       const s0 = setOf(e, 0), s1 = e.L - setOf(e, 1);
       if (s1 - s0 < 1) continue;
@@ -1921,48 +1887,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       let prev = null;
       for (let k = 0; k < C.length; k++) {
         const p = C[k];
-        if (!inside(p[0], p[1]) || site.inland(p[0], p[1]) < 1 || (!e.lap && inPits(p[0], p[1]))) { prev = null; continue; }
+        const m1 = lap(Lf[k][0], Lf[k][1]), m2 = lap(Rt[k][0], Rt[k][1]), inner = m1 && m2 && m1.bar < -0.2 && m2.bar < -0.2;
+        if (!inside(p[0], p[1]) || site.inland(p[0], p[1]) < 1 || (!e.lap && inPits(p[0], p[1])) || inner) { prev = null; continue; }
         const a = road.v(Lf[k][0], yRoad(Lf[k][0], Lf[k][1]), Lf[k][1], 0, 1, 0, Lf[k][0] / 9, Lf[k][1] / 9), c = road.v(Rt[k][0], yRoad(Rt[k][0], Rt[k][1]), Rt[k][1], 0, 1, 0, Rt[k][0] / 9, Rt[k][1] / 9);
         if (prev) { road.t(prev[0], a, prev[1]); road.t(prev[1], a, c); }
         prev = [a, c];
       }
       const pw = e.w < 5 ? 1.3 : e.cls === 0 ? 4 : 2.9;
       kerbLine(Lf, 1, pw, e.lap); kerbLine(Rt, -1, pw, e.lap);
-      // Each street has its own paint. Nothing is removed for the race, and it changes from street
-      // to street: long dashes, short dashes, a solid line with a dash beside it; lanes that are not
-      // quite central; an edge line on some; arrows into junctions; manholes and old seams in the road.
-      own = e;
-      // A street's lines stop short of a junction unless it is the road that carries on through it;
-      // edge lines always break there
-      const carries = n => !!nodes[n].through && nodes[n].through.includes(edges.indexOf(e));
-      const Cl = cut(e.pts, s0 + (carries(e.a) ? 0 : 5.5), s1 - (carries(e.b) ? 0 : 5.5)), Ce = cut(e.pts, s0 + 5.5, s1 - 5.5);
-      if (e.w >= 6 && s1 - s0 > 16 && e.mark) {
-        const m = e.mark, mid = m.mid, lanes = e.w >= 11.5 ? [mid - e.w / 4 - 0.4, mid + e.w / 4 + 0.4] : [];
-        if (m.type < 0.4) lane(Cl, mid, 2.5, 1.1, 0.15);
-        else if (m.type < 0.7) lane(Cl, mid, 0.8, 0.8, 0.13);
-        else { lane(Cl, mid, 900, 0, 0.17); lane(Cl, mid + 0.3, 2.5, 1.1, 0.15); }
-        for (const q of lanes) lane(Cl, q, 2.5, 1.1, 0.14);
-        e.laneMid = mid;
-        if (m.edge) for (const sd of [-1, 1]) lane(Ce, sd * (hw - 0.55), 900, 0, 0.15);
-        if (C.length > 12) {
-          const a = C[3], b = C[4], u = unit(b[0] - a[0], b[1] - a[1]), z = C[C.length - 5], y = C[C.length - 4], w2 = unit(y[0] - z[0], y[1] - z[1]);
-          if (!carries(e.a) && m.type > 0.5) arrow(a, u, -e.w / 4, -1);
-          if (!carries(e.b) && m.type < 0.5) arrow(z, w2, -e.w / 4, 1);
-        }
-      }
-      if (e.w >= 8.5 && e.L > 50 && e.mark && e.mark.bays) {
-        const sd = e.mark.bays;
-        lane(Ce, sd * (hw - 2.05), 900, 0, 0.1);
-        for (let k = 2; k < Ce.length - 2; k++) { const a = Ce[k], b = Ce[k + 1], u = unit(b[0] - a[0], b[1] - a[1]); if (k % 2 === 0) across(a, u, 0, 0.1, sd > 0 ? hw - 2.05 : -hw + 0.1, sd > 0 ? hw - 0.1 : -hw + 2.05); }
-      }
-      if (e.w >= 5) {
-        for (let k = 5 + Math.floor(rnd() * 12); k < C.length - 1; k += 12 + Math.floor(rnd() * 9)) manhole([C[k][0] - (C[k + 1][1] - C[k][1]) / 4 * (rnd() - 0.5) * hw, C[k][1] + (C[k + 1][0] - C[k][0]) / 4 * (rnd() - 0.5) * hw], rnd() < 0.3 ? 0.5 : 0.4);
-        // old repairs: tar lines wandering across the surface
-        if (rnd() < 0.7 && C.length > 10) {
-          const k0 = 2 + Math.floor(rnd() * (C.length - 8)), q0 = (rnd() - 0.5) * hw * 1.4, f1 = 0.5 + rnd(), ph = rnd() * 6;
-          for (let k = k0; k < Math.min(C.length - 1, k0 + 3 + Math.floor(rnd() * 5)); k++) { const a = C[k], b = C[k + 1], u = unit(b[0] - a[0], b[1] - a[1]), q = q0 + Math.sin(k * f1 + ph) * 0.5; across(a, u, 0, 4, q - 0.03, q + 0.03, tar); }
-        }
-      }
     }
     // ---- the junctions themselves ----
     const dead = [];
@@ -1997,30 +1929,135 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       const yO = yRoad(O.x, O.y), c = road.v(O.x, yO, O.y, 0, 1, 0, O.x / 9, O.y / 9), vs = ring.map(p => road.v(p[0], yRoad(p[0], p[1]), p[1], 0, 1, 0, p[0] / 9, p[1] / 9));
       for (let k = 0; k < vs.length; k++) road.t(c, vs[(k + 1) % vs.length], vs[k]);
-      const thru = nodes[n].through;
-      for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
-        const a = A[i], b = A[j];
-        if (!thru || !thru.includes(edges.indexOf(a.e)) || !thru.includes(edges.indexOf(b.e)) || a.e.w < 6 || a.e.laneMid == null) continue;
-        own = a.e;
-        const Ea = endAt(a), Eb = endAt(b), sg = a.end ? -1 : 1;
-        lane([Ea.p, Eb.p], sg * a.e.laneMid, 2.5, 1.1, 0.15);
-      }
-      // stop lines on the streets that give way, crossings where the town has them
-      if (A.length >= 3) {
-        for (const a of A) {
-          if (a.e.L < 26) continue;
-          own = a.e;
-          const E = endAt(a), yields = !thru || !thru.includes(edges.indexOf(a.e));
-          if (yields) { if (a.e.cls >= 2) for (let q = -a.hw + 0.3; q < -0.2; q += 1.5) across(E.p, E.u, 0.4, 0.8, q, q + 1); else across(E.p, E.u, 0.4, 0.8, -a.hw + 0.3, 0); }
-          if (a.e.zeb && a.e.zeb[a.end]) for (let q = -a.hw + 0.35; q < a.hw - 0.6; q += 1.3) across(E.p, E.u, 1.3, 4.3, q, q + 0.6);
-        }
-      }
     });
+    // Road markings, as a town lays them: a road is a chain of streets that carries on through its
+    // junctions, and is painted end to end in one go, so its lines hold one offset and one rhythm
+    // for its whole length. Its centre line runs on through the junctions it has priority at; its
+    // edge lines break at each side road. The road that gives way stops at a line, with a crossing
+    // in front of it where the town has one. None of this knows where the race goes.
+    {
+      const idx = new Map(edges.map((e, k) => [e, k])), used = new Set(), STEP = 1.6;
+      const tri = (a, b, c) => { const v = q => mark.v(q[0], paintY(q[0], q[1]), q[1], 0, 1, 0, q[0] / 9, q[1] / 9, white); const i = v(a); v(b); v(c); mark.t(i, i + 1, i + 2); };
+      const onward = (e, n) => { const t = nodes[n].through, k = idx.get(e); if (!t || !t.includes(k)) return null; const o = edges[t[0] === k ? t[1] : t[0]]; return used.has(o) || o === e ? null : o; };
+      for (const e0 of edges) {
+        if (used.has(e0)) continue;
+        used.add(e0);
+        const parts = [{ e: e0, rev: false }];
+        for (let e = e0, n = e0.b; ;) { const o = onward(e, n); if (!o) break; used.add(o); const rev = o.b === n; parts.push({ e: o, rev }); e = o; n = rev ? o.a : o.b; }
+        for (let e = e0, n = e0.a; ;) { const o = onward(e, n); if (!o) break; used.add(o); const rev = o.a === n; parts.unshift({ e: o, rev }); e = o; n = rev ? o.b : o.a; }
+        // the road's whole line, a point a metre, its corners eased, with its width along it
+        const P = [], W = [], joints = [];
+        for (const q of parts) {
+          const pts = q.rev ? q.e.pts.slice().reverse() : q.e.pts;
+          for (let k = P.length ? 1 : 0; k < pts.length; k++) { P.push(pts[k]); W.push(q.e.w / 2); }
+          joints.push({ at: P.length - 1, n: q.rev ? q.e.a : q.e.b, q });
+        }
+        const X = [P[0][0]], Z = [P[0][1]], Hw = [W[0]], Sj = joints.map(() => 0);
+        for (let k = 1, run = 0, rest = 1, jn = 0; k < P.length; k++) {
+          const dx = P[k][0] - P[k - 1][0], dz = P[k][1] - P[k - 1][1], l = Math.hypot(dx, dz) || 1e-6;
+          let t = rest;
+          for (; t <= l; t += 1) { X.push(P[k - 1][0] + dx * t / l); Z.push(P[k - 1][1] + dz * t / l); Hw.push(W[k]); }
+          rest = t - l; run += l;
+          while (jn < joints.length && joints[jn].at <= k) { if (joints[jn].at === k) Sj[jn] = run; jn++; }
+        }
+        const m1 = X.length;
+        if (m1 < 12) continue;
+        const ease = (A, R) => { const o = A.slice(); for (let k = 0; k < m1; k++) { const r0 = Math.min(R, k, m1 - 1 - k); let t = 0; for (let q = -r0; q <= r0; q++) t += A[k + q]; o[k] = t / (2 * r0 + 1); } return o; };
+        const Xs = ease(X, 4), Zs = ease(Z, 4), Hs = ease(Hw, 7), L = m1 - 1;
+        const at = (t, q) => {
+          const f = U.clamp(t, 0, L - 0.001), i = Math.floor(f), u = f - i, a = Math.max(0, i - 2), b = Math.min(L, i + 3), d = unit(Xs[b] - Xs[a], Zs[b] - Zs[a]);
+          return [Xs[i] + (Xs[i + 1] - Xs[i]) * u - d[1] * q, Zs[i] + (Zs[i + 1] - Zs[i]) * u + d[0] * q];
+        };
+        const hAt = t => Hs[Math.round(U.clamp(t, 0, L))];
+        const ok = q => inside(q[0], q[1]) && site.inland(q[0], q[1]) >= 1 && !inPits(q[0], q[1]);
+        // a band of paint along the road from t0 to t1, centred q (or q(t)) off its line
+        const band = (t0, t1, q, w) => {
+          const n = Math.max(1, Math.ceil((t1 - t0) / STEP));
+          let prev = null;
+          for (let k = 0; k <= n; k++) {
+            const t = t0 + (t1 - t0) * k / n, c = typeof q === 'function' ? q(t) : q, a = at(t, c - w / 2), b = at(t, c + w / 2);
+            if (!ok(a) || !ok(b)) { prev = null; continue; }
+            const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, a[0] / 9, a[1] / 9, white), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, b[0] / 9, b[1] / 9, white);
+            if (prev != null) { mark.t(prev, prev + 1, v0); mark.t(prev + 1, v1, v0); }
+            prev = v0;
+          }
+        };
+        const first = parts[0], last = parts[parts.length - 1], nA = first.rev ? first.e.b : first.e.a, nB = last.rev ? last.e.a : last.e.b;
+        const dA = arms[nA].length, dB = arms[nB].length, setA = setOf(first.e, first.rev ? 1 : 0), setB = setOf(last.e, last.rev ? 0 : 1);
+        const minW = Math.min(...parts.map(q => q.e.w)), cls = Math.min(...parts.map(q => q.e.cls)), mk = first.e.mark || { type: 0, mid: 0 }, mid = mk.mid * 0.5;
+        const blocks = [], gaps = { '-1': [], 1: [] };
+        // a crossing's bars lie along the road, kerb to kerb, the centre line stopping a metre short
+        const zebra = (z0, z1) => {
+          if (z0 < 2 || z1 > L - 2 || blocks.some(b => z1 > b[0] - 8 && z0 < b[1] + 8)) return false;
+          const h = Math.min(hAt(z0), hAt(z1)), n = Math.floor((2 * h - 0.7 + 0.7) / 1.3), q0 = -(n * 1.3 - 0.7) / 2;
+          for (let k = 0; k < n; k++) band(z0, z1, q0 + k * 1.3 + 0.3, 0.6);
+          blocks.push([z0 - 1, z1 + 1]);
+          return true;
+        };
+        // the ends of the road
+        let lo = 0, hi = L;
+        const zebA = first.e.zeb && first.e.zeb[first.rev ? 1 : 0], zebB = last.e.zeb && last.e.zeb[last.rev ? 0 : 1];
+        if (minW >= 5) {
+          if (dA < 2) lo = 6;
+          else {
+            const z = zebA && dA >= 3 && minW >= 6 && zebra(setA + 0.8, setA + 3.8), st = setA + (z ? 4.8 : 0.4);
+            if (dA >= 3) band(st, st + 0.4, (-hAt(st) + 0.3 + mid) / 2, hAt(st) - 0.3 + mid);
+            lo = st + 1.4;
+          }
+          if (dB < 2) hi = L - 6;
+          else {
+            const z = zebB && dB >= 3 && minW >= 6 && zebra(L - setB - 3.8, L - setB - 0.8), st = L - setB - (z ? 5.2 : 0.8);
+            if (dB >= 3) band(st, st + 0.4, (hAt(st) - 0.3 + mid) / 2, hAt(st) - 0.3 - mid);
+            hi = st - 1;
+          }
+        }
+        // the junctions along the way: edge lines break at each side road
+        joints.forEach((j, k) => {
+          if (k === joints.length - 1) return;
+          const t0 = Sj[k], next = joints[k + 1].q, side = arms[j.n].filter(a => a.e !== j.q.e && a.e !== next.e);
+          if (!side.length) return;
+          const c0 = at(t0, 0), c1 = at(t0 + 2, 0), u = unit(c1[0] - c0[0], c1[1] - c0[1]);
+          let reach = 0;
+          for (const a of side) {
+            const cr = a.u[0] * u[1] - a.u[1] * u[0], half = a.hw / Math.max(0.5, Math.abs(cr)) + 5.5, sd = -a.u[0] * u[1] + a.u[1] * u[0] > 0 ? 1 : -1;
+            gaps[sd].push([t0 - half, t0 + half]); reach = Math.max(reach, half);
+          }
+          if (minW < 6) return;
+          if (j.q.e.zeb && j.q.e.zeb[j.q.rev ? 0 : 1]) zebra(t0 - reach - 3.8, t0 - reach - 0.8);
+          if (next.e.zeb && next.e.zeb[next.rev ? 1 : 0]) zebra(t0 + reach + 0.8, t0 + reach + 3.8);
+        });
+        const free = (a, b, cut0) => { let out = [[a, b]]; for (const g of cut0) { const o = []; for (const [p, q] of out) { if (g[1] <= p || g[0] >= q) { o.push([p, q]); continue; } if (g[0] > p) o.push([p, g[0]]); if (g[1] < q) o.push([g[1], q]); } out = o; } return out.filter(r => r[1] - r[0] > 0.4); };
+        const solid = (q, w, a, b, cut0) => { for (const [p, r] of free(a, b, cut0)) band(p, r, q, w); };
+        const dashes = (q, w, on, off) => { for (let t = lo; t + on <= hi; t += on + off) if (!blocks.some(g => t + on > g[0] && t < g[1])) band(t, t + on, q, w); };
+        if (minW >= 6 && hi - lo > 8) {
+          if (minW >= 11.5 && cls === 0) { dashes(mid - minW / 6, 0.15, 2.5, 1.1); solid(mid + minW / 6, 0.15, lo, hi, blocks); }
+          else if (mk.type < 0.62) dashes(mid, 0.15, 2.5, 1.1);
+          else if (mk.type < 0.82) dashes(mid, 0.13, 0.9, 0.9);
+          else { solid(mid, 0.17, lo, hi, blocks); dashes(mid + 0.3, 0.15, 2.5, 1.1); }
+          if (mk.edge) for (const sd of [-1, 1]) solid(t => sd * (hAt(t) - 0.75), 0.15, lo, hi, blocks.concat(gaps[sd]));
+          // a lane arrow on the way up to a junction the road gives way at
+          const arrow = (t, f, q) => {
+            band(f > 0 ? t : t - 2.6, f > 0 ? t + 2.6 : t, q, 0.2);
+            const c = t + f * 2.6, a = at(c, q - f * 0.42), b = at(c, q + f * 0.42), tip = at(c + f * 1.2, q);
+            tri(a, b, tip);
+          };
+          if (dA >= 3 && hi - lo > 30) arrow(lo + 12, -1, (mid - hAt(lo + 12)) / 2);
+          if (dB >= 3 && hi - lo > 30) arrow(hi - 12, 1, (mid + hAt(hi - 12)) / 2);
+        }
+        if (minW >= 8.5 && mk.bays && hi - lo > 30) {
+          const sd = mk.bays, cuts = blocks.concat(gaps[sd]);
+          solid(t => sd * (hAt(t) - 2.05), 0.1, lo + 3, hi - 3, cuts);
+          for (let t = lo + 3; t < hi - 3; t += 6) if (!cuts.some(g => t > g[0] && t < g[1])) band(t, t + 0.1, u => sd * (hAt(u) - 1.03), 2.05);
+        }
+        if (minW >= 5) for (let t = 14 + rnd() * 30; t < L - 8; t += 45 + rnd() * 35) { const q = at(t, (rnd() - 0.5) * hAt(t)); if (ok(q)) manhole(q, rnd() < 0.3 ? 0.5 : 0.4); }
+      }
+    }
     const rg = road.geo();
     if (rg) { rg.setAttribute('trk', offLine(rg)); add(rg, M.asphalt); }
     {
       const ap = new Acc(), pS = tr.pit.side > 0 ? 1 : 0, wd = (sd, k) => (sd === pS && !isNaN(tr.pit.off[k]) ? tr.hw + 0.3 : tr.barr[sd][k] + 0.6);
-      ribbon(ap, tr, 0, N, k => -wd(0, k), k => wd(1, k), -0.02, 9);
+      ribbon(ap, tr, 0, N, k => -wd(0, k), () => -tr.hw + 0.2, -0.02, 9);
+      ribbon(ap, tr, 0, N, () => tr.hw - 0.2, k => wd(1, k), -0.02, 9);
       const ag = ap.geo();
       if (ag) { ag.setAttribute('trk', offLine(ag)); add(ag, M.asphalt); }
     }
@@ -2028,7 +2065,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     add(gut.geo(), M.gutter || (M.gutter = std({ color: '#c9c6bc', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.3 })));
     if (!M.townPave) { M.townPave = T.has('city_tile') ? pbr('city_tile', 1, { color: '#8f8b80', side: THREE.DoubleSide, envMapIntensity: 0.25 }) : M.concrete; if (M.townPave.roughnessMap) { M.townPave.roughnessMap = null; M.townPave.metalnessMap = null; M.townPave.roughness = 0.96; M.townPave.metalness = 0; } }
     add(pave.geo(), M.townPave);
-    add(mark.geo(), M.paint, { receive: true });
+    add(mark.geo(), M.paint, { receive: true, order: 1 });
     // ---- what a town closed for a race looks like (from the Monaco onboard, frame by frame) ----
     // A side street has no closure of its own: the ordinary barrier carries straight on along the
     // kerb line, with asphalt and paint running under it, and only what stands beyond says a street
@@ -2932,7 +2969,7 @@ void main() {
 }`,
     });
     const mesh = new THREE.Mesh(g, m);
-    mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false;
+    mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false; mesh.renderOrder = 6;
     mesh.userData.cat = 'backdrop';
     root.add(mesh);
     root.userData.backdropMesh = mesh;

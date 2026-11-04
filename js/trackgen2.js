@@ -1189,13 +1189,14 @@
   // are one road and share one paint; that road has priority there, its lines run on across the
   // junction, and the streets that meet it stop at a line. Crossings go where a town needs them.
   // None of this knows where any lap goes: a race drives over the paint the town already has.
-  function roadMarks(net, r) {
+  function roadMarks(net, seed) {
+    const r = U.rng(seed);
     const up = new Map(), find = e => { let q = e; while (up.get(q) !== q) q = up.get(q); return q; };
     for (const e of net.edges) up.set(e, e);
     const heading = (n, e) => { const P = e.a === n ? e.pts : e.pts.slice().reverse(), q = P[Math.min(2, P.length - 1)]; return Math.atan2(q[1] - n.y, q[0] - n.x); };
     for (const n of net.nodes) {
-      n.through = null;
-      let best = -1;
+      n.through = n.e.length === 2 && n.e[0] !== n.e[1] ? [n.e[0], n.e[1]] : null;
+      let best = n.through ? Infinity : -1;
       for (let i = 0; i < n.e.length; i++) for (let j = i + 1; j < n.e.length; j++) {
         const a = n.e[i], b = n.e[j];
         if (a === b || Math.abs(U.wrapAngle(heading(n, a) - heading(n, b))) < 2.65 || Math.abs(a.w - b.w) > 2.2) continue;
@@ -1382,7 +1383,7 @@
     if (style === 'city') {
       const T = cityTerrain(r), net = roadSystem(T, r);
       if (!net) return { fail: 'shore road' };
-      roadMarks(net, r);
+      roadMarks(net, T.s + 77);
       const laps = lapsOf(net, T, r, st);
       if (!laps.length) return { fail: 'no lap in the streets' };
       m = r() < 0.5 ? 1 : -1;

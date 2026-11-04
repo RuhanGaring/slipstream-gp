@@ -365,12 +365,13 @@
   // Road paint: worn through to the asphalt where wheels cross it, with dirt and rubber.
   function paintWear(m) {
     return ext(m, 'paint', sh => {
-      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <color_fragment>', [
+      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <logdepthbuf_fragment>', '#include <logdepthbuf_fragment>\n#if defined( USE_LOGDEPTHBUF ) && defined( USE_LOGDEPTHBUF_EXT )\n  gl_FragDepthEXT -= 0.0012;\n#endif').replace('#include <color_fragment>', [
         '#include <color_fragment>',
         '  vec2 pW = vFogWorld.xz;',
-        '  float pN = wNoise(pW * 2.5) * 0.5 + wNoise(pW * 11.0) * 0.5;',
-        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.06), smoothstep(0.52, 0.82, pN) * 0.6);',
-        '  diffuseColor.rgb *= (1.0 - smoothstep(0.55, 0.9, wNoise(pW * 0.7 + 5.0)) * 0.35) * 0.86;',
+        // fine pitting, thin in places, a little dirt: paint stays paint, it does not go patchy
+        '  float pN = wNoise(pW * 9.0) * 0.5 + wNoise(pW * 31.0) * 0.5;',
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14), smoothstep(0.62, 0.86, pN) * 0.4);',
+        '  diffuseColor.rgb *= (1.0 - smoothstep(0.5, 0.9, wNoise(pW * 0.5 + 5.0)) * 0.14) * 0.9;',
       ].join('\n'));
     });
   }
