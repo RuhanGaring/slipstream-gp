@@ -209,7 +209,7 @@
     if (ph) {
       const m = MATS.asphalt, prev = m.userData.patchExtra || null;
       m.userData.patchKey = (m.userData.patchKey || '') + '_neut';
-      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
+      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= 2.6;').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
     }
     const aN = ph ? T.photo('asphalt_n', 9 / 3.5, false) : null;
     // kerbs: painted concrete; UVs run 1.5 m along and across the kerb
@@ -1272,36 +1272,60 @@
       add(ck.geo(), std({ map: T.checker(), roughness: 0.6 }));
     }
 
-    // kerbs: raised, red and white in 2 m blocks
+    // Kerbs, drawn finely: a rounded section swept every half metre along the road's own curve, so
+    // no bend shows as a polygon, painted in blocks with clean edges, easing in and out of the road
+    // at each end instead of stopping square. A street circuit has two kinds (the Monaco onboard):
+    // wide low aprons at the apexes, and a narrow stone kerb painted at the foot of the barrier.
     {
-      const kb = new Acc(true), red = col('#d0202a'), wht = col('#f1f1f1');
-      for (const side of [0, 1]) {
-        const sg = side ? 1 : -1, arr = side ? tr.kerbR : tr.kerbL, kw = W2.town ? Math.min(tr.kerbW, 0.9) : tr.kerbW;
-        const prof = [[-0.05, 0.0], [0.3 * kw, 0.06], [kw - 0.1, 0.06], [kw, 0.0]];
-        for (let i = 0; i < N; i++) {
-          if (!arr[i] || (W2.town && Math.abs(tr.kap[i]) < 1 / 45)) continue;
-          const c = (Math.floor(i / 1) % 2) ? red : wht;
-          const j = (i + 1) % N;
-          const base = kb.k;
-          for (const [kk, u] of [[i, i * tr.ds / 1.5], [j, (i + 1) * tr.ds / 1.5]]) for (const [dd, yy] of prof) {
-            const d = sg * (hw + dd);
-            kb.v(tr.x[kk] + tr.nx[kk] * d, Tracks.surfZ(tr, kk, d) + (yy > 0 ? 0.004 : 0.002), tr.y[kk] + tr.ny[kk] * d, 0, 1, 0, u, dd / 1.5, c);
+      const kb = new Acc(true), red = col('#c81e28'), wht = col('#eeeeea'), STEP = 0.5;
+      const sweep = (s0, s1, dOf, prof, blk, ease) => {
+        const n = Math.max(1, Math.ceil((s1 - s0) / STEP));
+        let prev = -1, lastB = null;
+        for (let q = 0; q <= n; q++) {
+          const sq = s0 + (s1 - s0) * q / n, k = Math.floor(((sq % tr.L) + tr.L) % tr.L / tr.ds) % N, e = Math.min(sq - s0, s1 - sq), t = ease ? U.smooth(Math.min(1, e / ease)) : 1, bId = Math.floor(sq / blk), c = bId % 2 ? red : wht;
+          const row = [], base = kb.k;
+          const hard = lastB != null && bId !== lastB;
+          for (let copy = 0; copy < (hard ? 2 : 1); copy++) {
+            const cc = copy === 0 && hard ? (lastB % 2 ? red : wht) : c;
+            for (const pr of prof) {
+              const d = dOf(pr[0], t, k), w = Tracks.pointAt(tr, sq, d);
+              row.push(kb.v(w[0], Tracks.surfZ(tr, k, d) + pr[1] * t + 0.003, w[1], tr.nx[k] * pr[2] * Math.sign(d || 1), pr[3], tr.ny[k] * pr[2] * Math.sign(d || 1), sq / 1.5, pr[0] / 1.5, cc));
+            }
           }
-          // (the left kerb is the right one mirrored, which turns its faces round: wound the
-          // other way there, or it is culled and the left kerbs never show)
-          for (let q = 0; q < 3; q++) {
-            if (side) { kb.t(base + q, base + q + 1, base + 4 + q); kb.t(base + q + 1, base + 5 + q, base + 4 + q); }
-            else { kb.t(base + q, base + 4 + q, base + q + 1); kb.t(base + q + 1, base + 4 + q, base + 5 + q); }
+          const m = prof.length;
+          if (prev >= 0) for (let j = 0; j < m - 1; j++) { const a0 = prev + j, a1 = a0 + 1, b0 = base + j, b1 = b0 + 1, flip = dOf(0.5, 1, k) > 0; if (flip) { kb.t(a0, a1, b0); kb.t(a1, b1, b0); } else { kb.t(a0, b0, a1); kb.t(a1, b0, b1); } }
+          prev = hard ? base + m : base;
+          lastB = bId;
+        }
+      };
+      for (const side of [0, 1]) {
+        const sg = side ? 1 : -1, arr = side ? tr.kerbR : tr.kerbL, kw = W2.town ? 1.05 : tr.kerbW;
+        // the apron's section: a lip up from the road, a low crown, a rounded back edge
+        const apron = [[-0.06, 0, 0, 1], [0.02, 0.012, -0.5, 0.86], [0.1, 0.03, -0.35, 0.94], [0.3, 0.052, -0.08, 1], [0.72, 0.056, 0.06, 1], [0.94, 0.03, 0.4, 0.92], [1, 0.002, 0.5, 0.86]];
+        // (in a town an apron lies on the inside of a corner, its back against the kerb line, and
+        // never out in the carriageway; the outside of a bend has only the kerb at the wall's foot)
+        const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45));
+        for (const [i0, i1] of runs(N, on)) {
+          if ((i1 - i0) * tr.ds < 6) continue;
+          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (0.25 + 0.75 * t), e0 = W2.town ? Math.max(hw, tr.barr[side][k] + 0.32 - wd) : hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, 5);
+        }
+        // a town's narrow painted kerb, 28 cm wide and 12 high, standing at the foot of the barrier
+        if (W2.town) {
+          const foot = [[-0.3, 0, -1, 0], [-0.3, 0.12, -1, 0], [-0.27, 0.13, -0.5, 0.86], [0, 0.13, 0, 1]];
+          const near = k => { for (let q = -9; q <= 9; q += 3) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 60) return isNaN(tr.pit.off[k]); return false; };
+          for (const [i0, i1] of runs(N, near)) {
+            if ((i1 - i0) * tr.ds < 8) continue;
+            sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => sg * (tr.barr[side][k] + 0.42 + u), foot, 1.2, 0);
           }
         }
       }
       const g = kb.geo();
-      if (g) { g.computeVertexNormals(); add(g, M.kerb); }
+      if (g) add(g, M.kerb);
     }
 
     // barriers
     {
-      const armW = new Acc(), orn = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
+      const fpost = new Batch(false), armW = new Acc(), orn = new Acc(), nose = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
       const pit = tr.pit, ps = pit.side > 0 ? 1 : 0;
       const gz0 = (pit.boxS[9] - 16 + tr.L) % tr.L, gz1 = (pit.boxS[0] + 16) % tr.L;
       const garageZone = k => !isNaN(pit.off[k]) && Tracks.inRange(tr, k * tr.ds, gz0, gz1);
@@ -1317,12 +1341,18 @@
         // concrete (street, modern, every main straight) or armco
         const isConc = k => style !== 'park' || mainStraight(k), Tg2 = W2.townGates && W2.townGates.net ? W2.townGates : null;
         const unit = Tg2 ? Tg2.unit[side] : null, abs = Tg2 ? Tg2.absorb[side] : null;
-        const off = k => (unit && unit[k]) || (abs && abs[k]);
+        const off = k => (unit && unit[k]) || (abs && abs[k] > 0);
         // (three W-beams, six ribs, no posts on the road side; near white in the sun)
         if (unit) for (const [i0, i1] of runs(N, k => !skip(k) && unit[k])) {
           for (const y of [0.04, 0.38, 0.72]) wallRun(armW, tr, i0, i1 + 1, d, y, y + 0.31, 4, 0.53, 0);
         }
-        if (abs) for (const [i0, i1] of runs(N, k => !skip(k) && abs[k] && !unit[k])) wallRun(orn, tr, i0, i1 + 1, d, -0.07, 1.05, 3, 1.12, 0.55);
+        if (abs) for (const v of [1, 2]) for (const [i0, i1] of runs(N, k => !skip(k) && abs[k] === v && !unit[k])) wallRun(v === 1 ? orn : nose, tr, i0, i1 + 1, d, -0.07, 1.05, v === 1 ? 2.4 : 2.6, 1.12, 0.55, undefined, true);
+        // upper tier: a second row of boards standing on the first, at a few places
+        if (Tg2) for (let t = 0; t < 3; t++) {
+          const i = Math.floor(rnA() * N), n = Math.round((40 + rnA() * 60) / tr.ds);
+          let okU = true; for (let q = 0; q <= n; q += 4) if (skip(mod(i + q, N)) || !isNaN(tr.pit.off[mod(i + q, N)])) okU = false;
+          if (okU) wallRun(adRuns[Math.floor(rnA() * 8)], tr, i, i + n, d, 1.05, 2.6, 4.4, 1.55, 0.2, undefined, true);
+        }
         for (const [i0, i1] of runs(N, k => !skip(k) && isConc(k) && !off(k))) {
           if (adRuns && style !== 'park') {
             for (let i = i0; i < i1;) {
@@ -1344,8 +1374,8 @@
         }
         if (Tg2) {
           // fast road only: through the slow corners the fence simply stops at a post
-          const fast = new Uint8Array(N), span = Math.round(36 / tr.ds);
-          for (let k = 0; k < N; k++) { let f = 1; for (let q = -span; q <= span; q += 4) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 80) { f = 0; break; } fast[k] = f; }
+          const fast = new Uint8Array(N), span = Math.round(22 / tr.ds);
+          for (let k = 0; k < N; k++) { let f = 1; for (let q = -span; q <= span; q += 4) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 48) { f = 0; break; } fast[k] = f; }
           const pitch = Math.max(1, Math.round(3 / tr.ds)), fh = 4.1;
           for (const [i0, i1] of runs(N, k => !skip(k) && fast[k] && !unit[k])) {
             if (i1 - i0 < Math.round(30 / tr.ds)) continue;
@@ -1353,10 +1383,10 @@
             for (const y of [1.5, 2.2, 2.9, 3.6]) wallRun(cab, tr, i0, i1, k => d(k) + sg * 0.42, y, y + 0.022, 4, 1, 0);
             for (let i = i0; i <= i1; i += pitch) {
               const k = mod(i, N), dd = d(k) + sg * 0.5, x = tr.x[k] + tr.nx[k] * dd, z = tr.y[k] + tr.ny[k] * dd, y = Tracks.surfZ(tr, k, dd);
-              posts.add(postG, mat(x, y + 1.05 + (fh - 1.05) / 2, z, 0, 1.5, fh - 1.05, 1.5));
+              fpost.add(postG, mat(x, y + 1.05 + (fh - 1.05) / 2, z, 0, 1.4, fh - 1.05, 1.4));
               // the top cranks in toward the road
               const nx = -tr.nx[k] * sg, nz = -tr.ny[k] * sg, l = 1.1, q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), V(nx * 0.7, 0.71, nz * 0.7));
-              posts.add(postG, new THREE.Matrix4().compose(V(x + nx * 0.39, y + fh + 0.39, z + nz * 0.39), q, V(1.3, l, 1.3)));
+              fpost.add(postG, new THREE.Matrix4().compose(V(x + nx * 0.39, y + fh + 0.39, z + nz * 0.39), q, V(1.1, l, 1.1)));
             }
           }
         }
@@ -1389,7 +1419,7 @@
       // pit wall with fence
       for (const [i0, i1] of runs(N, k => !isNaN(pit.wall[k]))) {
         const d = k => pit.side * (pit.wall[k] + 0.1);
-        wallRun(ad, tr, i0, i1 - 1, d, -0.07, 1.1, 14, 1.12, 0.6);
+        wallRun(adRuns ? adRuns[0] : ad, tr, i0, i1 - 1, d, -0.07, 1.1, adRuns ? 4.4 : 14, 1.12, 0.6);
         wallRun(fen, tr, i0, i1 - 1, k => d(k) + pit.side * 0.3, 1.1, 3.6, 1.6, 1.6, 0);
       }
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
@@ -1397,7 +1427,9 @@
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
       if (armW.k) add(armW.geo(), M.railW || (M.railW = std({ color: '#cfd4d2', roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide, normalMap: T.corrugation() })), { cast: true });
       if (orn.k) add(orn.geo(), M.orangeEnd || (M.orangeEnd = std({ map: absorberTex(), roughness: 0.7, side: THREE.DoubleSide })), { cast: true });
+      if (nose.k) add(nose.geo(), M.stripeEnd || (M.stripeEnd = std({ map: stripeTex(), roughness: 0.5, side: THREE.DoubleSide })), { cast: true });
       if (cab.k) add(cab.geo(), M.dark, { cast: false });
+      if (fpost.parts.length) add(fpost.geo(), M.fencePost || (M.fencePost = std({ color: '#5f6c64', roughness: 0.6, metalness: 0.3 })), { cast: true });
       add(fen.geo(), fenceMat(M, W2), { cast: false });
       add(posts.geo(), M.steel, { cast: true });
       // floodlight masts: 36 m poles with a lamp bank, every 90 m round a modern venue
@@ -1784,11 +1816,28 @@
     const cg = new Map(), ck = (x, z) => Math.floor(x / 14) + ',' + Math.floor(z / 14);
     for (const e of edges) for (let k = 0; k < e.pts.length - 1; k++) {
       const a = e.pts[k], b = e.pts[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      for (let t = 0; t <= l; t += 3) { const x = a[0] + (b[0] - a[0]) * t / (l || 1), z = a[1] + (b[1] - a[1]) * t / (l || 1), q = ck(x, z); if (!cg.has(q)) cg.set(q, []); cg.get(q).push([x, z, e.w / 2]); }
+      for (let t = 0; t <= l; t += 3) { const x = a[0] + (b[0] - a[0]) * t / (l || 1), z = a[1] + (b[1] - a[1]) * t / (l || 1), q = ck(x, z); if (!cg.has(q)) cg.set(q, []); cg.get(q).push([x, z, e.w / 2, e]); }
     }
     const onCarriage = (x, z, m) => {
       const i0 = Math.floor(x / 14), j0 = Math.floor(z / 14);
       for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of cg.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], z - q[1]) < q[2] - m) return true;
+      return false;
+    };
+    // Paint belongs to its own street. It stops at the kerb line of any street it would run on to;
+    // only a road carrying straight on through a junction keeps its lines across it (its mates).
+    const pair = (a, b) => (a.mates || (a.mates = new Set())).add(b);
+    for (const A of arms) for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
+      const a = A[i], b = A[j], d = Math.abs(U.wrapAngle(a.ang - b.ang));
+      if (d > 2.75 && a.e !== b.e && Math.abs(a.e.w - b.e.w) < 1.5) { pair(a.e, b.e); pair(b.e, a.e); }
+    }
+    let own = null;
+    const foreign = (x, z) => {
+      if (!own) return false;
+      const i0 = Math.floor(x / 14), j0 = Math.floor(z / 14);
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of cg.get((i0 + i) + ',' + (j0 + j)) || []) {
+        if (q[3] === own || (own.mates && own.mates.has(q[3]))) continue;
+        if (Math.hypot(x - q[0], z - q[1]) < q[2] + 0.2) return true;
+      }
       return false;
     };
     // a kerb and its pavement along a line, on the side given (+1 left of the way it runs)
@@ -1797,11 +1846,12 @@
       for (let k = 0; k < K.length; k++) {
         const a = K[Math.max(0, k - 1)], b = K[Math.min(K.length - 1, k + 1)], u = unit(b[0] - a[0], b[1] - a[1]), nx = -u[1] * side, nz = u[0] * side;
         const p = K[k]; if (k) along += Math.hypot(p[0] - K[k - 1][0], p[1] - K[k - 1][1]);
-        if (!inside(p[0], p[1]) || site.inland(p[0], p[1]) < 1 || inPits(p[0], p[1]) || onCarriage(p[0], p[1], 0.6)) { prev = null; gprev = null; continue; }
+        const mk = lap(p[0], p[1]);
+        if (!inside(p[0], p[1]) || site.inland(p[0], p[1]) < 1 || inPits(p[0], p[1]) || onCarriage(p[0], p[1], 0.6) || (mk && mk.bar < -0.15)) { prev = null; gprev = null; continue; }
         let pw = wide; while (pw > 0.5 && onCarriage(p[0] + nx * pw, p[1] + nz * pw, 0.1)) pw -= 0.6;
         const y = yRoad(p[0], p[1]), fx = p[0] + nx * 0.3, fz = p[1] + nz * 0.3, ox = p[0] + nx * pw, oz = p[1] + nz * pw;
         { const gx = p[0] - nx * 0.42, gz = p[1] - nz * 0.42, g0 = gut.v(gx, y + 0.042, gz, 0, 1, 0, gx / 3, gz / 3), g1 = gut.v(p[0], y + 0.042, p[1], 0, 1, 0, p[0] / 3, p[1] / 3); if (gprev != null) { gut.t(gprev, g0, gprev + 1); gut.t(gprev + 1, g0, g1); } gprev = g0; }
-        const c0 = kerb.v(p[0], y, p[1], -nx, 0, -nz, along / 1.5, 0), c1 = kerb.v(p[0], y + 0.14, p[1], 0, 1, 0, along / 1.5, 0.1), c2 = kerb.v(fx, y + 0.14, fz, 0, 1, 0, along / 1.5, 0.3);
+        const c0 = kerb.v(p[0], y, p[1], -nx, 0, -nz, along / 3, 0), c1 = kerb.v(p[0], y + 0.14, p[1], 0, 1, 0, along / 3, 0.35), c2 = kerb.v(fx, y + 0.14, fz, 0, 1, 0, along / 3, 1);
         const yo = Math.max(y + 0.14, gy(ox, oz) + 0.05);
         const a0 = pave.v(fx, y + 0.14, fz, 0, 1, 0, fx / 4.8, fz / 4.8), a1 = pave.v(ox, yo, oz, 0, 1, 0, ox / 4.8, oz / 4.8);
         if (prev) {
@@ -1813,7 +1863,8 @@
     };
     const quad = (a, b, c, d, y, cc = white) => { const v0 = mark.v(a[0], y, a[1], 0, 1, 0, 0, 0, cc), v1 = mark.v(b[0], y, b[1], 0, 1, 0, 0.1, 0, cc), v2 = mark.v(c[0], y, c[1], 0, 1, 0, 0.1, 0.3, cc), v3 = mark.v(d[0], y, d[1], 0, 1, 0, 0, 0.3, cc); mark.t(v0, v1, v3); mark.t(v1, v2, v3); };
     const across = (p, u, a, b, h0, h1, cc) => {  // a patch of paint on a road: a..b along, h0..h1 across
-      const l = [-u[1], u[0]], P = (s, h) => [p[0] + u[0] * s + l[0] * h, p[1] + u[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014;
+      const l = [-u[1], u[0]], P = (s, h) => [p[0] + u[0] * s + l[0] * h, p[1] + u[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014, hm = (h0 + h1) / 2, s0 = P(a, hm), s1 = P(b, hm);
+      if (foreign(s0[0], s0[1]) || foreign(s1[0], s1[1])) return;
       quad(P(a, h0), P(a, h1), P(b, h1), P(b, h0), y, cc);
     };
     // a painted line along a stretch of street, off the centre by q: on metres of line, off metres of gap
@@ -1831,11 +1882,12 @@
     };
     const arrow = (p, u, q, f) => {
       const uf = [u[0] * f, u[1] * f], l = [-uf[1], uf[0]], P = (s, h) => [p[0] + uf[0] * s + l[0] * h, p[1] + uf[1] * s + l[1] * h], y = yRoad(p[0], p[1]) + 0.014, h0 = f * q;
+      for (const t of [0, 3.8]) { const c = P(t, h0); if (foreign(c[0], c[1])) return; }
       quad(P(0, h0 - 0.1), P(0, h0 + 0.1), P(2.6, h0 + 0.1), P(2.6, h0 - 0.1), y);
       quad(P(2.6, h0 - 0.42), P(2.6, h0 + 0.42), P(3.8, h0 + 0.02), P(3.8, h0 - 0.02), y);
     };
     const iron = col('#2a2a2c'), tar = col('#1a1a1c'), yellow = col('#d8b83a');
-    const manhole = (p, R) => { const y = yRoad(p[0], p[1]) + 0.012, n = 10, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); };
+    const manhole = (p, R) => { const y = yRoad(p[0], p[1]) + 0.012, n = 10, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#77787a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
     for (const e of edges) {
       const s0 = setOf(e, 0), s1 = e.L - setOf(e, 1);
       if (s1 - s0 < 1) continue;
@@ -1853,13 +1905,18 @@
       // Each street has its own paint. Nothing is removed for the race, and it changes from street
       // to street: long dashes, short dashes, a solid line with a dash beside it; lanes that are not
       // quite central; an edge line on some; arrows into junctions; manholes and old seams in the road.
-      if (e.w >= 6) {
-        const style = rnd(), mid = (rnd() - 0.5) * (e.w >= 9 ? 1.6 : 0.4), lanes = e.w >= 11.5 ? [mid - e.w / 4 - 0.4, mid + e.w / 4 + 0.4] : [];
-        if (style < 0.4) lane(C, mid, 2.5, 1.1, 0.15);
-        else if (style < 0.7) lane(C, mid, 0.8, 0.8, 0.13);
-        else { lane(C, mid, 900, 0, 0.17); lane(C, mid + 0.3, 2.5, 1.1, 0.15); }
-        for (const q of lanes) lane(C, q, 2.5, 1.1, 0.14);
-        if (rnd() < 0.45) for (const sd of [-1, 1]) lane(C, sd * (hw - 0.55), 900, 0, 0.15);
+      own = e;
+      const carries = (n, en) => arms[n].some(a => a.e !== e && !!a.e.lap === !!e.lap && e.mates && e.mates.has(a.e) && Math.abs(U.wrapAngle(a.ang - arms[n].find(b => b.e === e && b.end === en).ang)) > 2.75);
+      const Cl = cut(e.pts, s0 + (carries(e.a, 0) ? 0 : 5.5), s1 - (carries(e.b, 1) ? 0 : 5.5));
+      if (e.w >= 6 && s1 - s0 > 16) {
+        const h1 = Math.abs(Math.sin(e.w * 12.9898 + e.cls * 4.1) * 43758.5453) % 1, h2 = (h1 * 7.13) % 1, h3 = (h1 * 13.7) % 1;
+        const style = h1, mid = (h2 - 0.5) * (e.w >= 9 ? 1.6 : 0.4), lanes = e.w >= 11.5 ? [mid - e.w / 4 - 0.4, mid + e.w / 4 + 0.4] : [];
+        if (style < 0.4) lane(Cl, mid, 2.5, 1.1, 0.15);
+        else if (style < 0.7) lane(Cl, mid, 0.8, 0.8, 0.13);
+        else { lane(Cl, mid, 900, 0, 0.17); lane(Cl, mid + 0.3, 2.5, 1.1, 0.15); }
+        for (const q of lanes) lane(Cl, q, 2.5, 1.1, 0.14);
+        e.laneMid = mid;
+        if (h3 < 0.45) for (const sd of [-1, 1]) lane(Cl, sd * (hw - 0.55), 900, 0, 0.15);
         if (C.length > 12) {
           const a = C[3], b = C[4], u = unit(b[0] - a[0], b[1] - a[1]), z = C[C.length - 5], y = C[C.length - 4], w2 = unit(y[0] - z[0], y[1] - z[1]);
           if (rnd() < 0.5) arrow(a, u, -e.w / 4, -1);
@@ -1913,11 +1970,19 @@
       }
       const yO = yRoad(O.x, O.y), c = road.v(O.x, yO, O.y, 0, 1, 0, O.x / 9, O.y / 9), vs = ring.map(p => road.v(p[0], yRoad(p[0], p[1]), p[1], 0, 1, 0, p[0] / 9, p[1] / 9));
       for (let k = 0; k < vs.length; k++) road.t(c, vs[(k + 1) % vs.length], vs[k]);
+      for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
+        const a = A[i], b = A[j];
+        if (a.e.w < 6 || !a.e.mates || !a.e.mates.has(b.e) || a.e.laneMid == null || !!a.e.lap !== !!b.e.lap) continue;
+        own = a.e;
+        const Ea = endAt(a), Eb = endAt(b), sg = a.end ? -1 : 1;
+        lane([Ea.p, Eb.p], sg * a.e.laneMid, 2.5, 1.1, 0.15);
+      }
       // crossings on the bigger junctions' arms, stop lines where a smaller street meets a bigger one
       if (A.length >= 3) {
         const top = Math.min(...A.map(a => a.e.cls));
         for (const a of A) {
           if (a.e.L < 30) continue;
+          own = a.e;
           const E = endAt(a);
           if (a.e.cls > top) { if (rnd() < 0.5) across(E.p, E.u, 0.4, 0.8, -a.hw + 0.3, 0); else for (let q = -a.hw + 0.3; q < -0.2; q += 1.5) across(E.p, E.u, 0.4, 0.8, q, q + 1); }
           if (a.e.w >= 6 && rnd() < (a.e.lap ? 0.16 : 0.4)) for (let q = -a.hw + 0.35; q < a.hw - 0.6; q += 1.3) across(E.p, E.u, 1.2, 4.2, q, q + 0.6);
@@ -1926,7 +1991,7 @@
     });
     const rg = road.geo();
     if (rg) { rg.setAttribute('trk', offLine(rg)); add(rg, M.asphalt); }
-    add(kerb.geo(), M.concrete);
+    add(kerb.geo(), M.kerbStone || (M.kerbStone = std({ map: stoneKerbTex(), roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.4 })));
     add(gut.geo(), M.gutter || (M.gutter = std({ color: '#c9c6bc', roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.3 })));
     if (!M.townPave) { M.townPave = T.has('city_tile') ? pbr('city_tile', 1, { color: '#8f8b80', side: THREE.DoubleSide, envMapIntensity: 0.25 }) : M.concrete; if (M.townPave.roughnessMap) { M.townPave.roughnessMap = null; M.townPave.metalnessMap = null; M.townPave.roughness = 0.96; M.townPave.metalness = 0; } }
     add(pave.geo(), M.townPave);
@@ -1946,12 +2011,16 @@
         const i = m ? m.i : -1;
         if (i < 0 || !isNaN(tr.pit.off[i])) continue;
         const tl = Math.hypot(tr.tx[i], tr.ty[i]) || 1, c = Math.abs(a.u[0] * tr.ty[i] - a.u[1] * tr.tx[i]) / tl, n = Math.ceil((a.hw + 2.5) / Math.max(c, 0.55) / tr.ds);
+        if (c < 0.45) continue;
         for (let q = -n; q <= n; q++) side[m.sd][mod(i + q, N)] = 1;
         list.push({ x: p[0], z: p[1], ux: a.u[0], uz: a.u[1], w: a.e.w, i, side: m.sd, n });
       }
     }
+    // nothing the town or the race puts out may stand on the road side of any barrier
+    const clear = (x, z, m0 = 0.7) => { const m = lap(x, z); return !m || m.bar > m0; };
     {
-      // bare gates, alternating sides, now and then a pair opposite each other
+      // bare gates, alternating sides, now and then a pair opposite each other; three or four
+      // longer bare runs, the marshals right behind them
       const gn = Math.max(1, Math.round(3 / 2 / tr.ds));
       for (let t = 80, sd = 0; t < tr.L - 40; t += 110 + rnd() * 100, sd = 1 - sd) {
         const i = Math.floor(t / tr.ds) % N;
@@ -1961,48 +2030,92 @@
           units.push({ i, side: q });
         }
       }
-      // an orange absorber where about one mouth in three shows at all
-      list.forEach((g, k) => { if (k % 3 === 0) for (let q = -g.n; q <= -g.n + Math.round(5 / tr.ds); q++) absorb[g.side][mod(g.i + q, N)] = 1; });
+      for (let r0 = 0; r0 < 4; r0++) {
+        const i = Math.floor(rnd() * N), q = rnd() < 0.5 ? 0 : 1, len = Math.round((20 + rnd() * 45) / tr.ds);
+        if (!isNaN(tr.pit.off[i]) || !isNaN(tr.pit.off[mod(i + len, N)])) continue;
+        for (let k = 0; k <= len; k++) unitM[q][mod(i + k, N)] = 1;
+        units.push({ i: mod(i + (len >> 1), N), side: q });
+      }
+      // an orange absorber, or a striped nose, at about one mouth in three; 5 m of it
+      list.forEach((g, k) => { if (k % 3 === 0) for (let q = 0; q <= Math.round(5 / tr.ds); q++) absorb[g.side][mod(g.i - g.n + q, N)] = k % 2 ? 2 : 1; });
     }
     {
-      const steel = new Batch(false), paint = new Batch(true), people = new Batch(true), gb = new THREE.BoxGeometry(1, 1, 1), cyl = new THREE.CylinderGeometry(0.04, 0.04, 1, 6, 1, true), head = new THREE.IcosahedronGeometry(0.12, 0);
-      const disc = new THREE.CircleGeometry(0.35, 12), discs = new Batch(true), red = col('#c8342c'), wh = col('#ece9e2'), or = col('#e8641c'), dk = col('#17181a');
-      const yb = (x, z) => yRoad(x, z) + 0.14;
-      const person = (x, z, k) => {
-        const y = yb(x, z);
-        people.add(gb, mat(x, y + 0.45, z, k, 0.34, 0.9, 0.2), dk); people.add(gb, mat(x, y + 1.15, z, k, 0.42, 0.62, 0.24), or); people.add(head, mat(x, y + 1.6, z, 0, 1, 1, 1), wh);
+      const steel = new Batch(false), paint = new Batch(true), people = new Batch(true), glassB = new Batch(false), gb = new THREE.BoxGeometry(1, 1, 1), cyl = new THREE.CylinderGeometry(0.04, 0.04, 1, 6, 1, true), head = new THREE.IcosahedronGeometry(0.115, 1), wheel = new THREE.CylinderGeometry(0.46, 0.46, 0.3, 10);
+      wheel.rotateZ(Math.PI / 2);
+      const body = new THREE.CapsuleGeometry(0.17, 0.42, 2, 6), leg = new THREE.CapsuleGeometry(0.075, 0.62, 1, 5), limb = new THREE.CapsuleGeometry(0.055, 0.46, 1, 5);
+      const disc = new THREE.CircleGeometry(0.35, 12), discs = new Batch(true), red = col('#c8342c'), wh = col('#ece9e2'), or = col('#e8641c'), dk = col('#17181a'), helmet = col('#efeee8');
+      const yb = (x, z) => yRoad(x, z) + 0.14, skin = ['#d9a982', '#b98a66', '#8a5f42', '#e2b896'], shirts = ['#d8d8d4', '#26415f', '#b5332e', '#2c2c30', '#6f8a6a', '#e2c34a', '#5d6d86', '#c9b8a2'];
+      const person = (x, z, k, shirt, hat) => {
+        const y = yb(x, z), sn = Math.sin(k), cs = Math.cos(k), trou = shirt === or ? or : dk;
+        for (const q of [-0.1, 0.1]) people.add(leg, mat(x + cs * q, y + 0.42, z - sn * q, k, 1, 1, 1), trou);
+        people.add(body, mat(x, y + 1.08, z, k, 1, 1, 0.72), shirt);
+        for (const q of [-0.25, 0.25]) people.add(limb, mat(x + cs * q, y + 1.1, z - sn * q, k, 1, 1, 1), shirt);
+        people.add(head, mat(x, y + 1.58, z, 0, 1, 1.1, 1), hat);
       };
-      const vehicle = (x, z, ry, L, c) => {
-        const y = yRoad(x, z), sn = Math.sin(ry), cs = Math.cos(ry);
-        paint.add(gb, mat(x + cs * 0.9, y + 1.7, z - sn * 0.9, ry, L - 2, 2.4, 2.25), wh);
-        paint.add(gb, mat(x - cs * (L / 2 - 1.1), y + 1.3, z + sn * (L / 2 - 1.1), ry, 1.9, 1.7, 2.2), c);
-        paint.add(gb, mat(x, y + 0.42, z, ry, L, 0.44, 2.05), dk);
+      // a service truck: box, cab with its windscreen, wheels
+      const vehicle = (x, z, ry, L, c, box = true) => {
+        const y = yRoad(x, z), sn = Math.sin(ry), cs = Math.cos(ry), at = (d) => [x + cs * d, z - sn * d];
+        if (box) { const q = at(0.9); paint.add(gb, mat(q[0], y + 1.85, q[1], ry, L - 2.1, 2.3, 2.3), wh); paint.add(gb, mat(q[0], y + 1.85, q[1], ry, L - 2, 0.42, 2.34), c); }
+        const q = at(-(L / 2 - 1.05)), wq = at(-(L / 2 - 0.1));
+        paint.add(gb, mat(q[0], y + 1.3, q[1], ry, 1.9, 1.6, 2.2), c);
+        glassB.add(gb, mat(wq[0], y + 1.72, wq[1], ry, 0.06, 0.7, 2.02));
+        const ch = at(0); paint.add(gb, mat(ch[0], y + 0.62, ch[1], ry, L, 0.26, 2), dk);
+        for (const d of [-(L / 2 - 1.1), L / 2 - 1.5]) for (const sd of [-1, 1]) { const w = at(d); paint.add(wheel, mat(w[0] + sn * sd * 0.98, y + 0.46, w[1] + cs * sd * 0.98, ry, 1, 1, 1), dk); }
       };
-      // gates: the poles and the marshals
+      const fits = (x, z, ry, L) => { const sn = Math.sin(ry), cs = Math.cos(ry); for (const d of [-L / 2, 0, L / 2]) for (const o of [-1.3, 1.3]) { const px = x + cs * d + sn * o, pz = z - sn * d + cs * o; if (!clear(px, pz, 1.2)) return false; } return true; };
       for (const g of units) {
         const sg = g.side ? 1 : -1, k = g.i, o = sg * (tr.barr[g.side][k] + 1.2), ux = tr.tx[k], uz = tr.ty[k], tl = Math.hypot(ux, uz) || 1, x = tr.x[k] + tr.nx[k] * o, z = tr.y[k] + tr.ny[k] * o;
         for (const q of [-0.65, 0.65]) {
           const px = x + ux / tl * q, pz = z + uz / tl * q, y = yb(px, pz);
+          if (!clear(px, pz, 0.4) || onCarriage(px, pz, 0.3)) continue;
           for (let b = 0; b < 5; b++) paint.add(cyl, mat(px, y + 0.28 + b * 0.56, pz, 0, 1, 0.56, 1), b % 2 ? wh : red);
         }
-        for (let m = 0, n = 2 + Math.floor(rnd() * 3); m < n; m++) person(x + ux / tl * (1.2 + m * 0.7), z + uz / tl * (1.2 + m * 0.7) + 0.1 * m, rnd() * 6);
+        for (let m = 0, n = 2 + Math.floor(rnd() * 5); m < n; m++) { const d = 1.2 + m * 0.7, px = x + ux / tl * d + tr.nx[k] * sg * (m % 2) * 0.5, pz = z + uz / tl * d + tr.ny[k] * sg * (m % 2) * 0.5; if (clear(px, pz, 0.4)) person(px, pz, rnd() * 6, or, helmet); }
       }
-      // what stands beyond each closed street
       let lastCrane = -1e9;
       list.forEach((g, n) => {
-        const tx = -g.uz, tz = g.ux, sx = g.x + g.ux * 2.2 + tx * (g.w / 2 + 0.5), sz = g.z + g.uz * 2.2 + tz * (g.w / 2 + 0.5), sy = yb(sx, sz), ry = -Math.atan2(tz, tx), s0 = g.i * tr.ds;
-        // the no-entry disc faces up the closed street, on its ordinary post
-        steel.add(cyl, mat(sx, sy + 1.2, sz, 0, 1, 2.4, 1));
-        discs.add(disc, mat(sx + g.ux * 0.04, sy + 2.2, sz + g.uz * 0.04, ry + Math.PI / 2 + Math.PI, 1, 1, 1), red);
-        const kind = rnd(), bk = 7 + rnd() * 8, bx = g.x + g.ux * bk, bz = g.z + g.uz * bk;
-        if (kind < 0.3 && s0 - lastCrane > 480 && g.w >= 6) {
+        const tx = -g.uz, tz = g.ux, ry = -Math.atan2(tz, tx), s0 = g.i * tr.ds;
+        // one no-entry disc to a street, on the pavement at its corner, facing up the closed street
+        if (n % 2 === 0) {
+          const sx = g.x + g.ux * 2.4 + tx * (g.w / 2 + 0.7), sz = g.z + g.uz * 2.4 + tz * (g.w / 2 + 0.7), sy = yb(sx, sz);
+          if (clear(sx, sz, 0.6) && !onCarriage(sx, sz, -0.1)) { steel.add(cyl, mat(sx, sy + 1.2, sz, 0, 1, 2.4, 1)); discs.add(disc, mat(sx + g.ux * 0.04, sy + 2.2, sz + g.uz * 0.04, ry + Math.PI / 2 + Math.PI, 1, 1, 1), red); }
+        }
+        const kind = rnd(), bk = 8 + rnd() * 9, bx = g.x + g.ux * bk, bz = g.z + g.uz * bk;
+        if (kind < 0.3 && s0 - lastCrane > 480 && g.w >= 6 && fits(bx, bz, ry + Math.PI / 2, 8.5)) {
           lastCrane = s0;
-          vehicle(bx, bz, ry + Math.PI / 2, 7.5, red);
-          const y = yRoad(bx, bz), a = 1.15 + rnd() * 0.2, Lb = 16 + rnd() * 5, h = new THREE.Matrix4().compose(V(bx + g.ux * Math.cos(a) * Lb / 2, y + 2.8 + Math.sin(a) * Lb / 2, bz + g.uz * Math.cos(a) * Lb / 2), new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), V(g.ux * Math.cos(a), Math.sin(a), g.uz * Math.cos(a))), V(0.45, Lb, 0.45));
-          paint.add(gb, h, red);
-        } else if (kind < 0.55 && g.w >= 5) vehicle(bx - tx * g.w * 0.2, bz - tz * g.w * 0.2, ry + Math.PI / 2 * (rnd() < 0.7 ? 1 : 0), 5.5 + rnd() * 2, col(['#e8e8e4', '#d7c23a', '#2f5d8a'][n % 3]));
-        else if (kind < 0.8) for (let m = 0; m < 2; m++) person(bx + tx * m * 0.8, bz + tz * m * 0.8, rnd() * 6);
+          vehicle(bx, bz, ry + Math.PI / 2, 8.5, col(n % 2 ? '#c8342c' : '#d9b02a'), false);
+          const y = yRoad(bx, bz) + 1, a = 1.1 + rnd() * 0.25, up = V(g.ux * Math.cos(a), Math.sin(a), g.uz * Math.cos(a)), q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), up), c0 = n % 2 ? '#c8342c' : '#d9b02a';
+          [[8, 0.62, 0], [8, 0.46, 7.4], [7, 0.32, 14.4]].forEach(([l, w, off]) => { const cc = off + l / 2; paint.add(gb, new THREE.Matrix4().compose(V(bx + up.x * cc, y + up.y * cc, bz + up.z * cc), q, V(w, l, w)), col(c0)); });
+          for (const sd of [-1, 1]) for (const d of [-2.6, 2.6]) { const ox = bx + tx * d + g.ux * sd * 1.9, oz = bz + tz * d + g.uz * sd * 1.9; if (clear(ox, oz, 1)) paint.add(gb, mat(ox, yRoad(ox, oz) + 0.22, oz, ry, 0.5, 0.44, 1.2), dk); }
+        } else if (kind < 0.55 && g.w >= 5) {
+          const vx = bx - tx * g.w * 0.2, vz = bz - tz * g.w * 0.2, r1 = ry + Math.PI / 2 * (rnd() < 0.7 ? 1 : 0), L = 5.8 + rnd() * 2;
+          if (fits(vx, vz, r1, L)) vehicle(vx, vz, r1, L, col(['#d7c23a', '#2f5d8a', '#d8d8d4'][n % 3]));
+        } else if (kind < 0.8) for (let m = 0, c = 2 + Math.floor(rnd() * 3); m < c; m++) { const px = bx + tx * m * 0.8, pz = bz + tz * m * 0.8; if (clear(px, pz, 0.5)) person(px, pz, rnd() * 6, or, helmet); }
       });
+      // the crowd: at the slow corners, behind white steel barriers on the pavement
+      {
+        const pan = new Batch(false), N2 = Math.round(2.5 / tr.ds);
+        let seen = 0;
+        for (const sd of [0, 1]) {
+          const sg = sd ? 1 : -1;
+          for (let i = 0; i < N && seen < 240; i += N2) {
+            let slow = false; for (let q = -12; q <= 12; q += 3) if (Math.abs(tr.kap[mod(i + q, N)]) > 1 / 40) slow = true;
+            if (!slow || side[sd][i] || !isNaN(tr.pit.off[i])) continue;
+            const o = sg * (tr.barr[sd][i] + 2.3), x = tr.x[i] + tr.nx[i] * o, z = tr.y[i] + tr.ny[i] * o, m = lap(x, z);
+            if (!inside(x, z) || (m && m.bar < 1.2) || onCarriage(x, z, -0.3) || site.inland(x, z) < 3) continue;
+            const ry = -Math.atan2(tr.ty[i], tr.tx[i]), y = yb(x, z);
+            pan.add(gb, mat(x, y + 1.08, z, ry, 2.4, 0.05, 0.05)); pan.add(gb, mat(x, y + 0.3, z, ry, 2.4, 0.04, 0.04));
+            for (let b = -1; b <= 1; b++) pan.add(gb, mat(x + Math.cos(ry) * b * 1.0, y + 0.55, z - Math.sin(ry) * b * 1.0, ry, 0.03, 1.1, 0.03));
+            for (let c = 0, cn = 2 + Math.floor(rnd() * 3); c < cn; c++) {
+              const d = -1 + rnd() * 2, bk = 0.5 + rnd() * 1.1, px = x + Math.cos(ry) * d + tr.nx[i] * sg * bk, pz = z - Math.sin(ry) * d + tr.ny[i] * sg * bk;
+              if (!clear(px, pz, 1.0) || onCarriage(px, pz, -0.2)) continue;
+              person(px, pz, ry + Math.PI / 2 * sg + (rnd() - 0.5), col(shirts[Math.floor(rnd() * shirts.length)]), col(skin[Math.floor(rnd() * 4)]));
+              seen++;
+            }
+          }
+        }
+        if (pan.parts.length) add(pan.geo(), M.white, { cast: false });
+      }
       // overhead banners on trusses, every 450 m or so
       {
         const ban = new Acc();
@@ -2022,6 +2135,7 @@
       if (paint.parts.length) add(paint.geo(), M.vcol, { cast: true });
       if (people.parts.length) add(people.geo(), M.vcol, { cast: false });
       if (steel.parts.length) add(steel.geo(), M.steel, { cast: true });
+      if (glassB.parts.length) add(glassB.geo(), M.carGlass || (M.carGlass = std({ color: '#14191e', roughness: 0.12, metalness: 0.2 })), { cast: false });
       if (discs.parts.length) add(discs.geo(), M.noEntry || (M.noEntry = new THREE.MeshBasicMaterial({ map: noEntryTex(), side: THREE.DoubleSide })), { cast: false });
     }
     // street lamps down every street of any size, staggered side to side
@@ -2088,8 +2202,26 @@
     const c = document.createElement('canvas'); c.width = 64; c.height = 256;
     const g = c.getContext('2d');
     g.fillStyle = '#141414'; g.fillRect(0, 0, 64, 256);
-    for (let k = 0; k < 5; k++) { g.fillStyle = '#e89a48'; g.fillRect(0, k * 51 + 4, 64, 43); g.fillStyle = 'rgba(255,240,210,.35)'; g.fillRect(0, k * 51 + 8, 64, 9); }
+    for (let k = 0; k < 5; k++) { const b = g.createLinearGradient(0, k * 51 + 3, 0, k * 51 + 49); b.addColorStop(0, '#d98d44'); b.addColorStop(0.3, '#f4bc78'); b.addColorStop(1, '#c97f3c'); g.fillStyle = b; g.fillRect(0, k * 51 + 3, 64, 46); }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping;
+    return t;
+  }
+  // dressed kerbstones a metre long, with their joints
+  function stoneKerbTex() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+    const g = c.getContext('2d'), r = U.rng(19);
+    g.fillStyle = '#b2aea3'; g.fillRect(0, 0, 256, 64);
+    for (let k = 0; k < 900; k++) { const v = 150 + r() * 50 | 0; g.fillStyle = `rgba(${v},${v - 3},${v - 10},.35)`; g.fillRect(r() * 256, r() * 64, 2 + r() * 3, 1 + r() * 2); }
+    g.fillStyle = 'rgba(40,38,34,.8)'; g.fillRect(84, 0, 3, 64); g.fillRect(170, 0, 3, 64); g.fillRect(254, 0, 2, 64);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
+  function stripeTex() {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ecebe6'; g.fillRect(0, 0, 128, 128); g.fillStyle = '#c8302a';
+    for (let k = -2; k < 3; k += 1) { g.beginPath(); g.moveTo(k * 64, 128); g.lineTo(k * 64 + 32, 128); g.lineTo(k * 64 + 160, 0); g.lineTo(k * 64 + 128, 0); g.fill(); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
   }
   function noEntryTex() {

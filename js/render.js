@@ -445,6 +445,13 @@
         return false;
       };
     })();
+    const inWall = (x, y) => {
+      let bi = -1, bd = 1e18;
+      tr.hash.near(x, y, 36, i => { const q = (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2; if (q < bd) { bd = q; bi = i; } });
+      if (bi < 0) return false;
+      const dl = (x - tr.x[bi]) * tr.nx[bi] + (y - tr.y[bi]) * tr.ny[bi];
+      return Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 1.6;
+    };
     // street trees on the pavements; palms within a block of the shore
     for (const rd of site.roads) {
       if (rd.kind === 'rail' || rd.kind === 'steps') continue;
@@ -456,7 +463,7 @@
           if (rnd() < 0.35) continue;
           const o = rd.w / 2 + 1.6, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
           const u = site.inland(x, y);
-          if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2) || onStreet(x, y)) continue;
+          if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2) || onStreet(x, y) || inWall(x, y)) continue;
           if (u < 70 && rnd() < 0.15) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
           else addDecor(W, { type: 'tree', x, y, r: 2.8 + rnd() * 2.2, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
         }
@@ -469,7 +476,7 @@
       for (let i = 0; i < tr.N; i += Math.max(1, Math.round((15 + rnd() * 10) / tr.ds))) for (const sd of [-1, 1]) {
         if (rnd() < 0.45 || tun(i)) continue;
         const o = (sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 3.6 + rnd() * 1.6, x = tr.x[i] + tr.nx[i] * o * sd, y = tr.y[i] + tr.ny[i] * o * sd, u = site.inland(x, y);
-        if (u < 4 || inBuilding(x, y, 1.5) || onStreet(x, y)) continue;
+        if (u < 4 || inBuilding(x, y, 1.5) || onStreet(x, y) || inWall(x, y)) continue;
         if (u < 70 && rnd() < 0.12) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
         else addDecor(W, { type: 'tree', x, y, r: 3.4 + rnd() * 2.4, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
       }
@@ -489,7 +496,7 @@
         if (site.inland(px, py) < 8) continue;
         const e = 3, g = Math.hypot(site.H(px + e, py) - site.H(px - e, py), site.H(px, py + e) - site.H(px, py - e)) / (2 * e);
         if (!(g > 0.35 || (site.park && site.park(px, py)))) continue;
-        if (rnd() < 0.4 || inBuilding(px, py, 2) || onRoad(px, py) || !clearance(tr, px, py, 3, W)) continue;
+        if (rnd() < 0.4 || inBuilding(px, py, 2) || onRoad(px, py) || inWall(px, py) || !clearance(tr, px, py, 3, W)) continue;
         addDecor(W, { type: 'tree', x: px, y: py, r: 3 + rnd() * 2.8, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
       }
     }

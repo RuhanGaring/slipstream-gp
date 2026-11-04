@@ -332,7 +332,7 @@
           '  float aLoad = 0.3 + 0.7 * aW;',
           '  float aSkid = smoothstep(0.72, 0.95, wNoise(vec2(vTrk.y * 3.2, vTrk.x * 0.03) + 41.0)) * aW * aWide;',
           // many separate tyre-track pairs, each a car's own path, baked (tools/rubber_bake.py)
-          '  float aMany = texture2D(uRubber, vec2(vTrk.x / 512.0, clamp(aL / 20.0 + 0.5, 0.01, 0.99))).r * 1.6;',
+          '  float aMany = texture2D(uRubber, vec2(vTrk.x / 512.0, clamp(aL / 20.0 + 0.5, 0.01, 0.99))).r * 0.75;',
           '  float aRub = aTr * aBreak * (0.28 + 0.5 * aLoad) + aBand * 0.14 * aLoad + aWide * 0.1 + aWider * 0.05 + aSkid * 0.35 + aMany * (0.5 + 0.5 * aLoad);',
           '  diffuseColor.rgb *= (1.0 - clamp(aRub, 0.0, 0.78));',
           '  float aMar = smoothstep(2.4, 4.5, abs(aL)) * (1.0 - smoothstep(0.0, 1.3, min(abs(vTrk.y) - 0.0, 20.0) * 0.0)) * (0.35 + 0.65 * aW) * smoothstep(0.45, 0.85, wNoise(vec2(vTrk.y * 5.0, vTrk.x * 0.35) + 3.0));',

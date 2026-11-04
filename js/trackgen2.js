@@ -941,7 +941,11 @@
       return n;
     };
     const land = (x, y, m) => T.inland(x, y) > m && Math.hypot(x - cx, y - cy) < reach && x > T.X0 + 60 && x < T.X1 - 60 && y > T.Y0 + 60 && y < T.Y1 - 60;
-    const unit = (x, y) => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+    const unit = (x, y) => { const l = Math.sqrt(x * x + y * y) || 1; return [x / l, y / l]; };
+    // Engines differ in the last bit of sin and cos, and a street tracer turns that into a different
+    // town, so a seed would build one town in the browser and another in a worker or in Node. Every
+    // heading and position is rounded as it is made, far above that noise.
+    const QD = v => Math.round(v * 1e6) / 1e6, QP = v => Math.round(v * 256) / 256;
     const shoreN = (x, y) => unit(T.inland(x + 10, y) - T.inland(x - 10, y), T.inland(x, y + 10) - T.inland(x, y - 10));
     // the two directions streets take: along the slope, and across it at the steepest a street may
     // climb. Flat ground has no contours, so there the shore gives the grain, and every district
@@ -977,14 +981,14 @@
     };
     const trace = (p0, h0, field, o) => {
       const pts = [p0.slice()], mt = o.turn || 0.17;
-      let x = p0[0], y = p0[1], d = [Math.cos(h0), Math.sin(h0)], len = 0, hit = null, why = 'length', bent = 0;
+      let x = p0[0], y = p0[1], d = [QD(Math.cos(h0)), QD(Math.sin(h0))], len = 0, hit = null, why = 'length', bent = 0;
       while (len < o.max) {
         const q = field(x, y, d), a = U.clamp(Math.atan2(d[0] * q[1] - d[1] * q[0], d[0] * q[0] + d[1] * q[1]), -mt, mt), ca = Math.cos(a), sa = Math.sin(a);
-        d = [d[0] * ca - d[1] * sa, d[0] * sa + d[1] * ca];
+        d = [QD(d[0] * ca - d[1] * sa), QD(d[0] * sa + d[1] * ca)];
         // (a street does not hook round to rejoin where it came from)
-        bent += a;
+        bent += QD(a);
         if (o.bend && Math.abs(bent) > o.bend) { why = 'hook'; break; }
-        const nx = x + d[0] * STEP, ny = y + d[1] * STEP;
+        const nx = QP(x + d[0] * STEP), ny = QP(y + d[1] * STEP);
         if (!land(nx, ny, o.shore || 12)) { why = 'edge'; break; }
         if (Math.abs(T.H(nx, ny) - T.H(x, y)) / STEP > o.gmax) { why = 'steep'; break; }
         if (len > (o.clear || 20)) {
@@ -1019,7 +1023,7 @@
         const e = U.clamp((off - T.inland(x, y)) * 0.06, -0.8, 0.8);
         return unit(t[0] + n[0] * e, t[1] + n[1] * e);
       };
-      const x0 = T.Wb * 0.5, y0 = T.cl(x0) + off, w = Math.round(L(11, 14) * 2) / 2, o = { max: 3200, gmax: 0.17, hit: 0, shore: 14, clear: 1e9, turn: 0.22 };
+      const x0 = QP(T.Wb * 0.5), y0 = QP(T.cl(x0) + off), w = Math.round(L(11, 14) * 2) / 2, o = { max: 3200, gmax: 0.17, hit: 0, shore: 14, clear: 1e9, turn: 0.22 };
       const a = trace([x0, y0], 0, follow, o), b = trace([x0, y0], Math.PI, follow, o);
       const pts = b.pts.slice().reverse().concat(a.pts.slice(1));
       if (pts.length < 40) return null;
@@ -1038,9 +1042,9 @@
           if (e.dead) break;
           const p = e.pts[i], o = e.pts[i + 1], u = unit(o[0] - p[0], o[1] - p[1]);
           for (const sd of [-1, 1]) {
-            const g = gap * L(0.85, 1.2), x = p[0] - u[1] * sd * g, y = p[1] + u[0] * sd * g;
+            const g = gap * L(0.85, 1.2), x = QP(p[0] - u[1] * sd * g), y = QP(p[1] + u[0] * sd * g);
             if (!land(x, y, 40) || T.H(x, y) > ceiling || nearest(x, y, gap * 0.72, null)) continue;
-            const d0 = along(x, y, u), h0 = Math.atan2(d0[1], d0[0]), oo = { max: L(450, 1300), gmax, hit: gap * 0.5, shore: 28, clear: 0 };
+            const d0 = along(x, y, u), h0 = QD(Math.atan2(d0[1], d0[0])), oo = { max: L(450, 1300), gmax, hit: gap * 0.5, shore: 28, clear: 0 };
             const fw = trace([x, y], h0, along, oo), bk = trace([x, y], h0 + Math.PI, along, oo);
             if (fw.len + bk.len < 120) continue;
             const pts = bk.pts.slice().reverse().concat(fw.pts.slice(1)), w = Math.round(L(w0, w1) * 2) / 2;
@@ -1060,7 +1064,7 @@
         for (let i = 3 + Math.floor(r() * (every / STEP)); i < pts.length - 3; i += Math.round(L(every * 0.8, every * 1.25) / STEP)) cuts.push(i);
         for (const i of cuts) for (const sd of [-1, 1]) {
           if (r() < 0.25) continue;
-          const p = pts[i], q = pts[i + 1], h = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * Math.PI / 2;
+          const p = pts[i], q = pts[i + 1], h = QD(Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * Math.PI / 2);
           if (!land(p[0] + Math.cos(h) * 16, p[1] + Math.sin(h) * 16, 12)) continue;
           const t = trace(p, h, across(gmax), { max: maxLen, gmax: gmax * 1.25, hit: hitAt, shore: 12, clear: 14, turn: 0.2, bend: 1.05 });
           if (t.len < 24 || t.why === 'parallel' || t.why === 'hook' || (!t.hit && !keepDead)) continue;
@@ -1079,7 +1083,7 @@
         for (const n of [e.a, e.b]) {
           if (n.e.length !== 1) continue;
           const pts = n === e.a ? e.pts : e.pts.slice().reverse(), p = pts[0], q = pts[Math.min(3, pts.length - 1)];
-          const h = Math.atan2(p[1] - q[1], p[0] - q[0]), o = nearest(p[0] + Math.cos(h) * 40, p[1] + Math.sin(h) * 40, 150, e);
+          const h = QD(Math.atan2(p[1] - q[1], p[0] - q[0])), o = nearest(QP(p[0] + Math.cos(h) * 40), QP(p[1] + Math.sin(h) * 40), 150, e);
           if (!o) continue;
           const tgt = o.e.pts[o.i], to = (x, y, d) => unit(tgt[0] - x, tgt[1] - y);
           const t = trace(p, h, to, { max: 260, gmax: 0.14, hit: 11, shore: 12, clear: 10, turn: 0.26 });
@@ -1101,7 +1105,7 @@
       if (e.dead || e.cls < 1 || e.pts.length < 7) continue;
       for (let i = 3 + Math.floor(r() * 5); i < e.pts.length - 3; i += Math.round(L(50, 95) / STEP)) {
         if (e.dead || r() < 0.35) continue;
-        const p = e.pts[i], q = e.pts[i + 1], sd = r() < 0.5 ? -1 : 1, h = Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * (Math.PI / 2 + L(-0.25, 0.25));
+        const p = e.pts[i], q = e.pts[i + 1], sd = r() < 0.5 ? -1 : 1, h = QD(Math.atan2(q[1] - p[1], q[0] - p[0]) + sd * (Math.PI / 2 + L(-0.25, 0.25)));
         const t = trace(p, h, (x, y, d) => d, { max: L(40, 80), gmax: 0.16, hit: 9, shore: 12, clear: 10 });
         if (t.len < 30 || t.hit || t.why === 'parallel') continue;
         lay(nodeAt(e, i), t, Math.round(L(3.5, 4.5) * 2) / 2, 3, 'street');
@@ -1127,14 +1131,14 @@
           const p = e.pts[k], o = nearest(p[0], p[1], 240, null);
           // (the search returns the nearest of all, so it is walked out from the road a little)
           for (const a of [0, 1, 2, 3, 4, 5, 6, 7]) {
-            const ax = p[0] + Math.cos(a * 0.785) * 60, ay = p[1] + Math.sin(a * 0.785) * 60, q = nearest(ax, ay, 90, null);
+            const ax = QP(p[0] + Math.cos(a * 0.785) * 60), ay = QP(p[1] + Math.sin(a * 0.785) * 60), q = nearest(ax, ay, 90, null);
             if (q && comp.get(q.e.a) === main) { const d = Math.hypot(q.e.pts[q.i][0] - p[0], q.e.pts[q.i][1] - p[1]); if (!best || d < best.d) best = { d, e, k, q }; }
           }
           void o;
         }
         if (best && !best.e.dead) {
           const p = best.e.pts[best.k], tgt = best.q.e.pts[best.q.i], to = (x, y) => unit(tgt[0] - x, tgt[1] - y);
-          const t = trace(p, Math.atan2(tgt[1] - p[1], tgt[0] - p[0]), to, { max: 320, gmax: 0.16, hit: 11, shore: 12, clear: 12, turn: 0.3 });
+          const t = trace(p, QD(Math.atan2(tgt[1] - p[1], tgt[0] - p[0])), to, { max: 320, gmax: 0.16, hit: 11, shore: 12, clear: 12, turn: 0.3 });
           if (t.hit && comp.get(t.hit.e.a) === main) { lay(nodeAt(best.e, best.k), t, 8, 1, 'street'); continue; }
         }
         if (pass === 5) for (const e of own) unlink(e);
@@ -1148,7 +1152,7 @@
     // two junctions a few metres apart are one junction
     for (const e of edges) {
       if (e.dead || e.a === e.b || e.a.e.length < 3 || e.b.e.length < 3 || polyLen(e.pts) > 24 || e.cls === 0) continue;
-      const m = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 }, keep = e.a, gone = e.b;
+      const m = { x: QP((e.a.x + e.b.x) / 2), y: QP((e.a.y + e.b.y) / 2) }, keep = e.a, gone = e.b;
       unlink(e);
       keep.x = m.x; keep.y = m.y;
       for (const q of gone.e.slice()) { if (q.a === gone) q.a = keep; if (q.b === gone) q.b = keep; keep.e.push(q); }
@@ -1243,7 +1247,7 @@
       const hill = Math.min(1, (zmax - zmin) / 40);
       const area = Math.abs(lp.pts.reduce((s, p, k) => { const q = lp.pts[(k + 1) % lp.pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
       const fill = area / (lp.len * lp.len / (4 * Math.PI));   // a thin, winding shape over a plain ring
-      return 2 * hill + Math.min(turns, 20) / 10 + Math.min(sharp, 10) / 8 + (1 - fill) * 2;
+      return 2 * hill + (turns > 20 ? 2 - (turns - 20) * 0.15 : turns / 10) + Math.min(sharp, 8) / 8 + (1 - fill) * 2;
     };
     for (let run = 0; run < 90; run++) {
       const set = new Set([usable[Math.floor(r() * usable.length)]]);
