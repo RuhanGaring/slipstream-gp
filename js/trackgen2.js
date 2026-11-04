@@ -455,8 +455,21 @@
       }
     }
     const inPoly = (pl, x, y) => { let c = false; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) if ((pl[i][1] > y) !== (pl[j][1] > y) && x < (pl[j][0] - pl[i][0]) * (y - pl[i][1]) / (pl[j][1] - pl[i][1]) + pl[i][0]) c = !c; return c; };
+    const lapClear = pl => {
+      for (let k = 0; k < pl.length; k++) {
+        const a = pl[k], c = pl[(k + 1) % pl.length], l = Math.hypot(c[0] - a[0], c[1] - a[1]);
+        for (let t = 0; t <= l; t += 3) {
+          const x = a[0] + (c[0] - a[0]) * t / (l || 1), y = a[1] + (c[1] - a[1]) * t / (l || 1);
+          let bi = -1, bd = 1e18;
+          tr.hash.near(x, y, 30, i => { const q = (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2; if (q < bd) { bd = q; bi = i; } });
+          if (bi >= 0) { const dl = (x - tr.x[bi]) * tr.nx[bi] + (y - tr.y[bi]) * tr.ny[bi]; if (Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 1.6) return false; }
+        }
+      }
+      return true;
+    };
     return out.filter(b => {
       for (const pl of b.parts || [b.poly]) {
+        if (!lapClear(pl)) return false;
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
         for (const p of pl) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
         for (let i = Math.floor(x0 / cell) - 1; i <= Math.floor(x1 / cell) + 1; i++) for (let j = Math.floor(y0 / cell) - 1; j <= Math.floor(y1 / cell) + 1; j++) for (const q of g.get(i + ',' + j) || []) {
@@ -1247,7 +1260,9 @@
       const hill = Math.min(1, (zmax - zmin) / 40);
       const area = Math.abs(lp.pts.reduce((s, p, k) => { const q = lp.pts[(k + 1) % lp.pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
       const fill = area / (lp.len * lp.len / (4 * Math.PI));   // a thin, winding shape over a plain ring
-      return 2 * hill + (turns > 20 ? 2 - (turns - 20) * 0.15 : turns / 10) + Math.min(sharp, 8) / 8 + (1 - fill) * 2;
+      let main = 0; for (const h of lp.hs) if (h.e.cls === 0) main += polyLen(h.pts);
+      const perKm = turns / (lp.len / 1000);
+      return 2 * hill + 3 * main / lp.len - Math.abs(perKm - 6) * 0.4 + Math.min(sharp, 8) / 8 - Math.abs(fill - 0.4) * 3 + 4;
     };
     for (let run = 0; run < 90; run++) {
       const set = new Set([usable[Math.floor(r() * usable.length)]]);
