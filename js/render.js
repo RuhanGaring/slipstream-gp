@@ -19,7 +19,7 @@
       grassA: '#6c8f3e', grassB: '#73974a', grassN: ['#62853a', '#7aa04e'],
       gravel: '#d9c08f', gravelN: ['#cfb27d', '#e2cc9f', '#c9ab76'],
       asphalt: '#36393e', asphaltN: ['#2f3236', '#3d4045', '#2b2e32'],
-      runoff: '#4b5260', runoffN: ['#454c59', '#525967'],
+      runoff: '#6d7072', runoffN: ['#646769', '#77797b'],
       ground: '#dcc496', groundN: ['#d2b886', '#e6d1a8', '#cdb27f', '#e9d7b4'], bg: 'ground',
       tree: ['#4d6b2c', '#56763a'], treeHi: '#7c9a50', palms: true,
     },
@@ -330,15 +330,17 @@
         addDecor(W, { type: 'tree', x, y, r: 3 + rnd() * 2.5, c: th.tree[Math.floor(rnd() * th.tree.length)] });
       }
     } else {
-      const n = Math.floor(area / (th.palms ? 1800 : 520));
-      for (let k = 0; k < n; k++) {
+      const n = Math.floor(area / (th.palms ? 16000 : 520));
+      const grove = (x, y) => Math.sin(x / 190 + 1.3) * Math.sin(y / 150 + 0.7) + 0.5 * Math.sin((x + y) / 95) + 0.35 * Math.sin((x - y * 0.6) / 40);
+      for (let k = 0; k < (th.palms ? n : n * 2); k++) {
         // clumps
         const cx = W.bounds.x0 + rnd() * (W.bounds.x1 - W.bounds.x0), cy = W.bounds.y0 + rnd() * (W.bounds.y1 - W.bounds.y0);
-        const m = th.palms ? 1 : 1 + Math.floor(rnd() * 6);
+        if (!th.palms && grove(cx, cy) < 0.15) continue;   // (woods and copses with open fields between)
+        const m = th.palms ? 3 + Math.floor(rnd() * 4) : 1 + Math.floor(rnd() * 6);
         for (let q = 0; q < m; q++) {
           const x = cx + (rnd() - 0.5) * 26, y = cy + (rnd() - 0.5) * 26;
           if (!clearance(tr, x, y, 8, W)) continue;
-          addDecor(W, th.palms ? { type: 'palm', x, y, r: 4 + rnd() * 2, a: rnd() * 6 } : { type: 'tree', x, y, r: 3.5 + rnd() * 4, c: th.tree[Math.floor(rnd() * th.tree.length)] });
+          addDecor(W, th.palms ? { type: 'palm', x, y, r: 4 + rnd() * 2, a: rnd() * 6 } : { type: 'tree', x, y, r: 4.8 + rnd() * 5, c: th.tree[Math.floor(rnd() * th.tree.length)] });
         }
       }
       // a treeline round the edge of the venue, a few rows deep, so the ground plane never

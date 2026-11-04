@@ -74,7 +74,7 @@
   Game.GFX_ADV = ADV;
   // phones and tablets start on the potato preset (a desktop starts on high); the slowest can go to rock
   const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-  if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'potato', tone: 'agx', ev: 0 }, GFX_PRESETS.potato);
+  if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'potato', tone: 'aces', ev: 0 }, GFX_PRESETS.potato);
   // settings saved before an option existed take its value from their preset (a custom setup
   // from the preset it most resembles), so an old save never ends up with missing values
   { const sv = Game.settings.gfx;
@@ -83,7 +83,9 @@
       for (const k in base) if (sv[k] === undefined) sv[k] = base[k];
       if (sv.boot === undefined) sv.boot = sv.preset === 'rock' || sv.preset === 'potato' ? sv.preset : '';
     } }
-  Game.settings.gfx = Object.assign({ preset: 'high', tone: 'agx', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
+  Game.settings.gfx = Object.assign({ preset: 'high', tone: 'aces', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
+  // (the look was graded for ACES in November 2026: saves made before then move across once)
+  if (Game.settings.gfx.toneV !== 2) { Game.settings.gfx.tone = 'aces'; Game.settings.gfx.toneV = 2; }
   // settings saved before the lite flag existed
   Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato' || Game.settings.gfx.preset === 'rock';
   Game.settings.gfx.rock = Game.settings.gfx.preset === 'rock';

@@ -67,7 +67,7 @@
         [381, 415, 22], [344, 441, 22], [-571, 441, 60], [-744, 341, 40], [-744, 29, 25], [-484, 29, 18], [-450, 0, 18]],
     },
     {
-      id: 'sierra', name: 'Sierra Alta', country: 'Spain', flag: 'ES', trees: 'fir',
+      id: 'sierra', name: 'Sierra Alta', country: 'Spain', flag: 'ES',
       blurb: 'High in the mountains. Climbing esses, a blind crest taken flat, a hairpin at the top and a long fast plunge back down.',
       width: 14, style: 'park', seed: 67,
       startAt: 0.45, pit: { side: 1, entry: -400, exit: 240, offset: 22, lane: 12 },
