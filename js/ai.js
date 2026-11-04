@@ -27,8 +27,44 @@
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
   };
 
-  function makeBrain(car, prof, opts) {
+  // How a driver differs from the plan. Driving the plan alone, every car brakes at the same metre
+  // and holds the same line. A racing driver goes for the last possible moment, not always the same
+  // board, and has a line of his own that moves about from lap to lap. skill is 0 to 1: the better
+  // the driver, the later and more repeatable the braking and the tidier the line.
+  function styleOf(b, skill) {
+    const r = b.rng, g = () => r() + r() + r() - 1.5;
     return {
+      skill,
+      brk: U.clamp(1.02 + g() * 0.02, 0.98, 1.06),        // share of P.brkOn: over 1 is later
+      brkVar: 0.05 - 0.03 * skill,                                    // corner to corner
+      lat: 0.6 - 0.25 * skill,                                        // metres off the line, on a straight
+      latK: 0, a: null, b: null, c: 1, s: 0, lap: -1,
+    };
+  }
+  // a car's own line: smooth drift either side of the racing line, closing the lap, tight in corners
+  // where the road decides and looser between them
+  function styleLine(tr, b) {
+    const st = b.style, N = tr.N, r = b.rng;
+    if (!tr.styleEnv) {
+      tr.styleEnv = new Float32Array(N);
+      const w = Math.round(22 / tr.ds);
+      for (let i = 0; i < N; i++) { let k = 0; for (let q = -w; q <= w; q += 2) k = Math.max(k, Math.abs(tr.line.kap[(i + q + N) % N])); tr.styleEnv[i] = 1 - 0.68 * Math.min(1, k * 45); }
+    }
+    const wave = () => {
+      const a = new Float32Array(N), n = 3;
+      for (let k = 0; k < n; k++) {
+        const m = Math.max(2, Math.round(tr.L / (130 + r() * 300))), ph = r() * 6.283, w = (2 * Math.PI * m) / N, amp = 1 / Math.sqrt(n);
+        for (let i = 0; i < N; i++) a[i] += amp * Math.sin(w * i + ph);
+      }
+      for (let i = 0; i < N; i++) a[i] *= st.lat * tr.styleEnv[i];
+      return a;
+    };
+    st.a = wave(); st.b = wave();
+  }
+  const styleAt = (b, j) => { const st = b.style; return st.a[j] * st.c + st.b[j] * st.s; };
+
+  function makeBrain(car, prof, opts) {
+    const b = {
       prof, pace: opts.pace || 1, aggr: opts.aggr == null ? 0.6 : opts.aggr,
       rng: U.rng(opts.seed || 1),
       bias: 0, mode: 'race', side: 0, passT: 0, defended: -1,
@@ -36,7 +72,10 @@
       senseT: 0, react: opts.react || 0.25, startT: 0,
       stuckT: 0, noise: 1, noiseT: 0,
       pit: null, // {phase, box, serviceT}
+      brkK: 1, zoneK: null,
     };
+    if (opts.skill != null) b.style = styleOf(b, opts.skill);
+    return b;
   }
 
   // forward distance along the lap from car a to car b (centre to centre)
@@ -115,6 +154,12 @@
     const v = Math.max(0, car.u);
     const sinceStart = race.time - race.startTime;
     const br = brakeRoom(tr, car);
+    // a new braking zone: where this driver goes for the pedal this time
+    if (b.style && br.z !== b.zoneK) {
+      b.zoneK = br.z;
+      const g = b.rng() + b.rng() + b.rng() - 1.5;
+      b.brkK = U.clamp(b.style.brk * (1 + g * b.style.brkVar), 0.94, 1.08);
+    }
     const SEP = 3.35;
     // refresh longitudinal distances to the cars we are tracking
     b.nds = b.nds || [];
@@ -344,7 +389,7 @@
     if (car.wetness > 0.02) aCap *= Math.min(1, (car.grip == null ? 0.972 : car.grip) / 0.972); // wet brakes bite less
     const aReq = b && b.aReq != null ? b.aReq : 0;
     let thr = 0, brk = 0;
-    if (aReq > P.brkOn * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
+    if (aReq > P.brkOn * (b ? b.brkK : 1) * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
     else if (err < -1.2) brk = U.clamp(-err * P.errBrk, 0, 1);
     // once on the brakes, stay on them and bleed the pedal off (no on/off chatter): the
     // tyres now build slip progressively, so a held, smoothly released pedal is quicker
@@ -569,7 +614,13 @@
     // pit approach: get over to the pit side before the entry
     const lo = b.lo == null ? -tr.hw : b.lo, hi = b.hi == null ? tr.hw : b.hi;
     const LL = edgeOf(tr);
-    let latFn = j => U.clamp(LL.clamp(j, tr.line.off[j]), lo, hi);
+    // (each lap the driver's own line turns a little toward another shape)
+    if (b.style) {
+      const st = b.style;
+      if (!st.a) styleLine(tr, b);
+      if (st.lap !== car.lap) { st.lap = car.lap; const ph = b.rng() * 6.283; st.c = Math.cos(ph); st.s = Math.sin(ph); }
+    }
+    let latFn = b.style && !b.closeFollow ? j => U.clamp(LL.clamp(j, tr.line.off[j] + styleAt(b, j)), lo, hi) : j => U.clamp(LL.clamp(j, tr.line.off[j]), lo, hi);
     if (b.pit && b.pit.phase === 'approach') {
       const d = Tracks.fwd(tr, car.loc.s, tr.pit.sIn);
       if (d < 260) latFn = j => (isNaN(tr.pit.off[j]) ? tr.pit.side * (tr.hw - 1.8) : tr.pit.off[j]);

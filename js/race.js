@@ -148,7 +148,9 @@
       if (!profCache.has(key)) {
         const spec = Object.assign({}, Car.SPEC, teamSpec(team)), g0 = learnedGrip(tr, sim ? 'sim' : 'arcade');
         const grip = k === 1 ? g0 : Float64Array.from({ length: tr.N }, (_, i) => (g0 ? g0[i] : 1) * k);
-        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, { pace, grip }));
+        // (difficulty slows a driver's corners, not his brakes: a slower driver still brakes where
+        // the car can, or he backs the whole field up into every corner)
+        profCache.set(key, Raceline.speedProfile(tr, tr.line, spec, { pace, grip, brakePace: Math.max(pace, sim ? 0.99 : 1.1), brake: 0.97 }));
       }
       return profCache.get(key);
     };
@@ -199,6 +201,8 @@
       car.profPace = U.clamp(pace, 0.5, 1.0) * gripK;
       car.brain = AI.makeBrain(car, profFor(r.team, car.profPace), {
         pace: 1, aggr: diff.aggr * (0.8 + rng() * 0.4), seed: 100 + race.cars.length * 7, react: 0.18 + rng() * 0.25 + (1 - diff.pace) * 0.6,
+        // (a time trial's ghost and the player's autopilot drive the plan as it is)
+        skill: isPlayer || mode === 'tt' || cfg.noStyle ? null : U.clamp((diff.pace - 0.58) / 0.42 * 0.7 + (r.d[4] - 0.9) * 3, 0, 1),
       });
       Object.assign(car, {
         dist: 0, prevS: 0, lap: 0, lapStart: 0, secStart: 0, sector: 0, curSec: [null, null, null],

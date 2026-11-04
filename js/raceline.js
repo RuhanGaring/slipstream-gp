@@ -297,6 +297,8 @@
     // per-sample grip the AI has learned it can actually use (tools/learn.js)
     const g = opt.grip;
     const muAt = i => (g ? mu * g[i] : mu);
+    // (the grip it brakes on, where that differs from what it corners on)
+    const muB = spec.mu * MU_G * (opt.brakePace || pace), muBrk = i => (g ? muB * g[i] : muB);
     const m = spec.mass + 20;
     const kA = 0.5 * Car.RHO * spec.ClA / m * (MU_A / MU_G);
     const acc = accelTable(spec, mu);
@@ -333,7 +335,7 @@
       for (let k = N - 1; k >= 0; k--) {
         const i = k, j = (k + 1) % N;
         const vj = v[j];
-        const aGrip = muAt(j) * (gN(j, vj) + kA * vj * vj);
+        const aGrip = muBrk(j) * (gN(j, vj) + kA * vj * vj);
         const aLat = vj * vj * Math.abs(line.kap[j]);
         const left = Math.sqrt(Math.max(0, aGrip * aGrip - aLat * aLat));
         const drag = 0.5 * Car.RHO * spec.CdA * vj * vj / m;
