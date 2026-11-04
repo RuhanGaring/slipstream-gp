@@ -471,7 +471,7 @@
       if (!inLimit && toLimit > 400) vt = profAt(b, tr, s);
       car.limiter = inLimit;
       const toBox = Tracks.fwd(tr, s, box);
-      if (inLimit && toBox < 60 && !p.served) {
+      if (toBox < 60 && !p.served) {
         vt = Math.min(vt, Math.sqrt(2 * 4.5 * Math.max(0, toBox - 0.5)));
         control(race, car, toBox < 45 ? workLat : laneLat, vt, dt);
         if (toBox < 1.6 || (toBox > tr.L - 3)) {
@@ -481,7 +481,8 @@
         return;
       }
       control(race, car, laneLat, vt, dt);
-      if (p.served && !Tracks.inRange(tr, s, pit.limitIn, pit.limitOut) && Tracks.fwd(tr, pit.limitOut, s) < 300) p.phase = 'out';
+      // (past the end of the limit, served or not: 'in' has no braking plan and cannot drive a lap)
+      if (!inLimit && Tracks.fwd(tr, pit.limitOut, s) < 300) p.phase = 'out';
     } else if (p.phase === 'stop') {
       car.ctl.throttle = 0; car.ctl.brake = 1; car.ctl.steerDirect = 0;
       car.vx *= 0.8; car.vy *= 0.8;

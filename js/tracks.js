@@ -336,10 +336,15 @@
       pitOff[i] = o * pit.side;
     }
     pit.off = pitOff;
-    pit.boxS = []; // 10 team boxes before the line
-    for (let b = 0; b < 10; b++) pit.boxS.push((L - 40 - b * 16) % L);
     pit.limit = 80 / 3.6;
     pit.limitIn = (pit.sIn + blend * 0.7) % L; pit.limitOut = (pit.sOut - blend * 0.6 + L) % L;
+    // 10 team boxes, the last 40 m before the line. All ten have to lie inside the speed limit, on
+    // the lane proper: a city lane is too short for that, so there they sit closer together and
+    // run on past the line.
+    const boxRoom = (pit.limitOut - pit.limitIn + L) % L - 20, boxGap = Math.min(16, boxRoom / 9);
+    const boxShift = Math.max(0, 50 + 9 * boxGap - (L - pit.limitIn) % L);
+    pit.boxS = [];
+    for (let b = 0; b < 10; b++) pit.boxS.push((L - 40 + boxShift - b * boxGap) % L);
     // Barriers beside the pit: outer barrier beyond the garages, pit wall between.
     const ps = pit.side > 0 ? 1 : 0;
     const pitWall = new Float64Array(N).fill(NaN);

@@ -264,7 +264,7 @@
         addDecor(W, { type: 'box', x: bx, y: by, h, team, r: 4 });
       }
       // pit building roof spanning the garages
-      const s0 = pit.boxS[9] - 12, s1 = pit.boxS[0] + 12;
+      const s0 = pit.boxS[9] - 12, s1 = pit.boxS[0] + 12 + (pit.boxS[0] < pit.boxS[9] ? tr.L : 0);
       const pts = [];
       for (let s = s0; s <= s1; s += 6) {
         const i = Math.floor(((s % tr.L) + tr.L) % tr.L / tr.ds) % tr.N;
