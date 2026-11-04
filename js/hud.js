@@ -54,8 +54,12 @@
     e.sec.forEach(s => (s.className = ''));
     e.pit.classList.remove('show');
     const kh = [];
-    if (race.mode === 'arcade') kh.push(['W A S D', 'drive'], ['R', 'reset car'], ['C', 'camera'], ['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
-    else kh.push(['SPACE', 'overtake'], ['P', 'pit strategy'], ['C', 'camera'], ['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
+    // (what each key really does here: the session and the handling both change it)
+    const inRace = race.mode !== 'tt', simCar = race.sim;
+    kh.push(['W A S D', 'drive']);
+    if (!simCar || !inRace) kh.push(['R', 'reset car']);
+    if (inRace && simCar) kh.push(['SPACE', 'overtake'], ['P', 'pit strategy']);
+    kh.push(['C', 'camera'], ['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
     if (race.sim && race.player.assist.autoGear === false) kh.unshift(['E / Q', 'shift up / down']);
     e.keyhint.innerHTML = kh.map(([k, t]) => `<div><span class="key">${k}</span>${t}</div>`).join('');
     H.keyhintT = 12;
@@ -196,7 +200,8 @@
         r.el.className = 'tw-row' + (c === p ? ' me' : '') + (c.inPit ? ' pit' : '') + (race.fastest && race.fastest.car === c ? ' fl' : '');
       });
     }
-    if (H.keyhintT > 0) { H.keyhintT -= dt; if (H.keyhintT <= 0) e.keyhint.style.opacity = 0; }
+    // (the clock starts at the lights: the grid is no time to read it and then lose it)
+    if (H.keyhintT > 0 && race.green) { H.keyhintT -= dt; if (H.keyhintT <= 0) e.keyhint.style.opacity = 0; }
   }
 
   F1.HUD = { H, init, setup, update, message, big };

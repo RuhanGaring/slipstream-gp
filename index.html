@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Slipstream Grand Prix</title>
-<link href="assets/fonts/fonts.css?v=202611050108" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=202611050108">
-<link rel="stylesheet" href="css/viewer.css?v=202611050108">
-<link rel="stylesheet" href="css/mobile.css?v=202611050108">
+<link href="assets/fonts/fonts.css?v=202611050220" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=202611050220">
+<link rel="stylesheet" href="css/viewer.css?v=202611050220">
+<link rel="stylesheet" href="css/mobile.css?v=202611050220">
 <!-- the boot screen: drawn on the first paint, before any of the (large) scripts below load -->
 <style>
 #boot { position: fixed; inset: 0; z-index: 100; background: #0b0b10; color: #f4f6f8; font-family: 'Titillium Web', 'Segoe UI', sans-serif;
@@ -89,7 +89,7 @@
   <div id="center-big"></div>
   <div id="pitpanel">
     <div class="pp-title">PIT STRATEGY</div>
-    <div class="pp-row"><span class="key">1</span><b class="c-S">SOFT</b><span class="key">2</span><b class="c-M">MEDIUM</b><span class="key">3</span><b class="c-H">HARD</b><span class="key">4</span><b class="c-I">INTER</b><span class="key">5</span><b class="c-W">WET</b></div>
+    <div class="pp-row"><span class="key">1</span><b class="c-S" data-c="S">SOFT</b><span class="key">2</span><b class="c-M" data-c="M">MEDIUM</b><span class="key">3</span><b class="c-H" data-c="H">HARD</b><span class="key">4</span><b class="c-I" data-c="I">INTER</b><span class="key">5</span><b class="c-W" data-c="W">WET</b></div>
     <div class="pp-advice" id="pp-advice"></div>
     <div class="pp-hint">P to cancel. The car boxes at the end of this lap.</div>
   </div>
@@ -100,87 +100,87 @@
 <div id="screens"></div>
 <div id="fade"></div>
 
-<script src="js/util.js?v=202611050108"></script>
-<script src="js/offline.js?v=202611050108"></script>
-<script src="js/tracks.js?v=202611050108"></script>
-<script src="js/trackgen.js?v=202611050108"></script>
-<script src="js/trackgen2.js?v=202611050108"></script>
-<script src="js/trackgen2-fixed.js?v=202611050108"></script>
-<script src="js/car.js?v=202611050108"></script>
-<script src="js/damage.js?v=202611050108"></script>
-<script src="js/softbody.js?v=202611050108"></script>
-<script src="js/raceline.js?v=202611050108"></script>
-<script src="js/lines.js?v=202611050108"></script>
-<script src="js/limits.js?v=202611050108"></script>
-<script src="js/premade.js?v=202611050108"></script>
-<script src="js/gripmodel.js?v=202611050108"></script>
-<script src="js/gripmodel-data.js?v=202611050108"></script>
-<script src="js/data.js?v=202611050108"></script>
-<script src="js/ai.js?v=202611050108"></script>
-<script src="js/race.js?v=202611050108"></script>
-<script src="js/learncore.js?v=202611050108"></script>
-<script src="js/learnjob.js?v=202611050108"></script>
-<script src="js/gen2pool.js?v=202611050108"></script>
-<script src="js/sprites.js?v=202611050108"></script>
-<script src="js/render.js?v=202611050108"></script>
+<script src="js/util.js?v=202611050220"></script>
+<script src="js/offline.js?v=202611050220"></script>
+<script src="js/tracks.js?v=202611050220"></script>
+<script src="js/trackgen.js?v=202611050220"></script>
+<script src="js/trackgen2.js?v=202611050220"></script>
+<script src="js/trackgen2-fixed.js?v=202611050220"></script>
+<script src="js/car.js?v=202611050220"></script>
+<script src="js/damage.js?v=202611050220"></script>
+<script src="js/softbody.js?v=202611050220"></script>
+<script src="js/raceline.js?v=202611050220"></script>
+<script src="js/lines.js?v=202611050220"></script>
+<script src="js/limits.js?v=202611050220"></script>
+<script src="js/premade.js?v=202611050220"></script>
+<script src="js/gripmodel.js?v=202611050220"></script>
+<script src="js/gripmodel-data.js?v=202611050220"></script>
+<script src="js/data.js?v=202611050220"></script>
+<script src="js/ai.js?v=202611050220"></script>
+<script src="js/race.js?v=202611050220"></script>
+<script src="js/learncore.js?v=202611050220"></script>
+<script src="js/learnjob.js?v=202611050220"></script>
+<script src="js/gen2pool.js?v=202611050220"></script>
+<script src="js/sprites.js?v=202611050220"></script>
+<script src="js/render.js?v=202611050220"></script>
 <script>__boot(0.05, 'Loading the 3D engine')</script>
-<script src="js/vendor/three.min.js?v=202611050108"></script>
-<script src="js/carmodels.js?v=202611050108"></script>
+<script src="js/vendor/three.min.js?v=202611050220"></script>
+<script src="js/carmodels.js?v=202611050220"></script>
 <script>__boot(0.1, 'Loading textures')</script>
-<script src="js/assets/core.js?v=202611050108"></script>
+<script src="js/assets/core.js?v=202611050220"></script>
 <script>__boot(0.33, 'Loading the venues')</script>
-<script src="js/assets/terrain.js?v=202611050108"></script>
-<script src="js/assets/mtn.js?v=202611050108"></script>
-<script src="js/assets/rubber.js?v=202611050108"></script>
-<script src="js/assets/scenery.js?v=202611050108"></script>
-<script src="js/assets/venue.js?v=202611050108"></script>
-<script src="js/assets/city.js?v=202611050108"></script>
+<script src="js/assets/terrain.js?v=202611050220"></script>
+<script src="js/assets/mtn.js?v=202611050220"></script>
+<script src="js/assets/rubber.js?v=202611050220"></script>
+<script src="js/assets/scenery.js?v=202611050220"></script>
+<script src="js/assets/venue.js?v=202611050220"></script>
+<script src="js/assets/city.js?v=202611050220"></script>
 <script>__boot(0.36, 'Loading trees')</script>
-<script src="js/assets/trees.js?v=202611050108"></script>
-<script src="js/assets/arm.js?v=202611050108"></script>
-<script src="js/assets/handpose.js?v=202611050108"></script>
-<script src="js/assets/fabric.js?v=202611050108"></script>
+<script src="js/assets/trees.js?v=202611050220"></script>
+<script src="js/assets/arm.js?v=202611050220"></script>
+<script src="js/assets/handpose.js?v=202611050220"></script>
+<script src="js/assets/fabric.js?v=202611050220"></script>
 <script>__boot(0.46, 'Loading skies')</script>
-<script src="js/assets/sky_kestrel.js?v=202611050108"></script>
-<script src="js/assets/sky_varenna.js?v=202611050108"></script>
-<script src="js/assets/sky_lucerne.js?v=202611050108"></script>
-<script src="js/assets/sky_hakone.js?v=202611050108"></script>
-<script src="js/assets/sky_rimal.js?v=202611050108"></script>
-<script src="js/assets/sky_ileverte.js?v=202611050108"></script>
-<script src="js/assets/sky_sierra.js?v=202611050108"></script>
-<script src="js/assets/sky_bahia.js?v=202611050108"></script>
-<script src="js/assets/sky_nordwald.js?v=202611050108"></script>
-<script src="js/assets/sky_lonestar.js?v=202611050108"></script>
+<script src="js/assets/sky_kestrel.js?v=202611050220"></script>
+<script src="js/assets/sky_varenna.js?v=202611050220"></script>
+<script src="js/assets/sky_lucerne.js?v=202611050220"></script>
+<script src="js/assets/sky_hakone.js?v=202611050220"></script>
+<script src="js/assets/sky_rimal.js?v=202611050220"></script>
+<script src="js/assets/sky_ileverte.js?v=202611050220"></script>
+<script src="js/assets/sky_sierra.js?v=202611050220"></script>
+<script src="js/assets/sky_bahia.js?v=202611050220"></script>
+<script src="js/assets/sky_nordwald.js?v=202611050220"></script>
+<script src="js/assets/sky_lonestar.js?v=202611050220"></script>
 <script>__boot(0.68, 'Loading light probes')</script>
-<script src="js/assets/hdr_kestrel.js?v=202611050108"></script>
-<script src="js/assets/hdr_varenna.js?v=202611050108"></script>
-<script src="js/assets/hdr_lucerne.js?v=202611050108"></script>
-<script src="js/assets/hdr_hakone.js?v=202611050108"></script>
-<script src="js/assets/hdr_rimal.js?v=202611050108"></script>
-<script src="js/assets/hdr_ileverte.js?v=202611050108"></script>
-<script src="js/assets/hdr_sierra.js?v=202611050108"></script>
-<script src="js/assets/hdr_bahia.js?v=202611050108"></script>
-<script src="js/assets/hdr_nordwald.js?v=202611050108"></script>
-<script src="js/assets/hdr_lonestar.js?v=202611050108"></script>
+<script src="js/assets/hdr_kestrel.js?v=202611050220"></script>
+<script src="js/assets/hdr_varenna.js?v=202611050220"></script>
+<script src="js/assets/hdr_lucerne.js?v=202611050220"></script>
+<script src="js/assets/hdr_hakone.js?v=202611050220"></script>
+<script src="js/assets/hdr_rimal.js?v=202611050220"></script>
+<script src="js/assets/hdr_ileverte.js?v=202611050220"></script>
+<script src="js/assets/hdr_sierra.js?v=202611050220"></script>
+<script src="js/assets/hdr_bahia.js?v=202611050220"></script>
+<script src="js/assets/hdr_nordwald.js?v=202611050220"></script>
+<script src="js/assets/hdr_lonestar.js?v=202611050220"></script>
 <script>__boot(0.86, 'Loading the renderer')</script>
-<script src="js/r3-textures.js?v=202611050108"></script>
-<script src="js/r3-shadow.js?v=202611050108"></script>
-<script src="js/r3-shaders.js?v=202611050108"></script>
-<script src="js/r3-grass.js?v=202611050108"></script>
-<script src="js/r3-trees.js?v=202611050108"></script>
-<script src="js/r3-weather.js?v=202611050108"></script>
-<script src="js/r3-damage.js?v=202611050108"></script>
-<script src="js/r3-post.js?v=202611050108"></script>
-<script src="js/r3-car.js?v=202611050108"></script>
-<script src="js/render3d.js?v=202611050108"></script>
-<script src="js/audio-engine-worklet.js?v=202611050108"></script>
-<script src="js/audio.js?v=202611050108"></script>
-<script src="js/hud.js?v=202611050108"></script>
-<script src="js/replay.js?v=202611050108"></script>
-<script src="js/viewer.js?v=202611050108"></script>
-<script src="js/wheel.js?v=202611050108"></script>
-<script src="js/ui.js?v=202611050108"></script>
+<script src="js/r3-textures.js?v=202611050220"></script>
+<script src="js/r3-shadow.js?v=202611050220"></script>
+<script src="js/r3-shaders.js?v=202611050220"></script>
+<script src="js/r3-grass.js?v=202611050220"></script>
+<script src="js/r3-trees.js?v=202611050220"></script>
+<script src="js/r3-weather.js?v=202611050220"></script>
+<script src="js/r3-damage.js?v=202611050220"></script>
+<script src="js/r3-post.js?v=202611050220"></script>
+<script src="js/r3-car.js?v=202611050220"></script>
+<script src="js/render3d.js?v=202611050220"></script>
+<script src="js/audio-engine-worklet.js?v=202611050220"></script>
+<script src="js/audio.js?v=202611050220"></script>
+<script src="js/hud.js?v=202611050220"></script>
+<script src="js/replay.js?v=202611050220"></script>
+<script src="js/viewer.js?v=202611050220"></script>
+<script src="js/wheel.js?v=202611050220"></script>
+<script src="js/ui.js?v=202611050220"></script>
 <script>__boot(0.88, 'Starting up')</script>
-<script src="js/game.js?v=202611050108"></script>
+<script src="js/game.js?v=202611050220"></script>
 </body>
 </html>

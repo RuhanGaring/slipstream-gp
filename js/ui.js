@@ -85,6 +85,7 @@
       });
     });
     setFocus(UI.focus, true);
+    if (scr.top) { const s = scr.el.querySelector('.menu-wrap'); if (s) s.scrollTop = 0; scr.el.scrollTop = 0; }
     F1.Game.onScreen(id, scr);
     return scr;
   }
@@ -236,14 +237,16 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="brand" style="margin-bottom:44px"><span class="w1" style="font-size:64px">SLIPSTREAM</span><span class="w2" style="font-size:18px">GRAND PRIX</span></div>`;
     const menu = h('div', 'menu');
+    const saved = F1.Game.champSaved && F1.Game.champSaved();
     const entries = [
+      ...(saved ? [['CONTINUE CHAMPIONSHIP', `Round ${saved.round + 1} of ${F1.Tracks.DEFS.length}: ${F1.Tracks.DEFS[saved.round].name}`, () => F1.Game.champResume()]] : []),
       ['QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', () => { F1.Game.flow = { kind: 'race' }; go('mode'); }],
       ['GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
       ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
       ['SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }],
-      ['SETTINGS', 'Audio, camera, units and HUD.', () => go('settings', { back: 'main' })],
-      ['CONTROLS', 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })],
+      ['SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' })],
+      ['CONTROLS', compact() ? 'Touch, gamepad and racing wheel.' : 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })],
     ];
     const items = entries.map(([t, s, fn]) => {
       const e = h('div', 'mi', `${t}<small>${s}</small>`);
@@ -273,7 +276,7 @@
   // a team colour that reads on the carbon panels: very dark liveries use their accent instead
   const lum = hex => { const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => { v /= 255; return v <= 0.04 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
   const tink = t => { const c = tcol(t); return lum(c) < 0.09 ? t.accent : c; };
-  const teamVars = (e, t) => { e.style.setProperty('--tc', tcol(t)); e.style.setProperty('--tk', tink(t)); e.style.setProperty('--tc2', t.accent); e.style.setProperty('--tf', lum(tcol(t)) > 0.5 ? t.accent : tcol(t)); }; // --tf: on white
+  const teamVars = (e, t) => { e.style.setProperty('--tc', tcol(t)); e.style.setProperty('--tk', tink(t)); e.style.setProperty('--tc2', t.accent); e.style.setProperty('--tf', lum(tcol(t)) > 0.5 ? (lum(t.accent) > 0.5 ? t.base : t.accent) : tcol(t)); }; // --tf: on white
 
   // flags, drawn (the circuits' home countries)
   const FLAGS = {
@@ -291,7 +294,7 @@
   const flag = code => `<span class="flg">${FLAGS[code] || `<em>${code}</em>`}</span>`;
   // what the menus draw and list of a circuit (a premade generated one has a light copy, js/premade.js)
   const peek = id => (F1.Premade && F1.Premade[id]) || F1.Race.getTrack(id);
-  const statCells = (tr, best) => `<div><b>${(tr.L / 1000).toFixed(3)}<small>KM</small></b><span>Circuit length</span></div><div><b>${tr.apexes.length}</b><span>Corners</span></div><div><b>${tr.drs.length}</b><span>Overtake zones</span></div><div><b>${best ? U.fmtTime(best) : '--:--.---'}</b><span>Your best</span></div>`;
+  const statCells = (tr, best) => `<div><b>${(tr.L / 1000).toFixed(3)}<small>KM</small></b><span>Circuit length</span></div><div><b>${tr.apexes.length}</b><span>Corners</span></div><div><b>${tr.drs.length}</b><span>Overtake zones</span></div><div><b>${best ? U.fmtTime(best) : 'NO TIME'}</b><span>Your best</span></div>`;
 
   S.mode = () => {
     const el = h('div', 'wk');
@@ -302,8 +305,8 @@
     const cards = h('div', 'cards');
     const a = h('div', 'card', `<h3>Arcade</h3><div class="tag">Pick up and play</div>
       <div class="keys-big"><span>W</span><span>A</span><span>S</span><span>D</span></div>
-      <p>Everything you need is on four keys. The car shifts itself, catches slides and forgives the odd mistake.</p>
-      <ul><li>Automatic gears, traction and stability help</li><li>Extra grip, no tyre wear</li><li>Full racing line with braking cues</li><li>No pit stops or penalties</li></ul>`);
+      <p>${compact() ? 'Steer, gas and brake are all you need.' : 'Everything you need is on four keys.'} The car shifts itself, catches slides and forgives the odd mistake.</p>
+      <ul><li>Automatic gears, traction and stability help</li><li>Extra grip, no tyre wear</li><li>Full racing line with braking cues</li><li>No damage, pit stops or penalties</li></ul>`);
     const b = h('div', 'card', `<h3>Simulation</h3><div class="tag">For the purist</div>
       <div class="keys-big"><span>W</span><span>A</span><span>S</span><span>D</span><span class="wide">SPACE</span><span>P</span></div>
       <p>The full model: suspension and ground-effect aero, slip-based tyres with temperature, pressure and wear, the 2026 hybrid power unit, Overtake mode, fuel load, soft-body damage, track limits and pit strategy.</p>
@@ -341,12 +344,12 @@
       wrap.querySelector('.trk-stats').innerHTML = stats;
     };
     const items = F1.Tracks.DEFS.map((d, k) => {
-      const e = tile(`${flag(d.flag)}<span>ROUND ${String(k + 1).padStart(2, '0')}</span>`, d.name, d.country.toUpperCase());
+      const e = tile(`${flag(d.flag)}<span>${String(k + 1).padStart(2, '0')}</span>`, d.name, d.country.toUpperCase());
       return {
         el: e,
         onFocus: () => {
           const tr = peek(d.id);
-          setInfo(d.name, `${flag(d.flag)}<span>${d.country.toUpperCase()}</span><span class="dot"></span><span>ROUND ${k + 1} OF ${F1.Tracks.DEFS.length}</span>`, d.blurb, statCells(tr, F1.Game.bestLap(d.id, flow.mode)));
+          setInfo(d.name, `${flag(d.flag)}<span>${d.country.toUpperCase()}</span><span class="dot"></span><span>${flow.kind === 'champ' ? `ROUND ${k + 1} OF ${F1.Tracks.DEFS.length}` : `CIRCUIT ${k + 1} OF ${F1.Tracks.DEFS.length}`}</span>`, d.blurb, statCells(tr, F1.Game.bestLap(d.id, flow.mode)));
           F1.Game.previewTrack(d.id);
           requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true, w: 6, pad: 30 }));
         },
@@ -404,9 +407,9 @@
     const cv = det.querySelector('canvas');
     const aiEl = det.querySelector('.gen-ai');
     const race = h('div', 'li', `<span class="flag">GO</span><span><div class="nm">Race This Circuit</div><div class="sub">CHOOSE A TEAM NEXT</div></span><span class="sub"></span>`);
-    const roll = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">New Circuit</div><div class="sub">RANDOM SEED</div></span><span class="sub">R</span>`);
-    const seedRow = h('div', 'li gen-seed', `<span class="flag">#</span><span><div class="nm"></div><div class="sub">TYPE A SEED, OR &#9664; &#9654; TO STEP</div></span><span class="sub"></span>`);
-    const styleRow = h('div', 'li gen-seed', `<span class="flag">&#9670;</span><span><div class="nm"></div><div class="sub">&#9664; &#9654; TO CHANGE THE STYLE</div></span><span class="sub"></span>`);
+    const roll = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">New Circuit</div><div class="sub">RANDOM SEED</div></span><span class="sub">${compact() ? '' : 'R'}</span>`);
+    const seedRow = h('div', 'li gen-seed', `<span class="flag">#</span><span><div class="nm"></div><div class="sub">${compact() ? 'TAP TO STEP' : 'TYPE A SEED, OR &#9664; &#9654; TO STEP'}</div></span><span class="sub"></span>`);
+    const styleRow = h('div', 'li gen-seed', `<span class="flag">&#9670;</span><span><div class="nm"></div><div class="sub">${compact() ? 'TAP TO CHANGE THE STYLE' : '&#9664; &#9654; TO CHANGE THE STYLE'}</div></span><span class="sub"></span>`);
     [race, roll, styleRow, seedRow].forEach(x => list.appendChild(x));
     let typed = 0; // time of the last digit typed (digits within a moment build one number)
     let settle = null;
@@ -437,7 +440,7 @@
       det.querySelector('h2').textContent = def.name;
       det.querySelector('.blurb').textContent = def.blurb;
       const best = F1.Game.bestLap(def.id, flow.mode);
-      det.querySelector('.stats').innerHTML = `<div><b>${(tr.L / 1000).toFixed(3)} km</b><span>LENGTH</span></div><div><b>${tr.apexes.length}</b><span>CORNERS</span></div><div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div><div><b>${best ? U.fmtTime(best) : '--:--.---'}</b><span>YOUR BEST</span></div>`;
+      det.querySelector('.stats').innerHTML = `<div><b>${(tr.L / 1000).toFixed(3)} km</b><span>LENGTH</span></div><div><b>${tr.apexes.length}</b><span>CORNERS</span></div><div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div><div><b>${best ? U.fmtTime(best) : 'NO TIME'}</b><span>YOUR BEST</span></div>`;
       requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true }));
     };
     // A classic circuit is ready at once. The elevation-aware styles take some seconds, tried on
@@ -467,7 +470,7 @@
       }).catch(() => {
         if (!live()) return;
         det.querySelector('h2').textContent = 'No circuit for this seed';
-        det.querySelector('.blurb').textContent = 'Press R for a new one.';
+        det.querySelector('.blurb').textContent = compact() ? 'Tap New Circuit for another.' : 'Press R for a new one.';
       });
     };
     const setSeed = v => { flow.genSeed = U.clamp(Math.floor(v) || 1, 1, 999999); show(); };
@@ -590,14 +593,14 @@
     const add = (o, sec) => { if (sec) { opts.appendChild(h('div', 'opt sec', sec)); } opts.appendChild(o.el); items.push(o); return o; };
     if (kind !== 'tt') {
       add(optRow('Race distance', '', [2, 3, 5, 8, 12, 20], () => R.laps, v => { R.laps = v; updSummary(); }, v => v + ' LAPS'), 'Race');
-      add(optRow('AI difficulty', 'Legend drives at the limit the AI learned for each circuit', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
+      add(optRow('AI difficulty', 'How fast and how sure the field is. Legend is the fastest lap the car can do', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
       if (kind !== 'champ' && kind !== 'weekend' && kind !== 'spectate') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
       add(optRow('Field size', '', [10, 16, 20], () => R.field, v => { R.field = v; updSummary(); }, v => v + ' CARS'));
       if (kind === 'weekend') add(optRow('Weekend format', 'Practice is a longer solo session before qualifying', ['full', 'quali'], () => R.wkFmt || 'full', v => { R.wkFmt = v; updSummary(); }, v => FMT[v]));
       if (kind === 'champ') add(optRow('Round format', 'Each round as a race only, or with qualifying for the grid', ['race', 'quali', 'full'], () => R.chFmt || 'race', v => { R.chFmt = v; updSummary(); }, v => FMT[v]));
     }
     if (sim) {
-      add(optRow('Starting tyre', '', ['S', 'M', 'H'], () => R.compound, v => { R.compound = v; updSummary(); }, v => F1.Car.COMPOUNDS[v].name), 'Car');
+      add(optRow('Starting tyre', 'Auto takes what the engineer would, and rain tyres on a wet grid', ['auto', 'S', 'M', 'H'], () => R.compound, v => { R.compound = v; updSummary(); }, v => (v === 'auto' ? 'AUTO' : F1.Car.COMPOUNDS[v].name)), 'Car');
       if (kind !== 'tt') add(optRow('Weather', 'Dry, light or heavy rain, or a changeable day', ['dry', 'light', 'heavy', 'mixed'], () => R.weather || 'dry', v => { R.weather = v; updSummary(); }, v => v.toUpperCase()), 'Conditions');
       if (kind !== 'tt') add(optRow('Safety car', 'A crash can bring it out', ['on', 'off', 'always'], () => R.safetyCar || 'on', v => { R.safetyCar = v; }, v => v.toUpperCase()));
       if (kind !== 'tt') add(optRow('Mandatory pit stop', 'Use two compounds in races of 5 laps or more', [true, false], () => R.mandatory !== false, v => { R.mandatory = v; }, v => (v ? 'ON' : 'OFF')));
@@ -606,7 +609,7 @@
       if (kind !== 'spectate') add(optRow('Gearbox', '', [true, false], () => R.autoGear, v => { R.autoGear = v; }, v => (v ? 'AUTOMATIC' : 'MANUAL  E / Q')));
       if (kind !== 'spectate') add(optRow('Steering assist', 'Limits lock to the grip available', [true, false], () => R.steerAssist, v => { R.steerAssist = v; }, v => (v ? 'ON' : 'OFF')));
     }
-    add(optRow('Damage', 'Full: soft-body crashes, parts break off, punctures, engine and gearbox failures', sim ? ['full', 'limited', 'off'] : ['full', 'off'], () => (R.damage === true ? 'limited' : R.damage === false ? 'off' : R.damage || 'full'), v => { R.damage = v; }, v => ({ full: 'FULL', limited: 'FRONT WING ONLY', off: 'OFF' })[v]), sim ? '' : 'Assists');
+    add(optRow('Damage', 'Full: soft-body crashes, parts break off, punctures, engine and gearbox failures', sim ? ['full', 'limited', 'off'] : ['off', 'full'], () => (!sim ? R.damageArcade || 'off' : R.damage === true ? 'limited' : R.damage === false ? 'off' : R.damage || 'full'), v => { if (sim) R.damage = v; else R.damageArcade = v; }, v => ({ full: 'FULL', limited: 'FRONT WING ONLY', off: 'OFF' })[v]), sim ? '' : 'Assists');
     if (kind !== 'spectate') add(optRow('Racing line', 'Red bar: brake. Yellow: turn in. Blue: apex. Green: track out.', ['full', 'brake', 'off'], () => (sim ? R.lineSim : R.lineArcade), v => { if (sim) R.lineSim = v; else R.lineArcade = v; }, v => ({ full: 'FULL', brake: 'BRAKING ONLY', off: 'OFF' })[v]));
     const btn = h('div', 'btn go', `<span>${kind === 'tt' ? 'Start session' : kind === 'champ' ? 'Start championship' : kind === 'weekend' ? 'Start weekend' : kind === 'spectate' ? 'Start watching' : 'Start race'}</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>`);
     const sum = h('div', 'weekend');
@@ -630,7 +633,7 @@
           <div><span>Handling</span><b>${sim ? 'Simulation' : 'Arcade'}</b></div>
           ${kind === 'weekend' || kind === 'champ' ? `<div><span>Format</span><b>${{ race: 'Race only', quali: 'Qualifying, race', full: 'Practice, qualifying, race' }[kind === 'champ' ? R.chFmt || 'race' : R.wkFmt || 'full']}</b></div>` : ''}
           ${kind !== 'tt' ? `<div><span>Distance</span><b>${R.laps} laps</b></div><div><span>${kind === 'spectate' ? 'Field' : 'Opponents'}</span><b>${kind === 'spectate' ? R.field : R.field - 1}, ${Data.DIFFICULTY[R.difficulty].name.toLowerCase()}</b></div>` : ''}
-          ${sim ? `<div><span>Tyre</span><b class="c-${R.compound}">${F1.Car.COMPOUNDS[R.compound].name.toLowerCase()}</b></div>` : ''}
+          ${sim ? `<div><span>Tyre</span><b class="c-${R.compound}">${R.compound === 'auto' ? 'auto' : F1.Car.COMPOUNDS[R.compound].name.toLowerCase()}</b></div>` : ''}
           ${sim && kind !== 'tt' ? `<div><span>Weather</span><b>${wx}</b></div>` : ''}
         </div>`;
       const cv = info.querySelector('canvas');
@@ -657,7 +660,6 @@
     const { gfx, wheel, ...rest } = SD; void gfx; void wheel;
     Object.assign(G.settings, rest);
     G.applySettings();
-    SD = draftOf();
     if (F1.R3 && F1.R3.bootTier && F1.R3.bootTier() !== (gx.boot || '')) { G.saveSettings(); setTimeout(() => location.reload(), 200); return true; }
     return false;
   }
@@ -868,7 +870,8 @@
     const k = s => s.split(' ').map(x => `<span class="key">${x}</span>`).join('');
     const rows = (arr) => arr.map(([a, b]) => `<div class="ctl"><span>${a}</span><span class="k">${k(b)}</span></div>`).join('');
     const g = h('div', 'ctl-grid');
-    g.innerHTML = `<div><div class="crumbs" style="margin-top:6px">DRIVING</div>${rows([['Throttle', 'W &#8593;'], ['Brake / reverse', 'S &#8595;'], ['Steer', 'A D'], ['Overtake mode (simulation)', 'SPACE'], ['Shift up / down (manual)', 'E Q'], ['Pit strategy (simulation)', 'P'], ['Reset car (arcade)', 'R']])}</div>
+    const touchRows = compact() ? `<div class="crumbs" style="margin-top:6px">TOUCH</div>${rows([['Steer', 'LEFT PAD'], ['Gas / brake', 'RIGHT PEDALS'], ['Overtake / pit', 'OVT PIT'], ['Camera / pause', 'CAM II']])}` : '';
+    g.innerHTML = `<div>${touchRows}<div class="crumbs" style="margin-top:${compact() ? 22 : 6}px">DRIVING</div>${rows([['Throttle', 'W &#8593;'], ['Brake / reverse', 'S &#8595;'], ['Steer', 'A D'], ['Overtake mode (simulation)', 'SPACE'], ['Shift up / down (manual)', 'E Q'], ['Pit strategy (simulation)', 'P'], ['Reset car (arcade)', 'R']])}</div>
       <div><div class="crumbs" style="margin-top:6px">GENERAL</div>${rows([['Pause', 'ESC'], ['Camera mode', 'C'], ['Zoom near / standard / far', 'Z'], ['Mouse steering on / off', 'RMB'], ['Mute', 'M'], ['Hide HUD', 'H'], ['Menu select', 'ENTER'], ['Back', 'ESC']])}
       <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Pause', 'START']])}
       <div class="crumbs" style="margin-top:22px">RACING WHEEL</div>${rows([['Calibrate, map buttons, force feedback', 'WHEEL SETTINGS']])}</div>`;
@@ -881,7 +884,7 @@
     wrap.appendChild(back);
     el.appendChild(wrap);
     const doBack = () => { if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
-    return { el, items: [{ el: wb, activate: () => go('wheel', { back: o.back, from: 'controls' }) }, { el: back, activate: doBack }], back: doBack };
+    return { el, items: [{ el: wb, activate: () => go('wheel', { back: o.back, from: 'controls' }) }, { el: back, activate: doBack }], back: doBack, top: true };
   };
 
   // ---------- racing wheel ----------
@@ -1164,7 +1167,7 @@
     const def = o.def, tr = o.tr;
     const num = o.round ? String(o.round).padStart(2, '0') : def.gen ? 'GEN' : String(F1.Tracks.DEFS.indexOf(def) + 1).padStart(2, '0');
     const rnd = o.round ? `ROUND ${o.round}  /  ` : '';
-    const session = o.quali != null ? rnd + 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.practice ? rnd + 'FREE PRACTICE' : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : 'GRAND PRIX';
+    const session = o.quali != null ? rnd + 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.practice ? rnd + 'FREE PRACTICE' : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : o.weekend ? 'GRAND PRIX' : 'QUICK RACE';
     const handling = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim') ? 'SIMULATION' : 'ARCADE';
     const tc = o.team.base === '#121417' ? o.team.accent : o.team.base;
     el.innerHTML = `
@@ -1184,7 +1187,7 @@
         </div>
         <div class="ld-driver" style="--tc:${tc}"><i></i><span><b>${o.driver[0]} ${o.driver[1].toUpperCase()}</b><small>${o.team.name.toUpperCase()}  /  #${o.driver[3]}</small></span></div>
       </div>
-      <div class="ld-map"><canvas></canvas><div class="ld-legend"><span class="s1">S1</span><span class="s2">S2</span><span class="s3">S3</span><span class="drs">DRS</span></div></div>
+      <div class="ld-map"><canvas></canvas><div class="ld-legend"><span class="s1">S1</span><span class="s2">S2</span><span class="s3">S3</span><span class="drs">OVERTAKE</span></div></div>
       <div class="ld-foot">
         <div class="ld-tip"><span class="lbl">TIP</span>${TIPS[Math.floor(Math.random() * TIPS.length)]}</div>
         <div class="ld-prog"><div class="ld-bar"><i></i></div><div class="ld-state">LOADING CIRCUIT</div></div>
@@ -1193,18 +1196,37 @@
     const scr = { el, items: [] };
     scr.ready = () => {
       el.classList.add('ready');
-      el.querySelector('.ld-state').innerHTML = '<span class="key">ENTER</span> START';
+      el.querySelector('.ld-state').innerHTML = compact() ? 'TAP TO START' : '<span class="key">ENTER</span> START';
     };
     return scr;
   };
 
+  // the second press within a few seconds does it: a mistaken key must not end anyone's race
+  const sure = fn => e => {
+    if (e && !e.dataset.sure) {
+      e.dataset.sure = e.textContent; e.textContent = 'PRESS AGAIN TO CONFIRM';
+      setTimeout(() => { if (e.dataset.sure) { e.textContent = e.dataset.sure; delete e.dataset.sure; } }, 3000);
+      return;
+    }
+    fn();
+  };
+  // a long table: up and down scroll it, and it opens on the player's own row
+  const tableKeys = (tbl, scr) => {
+    requestAnimationFrame(() => { const me = tbl.querySelector('tr.me'); if (me) tbl.scrollTop = Math.max(0, me.offsetTop - tbl.clientHeight / 2); });
+    scr.onKey = c => {
+      if (c === 'ArrowUp' || c === 'KeyW') { tbl.scrollBy(0, -60); return true; }
+      if (c === 'ArrowDown' || c === 'KeyS') { tbl.scrollBy(0, 60); return true; }
+      return false;
+    };
+    return scr;
+  };
   S.pause = o => {
     const el = h('div');
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu()]] : [[o.race.mode === 'tt' ? 'END SESSION' : 'RETIRE TO MENU', () => F1.Game.quitToMenu()]])];
-    const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: fn }; });
+    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT TO MENU' : 'QUIT WEEKEND', sure(() => F1.Game.quitToMenu())]] : [[o.race.mode === 'tt' ? 'END SESSION' : F1.Game.flow.kind === 'spectate' ? 'STOP WATCHING' : 'QUIT TO MENU', o.race.mode === 'tt' || F1.Game.flow.kind === 'spectate' ? () => F1.Game.quitToMenu() : sure(() => F1.Game.quitToMenu())]])];
+    const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: () => fn(e) }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
     // session info on the right
@@ -1260,7 +1282,7 @@
     if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('results', o))));
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h' };
+    return tableKeys(tbl, { el, items, nav: 'h' });
   };
 
   S.standings = o => {
@@ -1285,10 +1307,10 @@
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     if (done) mk('MAIN MENU', () => F1.Game.quitToMenu());
-    else { mk('NEXT ROUND  ' + F1.Tracks.DEFS[ch.round + 1].name.toUpperCase(), () => F1.Game.champNext()); mk('QUIT TO MENU', () => F1.Game.quitToMenu()); }
+    else { mk('NEXT ROUND  ' + F1.Tracks.DEFS[ch.round + 1].name.toUpperCase(), () => F1.Game.champNext()); mk('SAVE AND QUIT', () => F1.Game.quitToMenu()); }
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h' };
+    return tableKeys(tbl, { el, items, nav: 'h' });
   };
 
   // qualifying session classification, with the knockout line
@@ -1312,10 +1334,10 @@
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
     mk(o.next.label, o.next.fn);
     if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('quali', o))));
-    mk(o.round ? 'QUIT CHAMPIONSHIP' : 'QUIT WEEKEND', () => F1.Game.quitToMenu());
+    { let armed = null; mk(o.round ? 'QUIT TO MENU' : 'QUIT WEEKEND', () => { const it = items[items.length - 1].el.querySelector('span'); if (!armed) { armed = it.textContent; it.textContent = 'PRESS AGAIN TO CONFIRM'; setTimeout(() => { it.textContent = armed; armed = null; }, 3000); return; } F1.Game.quitToMenu(); }); }
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return { el, items, nav: 'h' };
+    return tableKeys(tbl, { el, items, nav: 'h' });
   };
 
   function go(id, opts) { return show(id, S[id], opts); }

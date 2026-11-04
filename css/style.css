@@ -139,12 +139,16 @@ b { font-weight: 700; }
 #center-big.show { animation: big 1.2s ease forwards; }
 @keyframes big { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.4); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(.98); } }
 
-#pitpanel { position: absolute; left: 50%; bottom: 140px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--accent);
+#pitpanel { position: absolute; z-index: 40; pointer-events: auto; left: 50%; bottom: 140px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--accent);
   padding: 12px 18px; display: none; text-align: center; }
 #pitpanel.show { display: block; }
 .pp-title { font-size: 12px; letter-spacing: .18em; color: var(--ink-3); font-weight: 700; margin-bottom: 8px; }
 .pp-row { display: flex; gap: 10px; align-items: center; justify-content: center; font-size: 15px; }
-.pp-row b { padding: 3px 10px; border: 1px solid var(--line-2); letter-spacing: .08em; }
+.pp-row { flex-wrap: wrap; }
+.pp-row b { padding: 3px 10px; border: 1px solid var(--line-2); letter-spacing: .08em; cursor: pointer; }
+body.mobile .pp-row .key { display: none; }
+body.mobile .pp-row b { padding: 10px 14px; }
+body.mobile #pitpanel { bottom: auto; top: 22%; max-width: calc(100vw - 16px); }
 .pp-row b.sel { background: #fff; color: #000; }
 .key { display: inline-block; min-width: 22px; padding: 1px 5px; border: 1px solid var(--line-2); border-bottom-width: 2px; font-size: 12px; font-weight: 700; color: var(--ink-2); text-align: center; }
 .c-S { color: #ff4d4d; } .c-M { color: #ffd400; } .c-H { color: #f2f2f2; } .c-I { color: #2bd66b; } .c-W { color: #2b7bff; }
@@ -533,6 +537,16 @@ body.mobile #hud-mini { transform: scale(.55); transform-origin: top right; marg
 body.mobile #timing { transform: translateX(-50%) scale(.6); transform-origin: top center; bottom: auto; top: 6px; }
 body.mobile #dash { transform: translateX(-50%) scale(.55); transform-origin: bottom center; right: auto; left: 50%; bottom: 6px; }
 body.mobile #pedals { display: none; }
+/* portrait: the same parts, moved so that nothing sits on anything else */
+@media (orientation: portrait) {
+  body.mobile #hud-top-left { left: 10px; top: calc(12px + env(safe-area-inset-top)); }
+  body.mobile #timing { left: auto; right: 8px; top: calc(56px + env(safe-area-inset-top)); transform: scale(.6); transform-origin: top right; }
+  body.mobile #hud-mini { margin-top: calc(100px + env(safe-area-inset-top)); }
+  body.mobile #dash { left: 8px; right: auto; bottom: calc(8px + env(safe-area-inset-bottom)); transform: scale(.7); transform-origin: bottom left; }
+  body.mobile #lights, body.mobile #msgs { top: 26%; }
+  body.mobile #touch .t-knob { bottom: 42%; }
+  #touch.sim .t-pit { top: auto; right: calc(min(17vw, 140px) + 30px); bottom: calc(min(36vh, 220px) + 28px); }
+}
 
 #touch.tilt .t-knob { display: none; }
 #touch.tilt .t-steer::after { content: 'TAP TO CENTRE'; position: absolute; left: 20px; bottom: 24px; color: rgba(255,255,255,.45); font: 700 11px 'Titillium Web', sans-serif; letter-spacing: .12em; }
@@ -594,3 +608,8 @@ table.res tr.cutline td { padding: 4px 10px; font-size: 11px; font-weight: 800; 
 .wm-cap { min-height: 28px; margin: -8px 0 12px; font-size: 14px; font-weight: 900; letter-spacing: .1em; color: var(--yellow); }
 .wm-b { text-align: right; font-weight: 900; font-size: 14px; letter-spacing: .08em; padding-right: 14px; }
 .opt.f .wm-b { color: var(--f1); }
+
+/* an empty delta takes no room, so the timer stays centred */
+.delta:empty { display: none; }
+/* controls rows stay readable over the live scene behind them */
+.ctl { background: var(--carbon); }

@@ -26,7 +26,7 @@
     state: 'boot', race: null, world: null, flow: { kind: 'race', mode: 'arcade', track: 'kestrel', team: 0, driver: 0 },
     settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
       mobile: 'auto', touchSteer: 'pad', tSens: 1, tiltSens: 1, mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
-    raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
+    raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', damageArcade: 'off', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
     champ: null, paused: false, hudOn: true,
   };
   // graphics presets for the 3D renderer (see Settings > Graphics)
@@ -90,6 +90,8 @@
   // settings saved before the lite flag existed
   Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato' || Game.settings.gfx.preset === 'rock';
   Game.settings.gfx.rock = Game.settings.gfx.preset === 'rock';
+  // (the starting tyre became AUTO so a wet start is not on slicks: saves move across once)
+  if (Game.raceDefaults.compoundV !== 2) { Game.raceDefaults.compound = 'auto'; Game.raceDefaults.compoundV = 2; }
   if (Game.settings.gfx.lite === undefined) Game.settings.gfx.lite = Game.settings.gfx.preset === 'low';
 
   // ---------- canvas ----------
@@ -120,7 +122,7 @@
   const tl = document.createElement('div');
   tl.id = 'touch';
   tl.innerHTML = '<div class="t-steer"><div class="t-knob"></div></div>' +
-    '<div class="t-btn t-pause" data-k="Escape">II</div><div class="t-btn t-cam" data-k="KeyC">CAM</div><div class="t-btn t-drs" data-hold="drs">DRS</div>' +
+    '<div class="t-btn t-pause" data-k="Escape">II</div><div class="t-btn t-cam" data-k="KeyC">CAM</div><div class="t-btn t-drs" data-hold="drs">OVT</div>' +
     '<div class="t-btn t-pit" data-k="KeyP">PIT</div><div class="t-btn t-gup" data-k="KeyE">+</div><div class="t-btn t-gdn" data-k="KeyQ">&minus;</div>' +
     '<div class="t-pedal t-brk" data-hold="brk">BRAKE</div><div class="t-pedal t-thr" data-hold="thr">GAS</div>';
   document.body.appendChild(tl);
@@ -335,19 +337,18 @@
           Game.pitMenu = true;
           const adv = race.advice;
           document.getElementById('pp-advice').innerHTML = adv ? 'ENGINEER: <b>' + planText(adv) + '</b>' + (race.mandatory && new Set(p.tyreHist).size < 2 ? '  /  mandatory stop still to serve' : '') : '';
+          // (the engineer's call is already chosen; the wet tyres when it rains)
+          const call = race.wet > 0.05 ? Race.tyreFor(race, p) : p.plan && p.plan.seq && p.plan.seq[1];
+          pitSel = Math.max(0, PIT_TYRES.indexOf(call || (p.compound.id === 'M' ? 'H' : 'M')));
+          pitMark();
+          document.querySelector('#pitpanel .pp-hint').textContent = Game.mobile() ? 'Tap a tyre. PIT again to cancel.' : 'Keys 1 to 5, or arrows and Enter. P to cancel.';
         }
         document.getElementById('pitpanel').classList.toggle('show', !!Game.pitMenu);
         return;
       }
-      if (Game.pitMenu && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'].includes(code)) {
-        const comp = ['S', 'M', 'H', 'I', 'W'][+code.slice(-1) - 1];
-        p.pitPlan = { compound: comp };
-        p.brain.pit = { phase: 'approach', service: 2.4, served: false };
-        Game.pitMenu = false;
-        document.getElementById('pitpanel').classList.remove('show');
-        HUD.message('BOX, BOX', 'red', `${Car.COMPOUNDS[comp].name} TYRES  /  THIS LAP`);
-        Audio.chime(true);
-      }
+      if (Game.pitMenu && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'].includes(code)) pickTyre(PIT_TYRES[+code.slice(-1) - 1]);
+      if (Game.pitMenu && (code === 'ArrowLeft' || code === 'ArrowRight')) pitMove(code === 'ArrowLeft' ? -1 : 1);
+      if (Game.pitMenu && (code === 'Enter' || code === 'NumpadEnter')) pickTyre(PIT_TYRES[pitSel]);
       return;
     }
     if (Game.state === 'loading') {
@@ -376,6 +377,7 @@
       if (pressed(5)) onKey('KeyE');
       if (pressed(4)) onKey('KeyQ');
       if (pressed(3)) onKey('KeyP');
+      if (Game.pitMenu) { if (pressed(14)) onKey('ArrowLeft'); if (pressed(15)) onKey('ArrowRight'); if (pressed(0)) onKey('Enter'); }
       out.drs = b(0) > 0.5;
       rumble(gp);
     } else {
@@ -425,6 +427,7 @@
       if (Wh.pressed(dev, 'gearUp')) onKey('KeyE');
       if (Wh.pressed(dev, 'gearDown')) onKey('KeyQ');
       if (Wh.pressed(dev, 'pit')) onKey('KeyP');
+      if (Game.pitMenu) { if (Wh.pressed(dev, 'menuLeft')) onKey('ArrowLeft'); if (Wh.pressed(dev, 'menuRight')) onKey('ArrowRight'); if (Wh.pressed(dev, 'menuOk')) onKey('Enter'); }
       if (Wh.pressed(dev, 'camera')) onKey('KeyC');
       if (Wh.pressed(dev, 'reset')) onKey('KeyR');
       r.drs = Wh.held(dev, 'overtake');
@@ -934,7 +937,7 @@
   // ---------- race lifecycle ----------
   let acc = 0;
   let evIdx = 0;
-  let finishT = -1;
+  let finishT = -1, retireT = -1, launching = false;
   const trace = { cur: [], best: null };
 
   function bestKey(id, mode) { return 'slip_best_' + id + '_' + (mode === 'arcade' ? 'arcade' : 'sim'); }
@@ -962,7 +965,7 @@
     race.physLod = !!Game.settings.gfx.physLod; race.physLodDist = Game.settings.gfx.physLodDist;
     buildWorld(race.track);
     FX.parts.length = 0; FX.skidN = 0; FX.skidHead = 0; FX.debris.length = 0;
-    evIdx = 0; finishT = -1; acc = 0;
+    evIdx = 0; finishT = -1; retireT = -1; acc = 0;
     trace.cur = []; trace.best = null;
     for (const c of race.cars) c.onShift = c.isPlayer ? d => Audio.shiftClack(d) : null;
     return race;
@@ -992,6 +995,7 @@
         table[d[2]] = { name: `${d[0]} ${d[1]}`, team: t.name, color: t.base === '#121417' ? t.accent : t.base, pts: 0, wins: 0, pods: 0, player };
       });
       Game.champ = { round: 0, table };
+      saveChamp();
       launchRound();
       return;
     }
@@ -1123,6 +1127,7 @@
     W.grid = grid;
     // the championship counts poles
     const ch = Game.champ;
+    if (launching) return;
     if (W.round && ch && ch.table[grid[0]]) { ch.table[grid[0]].poles = (ch.table[grid[0]].poles || 0) + 1; ch.quali = true; }
     launch({ track: W.track, mode: Game.flow.mode, gridOrder: grid, weekend: true, round: W.round });
   }
@@ -1140,9 +1145,9 @@
     const f = Game.flow, R = Game.raceDefaults;
     const sim = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim');
     const assists = sim ? { abs: R.abs, tc: R.tc, autoGear: R.autoGear, steerAssist: R.steerAssist ? 1 : 0, stability: 0, damage: R.damage === 'full' ? 'full' : R.damage === false || R.damage === 'off' ? false : true, gripMul: 1 }
-      : { abs: true, tc: 2, autoGear: true, steerAssist: 1, stability: 1, gripMul: 1.12, damage: R.damage === 'full' ? 'full' : false };
+      : { abs: true, tc: 2, autoGear: true, steerAssist: 1, stability: 1, gripMul: 1.12, damage: R.damageArcade === 'full' ? 'full' : false };
     return {
-      mandatory: R.mandatory !== false, weather: R.weather || 'dry', safetyCar: R.safetyCar || 'on',
+      mandatory: R.mandatory !== false, weather: sim && o.mode !== 'tt' ? R.weather || 'dry' : 'dry', safetyCar: R.safetyCar || 'on',
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
       grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists, compound: R.compound,
       ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, spectate: !!o.spectate, noGhost: o.quali != null || !!o.practice,
@@ -1150,6 +1155,8 @@
   }
 
   function launch(o) {
+    if (launching) return;
+    launching = true;
     const def = Tracks.byId(o.track);
     if (def.gen && F1.LearnJob) F1.LearnJob.restore(def.id);
     Audio.ui.select();
@@ -1212,6 +1219,7 @@
             Audio.musicStop();
             Audio.startRace();
             fade.classList.remove('on');
+            launching = false;
             if (race.quali != null) HUD.message('QUALIFYING  ' + QSEG[race.quali].name, 'blue', QSEG[race.quali].laps + ' LAPS, OUT LAP FIRST', 3.5);
             else if (race.practice) HUD.message('FREE PRACTICE', 'blue', FP.laps + ' LAPS, END IT EARLY FROM PAUSE', 3.5);
             else if (race.mode === 'tt') HUD.message('TIME TRIAL', 'blue', race.ghost ? 'GHOST ' + U.fmtTime(race.ghost.t) : 'SET A BENCHMARK LAP', 3);
@@ -1377,16 +1385,20 @@
       if (k < 3) r.pods++;
     });
     const final = ch.round >= Tracks.DEFS.length - 1;
+    // (saved as the round to come, once this one is scored)
+    if (final) store.set('slip_champ', null); else store.set('slip_champ', { v: 1, round: ch.round + 1, table: ch.table, quali: !!ch.quali, flow: Game.flow });
     UIm.go('standings', { final });
   };
-  Game.champNext = () => { Game.champ.round++; launchRound(); };
-
-  // fast-forward the rest of the field once the player has taken the flag
-  function fastForward(race) {
-    let n = 0;
-    while (!race.done && n < 240 * 90) { Race.step(race, DT); n++; }
-    if (!race.done) Race.finish(race);
-  }
+  function saveChamp() { const ch = Game.champ; store.set('slip_champ', { v: 1, round: ch.round, table: ch.table, quali: !!ch.quali, flow: Game.flow }); }
+  Game.champSaved = () => { const c = store.get('slip_champ', null); return c && c.v === 1 && c.table && c.round < Tracks.DEFS.length ? c : null; };
+  Game.champResume = () => {
+    const c = Game.champSaved();
+    if (!c) return;
+    Game.flow = Object.assign({}, c.flow, { kind: 'champ' });
+    Game.champ = { round: c.round, table: c.table, quali: c.quali };
+    launchRound();
+  };
+  Game.champNext = () => { if (launching) return; Game.champ.round++; saveChamp(); launchRound(); };
 
   // ---------- events -> HUD / audio ----------
   function handleEvents(race) {
@@ -1416,14 +1428,14 @@
         case 'damage': if (mine) HUD.message('FRONT WING DAMAGE', 'red', 'BOX FOR A NEW NOSE'); break;
         case 'pitentry': if (mine) HUD.message('PIT LANE', 'blue', 'AUTOPILOT ENGAGED'); break;
         case 'pitdone': if (mine) HUD.message('PIT STOP COMPLETE', 'green', p.compound.name + ' TYRES FITTED'); break;
-        case 'engineer': if (mine) { HUD.message('ENGINEER: BOX THIS LAP', 'red', `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS P THEN ${['S', 'M', 'H'].indexOf(e.compound) + 1}`, 4); Audio.chime(true); } break;
+        case 'engineer': if (mine) { HUD.message('ENGINEER: BOX THIS LAP', 'red', Game.mobile() ? `${Car.COMPOUNDS[e.compound].name} TYRES  /  PIT, THEN PICK THEM` : `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS P THEN ${['S', 'M', 'H', 'I', 'W'].indexOf(e.compound) + 1}`, 4); Audio.chime(true); } break;
         case 'strategy': if (mine) HUD.message('STRATEGY', 'blue', planText(e.plan), 5); break;
         case 'pb': HUD.message('NEW PERSONAL BEST', 'purple', U.fmtTime(p.bestLap)); Audio.chime(true); break;
         case 'recover': if (mine) HUD.message('CAR RESET', ''); break;
         case 'chequered': HUD.big('CHEQUERED FLAG'); break;
         case 'part': if (mine) { HUD.message('DAMAGE', 'red', e.text + ' LOST'); Audio.chime(false); } break;
         case 'failure': if (mine) { HUD.message(e.text, 'red', 'PULL OVER'); Audio.chime(false); } else HUD.message(e.car.driver.code + '  ' + e.text, 'yellow', '', 2.5); break;
-        case 'retire': if (!mine && e.car) HUD.message(e.car.driver.code + '  RETIRED', 'yellow', '', 2); break;
+        case 'retire': if (mine) { HUD.message('RETIRED', 'red', '', 4); retireT = race.time; } else if (e.car) HUD.message(e.car.driver.code + '  RETIRED', 'yellow', '', 2); break;
         case 'sc': HUD.big('SAFETY CAR', '#ffc400'); HUD.message('SAFETY CAR DEPLOYED', 'yellow', 'NO OVERTAKING  /  HOLD POSITION'); Audio.chime(false); break;
         case 'scin': HUD.message('SAFETY CAR IN THIS LAP', 'yellow', 'RESTART AT THE LINE'); break;
         case 'green': HUD.big('GREEN FLAG', '#2bd66b'); break;
@@ -1433,7 +1445,26 @@
         case 'finish': if (mine) { HUD.message('FINISHED P' + p.pos, p.pos <= 3 ? 'purple' : 'green', race.track.name.toUpperCase()); finishT = race.time; } break;
       }
     }
+    // (read: Race.event drops the oldest of a full buffer, which an index into it would never see)
+    race.events.length = 0; evIdx = 0;
   }
+
+  // the pit panel: keys 1 to 5, or left, right and confirm on anything else, or a tap on the tyre
+  const PIT_TYRES = ['S', 'M', 'H', 'I', 'W'];
+  let pitSel = 1;
+  function pitMark() { document.querySelectorAll('#pitpanel .pp-row b').forEach(b => b.classList.toggle('sel', b.dataset.c === PIT_TYRES[pitSel])); }
+  function pitMove(d) { pitSel = (pitSel + d + PIT_TYRES.length) % PIT_TYRES.length; pitMark(); }
+  function pickTyre(comp) {
+    const race = Game.race, p = race && race.player;
+    if (!p || !Game.pitMenu) return;
+    p.pitPlan = { compound: comp };
+    p.brain.pit = { phase: 'approach', service: 2.4, served: false };
+    Game.pitMenu = false;
+    document.getElementById('pitpanel').classList.remove('show');
+    HUD.message('BOX, BOX', 'red', `${Car.COMPOUNDS[comp].name} TYRES  /  THIS LAP`);
+    Audio.chime(true);
+  }
+  document.querySelectorAll('#pitpanel .pp-row b').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); pickTyre(b.dataset.c); }));
 
   function planText(p) {
     if (!p) return '';
@@ -1446,13 +1477,17 @@
   let last = performance.now();
   let perf = { frames: 0, t: 0, fps: 0 };
   let booted = 0;
+  let frameFails = 0;
   function frame(now) {
     // frame rate limit (advanced graphics): skip display refreshes until the next frame is due
     const cap = Game.settings.gfx.fpsCap;
     if (cap && booted >= 3 && now - last < 1000 / cap - 2) { requestAnimationFrame(frame); return; }
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    tick(dt);
+    try { tick(dt); frameFails = 0; } catch (err) {
+      console.error(err);
+      if (++frameFails === 30) HUD.message('SOMETHING WENT WRONG', 'red', 'THE GAME MAY NEED A RELOAD', 8);
+    }
     // the boot screen (index.html) goes once the first frames are on screen (the very first
     // one also compiles every shader, so it is slow)
     if (booted < 3 && G.__bootLog) G.__bootLog.push(['frame ' + (booted + 1), Math.round(performance.now()), R3ok && R3.renderer ? R3.renderer.info.programs.length : 0]);
@@ -1554,10 +1589,15 @@
         HUD.update(race, p, dt, Game.settings, { delta });
         drawMouseGauge();
         Render.drawMini(miniCtx, Game.world, race, 220, miniCv.width / 220);
-        if (finishT > 0 && race.time - finishT > 5 && Game.state === 'race') {
-          fastForward(race);
+        // the flag, or a car that will not go on: a few seconds to take it in, then the results
+        if (((finishT > 0 && race.time - finishT > 5) || (retireT > 0 && race.time - retireT > 4)) && Game.state === 'race' && !sessionOf(race) && race.mode !== 'tt') {
+          Race.classifyRest(race);
           showResults();
-        } else if (race.done && Game.state === 'race' && p.finished) showResults();
+        } else if (race.done && Game.state === 'race' && (p.finished || p.retired)) showResults();
+        if (retireT > 0 && race.time - retireT > 4 && Game.state === 'race' && !race.qDone && (sessionOf(race) || race.mode === 'tt')) {
+          race.qDone = true;
+          if (sessionOf(race)) endQuali(); else Game.quitToMenu();
+        }
         // qualifying: the session ends after its laps (the chequered flag on the last one)
         if (sessionOf(race) && Game.state === 'race' && !race.qDone && p.lapTimes.length >= sessionOf(race).laps) {
           race.qDone = true;
@@ -1630,8 +1670,11 @@
         boot(0.88 * done / Math.max(1, total), left ? 'Downloading game files for offline play' : 'Game files ready for offline play', MB(done) + ' / ' + MB(total) + ' MB');
       }).then(r => {
         // new code was downloaded: run it (once; the cache now holds it)
-        if (r && r.codeChanged && !sessionStorage.getItem('sgpReloaded')) { sessionStorage.setItem('sgpReloaded', '1'); location.reload(); return new Promise(() => {}); }
-        sessionStorage.removeItem('sgpReloaded');
+        // (sessionStorage can be blocked; the game still runs)
+        try {
+          if (r && r.codeChanged && !sessionStorage.getItem('sgpReloaded')) { sessionStorage.setItem('sgpReloaded', '1'); location.reload(); return new Promise(() => {}); }
+          sessionStorage.removeItem('sgpReloaded');
+        } catch (e) { /* no session storage */ }
       }, () => {})],
       [0.89, 'Preparing the cars', () => F1.CarModels.loadAll([...new Set(F1.Data.TEAMS.map(t => t.car).filter(Boolean))], (n, of) => boot(0.89, 'Preparing the cars', n + ' / ' + of))],
       [0.9, 'Building the circuit', () => { HUD.init(); UIm.init(); startAttract(); }],
@@ -1646,7 +1689,10 @@
       boot(steps[k][0], steps[k][1]);
       setTimeout(() => {
         // a step may hand back a promise (the shader compile); the next waits for it
-        Promise.resolve(steps[k][2]()).then(() => { G.__bootLog.push([steps[k][1], Math.round(performance.now()), R3ok && R3.renderer ? R3.renderer.info.programs.length : 0]); run(k + 1); });
+        Promise.resolve().then(steps[k][2]).then(() => { G.__bootLog.push([steps[k][1], Math.round(performance.now()), R3ok && R3.renderer ? R3.renderer.info.programs.length : 0]); run(k + 1); }).catch(err => {
+          console.error(err);
+          boot(steps[k][0], 'Could not start. Reload the page to try again.');
+        });
       }, 40);
     };
     run(0);

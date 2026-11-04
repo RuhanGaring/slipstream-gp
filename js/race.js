@@ -199,12 +199,14 @@
       if (sim && mode !== 'tt') {
         const wr = Math.max(1, 22 / Math.max(3, race.laps));
         const wpl = { S: Strategy.wearEstimate(tr, 'S', wr), M: Strategy.wearEstimate(tr, 'M', wr), H: Strategy.wearEstimate(tr, 'H', wr) };
-        startPlan = Strategy.plan({ base: tr.refLap, laps: race.laps, comp: isPlayer && cfg.compound ? cfg.compound : null, wear: 0, wpl, loss: Strategy.pitLoss(tr), bias: isPlayer ? null : stratBias, need2: race.mandatory });
-        startComp = isPlayer && cfg.compound ? cfg.compound : startPlan.seq[0];
-      } else if (sim) startComp = cfg.compound || 'M';
+        const chosen = isPlayer && cfg.compound && cfg.compound !== 'auto' ? cfg.compound : null;
+        startPlan = Strategy.plan({ base: tr.refLap, laps: race.laps, comp: chosen, wear: 0, wpl, loss: Strategy.pitLoss(tr), bias: isPlayer ? null : stratBias, need2: race.mandatory });
+        startComp = chosen || startPlan.seq[0];
+      } else if (sim) startComp = cfg.compound && cfg.compound !== 'auto' ? cfg.compound : 'M';
       // a wet track at the start: the AI starts on inters or full wets
       // (the player's car too when it drives itself, spectating)
-      if (sim && (!isPlayer || cfg.spectate) && race.wet > 0.22) { startComp = race.wet > 0.65 ? 'W' : 'I'; startPlan = null; }
+      // (and the player's, unless he chose a tyre himself)
+      if (sim && (!isPlayer || cfg.spectate || !cfg.compound || cfg.compound === 'auto') && race.wet > 0.22) { startComp = race.wet > 0.65 ? 'W' : 'I'; startPlan = null; }
       const car = Car.makeCar({ id: race.cars.length, spec, assist: assists, compound: startComp, fuel: !sim ? 0 : mode === 'tt' ? 10 : Math.min(Car.SPEC.fuelMax * 2.5, 12 + race.laps * 1.6) });
       car.isPlayer = isPlayer;
       car.team = r.team;
@@ -263,17 +265,18 @@
     race.cars.forEach(c => { c.pos = order.indexOf(c) + 1; });
 
     // time trial ghost
-    if (mode === 'tt' && !cfg.noGhost) race.ghost = loadGhost(tr.id);
+    if (mode === 'tt' && !cfg.noGhost) race.ghost = loadGhost(tr.id, cfg.ttArcade ? 'arcade' : 'sim');
     race.servicePit = c => servicePit(race, c);
     race.recover = c => recover(race, c);
     return race;
   }
 
-  function loadGhost(id) {
-    try { const g = JSON.parse(localStorage.getItem('slip_ghost_' + id)); return g && g.pts ? g : null; } catch (e) { return null; }
+  function loadGhost(id, kind) {
+    // (a ghost saved before there was one per handling is still a good ghost)
+    try { const g = JSON.parse(localStorage.getItem('slip_ghost_' + id + '_' + kind) || localStorage.getItem('slip_ghost_' + id)); return g && g.pts ? g : null; } catch (e) { return null; }
   }
-  function saveGhost(id, g) {
-    try { localStorage.setItem('slip_ghost_' + id, JSON.stringify(g)); } catch (e) { /* storage unavailable */ }
+  function saveGhost(id, kind, g) {
+    try { localStorage.setItem('slip_ghost_' + id + '_' + kind, JSON.stringify(g)); } catch (e) { /* storage unavailable */ }
   }
 
   function event(race, type, car, text, extra) {
@@ -610,7 +613,7 @@
       if (best) {
         const g = { t: c.lastLap, pts: race.ghostRec.pts };
         const prev = race.ghost;
-        if (!prev || g.t < prev.t) { race.ghost = g; saveGhost(race.track.id, g); event(race, 'pb', c, 'NEW PERSONAL BEST'); }
+        if (!prev || g.t < prev.t) { race.ghost = g; saveGhost(race.track.id, race.cfg.ttArcade ? 'arcade' : 'sim', g); event(race, 'pb', c, 'NEW PERSONAL BEST'); }
       }
     }
     race.ghostRec = { pts: [], t0: race.time };
@@ -678,7 +681,8 @@
     if (race.sc && race.sc.state !== 'none') { c.drsOpen = false; c.overtake = false; return; }
     tr.drs.forEach((z, zi) => {
       if (crossed(prevDist, c.dist, z.det, tr.L)) {
-        c.drsElig[zi] = race.drsEnabled && c.interval > 0 && c.interval < 1.0 && c.pos > 1;
+        // (from the second lap, as the rules have it)
+        c.drsElig[zi] = (race.drsEnabled || race.order[0].lap >= 2) && c.interval > 0 && c.interval < 1.0 && c.pos > 1;
         if (race.mode === 'tt') c.drsElig[zi] = true;
       }
       if (c.drsElig[zi] && Tracks.inRange(tr, c.loc.s, z.act, z.end)) c.drsAvail = true;
@@ -767,7 +771,7 @@
     race.sc = { state: 'none', fired: false, x: 0, y: 0, h: 0, vis: false, v: 0, dist: 0 };
     if (cfg.safetyCar === 'off' || race.mode === 'tt' || race.laps < 3) return;
     const wetter = cfg.weather === 'heavy' || cfg.weather === 'mixed';
-    if (race.rng() > (cfg.safetyCar === 'always' ? 2 : wetter ? 0.9 : 0.65)) return;
+    if (race.rng() > (cfg.safetyCar === 'always' ? 2 : (wetter ? 0.9 : 0.65) * Math.min(1, race.laps / 12))) return;
     race.sc.at = race.laps * race.track.refLap * (0.22 + 0.38 * race.rng());
   }
   const SC_DIST_LEADER = 24, SC_DIST_CAR = 11;
@@ -840,10 +844,10 @@
     // the player: a time penalty for passing under the safety car (sim), a speed cap (arcade)
     const p = race.player;
     if (p && !p.retired && !p.finished) {
-      if (race.sim && race.green && p.pos < p.scPos && race.time > p.scPenT && !p.inPit) {
-        p.penalty += 5; p.scPenT = race.time + 6; event(race, 'penalty', p, 'OVERTAKING UNDER SAFETY CAR  +5 SEC');
-      }
-      p.scPos = p.pos;
+      // (a car that dived into the pits, broke down or crashed has not been overtaken)
+      const passed = race.sim && race.green && p.pos < p.scPos && race.time > p.scPenT && !p.inPit && race.cars.some(o => o !== p && o.scPos < p.scPos && o.pos > p.pos && !o.inPit && !o.retired && !o.incident && !(o.brain && o.brain.pit));
+      if (passed) { p.penalty += 5; p.scPenT = race.time + 6; event(race, 'penalty', p, 'OVERTAKING UNDER SAFETY CAR  +5 SEC'); }
+      race.cars.forEach(o => { o.scPos = o.pos; });
     }
   }
   // an AI car that has crashed: brakes, runs off the road and stops there for good
@@ -981,8 +985,8 @@
         carCollide(race, A, B);
       }
     }
-    // ghost recording (time trial)
-    if (race.mode === 'tt' && race.green) {
+    // ghost recording (time trial; qualifying and practice leave the ghost alone)
+    if (race.mode === 'tt' && race.green && !race.cfg.noGhost) {
       const p = race.player;
       if (!race.ghostRec) race.ghostRec = { pts: [], t0: race.time };
       const r = race.ghostRec;
@@ -992,7 +996,7 @@
     standings(race);
     if (race.chequered && !race.done) {
       const allDone = race.cars.every(c => c.finished || c.retired);
-      const pDone = !race.player || race.player.finished;
+      const pDone = !race.player || race.player.finished || race.player.retired;
       if (allDone || (pDone && race.time - race.chequerT > 40)) finish(race);
     }
   }
@@ -1056,6 +1060,26 @@
     race.order = arr;
   }
 
+  // Ends the race at once: every car still running is given the finish it was heading for, from its
+  // own average speed, so a player who has finished or retired does not sit through the rest
+  function classifyRest(race) {
+    if (race.done) return;
+    const L = race.track.L, t = race.time - race.startTime, run = race.cars.filter(c => !c.finished && !c.retired);
+    const speed = c => Math.max(5, c.dist / Math.max(1, t));
+    // when the winner gets there, if nobody has yet
+    const flag = race.chequered ? 0 : Math.min(...run.map(c => (race.laps * L - c.dist) / speed(c)), 1e9);
+    const est = run.map(c => {
+      const lapsDone = Math.min(race.laps, Math.max(c.lapTimes.length, Math.ceil((c.dist + speed(c) * flag) / L)));
+      return { c, lapsDone, at: t + Math.max(0, lapsDone * L - c.dist) / speed(c) };
+    }).sort((a, b) => a.at - b.at);
+    for (const { c, lapsDone, at } of est) {
+      const lt = L / speed(c);
+      while (c.lapTimes.length < lapsDone) c.lapTimes.push({ t: lt, valid: false, secs: [null, null, null], comp: c.compound.id });
+      c.finished = true; c.finishTime = at; race.finishOrder.push(c);
+    }
+    finish(race);
+  }
+
   function finish(race) {
     race.done = true;
     // classify: finished by time incl. penalties, then the rest by distance
@@ -1076,7 +1100,7 @@
     event(race, 'done', null, '');
   }
 
-  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
+  F1.Race = { CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, classifyRest, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
   // pit service hook used by AI.pitDrive
   F1.Race.attach = race => {
     race.servicePit = c => servicePit(race, c);

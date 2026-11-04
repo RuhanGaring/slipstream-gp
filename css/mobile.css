@@ -132,3 +132,9 @@ body.compact #scr-loading .ld-stats div { padding: 6px 10px; }
 body.compact #scr-loading .ld-foot { left: 18px; right: 18px; bottom: calc(16px + env(safe-area-inset-bottom)); }
 body.compact #scr-loading .ld-prog { width: 100%; }
 body.compact #scr-loading .ld-learn { font-size: 10px; }
+
+/* phone menus run edge to edge, so the scene behind them is dimmed evenly */
+body.compact #shade.on { background: rgba(8, 8, 12, .78); }
+body.compact .scr { scroll-padding: 60px 0 84px; }
+body.compact .two.adv .opts, body.compact .two.wh .opts { max-height: none; overflow: visible; }
+.m-back { background: var(--carbon-solid, #15171b); }
