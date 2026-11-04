@@ -1143,7 +1143,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
       };
       const fade = (t, a, b) => U.smooth(t / a) * U.smooth((1 - t) / b);
-      const brk = (seed, f) => t => 0.55 + 0.45 * Math.sin(t * f + seed) * Math.sin(t * f * 2.3 + seed * 1.7);
+      const brk = (seed, f) => (W2.town ? () => 0.8 : t => 0.55 + 0.45 * Math.sin(t * f + seed) * Math.sin(t * f * 2.3 + seed * 1.7));
       const pair = (s0, len, dOf, w, alphaOf, gap = 1.6, only = 0, step = 0) => {
         for (const sg of only ? [only] : [-1, 1]) strip(s0, len, t => dOf(t) + sg * gap / 2, w, alphaOf, step);
       };
@@ -1228,8 +1228,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       const L2 = tr.pit.lane / 2;
       for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) {
-        ribbon(pa, tr, i0, i1 - 1, k => tr.pit.off[k] - L2 + 0.05, k => tr.pit.off[k] - L2 + 0.3, 0.008, 9, white);
-        ribbon(pa, tr, i0, i1 - 1, k => tr.pit.off[k] + L2 - 0.3, k => tr.pit.off[k] + L2 - 0.05, 0.008, 9, white);
+        const dry = (k, o) => (W2.town && Math.abs(tr.pit.off[k]) - L2 < hw + 0.3 ? NaN : o);
+        ribbon(pa, tr, i0, i1 - 1, k => dry(k, tr.pit.off[k] - L2 + 0.05), k => dry(k, tr.pit.off[k] - L2 + 0.3), 0.008, 9, white);
+        ribbon(pa, tr, i0, i1 - 1, k => dry(k, tr.pit.off[k] + L2 - 0.3), k => dry(k, tr.pit.off[k] + L2 - 0.05), 0.008, 9, white);
       }
       const quad = (s0, s1, d0, d1, c, y = 0.012) => {
         const q1 = Tracks.pointAt(tr, s0, d0), q2 = Tracks.pointAt(tr, s0, d1), q3 = Tracks.pointAt(tr, s1, d1), q4 = Tracks.pointAt(tr, s1, d0);
@@ -1254,9 +1255,27 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
       }
       if (W2.town) {
-        const yl = col('#e0b628'), sdp = tr.pit.side > 0 ? 1 : -1;
+        const yl = col('#d9b02a'), sdp = tr.pit.side > 0 ? 1 : -1, innerOf = k => tr.pit.off[k] - sdp * L2;
         let last = -1; for (let k = 0; k < N; k++) if (!isNaN(tr.pit.off[k]) && isNaN(tr.pit.off[(k + 1) % N])) last = k;
-        if (last >= 0) { const n = Math.round(240 / tr.ds); ribbon(pa, tr, last, last + n, () => (sdp > 0 ? hw - 0.75 : -hw + 0.5), () => (sdp > 0 ? hw - 0.5 : -hw + 0.75), 0.016, 9, yl); }
+        if (last >= 0) {
+          let back = 0; while (back < N / 4 && !isNaN(tr.pit.off[mod(last - back - 1, N)]) && Math.abs(innerOf(mod(last - back - 1, N))) < hw + 0.3) back++;
+          const m = Math.round(240 / tr.ds), keep = sdp * (hw - 0.62), D = [];
+          for (let q = -back; q <= m; q++) { const k = mod(last + q, N); D.push(q <= 0 && !isNaN(tr.pit.off[k]) ? U.clamp(innerOf(k), -hw + 0.5, hw - 0.5) : keep); }
+          const R = Math.round(20 / tr.ds);
+          for (let it = 0; it < 2; it++) { const c = D.slice(); for (let q = 0; q < D.length; q++) { let t = 0, n = 0; for (let r = Math.max(0, q - R); r <= Math.min(D.length - 1, q + R); r++) { t += c[r]; n++; } D[q] = t / n; } }
+          const fade = Math.max(1, Math.round(120 / tr.ds)), off = k => { const q = mod(k - last + back, N), t = U.smooth(q / fade); return D[Math.min(q, D.length - 1)] * (1 - t) + keep * t; };
+          ribbon(pa, tr, last - back, last + m, k => off(k) - 0.1, k => off(k) + 0.1, 0.016, 9, yl);
+        }
+        // green paint a race lays on the run out of its slowest corners
+        const green = col('#4f7168');
+        for (const c of tr.apexes.slice().sort((p, q) => Math.abs(q.k) - Math.abs(p.k)).slice(0, 4)) {
+          const out = c.k > 0 ? -1 : 1, sd = out > 0 ? 1 : 0, i0 = c.i + Math.round(8 / tr.ds), i1 = i0 + Math.round(30 / tr.ds), bad = k => !isNaN(tr.pit.off[mod(k, N)]) || W2.townGates.side[sd][mod(k, N)];
+          let clear = true; for (let k = i0; k <= i1; k++) if (bad(k)) clear = false;
+          if (!clear) continue;
+          const e = k => tr.barr[sd][k] + 0.1, f = k => Math.max(hw - 0.4, e(k) - 2);
+          ribbon(pa, tr, i0, i1, k => (out > 0 ? f(k) : -e(k)), k => (out > 0 ? e(k) : -f(k)), 0.014, 9, green);
+          for (let b = 0; b < 3; b++) { const t = (c.i - 34 / tr.ds) * tr.ds + b * 3.4, k0 = mod(Math.floor(t / tr.ds), N); if (bad(k0)) continue; const w = tr.barr[sd][k0]; quad(t, t + 0.4, out * (w - 3), out * w, green, 0.014); }
+        }
       }
       for (let k = 0; k < 20; k++) {
         const g = tr.grid[k];
@@ -1937,7 +1956,21 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // in front of it where the town has one. None of this knows where the race goes.
     {
       const idx = new Map(edges.map((e, k) => [e, k])), used = new Set(), STEP = 1.6;
-      const tri = (a, b, c) => { const v = q => mark.v(q[0], paintY(q[0], q[1]), q[1], 0, 1, 0, q[0] / 9, q[1] / 9, white); const i = v(a); v(b); v(c); mark.t(i, i + 1, i + 2); };
+      let tone = white, flaky = 0;
+      const yellowP = col('#d9b02a'), wordA = new Acc(), wordsP = U.rng(9173);
+      const tri = (a, b, c) => { const v = q => mark.v(q[0], paintY(q[0], q[1]), q[1], 0, 1, 0, q[0] / 9, q[1] / 9, tone); const i = v(a); v(b); v(c); mark.t(i, i + 1, i + 2); };
+      // a line along any curve
+      const curve = (pts, w) => {
+        let prev = null;
+        for (let k = 0; k < pts.length; k++) {
+          const p0 = pts[k], a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)], u = unit(b[0] - a[0], b[1] - a[1]), rx = -u[1] * w / 2, rz = u[0] * w / 2;
+          if (!inside(p0[0], p0[1]) || site.inland(p0[0], p0[1]) < 1 || inPits(p0[0], p0[1])) { prev = null; continue; }
+          const v0 = mark.v(p0[0] - rx, paintY(p0[0] - rx, p0[1] - rz), p0[1] - rz, 0, 1, 0, p0[0] / 9, p0[1] / 9, tone), v1 = mark.v(p0[0] + rx, paintY(p0[0] + rx, p0[1] + rz), p0[1] + rz, 0, 1, 0, p0[0] / 9, p0[1] / 9, tone);
+          if (prev != null) { mark.t(prev, prev + 1, v0); mark.t(prev + 1, v1, v0); }
+          prev = v0;
+        }
+      };
+      const bez = (a, c, b, n = 10) => Array.from({ length: n + 1 }, (_, k) => { const t = k / n, g = 1 - t; return [g * g * a[0] + 2 * g * t * c[0] + t * t * b[0], g * g * a[1] + 2 * g * t * c[1] + t * t * b[1]]; });
       const onward = (e, n) => { const t = nodes[n].through, k = idx.get(e); if (!t || !t.includes(k)) return null; const o = edges[t[0] === k ? t[1] : t[0]]; return used.has(o) || o === e ? null : o; };
       for (const e0 of edges) {
         if (used.has(e0)) continue;
@@ -1976,8 +2009,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           let prev = null;
           for (let k = 0; k <= n; k++) {
             const t = t0 + (t1 - t0) * k / n, c = typeof q === 'function' ? q(t) : q, a = at(t, c - w / 2), b = at(t, c + w / 2);
-            if (!ok(a) || !ok(b)) { prev = null; continue; }
-            const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, a[0] / 9, a[1] / 9, white), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, b[0] / 9, b[1] / 9, white);
+            if (!ok(a) || !ok(b) || (flaky && wordsP() < flaky)) { prev = null; continue; }
+            const v0 = mark.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, a[0] / 9, a[1] / 9, tone), v1 = mark.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, b[0] / 9, b[1] / 9, tone);
             if (prev != null) { mark.t(prev, prev + 1, v0); mark.t(prev + 1, v1, v0); }
             prev = v0;
           }
@@ -1985,14 +2018,28 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const first = parts[0], last = parts[parts.length - 1], nA = first.rev ? first.e.b : first.e.a, nB = last.rev ? last.e.a : last.e.b;
         const dA = arms[nA].length, dB = arms[nB].length, setA = setOf(first.e, first.rev ? 1 : 0), setB = setOf(last.e, last.rev ? 0 : 1);
         const minW = Math.min(...parts.map(q => q.e.w)), cls = Math.min(...parts.map(q => q.e.cls)), mk = first.e.mark || { type: 0, mid: 0 }, mid = mk.mid * 0.5;
-        const blocks = [], gaps = { '-1': [], 1: [] };
+        const blocks = [], throughBars = [], gaps = { '-1': [], 1: [] };
+        // each road's paint has its own age: bright on the newest, thin and broken on the oldest
+        const age = wordsP(), fresh = white.clone().multiplyScalar(1 - 0.42 * age);
+        tone = fresh; flaky = age > 0.72 ? 0.1 : 0;
         // a crossing's bars lie along the road, kerb to kerb, the centre line stopping a metre short
         const zebra = (z0, z1) => {
           if (z0 < 2 || z1 > L - 2 || blocks.some(b => z1 > b[0] - 8 && z0 < b[1] + 8)) return false;
-          const h = Math.min(hAt(z0), hAt(z1)), n = Math.floor((2 * h - 0.7 + 0.7) / 1.3), q0 = -(n * 1.3 - 0.7) / 2;
-          for (let k = 0; k < n; k++) band(z0, z1, q0 + k * 1.3 + 0.3, 0.6);
+          const h = Math.min(hAt(z0), hAt(z1)), keepT = tone, tracks = [(mid + h) / 2, (mid - h) / 2];
+          for (const sd of [-1, 1]) for (let q = 0.65; Math.abs(mid + sd * q) < h - 0.35; q += 1.3) {
+            const c = mid + sd * q, worn = tracks.some(l => Math.abs(Math.abs(c - l) - 0.8) < 0.4);
+            tone = worn ? keepT.clone().multiplyScalar(0.62) : keepT;
+            band(z0, z1, c, 0.6);
+          }
+          tone = keepT;
           blocks.push([z0 - 1, z1 + 1]);
+          if (wordsP() < 0.5) throughBars.push(blocks[blocks.length - 1]);
           return true;
+        };
+        const giveWay = (st, sd) => {
+          const a = sd > 0 ? mid : -hAt(st) + 0.3, b = sd > 0 ? hAt(st) - 0.3 : mid;
+          if (wordsP() < 0.6) { for (let q = a + 0.1; q + 1 <= b; q += 1.6) band(st, st + 0.4, q + 0.5, 1); }
+          else band(st, st + 0.4, (a + b) / 2, b - a);
         };
         // the ends of the road
         let lo = 0, hi = L;
@@ -2001,13 +2048,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           if (dA < 2) lo = 6;
           else {
             const z = zebA && dA >= 3 && minW >= 6 && zebra(setA + 0.8, setA + 3.8), st = setA + (z ? 4.8 : 0.4);
-            if (dA >= 3) band(st, st + 0.4, (-hAt(st) + 0.3 + mid) / 2, hAt(st) - 0.3 + mid);
+            if (dA >= 3) giveWay(st, -1);
             lo = st + 1.4;
           }
           if (dB < 2) hi = L - 6;
           else {
             const z = zebB && dB >= 3 && minW >= 6 && zebra(L - setB - 3.8, L - setB - 0.8), st = L - setB - (z ? 5.2 : 0.8);
-            if (dB >= 3) band(st, st + 0.4, (hAt(st) - 0.3 + mid) / 2, hAt(st) - 0.3 - mid);
+            if (dB >= 3) giveWay(st, 1);
             hi = st - 1;
           }
         }
@@ -2021,6 +2068,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           for (const a of side) {
             const cr = a.u[0] * u[1] - a.u[1] * u[0], half = a.hw / Math.max(0.5, Math.abs(cr)) + 5.5, sd = -a.u[0] * u[1] + a.u[1] * u[0] > 0 ? 1 : -1;
             gaps[sd].push([t0 - half, t0 + half]); reach = Math.max(reach, half);
+            if (a.e.w >= 5 && wordsP() < 0.66) {
+              const f = wordsP() < 0.5 ? 1 : -1, q = sd * (hAt(t0) - 0.75), P0 = at(t0 + f * half, q), Ci = at(t0 + f * (a.hw - 0.75), q), c0 = cut(a.pts, 0, Math.max(a.set, 1) + 0.5), Ep = c0[c0.length - 1], l = [-a.u[1], a.u[0]], ls = l[0] * u[0] * f + l[1] * u[1] * f > 0 ? 1 : -1;
+              curve(bez(P0, Ci, [Ep[0] + l[0] * ls * (a.hw - 0.75), Ep[1] + l[1] * ls * (a.hw - 0.75)], 12), 0.15);
+            }
           }
           if (minW < 6) return;
           if (j.q.e.zeb && j.q.e.zeb[j.q.rev ? 0 : 1]) zebra(t0 - reach - 3.8, t0 - reach - 0.8);
@@ -2028,21 +2079,54 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         });
         const free = (a, b, cut0) => { let out = [[a, b]]; for (const g of cut0) { const o = []; for (const [p, q] of out) { if (g[1] <= p || g[0] >= q) { o.push([p, q]); continue; } if (g[0] > p) o.push([p, g[0]]); if (g[1] < q) o.push([g[1], q]); } out = o; } return out.filter(r => r[1] - r[0] > 0.4); };
         const solid = (q, w, a, b, cut0) => { for (const [p, r] of free(a, b, cut0)) band(p, r, q, w); };
-        const dashes = (q, w, on, off) => { for (let t = lo; t + on <= hi; t += on + off) if (!blocks.some(g => t + on > g[0] && t < g[1])) band(t, t + on, q, w); };
+        const dashes = (q, w, on, off, a0 = lo, b0 = hi) => { for (let t = a0; t + on <= b0; t += on + off) if (!blocks.some(g => t + on > g[0] && t < g[1])) band(t, t + on, q, w); };
         if (minW >= 6 && hi - lo > 8) {
-          if (minW >= 11.5 && cls === 0) { dashes(mid - minW / 6, 0.15, 2.5, 1.1); solid(mid + minW / 6, 0.15, lo, hi, blocks); }
-          else if (mk.type < 0.62) dashes(mid, 0.15, 2.5, 1.1);
-          else if (mk.type < 0.82) dashes(mid, 0.13, 0.9, 0.9);
-          else { solid(mid, 0.17, lo, hi, blocks); dashes(mid + 0.3, 0.15, 2.5, 1.1); }
+          const stretch = [lo];
+          joints.forEach((j, k) => { if (k < joints.length - 1 && Sj[k] - stretch[stretch.length - 1] > 100 && hi - Sj[k] > 60 && wordsP() < 0.5) stretch.push(Sj[k]); });
+          stretch.push(hi);
+          const barsOut = blocks.filter(b => !throughBars.includes(b));
+          for (let k = 0; k < stretch.length - 1; k++) {
+            const a0 = stretch[k], b0 = stretch[k + 1], ty = k ? wordsP() : mk.type;
+            if (minW >= 11.5 && cls === 0) { dashes(mid - minW / 6, 0.15, 2.5, 1.1, a0, b0); solid(mid + minW / 6, 0.15, a0, b0, barsOut); }
+            else if (ty < 0.56) dashes(mid, 0.15, 2.5, 1.1, a0, b0);
+            else if (ty < 0.78) dashes(mid, 0.13, 0.9, 0.9, a0, b0);
+            else { solid(mid, 0.17, a0, b0, barsOut); dashes(mid + 0.3, 0.15, 0.9, 0.9, a0, b0); }
+          }
           if (mk.edge) for (const sd of [-1, 1]) solid(t => sd * (hAt(t) - 0.75), 0.15, lo, hi, blocks.concat(gaps[sd]));
+          // a thin yellow line near the kerb on some stretches, and a slanted bus bay
+          if (hi - lo > 60) {
+            const sd = wordsP() < 0.5 ? -1 : 1;
+            if (wordsP() < 0.28) { const t0 = lo + wordsP() * (hi - lo - 50), keepT = tone; tone = yellowP; solid(t => sd * (hAt(t) - 0.35), 0.1, t0, Math.min(hi, t0 + 40 + wordsP() * 50), blocks.concat(gaps[sd])); tone = keepT; }
+            if (minW >= 8 && wordsP() < 0.2) {
+              const t0 = lo + wordsP() * (hi - lo - 24), cuts = blocks.concat(gaps[sd]);
+              if (!cuts.some(g => t0 + 18 > g[0] && t0 < g[1])) {
+                const keepT = tone; band(t0, t0 + 18, t => sd * (hAt(t) - 2), 0.12); tone = yellowP;
+                for (let t = t0 + 0.5; t < t0 + 17; t += 1.6) curve([at(t, sd * (hAt(t) - 1.85)), at(t + 1, sd * (hAt(t) - 0.75))], 0.2);
+                tone = keepT;
+              }
+            }
+          }
           // a lane arrow on the way up to a junction the road gives way at
-          const arrow = (t, f, q) => {
-            band(f > 0 ? t : t - 2.6, f > 0 ? t + 2.6 : t, q, 0.2);
-            const c = t + f * 2.6, a = at(c, q - f * 0.42), b = at(c, q + f * 0.42), tip = at(c + f * 1.2, q);
-            tri(a, b, tip);
+          const arrow = (t, f, q, split) => {
+            band(f > 0 ? t : t - 2.8, f > 0 ? t + 2.8 : t, q, 0.2);
+            const head = (c, l0) => { const r = at(c, l0 - f * 0.42), g = at(c, l0 + f * 0.42), tip = at(c + f * 1.3, l0); tri(r, g, tip); };
+            head(t + f * 2.8, q);
+            if (split) { const sd = q > mid ? -1 : 1, c = t + f * 1.2; curve(bez(at(c, q), at(c + f * 1.5, q), at(c + f * 2.4, q + sd * 0.95), 6), 0.2); head(c + f * 2.4, q + sd * 0.95); }
           };
-          if (dA >= 3 && hi - lo > 30) arrow(lo + 12, -1, (mid - hAt(lo + 12)) / 2);
-          if (dB >= 3 && hi - lo > 30) arrow(hi - 12, 1, (mid + hAt(hi - 12)) / 2);
+          // stretched capitals in the lane, on about one approach in three
+          const word = (t, f, q) => {
+            const row = Math.floor(wordsP() * 4), n = 6, len = 5.5, w = 1.5, t0 = f > 0 ? t : t - len;
+            let prev = null;
+            for (let k = 0; k <= n; k++) {
+              const tt = t0 + len * k / n, vv = (f > 0 ? k / n : 1 - k / n), a = at(tt, q - w / 2), b = at(tt, q + w / 2);
+              if (!ok(a) || !ok(b)) { prev = null; continue; }
+              const v0 = wordA.v(a[0], paintY(a[0], a[1]), a[1], 0, 1, 0, f > 0 ? 0 : 1, (row + vv) / 4), v1 = wordA.v(b[0], paintY(b[0], b[1]), b[1], 0, 1, 0, f > 0 ? 1 : 0, (row + vv) / 4);
+              if (prev != null) { wordA.t(prev, prev + 1, v0); wordA.t(prev + 1, v1, v0); }
+              prev = v0;
+            }
+          };
+          if (dA >= 3 && hi - lo > 30) { const q = (mid - hAt(lo + 12)) / 2; arrow(lo + 12, -1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(lo + 22, -1, q); }
+          if (dB >= 3 && hi - lo > 30) { const q = (mid + hAt(hi - 12)) / 2; arrow(hi - 12, 1, q, wordsP() < 0.45); if (hi - lo > 48 && wordsP() < 0.33) word(hi - 22, 1, q); }
         }
         if (minW >= 8.5 && mk.bays && hi - lo > 30) {
           const sd = mk.bays, cuts = blocks.concat(gaps[sd]);
@@ -2051,6 +2135,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         if (minW >= 5) for (let t = 14 + rnd() * 30; t < L - 8; t += 45 + rnd() * 35) { const q = at(t, (rnd() - 0.5) * hAt(t)); if (ok(q)) manhole(q, rnd() < 0.3 ? 0.5 : 0.4); }
       }
+      if (wordA.k) add(wordA.geo(), M.roadWords || (M.roadWords = F1.R3S.wear.paint(std({ map: wordsTex(), transparent: true, depthWrite: false, roughness: 0.6 }))), { receive: true, order: 2 });
     }
     const rg = road.geo();
     if (rg) { rg.setAttribute('trk', offLine(rg)); add(rg, M.asphalt); }
@@ -2293,6 +2378,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     g.fillStyle = '#ecebe6'; g.fillRect(0, 0, 128, 128); g.fillStyle = '#c8302a';
     for (let k = -2; k < 3; k += 1) { g.beginPath(); g.moveTo(k * 64, 128); g.lineTo(k * 64 + 32, 128); g.lineTo(k * 64 + 160, 0); g.lineTo(k * 64 + 128, 0); g.fill(); }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  // the words a town paints in its lanes, four rows of a texture, chipped
+  function wordsTex() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 512;
+    const g = c.getContext('2d'), r = U.rng(61);
+    g.clearRect(0, 0, 256, 512); g.fillStyle = '#efefe9'; g.font = 'bold 92px Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    ['STOP', 'BUS', 'TAXI', 'LENT'].forEach((w, k) => g.fillText(w, 128, 64 + (3 - k) * 128));
+    g.globalCompositeOperation = 'destination-out';
+    for (let k = 0; k < 900; k++) { g.fillStyle = `rgba(0,0,0,${0.3 + r() * 0.7})`; g.fillRect(r() * 256, r() * 512, 1 + r() * 7, 1 + r() * 4); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
     return t;
   }
   function noEntryTex() {
