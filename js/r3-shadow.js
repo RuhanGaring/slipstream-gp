@@ -57,7 +57,7 @@
   // one-mesh stand-in (its merged far model; at that scale a car is a few texels, and its full
   // detail costs more than the rest of the scene). The slices are rendered one at a time by the
   // shadow-map wrapper in js/render3d.js, which routes each light to what it should draw.
-  const EVERY = [1, 2, 4], PHASE = [0, 0, 1];
+  const EVERY = [1, 12, 40], PHASE = [0, 3, 11], lastDir = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], _d = new THREE.Vector3();
   let frame = 0, force = true;
   const lastPos = [new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0)];
   const lastSun = new THREE.Vector3();
@@ -129,10 +129,11 @@
       // the cars' map of an outer slice follows the camera every frame
       if (i) { S.cars[i - 1].shadow.needsUpdate = true; fit(S.cars[i - 1], i, d0, d1, camera, tx, ty, sunDir); }
       // due this frame? (a camera that jumped further than a tenth of the slice re-renders it now)
-      const l0 = S.lights[i], jump = lastPos[i].distanceToSquared(camera.position) > (end * 0.1) ** 2;
+      camera.getWorldDirection(_d);
+      const l0 = S.lights[i], jump = lastPos[i].distanceToSquared(camera.position) > (end * 0.1) ** 2 || (i > 0 && lastDir[i].dot(_d) < 0.985);
       const due = force || jump || G.__shFull || frame % EVERY[i] === PHASE[i];
       l0.shadow.needsUpdate = due;
-      if (due) { lastPos[i].copy(camera.position); fit(l0, i, d0, d1, camera, tx, ty, sunDir); }
+      if (due) { lastPos[i].copy(camera.position); lastDir[i].copy(_d); fit(l0, i, d0, d1, camera, tx, ty, sunDir); }
       start = end;
     }
     U.r3ShadowEnd.value = ends[S.q.n - 1];

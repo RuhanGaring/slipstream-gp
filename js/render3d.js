@@ -589,7 +589,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           } else if (SH.lights.indexOf(l) > 0) {
             for (const o of live.values()) if (o.visible) { o.visible = false; hid.push(o); }
             try { smRender([l], sc, cam); } finally { for (const o of hid) o.visible = true; hid.length = 0; }
-          } else smRender([l], sc, cam);
+          } else {
+            const tw = [], cp = camera.position;
+            for (const o of live.values()) {
+              const px = o.userData.body && o.userData.body.userData.shadowProxy;
+              if (!o.visible || !px || o.position.distanceToSquared(cp) < 130) continue;
+              o.visible = false; hid.push(o);
+              const t = px.userData.twin; t.matrixWorld.copy(px.matrixWorld); t.parent = sc; sc.children.push(t); tw.push(t);
+            }
+            try { smRender([l], sc, cam); } finally { for (const o of hid) o.visible = true; hid.length = 0; sc.children.length -= tw.length; for (const t of tw) t.parent = null; }
+          }
         }
       };
     }
@@ -637,7 +646,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   // ---------- graphics quality ----------
-  const GFX = { scenery: 'full', viewDist: 14000, dprCap: 2, aniso: 8, trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, carNear: 50, carFar: 300, carDraw: 0, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, tone: 'agx', ev: 0, aniso: 16 };
+  const GFX = { scenery: 'full', viewDist: 14000, dprCap: 2, aniso: 8, trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, carNear: 34, carFar: 130, carDraw: 0, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, tone: 'agx', ev: 0, aniso: 16 };
   // Only post on/off and the shadow setup change which shader programs the scene needs; every
   // other setting is a uniform or a render target size. When the programs do change they are
   // built with compileAsync (parallel, off the main thread where the driver allows) while the

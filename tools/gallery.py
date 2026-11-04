@@ -67,7 +67,7 @@ def open_page(b, track):
     pg.on('pageerror', lambda e: logs.append(f'pageerror: {e}'))
     pg.goto(f'http://127.0.0.1:{port}/index.html?t={time.time()}', timeout=120000)
     pg.wait_for_function('window.__game && window.__game.ready', timeout=90000)
-    pg.evaluate("t => { __game.Game.raceDefaults = Object.assign(__game.Game.raceDefaults || {}, { laps: 8 }); __game.quick({ flow: { track: t } }); }", track)
+    pg.evaluate("t => { __game.Game.raceDefaults = Object.assign(__game.Game.raceDefaults || {}, { laps: 8 }); __game.quick({ flow: { track: t } }); if (t.startsWith('gen2')) setInterval(() => { try { F1.LearnJob && F1.LearnJob.cancel(); } catch (e) {} }, 200); }", track)
     pg.wait_for_function("t => { const G = __game.Game; return G.state === 'race' && G.race && G.race.track && G.race.track.id === t && G.race.phase !== 'lights' && G.race.phase !== 'grid'; }", arg=track, timeout=280000)
     pg.evaluate("() => { const G = __game.Game; G.race.autoPlayer = true; G.hudOn = false; G.settings.tags = false; const h = document.getElementById('hud'); if (h) h.classList.add('off'); }")
     return pg, logs
