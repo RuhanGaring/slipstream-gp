@@ -691,63 +691,84 @@ body.compact .gx-card canvas { height: 110px; }
 body.compact .gx-act .m-btn { flex: 1; min-height: 46px; }
 body.compact .gx-go { display: none; } /* the action bar races */
 
-/* race HUD, laid out as racing games do: order top left, timing top right, map bottom left, a round
-   tach bottom right. Small, thin and quiet, so the road stays the picture. */
-#hud { --h-panel: rgba(8, 9, 13, .66); }
-#h-arc, #h-car { display: none; }
+/* race HUD, built on the F1 games' layout: order card top left, timing card top right, the low
+   cluster bottom centre, map bottom left, tyres bottom right, pit window on the right. */
+#hud { --h-panel: rgba(7, 8, 12, .84); --h-line: rgba(255, 255, 255, .1); }
+#h-arc, #h-car, #h-flag, #h-pit, #h-rpm { display: none; }
 #hud-pos, #hud-lap { background: var(--h-panel); border: 0; clip-path: none; }
-#tower { background: var(--h-panel); border: 0; padding: 2px 0; }
-.tw-row { grid-template-columns: 24px 3px 42px 1fr 16px; height: 20px; padding-right: 6px; font-size: 12px; font-weight: 600; }
-.tw-row .p { color: #fff; font-weight: 600; font-size: 12px; }
-.tw-row .c { width: 3px; height: 12px; }
+#tower { background: var(--h-panel); border: 0; padding: 0 0 3px; }
+.tw-row { grid-template-columns: 26px 3px 46px 1fr 18px; height: 21px; padding-right: 7px; font-size: 12px; font-weight: 600; }
+.tw-row .p { font-weight: 700; font-size: 12px; color: #fff; }
+.tw-row .c { width: 3px; height: 13px; }
 .tw-row .n { font-weight: 700; font-size: 12px; letter-spacing: .05em; }
-.tw-row .g { font-size: 11px; font-weight: 500; color: #c6c9d2; }
-.tw-row .t { justify-self: end; width: 12px; height: 12px; border: 1.5px solid currentColor; border-radius: 50%; display: grid; place-items: center; font-size: 0; }
+.tw-row .g { font-size: 11px; font-weight: 600; color: #cfd2da; }
+.tw-row .t { justify-self: end; width: 14px; height: 14px; border: 2px solid currentColor; border-radius: 50%; background: #000; display: grid; place-items: center; font-size: 8px; font-weight: 800; line-height: 1; }
 .tw-row .t:empty { visibility: hidden; }
-.tw-row.me { background: rgba(255, 255, 255, .2); }
-.tw-row.pit .g { color: #7cc0ff; }
-#msgs { top: 13%; left: 0; right: 0; transform: none; gap: 4px; }
-.msg { padding: 5px 18px; border: 0; border-top: 2px solid #fff; background: var(--h-panel); color: #fff; font-size: 14px; font-weight: 600; letter-spacing: .08em; text-align: center; }
-.msg.purple { border-top-color: var(--purple); } .msg.red { border-top-color: #ff3b30; } .msg.green { border-top-color: var(--green); }
-.msg.yellow { border-top-color: var(--yellow); } .msg.blue { border-top-color: var(--blue); }
-.msg small { font-size: 11px; color: #c6c9d2; }
-.delta { font-size: 13px; min-width: 0; }
-.delta.up { color: #ff6a60; } .delta.down { color: var(--green); }
-.t-sectors { gap: 2px; margin: 5px 0 4px; } .t-sectors i { height: 3px; }
+.tw-row.me { background: #fff; color: #111; } .tw-row.me .p { color: #111; } .tw-row.me .g { color: #333; }
+.tw-row.pit .g { color: #7cc0ff; } .tw-row.me.pit .g { color: #0a56a8; }
+#msgs { top: 15%; left: 0; right: 0; transform: none; gap: 5px; }
+.msg { padding: 5px 26px; border: 0; border-radius: 3px; background: #fff; color: #111; font-size: 14px; font-weight: 700; letter-spacing: .04em; text-align: center; }
+.msg small { font-size: 11px; color: #444; }
+.msg.purple { background: #7b2cd6; color: #fff; } .msg.red { background: #d81f16; color: #fff; } .msg.green { background: #118a45; color: #fff; } .msg.blue { background: #0a64c4; color: #fff; }
+.msg.purple small, .msg.red small, .msg.green small, .msg.blue small { color: #fff; }
+.msg.yellow { background: #ffd21f; color: #111; }
 
-body:not(.mobile) #h-arc, body:not(.mobile) #h-car { display: block; }
-body:not(.mobile) #hud-top-left { left: 20px; top: 16px; width: 214px; gap: 1px; }
-body:not(.mobile) #hud-pos, body:not(.mobile) #hud-lap { flex: 1 1 0; padding: 3px 10px; gap: 4px; align-items: baseline; }
-body:not(.mobile) #hud-pos .lbl, body:not(.mobile) #hud-lap .lbl { font-size: 10px; letter-spacing: .1em; color: #c6c9d2; font-weight: 600; }
-body:not(.mobile) #hud-pos b, body:not(.mobile) #hud-lap b { font-size: 22px; font-weight: 700; }
-body:not(.mobile) #pos-of, body:not(.mobile) #lap-of { font-size: 12px; color: #c6c9d2; font-weight: 500; }
-body:not(.mobile) #tower { left: 20px; top: 55px; width: 214px; }
-body:not(.mobile) #hud-mini { left: 20px; right: auto; top: auto; bottom: 16px; width: 150px; }
-body:not(.mobile) #minimap { width: 150px; height: 150px; }
+body:not(.mobile) #h-arc, body:not(.mobile) #h-car, body:not(.mobile) #h-rpm { display: block; }
+body:not(.mobile) #hud-top-left { left: 20px; top: 16px; width: 226px; display: block; }
+body:not(.mobile) #hud-lap { display: flex; justify-content: center; align-items: baseline; gap: 4px; padding: 4px 0 3px; border-bottom: 1px solid var(--h-line); }
+body:not(.mobile) #hud-lap .lbl { font-size: 13px; font-weight: 700; letter-spacing: .02em; color: #fff; }
+body:not(.mobile) #hud-lap b { font-size: 13px; font-weight: 700; }
+body:not(.mobile) #lap-of { font-size: 13px; color: #fff; font-weight: 700; }
+body:not(.mobile) #hud-pos { display: none; }
+#h-flag.on { display: block; padding: 4px 0; text-align: center; font-size: 13px; font-weight: 800; background: #ffd21f; color: #111; letter-spacing: .04em; }
+body:not(.mobile) #tower { left: 20px; top: 44px; width: 226px; }
+body:not(.mobile) #h-flag.on ~ * { margin-top: 0; }
+body:not(.mobile) #hud-mini { left: 20px; right: auto; top: auto; bottom: 16px; width: 170px; }
+body:not(.mobile) #minimap { width: 170px; height: 170px; }
 body:not(.mobile) #mini-name { display: none; }
-body:not(.mobile) #timing { left: auto; right: 20px; top: 16px; bottom: auto; transform: none; width: 214px; min-width: 0; background: var(--h-panel); border: 0; padding: 6px 10px 7px; }
-body:not(.mobile) .t-row { justify-content: space-between; }
-body:not(.mobile) .t-main #t-cur { font-size: 21px; font-weight: 600; }
-body:not(.mobile) .t-sub { justify-content: flex-start; font-size: 12px; font-weight: 500; color: #fff; margin: 0; }
-body:not(.mobile) .t-sub .lbl { margin-left: 0; font-size: 10px; letter-spacing: .08em; color: #c6c9d2; }
-body:not(.mobile) .t-sub .lbl:nth-of-type(3) { margin-left: auto; }
-body:not(.mobile) #keyhint { left: auto; right: 20px; top: 110px; bottom: auto; }
-body:not(.mobile) #dash { right: 12px; bottom: 8px; width: 270px; height: 226px; padding: 0; background: none; border: 0; clip-path: none; display: block; }
-body:not(.mobile) #revs, body:not(.mobile) #pedals, body:not(.mobile) #ers { display: none; }
-body:not(.mobile) #dash-main { position: absolute; left: 96px; top: 62px; width: 120px; display: block; text-align: center; }
-body:not(.mobile) #gear { width: auto; font-size: 62px; font-style: normal; font-weight: 700; line-height: 1; text-align: center; }
-body:not(.mobile) #speed-wrap { text-align: center; margin-top: 2px; }
-body:not(.mobile) #speed { font-size: 22px; font-style: normal; font-weight: 600; line-height: 1; }
-body:not(.mobile) #unit { font-size: 9px; letter-spacing: .12em; color: #c6c9d2; }
-body:not(.mobile) #dash-flags { position: absolute; right: 8px; top: -18px; margin: 0; min-height: 0; flex-wrap: nowrap; }
-.chip { border: 0; padding: 2px 6px; background: var(--h-panel); color: #fff; font-size: 10px; }
-body:not(.mobile) #tyres { position: absolute; right: 284px; bottom: 10px; margin: 0; grid-template-columns: 54px auto; gap: 8px; align-items: end; width: max-content; max-width: 240px; background: none; }
+body:not(.mobile) #timing { left: auto; right: 20px; top: 16px; bottom: auto; transform: none; width: 226px; min-width: 0; background: var(--h-panel); border: 0; padding: 0 0 4px; display: flex; flex-direction: column; overflow: hidden; }
+body:not(.mobile) .t-sectors { order: -1; gap: 2px; margin: 0 0 4px; } body:not(.mobile) .t-sectors i { height: 5px; }
+body:not(.mobile) .t-main { padding: 0 12px; justify-content: flex-end; }
+body:not(.mobile) .t-main #t-cur { font-size: 22px; font-weight: 700; }
+body:not(.mobile) .t-sub { display: grid; grid-template-columns: 1fr auto; padding: 2px 12px 0; margin: 0; gap: 0 8px; font-size: 12px; font-weight: 600; color: #fff; }
+body:not(.mobile) .t-sub .lbl { margin: 0; font-size: 12px; letter-spacing: .02em; color: #cfd2da; }
+body:not(.mobile) #t-delta { order: 5; }
+body:not(.mobile) .t-main { display: contents; }
+body:not(.mobile) #t-cur { padding: 0 12px; text-align: right; }
+body:not(.mobile) .delta { display: flex; justify-content: space-between; margin-top: 4px; padding: 2px 12px; min-width: 0; font-size: 13px; font-weight: 700; color: #fff; background: #d81f16; }
+body:not(.mobile) .delta::before { content: 'DELTA'; font-weight: 600; font-size: 12px; }
+body:not(.mobile) .delta.down { background: #118a45; }
+body:not(.mobile) .delta:empty { display: none; }
+body:not(.mobile) #keyhint { left: auto; right: 20px; top: 140px; bottom: auto; }
+body:not(.mobile) #dash { left: calc(50% - 220px); right: auto; bottom: 8px; width: 440px; height: 128px; padding: 0; background: none; border: 0; clip-path: none; display: block; }
+body:not(.mobile) #revs, body:not(.mobile) #pedals { display: none; }
+body:not(.mobile) #dash-main { position: absolute; inset: 0; display: block; }
+body:not(.mobile) #gear { position: absolute; left: 170px; top: 36px; width: 100px; height: 70px; display: block; text-align: center; font-size: 68px; line-height: 70px; font-style: normal; font-weight: 700; }
+body:not(.mobile) #speed-wrap { position: absolute; left: 320px; top: 36px; width: 100px; text-align: center; }
+body:not(.mobile) #speed { font-size: 29px; font-style: normal; font-weight: 700; line-height: 1; }
+body:not(.mobile) #unit { display: none; }
+body:not(.mobile) #h-rpm { font-size: 12px; font-weight: 600; color: #cfd2da; font-variant-numeric: tabular-nums; margin-top: 1px; }
+body:not(.mobile) #ers { position: absolute; left: 20px; top: 38px; width: 100px; margin: 0; display: flex; flex-direction: column-reverse; align-items: center; gap: 0; }
+body:not(.mobile) #ers i { display: none; }
+body:not(.mobile) #ers b { font-size: 25px; font-weight: 700; color: #fff; min-width: 0; line-height: 1.1; }
+body:not(.mobile) #ers .lbl { font-size: 9px; letter-spacing: .06em; color: #cfd2da; }
+body:not(.mobile) #dash-flags { position: absolute; left: 0; right: 0; bottom: 132px; margin: 0; min-height: 0; justify-content: center; flex-wrap: nowrap; }
+.chip { border: 0; border-radius: 2px; padding: 2px 8px; background: var(--h-panel); color: #fff; font-size: 11px; }
+body:not(.mobile) #tyres { position: fixed; right: 20px; bottom: 16px; margin: 0; grid-template-columns: 54px auto; gap: 10px; align-items: center; width: 226px; padding: 7px 10px; background: var(--h-panel); }
 body:not(.mobile) #tyres .tyre-grid { display: none; }
 body:not(.mobile) #h-car { width: 54px !important; height: 88px !important; }
-body:not(.mobile) #tyre-info { font-size: 11px; color: #fff; font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,.9); }
-body:not(.mobile) #tyre-comp { font-size: 12px; }
+body:not(.mobile) #tyre-info { font-size: 12px; font-weight: 600; color: #fff; min-width: 0; }
+body:not(.mobile) #tyre-comp { font-size: 14px; font-weight: 800; }
 body:not(.mobile) #wing.bad { color: #ff8a80; }
-@media (max-height: 700px) { body:not(.mobile) #hud-mini { display: none; } }
+body:not(.mobile) #h-pit.on { display: block; position: absolute; right: 20px; top: 46%; width: 148px; text-align: center; background: var(--h-panel); }
+#h-pit b { display: block; padding: 6px 8px; background: #d81f16; color: #fff; font-size: 15px; font-weight: 800; line-height: 1.1; }
+#h-pit span { display: block; padding: 5px 8px; color: #fff; font-size: 12px; font-weight: 700; }
+@media (max-height: 760px) {
+  body:not(.mobile) .tw-row { height: 19px; }
+  body:not(.mobile) #hud-mini, body:not(.mobile) #minimap { width: 130px; }
+  body:not(.mobile) #minimap { height: 130px; }
+}
+@media (max-height: 640px) { body:not(.mobile) #hud-mini { display: none; } }
 /* a landscape phone: the dash stays small, either side of the car */
 @media (max-height: 500px) {
   body.mobile #dash { width: 210px; padding: 6px 8px 7px; }
@@ -756,3 +777,5 @@ body:not(.mobile) #wing.bad { color: #ff8a80; }
   body.mobile #speed { font-size: 32px; }
   body.mobile #ers { margin-top: 4px; }
 }
+body:not(.mobile) #lap-of { margin-left: -2px; }
+body:not(.mobile) .t-sectors i { background: rgba(255,255,255,.22); } body:not(.mobile) .t-sectors i.live { background: #fff; }

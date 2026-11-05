@@ -7,10 +7,11 @@
 
   const H = { rows: [], towerT: 0, msgQ: [], lastLight: 0 };
 
-  // ---------- the tachometer and the car (desktop) ----------
-  // A round tach as racing games have it: the dial is drawn once and kept, and only the needle-less
-  // sweep, the battery and the pedals are stroked over it, at 30 Hz.
-  const A = { w: 270, h: 226, cx: 156, cy: 113, r: 100, a0: Math.PI * 0.75, a1: Math.PI * 2.25, max: 13000 };
+  // ---------- the cluster and the car (desktop) ----------
+  // The low cluster F1 games use, bottom centre: gear in the middle under a row of rev lights, the
+  // battery on a dial to its left, speed and revs on a dial to its right. The body is drawn once
+  // and kept; only the lit parts are stroked over it, at 30 Hz.
+  const A = { w: 440, h: 128, lx: 70, rx: 370, cy: 66, r: 47, a0: Math.PI * 0.75, a1: Math.PI * 2.25, max: 13000 };
   function sharp(cv, w, h) {
     const d = Math.min(2, G.devicePixelRatio || 1);
     cv.width = w * d; cv.height = h * d; cv.style.width = w + 'px'; cv.style.height = h + 'px';
@@ -18,43 +19,44 @@
     return g;
   }
   function hudExtras() {
-    const dash = $('dash');
+    const dash = $('dash'), hud = $('hud');
     const arc = document.createElement('canvas'); arc.id = 'h-arc'; dash.insertBefore(arc, dash.firstChild);
     const car = document.createElement('canvas'); car.id = 'h-car'; $('tyres').insertBefore(car, $('tyres').firstChild);
     H.ag = sharp(arc, A.w, A.h); H.cg = sharp(car, 72, 118);
-    // the dial
-    const d = Math.min(2, G.devicePixelRatio || 1), dial = document.createElement('canvas'), g = dial.getContext('2d');
-    dial.width = A.w * d; dial.height = A.h * d; g.scale(d, d);
-    const { cx, cy, r, a0, a1, max } = A, at = v => a0 + (a1 - a0) * v / max;
-    g.fillStyle = 'rgba(8,9,13,.66)'; g.beginPath(); g.arc(cx, cy, r + 11, 0, 7); g.fill();
-    g.lineCap = 'butt'; g.lineWidth = 5; g.strokeStyle = 'rgba(255,255,255,.16)'; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.stroke();
-    g.strokeStyle = 'rgba(255,59,48,.6)'; g.beginPath(); g.arc(cx, cy, r, at(11500), a1); g.stroke();
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '600 11px "Titillium Web", sans-serif';
-    for (let k = 0; k <= 13; k++) {
-      const a = at(k * 1000), c = Math.cos(a), s = Math.sin(a), big = k % 2 === 0;
-      g.strokeStyle = k >= 12 ? '#ff5a50' : 'rgba(255,255,255,.7)'; g.lineWidth = big ? 2 : 1;
-      g.beginPath(); g.moveTo(cx + c * (r - 5), cy + s * (r - 5)); g.lineTo(cx + c * (r - (big ? 13 : 9)), cy + s * (r - (big ? 13 : 9))); g.stroke();
-      if (big) { g.fillStyle = k >= 12 ? '#ff5a50' : 'rgba(255,255,255,.8)'; g.fillText(k, cx + c * (r - 24), cy + s * (r - 24)); }
-    }
-    H.dial = dial;
+    const rpm = document.createElement('span'); rpm.id = 'h-rpm'; $('speed-wrap').appendChild(rpm); H.rpmEl = rpm;
+    const ersL = document.querySelector('#ers .lbl'); if (ersL) ersL.textContent = 'BATTERY';
+    const flag = document.createElement('div'); flag.id = 'h-flag'; $('hud-top-left').appendChild(flag); H.flagEl = flag;
+    const pit = document.createElement('div'); pit.id = 'h-pit'; pit.innerHTML = '<b>PIT WINDOW OPEN</b><span></span>'; hud.appendChild(pit); H.pitEl = pit;
+    const d = Math.min(2, G.devicePixelRatio || 1), body = document.createElement('canvas'), g = body.getContext('2d');
+    body.width = A.w * d; body.height = A.h * d; g.scale(d, d);
+    const { lx, rx, cy, r, a0, a1 } = A;
+    g.fillStyle = '#07080c';
+    g.beginPath(); g.arc(lx, cy, 60, 0, 7); g.arc(rx, cy, 60, 0, 7); g.fill();
+    g.beginPath(); g.roundRect(lx, 14, rx - lx, 112, 22); g.fill();
+    for (const x of [lx, rx]) { g.lineWidth = 5; g.strokeStyle = '#3a3b40'; g.beginPath(); g.arc(x, cy, r, a0, a1); g.stroke(); }
+    g.strokeStyle = '#a32a24'; g.beginPath(); g.arc(rx, cy, r, a0 + (a1 - a0) * 11500 / A.max, a1); g.stroke();
+    H.body = body;
   }
-  function drawArc(p, hi, overtake) {
-    const g = H.ag, { cx, cy, r, a0, a1, max, w, h } = A, rpm = Math.min(max, p.rpm || 0);
+  function drawArc(p, lit, hi, overtake) {
+    const g = H.ag, { w, h, lx, rx, cy, r, a0, a1, max } = A, rpm = Math.min(max, p.rpm || 0), s = a1 - a0;
     g.clearRect(0, 0, w, h);
-    g.drawImage(H.dial, 0, 0, w, h);
+    g.globalAlpha = 0.86; g.drawImage(H.body, 0, 0, w, h); g.globalAlpha = 1;
     g.lineCap = 'butt'; g.lineWidth = 5;
+    const soc = p.soc == null ? 0 : p.soc;
+    if (soc > 0.005) { g.strokeStyle = overtake ? '#35e6ff' : p.deploy > 0.05 ? '#2f9dff' : p.harvest ? '#2bd66b' : '#ffd400'; g.beginPath(); g.arc(lx, cy, r, a0, a0 + s * soc); g.stroke(); }
     g.strokeStyle = rpm > hi ? '#3d8bff' : rpm > 11500 ? '#ff3b30' : '#fff';
-    g.beginPath(); g.arc(cx, cy, r, a0, a0 + (a1 - a0) * rpm / max); g.stroke();
-    // the battery, in the gap at the foot of the dial
-    const soc = p.soc == null ? 0 : p.soc, b0 = Math.PI * 0.68, b1 = Math.PI * 0.32;
-    g.lineWidth = 4; g.strokeStyle = 'rgba(255,255,255,.16)'; g.beginPath(); g.arc(cx, cy, r, b1, b0); g.stroke();
-    g.strokeStyle = overtake ? '#35e6ff' : p.deploy > 0.05 ? '#2f9dff' : p.harvest ? '#2bd66b' : '#ffd400';
-    if (soc > 0.005) { g.beginPath(); g.arc(cx, cy, r, b0, b0 + (b1 - b0) * soc, true); g.stroke(); }
-    // the pedals: two slim bars beside the dial
-    const thr = p.throttleOut != null ? p.throttleOut : p.ctl.throttle, bk = p.ctl.brake, bh = 96, by = cy + bh / 2;
-    g.fillStyle = 'rgba(8,9,13,.66)'; g.fillRect(14, by - bh - 2, 8, bh + 4); g.fillRect(26, by - bh - 2, 8, bh + 4);
-    g.fillStyle = '#ff3b30'; g.fillRect(16, by - bh * bk, 4, bh * bk);
-    g.fillStyle = '#2bd66b'; g.fillRect(28, by - bh * thr, 4, bh * thr);
+    g.beginPath(); g.arc(rx, cy, r, a0, a0 + s * rpm / max); g.stroke();
+    // rev lights over the gear
+    const shift = rpm > hi && p.gear > 0 && p.gear < 8 && Math.floor(performance.now() / 70) % 2 === 0;
+    for (let k = 0; k < 15; k++) {
+      g.fillStyle = shift ? '#3d8bff' : k >= lit ? 'rgba(255,255,255,.12)' : k < 5 ? '#22e06b' : k < 10 ? '#ff2d2d' : '#3d8bff';
+      g.beginPath(); g.arc(w / 2 + (k - 7) * 12, 28, 3.6, 0, 7); g.fill();
+    }
+    // brake to the left of centre, throttle to the right, under the gear
+    const thr = p.throttleOut != null ? p.throttleOut : p.ctl.throttle, bk = p.ctl.brake, bw = 74, by = 113;
+    g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(w / 2 - bw - 2, by, bw, 4); g.fillRect(w / 2 + 2, by, bw, 4);
+    g.fillStyle = '#ff3b30'; g.fillRect(w / 2 - 2 - bw * bk, by, bw * bk, 4);
+    g.fillStyle = '#2bd66b'; g.fillRect(w / 2 + 2, by, bw * thr, 4);
   }
   // the car from above: tyres by temperature, a tyre drains as it wears, broken parts go red
   function drawCar(p, tyre) {
@@ -136,7 +138,7 @@
     e.keyhint.style.opacity = 1;
     H.msgQ = [];
     H.lastLight = 0;
-    H.full = false; H.openT = 10; H.lapSeen = 0; H.arcT = 0;
+    H.full = false; H.openT = 10; H.lapSeen = 0; H.arcT = 0; H.planLap = 0; H.nextTyre = null;
   }
 
   function message(text, cls = '', sub = '', dur = 2.6) {
@@ -176,11 +178,11 @@
     const flash = rpm > hi && p.gear > 0 && p.gear < 8;
     e.revsEl = e.revsEl || $('revs');
     e.revsEl.classList.toggle('flash', flash && Math.floor(performance.now() / 70) % 2 === 0);
-    // the tach, on the desktop (a phone keeps its own compact dash)
+    // the cluster, on the desktop (a phone keeps its own compact dash)
     const wide = !document.body.classList.contains('mobile');
     if (wide) {
       H.arcT -= dt;
-      if (H.arcT <= 0) { H.arcT = 1 / 30; drawArc(p, hi, !!p.drsOpen); }
+      if (H.arcT <= 0) { H.arcT = 1 / 30; drawArc(p, lit, hi, !!p.drsOpen); }
     }
     for (let k = 0; k < 15; k++) { const on = k < lit; if (H.revs[k]._on !== on) { H.revs[k].classList.toggle('on', on); H.revs[k]._on = on; } }
     e.thr.style.setProperty('--v', p.throttleOut != null ? p.throttleOut.toFixed(2) : p.ctl.throttle.toFixed(2));
@@ -200,6 +202,21 @@
     const boxing = p.brain && p.brain.pit;
     e.box.classList.toggle('show', !!boxing); e.box.classList.toggle('on', !!boxing);
     H.slowT = (H.slowT || 0) - dt;
+    if (H.slowT <= 0) {
+      const rt = Math.round(p.rpm / 10) * 10;
+      if (H.rpmEl._v !== rt) { H.rpmEl.textContent = rt + ' RPM'; H.rpmEl._v = rt; }
+      const sc = race.sc && race.sc.state !== 'none', fl = sc ? 'SAFETY CAR' : '';
+      if (H.flagEl._v !== fl) { H.flagEl.textContent = fl; H.flagEl.classList.toggle('on', !!fl); H.flagEl._v = fl; }
+      // the pit window: the next stop is due at the end of this lap
+      if (race.sim && race.mode !== 'tt' && p.lap !== H.planLap) {
+        H.planLap = p.lap;
+        const left = race.laps - Math.max(1, p.lap) + 1;
+        H.nextTyre = null;
+        if (left > 1) { const pl = F1.Race.planFor(race, p, left); if (pl && pl.stops.length && pl.stops[0] <= 1) H.nextTyre = pl.seq[1]; }
+        if (H.nextTyre) H.pitEl.lastChild.textContent = 'FIT ' + F1.Car.COMPOUNDS[H.nextTyre].name;
+      }
+      H.pitEl.classList.toggle('on', !!H.nextTyre && !(p.brain && p.brain.pit) && !p.inPit);
+    }
     if (race.sim && H.slowT <= 0) {
       H.slowT = 0.25;
       p.wheels.forEach((w, k) => { e.tyreEls[k].style.background = tyreColor(w.temp, w.wear, p.compound.topt); });
