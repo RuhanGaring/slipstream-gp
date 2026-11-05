@@ -314,6 +314,7 @@
     if (Game.state === 'race' && !Game.paused) {
       const race = Game.race, p = race.player;
       if (code === 'Escape' || code === 'KeyP' && !race.sim) { pause(); return; }
+      if (code === 'KeyT' && !Game.paused) HUD.toggleTower();
       if (code === 'KeyC') {
         const list = R3ok ? CAMS : ['chase', 'fixed'];
         Game.settings.camera = list[(list.indexOf(Game.settings.camera) + 1) % list.length];

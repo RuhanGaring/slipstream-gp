@@ -25,7 +25,7 @@
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
-    hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
+    mpc: 0, mpcCare: 1, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
   };
 
@@ -152,6 +152,64 @@
   // past it is pulled back in as it is driven.
   function edgeOf(tr) { return tr.aiEdge || (tr.aiEdge = F1.Raceline.lineLimits(tr)); }
 
+  // Looking ahead. In traffic a driver tries a handful of lanes and two speeds, each run forward
+  // a few seconds on a simple model of the car against where the cars nearby will be, and takes
+  // the one that scores best: road covered, places gained, and contact all but ruled out. Passing,
+  // covering, tucking into a tow and backing out are not separate rules: they are what comes out.
+  // Cars with nobody near skip it, and each car thinks a few times a second, on its own beat.
+  const MPC_N = 12, MPC_DT = 0.2, MPC_R = 6;
+  const mpcS = new Float64Array(MPC_R * (MPC_N + 1)), mpcD = new Float64Array(MPC_R), mpcS0 = new Float64Array(MPC_R), mpcL = new Float64Array(14);
+  function predict(race, car, b, lim, v) {
+    const tr = race.track, N = tr.N, i = car.loc.i, ds = tr.ds, off = tr.line.off, kap = tr.line.kap;
+    let n = 0;
+    for (let k = 0; k < b.near.length && n < MPC_R; k++) {
+      const o = b.near[k], g = b.nds[k];
+      if (g < -22 || g > 70 || o.inPit || o.incident) continue;
+      // where this car will be: on its own plan from its own speed, in its own lane
+      const pr = o.brain && o.brain.prof, row = n * (MPC_N + 1);
+      let so = g, vo = Math.max(0, o.speed);
+      mpcS[row] = so; mpcS0[n] = g;
+      for (let t = 1; t <= MPC_N; t++) {
+        const q = (o.loc.i + Math.round((so - g) / ds)) % N, pv = pr ? pr[q] : vo;
+        vo += U.clamp(pv - vo, -35 * MPC_DT, 9 * MPC_DT); so += vo * MPC_DT; mpcS[row + t] = so;
+      }
+      mpcD[n] = o.brain && o.brain.desired != null ? 0.5 * (o.loc.d + o.brain.desired) : o.loc.d;
+      n++;
+    }
+    if (!n) { b.mpcL = null; b.mpcK = 1; return; }
+    const lead = (i + Math.round(v * 1.2 / ds)) % N, line = off[lead], E = edgeOf(tr);
+    let m = 0;
+    const add = x => { x = U.clamp(E.clamp(lead, x), -lim, lim); for (let q = 0; q < m; q++) if (Math.abs(mpcL[q] - x) < 0.5) return; if (m < 14) mpcL[m++] = x; };
+    add(line); add(car.loc.d);
+    for (let r = 0; r < n; r++) { const g = mpcS0[r]; if (g > -12) { add(mpcD[r] + 3.35); add(mpcD[r] - 3.35); } if (g > 8) add(mpcD[r]); else if (g < -8) add(mpcD[r]); }
+    const st = b.style, nerve = st ? U.clamp(st.nerve, 0, 1) : 0.5, care = P.mpcCare * (1.25 - 0.5 * nerve);
+    let best = 1e18, bL = line, bK = 1;
+    for (let c = 0; c < m; c++) for (let kk = 1; kk >= 0.965; kk -= 0.035) {
+      const L = mpcL[c];
+      let sv = 0, d = car.loc.d, vv = v, cost = 0.25 * Math.abs(L - car.loc.d), w = 1;
+      if (b.mpcL != null && Math.abs(L - b.mpcL) < 0.6) cost -= P.mpcKeep;
+      if (kk < 1) cost += 0.6;
+      for (let t = 1; t <= MPC_N; t++) {
+        const q = (i + Math.round(sv / ds)) % N, tight = Math.abs(kap[q]);
+        let pv = b.prof[q] * kk * (tight > 1 / 200 ? 1 - 0.012 * Math.abs(d - off[q]) : 1);
+        for (let r = 0; r < n; r++) {
+          const gap = mpcS[r * (MPC_N + 1) + t] - sv, dl = Math.abs(mpcD[r] - d);
+          if (gap > 7 && gap < 45 && dl < 1.5 && tight < 1 / 400) pv *= 1.03; // the tow
+          if (Math.abs(gap) < 6.2) { if (dl < 2.15) cost += 320 * w * care; else if (dl < 2.8) cost += 7 * w * care; }
+        }
+        vv += U.clamp(pv - vv, -35 * MPC_DT, 9 * MPC_DT);
+        sv += vv * MPC_DT;
+        d += U.clamp(L - d, -4.5 * MPC_DT, 4.5 * MPC_DT);
+        w *= 0.94;
+      }
+      cost -= sv;
+      for (let r = 0; r < n; r++) if (mpcS0[r] > 0 && sv > mpcS[r * (MPC_N + 1) + MPC_N] + 6) cost -= P.mpcPass * (0.5 + nerve);
+      cost += 0.35 * Math.abs(d - off[(i + Math.round(sv / ds)) % N]);
+      if (cost < best) { best = cost; bL = L; bK = kk; }
+    }
+    b.mpcL = bL; b.mpcK = bK;
+  }
+
   // The planner outputs a lateral corridor [lo, hi] (absolute offsets from the
   // centreline). The driver follows the racing line clamped into that corridor.
   function plan(race, car, dt) {
@@ -197,7 +255,7 @@
     // corner after bends the other way (the outside of one is the inside of the next) or
     // because the run is so big the car will be past before the turn-in.
     b.coolT = Math.max(0, (b.coolT || 0) - dt);
-    if ((b.mode === 'race' || b.mode === 'tow') && sinceStart > 1.5 && !b.coolT) {
+    if (!P.mpc && (b.mode === 'race' || b.mode === 'tow') && sinceStart > 1.5 && !b.coolT) {
       let o = null, ods = 1e9;
       for (let k = 0; k < b.near.length; k++) {
         const c = b.near[k], ds = b.nds[k];
@@ -287,7 +345,7 @@
       else hi = Math.min(hi, Math.max(-lim, lat));
     }
     // defend: one move to the inside when someone is close before a braking zone
-    if (b.mode === 'race' && b.behind && b.gapBehind < 16 && b.aggr > 0.3 && sinceStart > 4) {
+    if (!P.mpc && b.mode === 'race' && b.behind && b.gapBehind < 16 && b.aggr > 0.3 && sinceStart > 4) {
       const z = br.z;
       // only on a true straight that runs all the way to the braking zone
       let onStraight = br.room < 300;
@@ -303,7 +361,7 @@
     }
     // cover: an attacker with a run who pulls out of the tow gets the door shut on the side
     // he picked, once, while he is still behind (moving across a car already alongside is a crash)
-    if (b.mode === 'race' && b.behind && b.aggr > 0.3 && sinceStart > 4 && br.z && b.defended !== br.z.s0) {
+    if (!P.mpc && b.mode === 'race' && b.behind && b.aggr > 0.3 && sinceStart > 4 && br.z && b.defended !== br.z.s0) {
       const a = b.behind, rel = a.loc.d - car.loc.d;
       if (b.gapBehind > car.spec.len + 1.5 && b.gapBehind < 14 && Math.abs(rel) > 1.5 && a.speed > v + 0.5 && br.room > 60 && br.room < 450) {
         b.defended = br.z.s0;
@@ -358,6 +416,13 @@
         }
       }
     }
+    // looking ahead in traffic (see predict)
+    b.mpcK = b.mpcK || 1;
+    if (P.mpc && b.style && !b.hazard && sinceStart > 2 && !(b.pit && b.pit.phase === 'approach')) {
+      b.mpcT = (b.mpcT == null ? b.rng() * MPC_DT : b.mpcT) - dt;
+      if (b.mpcT <= 0) { b.mpcT = MPC_DT * (1 + (1 - b.style.skill) * 0.8); predict(race, car, b, lim, v); }
+      if (b.mpcL != null) { lo = Math.max(lo, Math.min(hi, b.mpcL - 0.5)); hi = Math.min(hi, Math.max(lo, b.mpcL + 0.5)); }
+    } else { b.mpcL = null; b.mpcK = 1; }
     // keep a car's width plus margin to anyone alongside
     b.squeezed = false;
     for (let k = 0; k < b.near.length; k++) {
@@ -622,6 +687,7 @@
     if (((b.ahead && b.gapAhead < 40) || b.alongside) && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= P.trafK;
     // the first lap is all elbows: everyone leaves a little more
     const lap1 = b.style && race.time - race.startTime < P.lap1T;
+    if (b.mpcK < 1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= b.mpcK;
     if (lap1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= P.lap1K;
     // in too hot, this one corner
     if (b.hot) { if (Tracks.fwd(tr, b.hotS, car.loc.s) < 40) b.hot = 0; else vt *= b.hot; }

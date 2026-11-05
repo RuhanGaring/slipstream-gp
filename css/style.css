@@ -690,3 +690,69 @@ body.compact .gx-grid { grid-template-columns: 1fr 1fr; overflow: visible; }
 body.compact .gx-card canvas { height: 110px; }
 body.compact .gx-act .m-btn { flex: 1; min-height: 46px; }
 body.compact .gx-go { display: none; } /* the action bar races */
+
+/* race HUD, laid out as racing games do: order top left, timing top right, map bottom left, a round
+   tach bottom right. Small, thin and quiet, so the road stays the picture. */
+#hud { --h-panel: rgba(8, 9, 13, .66); }
+#h-arc, #h-car { display: none; }
+#hud-pos, #hud-lap { background: var(--h-panel); border: 0; clip-path: none; }
+#tower { background: var(--h-panel); border: 0; padding: 2px 0; }
+.tw-row { grid-template-columns: 24px 3px 42px 1fr 16px; height: 20px; padding-right: 6px; font-size: 12px; font-weight: 600; }
+.tw-row .p { color: #fff; font-weight: 600; font-size: 12px; }
+.tw-row .c { width: 3px; height: 12px; }
+.tw-row .n { font-weight: 700; font-size: 12px; letter-spacing: .05em; }
+.tw-row .g { font-size: 11px; font-weight: 500; color: #c6c9d2; }
+.tw-row .t { justify-self: end; width: 12px; height: 12px; border: 1.5px solid currentColor; border-radius: 50%; display: grid; place-items: center; font-size: 0; }
+.tw-row .t:empty { visibility: hidden; }
+.tw-row.me { background: rgba(255, 255, 255, .2); }
+.tw-row.pit .g { color: #7cc0ff; }
+#msgs { top: 13%; left: 0; right: 0; transform: none; gap: 4px; }
+.msg { padding: 5px 18px; border: 0; border-top: 2px solid #fff; background: var(--h-panel); color: #fff; font-size: 14px; font-weight: 600; letter-spacing: .08em; text-align: center; }
+.msg.purple { border-top-color: var(--purple); } .msg.red { border-top-color: #ff3b30; } .msg.green { border-top-color: var(--green); }
+.msg.yellow { border-top-color: var(--yellow); } .msg.blue { border-top-color: var(--blue); }
+.msg small { font-size: 11px; color: #c6c9d2; }
+.delta { font-size: 13px; min-width: 0; }
+.delta.up { color: #ff6a60; } .delta.down { color: var(--green); }
+.t-sectors { gap: 2px; margin: 5px 0 4px; } .t-sectors i { height: 3px; }
+
+body:not(.mobile) #h-arc, body:not(.mobile) #h-car { display: block; }
+body:not(.mobile) #hud-top-left { left: 20px; top: 16px; width: 214px; gap: 1px; }
+body:not(.mobile) #hud-pos, body:not(.mobile) #hud-lap { flex: 1 1 0; padding: 3px 10px; gap: 4px; align-items: baseline; }
+body:not(.mobile) #hud-pos .lbl, body:not(.mobile) #hud-lap .lbl { font-size: 10px; letter-spacing: .1em; color: #c6c9d2; font-weight: 600; }
+body:not(.mobile) #hud-pos b, body:not(.mobile) #hud-lap b { font-size: 22px; font-weight: 700; }
+body:not(.mobile) #pos-of, body:not(.mobile) #lap-of { font-size: 12px; color: #c6c9d2; font-weight: 500; }
+body:not(.mobile) #tower { left: 20px; top: 55px; width: 214px; }
+body:not(.mobile) #hud-mini { left: 20px; right: auto; top: auto; bottom: 16px; width: 150px; }
+body:not(.mobile) #minimap { width: 150px; height: 150px; }
+body:not(.mobile) #mini-name { display: none; }
+body:not(.mobile) #timing { left: auto; right: 20px; top: 16px; bottom: auto; transform: none; width: 214px; min-width: 0; background: var(--h-panel); border: 0; padding: 6px 10px 7px; }
+body:not(.mobile) .t-row { justify-content: space-between; }
+body:not(.mobile) .t-main #t-cur { font-size: 21px; font-weight: 600; }
+body:not(.mobile) .t-sub { justify-content: flex-start; font-size: 12px; font-weight: 500; color: #fff; margin: 0; }
+body:not(.mobile) .t-sub .lbl { margin-left: 0; font-size: 10px; letter-spacing: .08em; color: #c6c9d2; }
+body:not(.mobile) .t-sub .lbl:nth-of-type(3) { margin-left: auto; }
+body:not(.mobile) #keyhint { left: auto; right: 20px; top: 110px; bottom: auto; }
+body:not(.mobile) #dash { right: 12px; bottom: 8px; width: 270px; height: 226px; padding: 0; background: none; border: 0; clip-path: none; display: block; }
+body:not(.mobile) #revs, body:not(.mobile) #pedals, body:not(.mobile) #ers { display: none; }
+body:not(.mobile) #dash-main { position: absolute; left: 96px; top: 62px; width: 120px; display: block; text-align: center; }
+body:not(.mobile) #gear { width: auto; font-size: 62px; font-style: normal; font-weight: 700; line-height: 1; text-align: center; }
+body:not(.mobile) #speed-wrap { text-align: center; margin-top: 2px; }
+body:not(.mobile) #speed { font-size: 22px; font-style: normal; font-weight: 600; line-height: 1; }
+body:not(.mobile) #unit { font-size: 9px; letter-spacing: .12em; color: #c6c9d2; }
+body:not(.mobile) #dash-flags { position: absolute; right: 8px; top: -18px; margin: 0; min-height: 0; flex-wrap: nowrap; }
+.chip { border: 0; padding: 2px 6px; background: var(--h-panel); color: #fff; font-size: 10px; }
+body:not(.mobile) #tyres { position: absolute; right: 284px; bottom: 10px; margin: 0; grid-template-columns: 54px auto; gap: 8px; align-items: end; width: max-content; max-width: 240px; background: none; }
+body:not(.mobile) #tyres .tyre-grid { display: none; }
+body:not(.mobile) #h-car { width: 54px !important; height: 88px !important; }
+body:not(.mobile) #tyre-info { font-size: 11px; color: #fff; font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+body:not(.mobile) #tyre-comp { font-size: 12px; }
+body:not(.mobile) #wing.bad { color: #ff8a80; }
+@media (max-height: 700px) { body:not(.mobile) #hud-mini { display: none; } }
+/* a landscape phone: the dash stays small, either side of the car */
+@media (max-height: 500px) {
+  body.mobile #dash { width: 210px; padding: 6px 8px 7px; }
+  body.mobile #tyres, body.mobile #dash-flags { display: none; }
+  body.mobile #gear { font-size: 44px; width: 46px; }
+  body.mobile #speed { font-size: 32px; }
+  body.mobile #ers { margin-top: 4px; }
+}

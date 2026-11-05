@@ -7,6 +7,74 @@
 
   const H = { rows: [], towerT: 0, msgQ: [], lastLight: 0 };
 
+  // ---------- the tachometer and the car (desktop) ----------
+  // A round tach as racing games have it: the dial is drawn once and kept, and only the needle-less
+  // sweep, the battery and the pedals are stroked over it, at 30 Hz.
+  const A = { w: 270, h: 226, cx: 156, cy: 113, r: 100, a0: Math.PI * 0.75, a1: Math.PI * 2.25, max: 13000 };
+  function sharp(cv, w, h) {
+    const d = Math.min(2, G.devicePixelRatio || 1);
+    cv.width = w * d; cv.height = h * d; cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
+    return g;
+  }
+  function hudExtras() {
+    const dash = $('dash');
+    const arc = document.createElement('canvas'); arc.id = 'h-arc'; dash.insertBefore(arc, dash.firstChild);
+    const car = document.createElement('canvas'); car.id = 'h-car'; $('tyres').insertBefore(car, $('tyres').firstChild);
+    H.ag = sharp(arc, A.w, A.h); H.cg = sharp(car, 72, 118);
+    // the dial
+    const d = Math.min(2, G.devicePixelRatio || 1), dial = document.createElement('canvas'), g = dial.getContext('2d');
+    dial.width = A.w * d; dial.height = A.h * d; g.scale(d, d);
+    const { cx, cy, r, a0, a1, max } = A, at = v => a0 + (a1 - a0) * v / max;
+    g.fillStyle = 'rgba(8,9,13,.66)'; g.beginPath(); g.arc(cx, cy, r + 11, 0, 7); g.fill();
+    g.lineCap = 'butt'; g.lineWidth = 5; g.strokeStyle = 'rgba(255,255,255,.16)'; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.stroke();
+    g.strokeStyle = 'rgba(255,59,48,.6)'; g.beginPath(); g.arc(cx, cy, r, at(11500), a1); g.stroke();
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '600 11px "Titillium Web", sans-serif';
+    for (let k = 0; k <= 13; k++) {
+      const a = at(k * 1000), c = Math.cos(a), s = Math.sin(a), big = k % 2 === 0;
+      g.strokeStyle = k >= 12 ? '#ff5a50' : 'rgba(255,255,255,.7)'; g.lineWidth = big ? 2 : 1;
+      g.beginPath(); g.moveTo(cx + c * (r - 5), cy + s * (r - 5)); g.lineTo(cx + c * (r - (big ? 13 : 9)), cy + s * (r - (big ? 13 : 9))); g.stroke();
+      if (big) { g.fillStyle = k >= 12 ? '#ff5a50' : 'rgba(255,255,255,.8)'; g.fillText(k, cx + c * (r - 24), cy + s * (r - 24)); }
+    }
+    H.dial = dial;
+  }
+  function drawArc(p, hi, overtake) {
+    const g = H.ag, { cx, cy, r, a0, a1, max, w, h } = A, rpm = Math.min(max, p.rpm || 0);
+    g.clearRect(0, 0, w, h);
+    g.drawImage(H.dial, 0, 0, w, h);
+    g.lineCap = 'butt'; g.lineWidth = 5;
+    g.strokeStyle = rpm > hi ? '#3d8bff' : rpm > 11500 ? '#ff3b30' : '#fff';
+    g.beginPath(); g.arc(cx, cy, r, a0, a0 + (a1 - a0) * rpm / max); g.stroke();
+    // the battery, in the gap at the foot of the dial
+    const soc = p.soc == null ? 0 : p.soc, b0 = Math.PI * 0.68, b1 = Math.PI * 0.32;
+    g.lineWidth = 4; g.strokeStyle = 'rgba(255,255,255,.16)'; g.beginPath(); g.arc(cx, cy, r, b1, b0); g.stroke();
+    g.strokeStyle = overtake ? '#35e6ff' : p.deploy > 0.05 ? '#2f9dff' : p.harvest ? '#2bd66b' : '#ffd400';
+    if (soc > 0.005) { g.beginPath(); g.arc(cx, cy, r, b0, b0 + (b1 - b0) * soc, true); g.stroke(); }
+    // the pedals: two slim bars beside the dial
+    const thr = p.throttleOut != null ? p.throttleOut : p.ctl.throttle, bk = p.ctl.brake, bh = 96, by = cy + bh / 2;
+    g.fillStyle = 'rgba(8,9,13,.66)'; g.fillRect(14, by - bh - 2, 8, bh + 4); g.fillRect(26, by - bh - 2, 8, bh + 4);
+    g.fillStyle = '#ff3b30'; g.fillRect(16, by - bh * bk, 4, bh * bk);
+    g.fillStyle = '#2bd66b'; g.fillRect(28, by - bh * thr, 4, bh * thr);
+  }
+  // the car from above: tyres by temperature, a tyre drains as it wears, broken parts go red
+  function drawCar(p, tyre) {
+    const g = H.cg, W = 72, H2 = 118, c = W / 2;
+    g.clearRect(0, 0, W, H2);
+    const dm = p.dm, part = (k, f) => { const v = dm ? (dm.off[k] ? 1 : dm.p[k] || 0) : f; return v > 0.08 ? `rgb(${Math.round(120 + 135 * v)},${Math.round(90 - 60 * v)},${Math.round(90 - 60 * v)})` : 'rgba(255,255,255,.28)'; };
+    g.fillStyle = 'rgba(255,255,255,.2)';
+    g.beginPath(); g.moveTo(c - 4, 12); g.lineTo(c + 4, 12); g.lineTo(c + 7, 42); g.lineTo(c + 15, 60); g.lineTo(c + 12, 96); g.lineTo(c - 12, 96); g.lineTo(c - 15, 60); g.lineTo(c - 7, 42); g.closePath(); g.fill();
+    g.fillStyle = part('fwL', p.wingDmg || 0); g.fillRect(c - 26, 6, 25, 6);
+    g.fillStyle = part('fwR', p.wingDmg || 0); g.fillRect(c + 1, 6, 25, 6);
+    g.fillStyle = 'rgba(255,255,255,.28)'; g.fillRect(c - 20, 106, 40, 6);
+    const pos = [[6, 20], [52, 20], [4, 74], [50, 74]];
+    p.wheels.forEach((w, k) => {
+      const [x, y] = pos[k], tw = k < 2 ? 14 : 18, th = 28, hw = th * U.clamp(w.wear, 0, 1);
+      g.fillStyle = tyre(w.temp, 0, p.compound.topt); g.fillRect(x, y, tw, th);
+      if (hw > 0.5) { g.fillStyle = 'rgba(8,8,12,.72)'; g.fillRect(x, y, tw, hw); }
+      if (dm && dm.puncture[k]) { g.strokeStyle = '#ff3b30'; g.lineWidth = 2; g.strokeRect(x - 1, y - 1, tw + 2, th + 2); }
+    });
+  }
+
   function init() {
     const revs = $('revs');
     revs.innerHTML = '';
@@ -25,6 +93,7 @@
       msgs: $('msgs'), lights: $('lights'), lightEls: Array.from(document.querySelectorAll('#lights i')), big: $('center-big'),
       pit: $('pitpanel'), mini: $('minimap'), miniName: $('mini-name'), keyhint: $('keyhint'),
     };
+    hudExtras();
   }
 
   function setup(race, settings) {
@@ -59,6 +128,7 @@
     kh.push(['W A S D', 'drive']);
     if (!simCar || !inRace) kh.push(['R', 'reset car']);
     if (inRace && simCar) kh.push(['SPACE', 'overtake'], ['P', 'pit strategy']);
+    if (inRace) kh.push(['T', 'full order']);
     kh.push(['C', 'camera'], ['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
     if (race.sim && race.player.assist.autoGear === false) kh.unshift(['E / Q', 'shift up / down']);
     e.keyhint.innerHTML = kh.map(([k, t]) => `<div><span class="key">${k}</span>${t}</div>`).join('');
@@ -66,6 +136,7 @@
     e.keyhint.style.opacity = 1;
     H.msgQ = [];
     H.lastLight = 0;
+    H.full = false; H.openT = 10; H.lapSeen = 0; H.arcT = 0;
   }
 
   function message(text, cls = '', sub = '', dur = 2.6) {
@@ -105,6 +176,12 @@
     const flash = rpm > hi && p.gear > 0 && p.gear < 8;
     e.revsEl = e.revsEl || $('revs');
     e.revsEl.classList.toggle('flash', flash && Math.floor(performance.now() / 70) % 2 === 0);
+    // the tach, on the desktop (a phone keeps its own compact dash)
+    const wide = !document.body.classList.contains('mobile');
+    if (wide) {
+      H.arcT -= dt;
+      if (H.arcT <= 0) { H.arcT = 1 / 30; drawArc(p, hi, !!p.drsOpen); }
+    }
     for (let k = 0; k < 15; k++) { const on = k < lit; if (H.revs[k]._on !== on) { H.revs[k].classList.toggle('on', on); H.revs[k]._on = on; } }
     e.thr.style.setProperty('--v', p.throttleOut != null ? p.throttleOut.toFixed(2) : p.ctl.throttle.toFixed(2));
     e.brk.style.setProperty('--v', p.ctl.brake.toFixed(2));
@@ -126,6 +203,7 @@
     if (race.sim && H.slowT <= 0) {
       H.slowT = 0.25;
       p.wheels.forEach((w, k) => { e.tyreEls[k].style.background = tyreColor(w.temp, w.wear, p.compound.topt); });
+      if (!document.body.classList.contains('mobile')) drawCar(p, tyreColor);
       e.comp.textContent = p.compound.name;
       e.comp.className = 'c-' + p.compound.id;
       const wr = Math.max(...p.wheels.map(w => w.wear));
@@ -179,7 +257,10 @@
       H.towerT = 0.25;
       const order = race.order;
       // on a phone the tower is short: the top five, then the player and the cars either side
-      const short = document.body.classList.contains('mobile'), me = order.indexOf(p);
+      // on the desktop too, except for a few seconds each lap or when asked for (T)
+      H.openT -= 0.25;
+      if (p.lap !== H.lapSeen) { H.lapSeen = p.lap; H.openT = 7; }
+      const short = document.body.classList.contains('mobile') || (!H.full && H.openT <= 0), me = order.indexOf(p);
       order.forEach((c, k) => {
         const r = H.rows[k];
         if (!r) return;
@@ -206,5 +287,5 @@
     if (H.keyhintT > 0 && race.green) { H.keyhintT -= dt; if (H.keyhintT <= 0) e.keyhint.style.opacity = 0; }
   }
 
-  F1.HUD = { H, init, setup, update, message, big };
+  F1.HUD = { H, init, setup, update, message, big, toggleTower: () => { H.full = !H.full; H.openT = 0; H.towerT = 0; } };
 })(typeof window !== 'undefined' ? window : globalThis);
