@@ -43,20 +43,21 @@ if (!isMainThread) {
     const js = []; for (const track of TRACKS) for (const diff of DIFFS) for (let s = 0; s < seeds; s++) js.push(job({ track, diff, seed: seed0 + s, tune }));
     const rs = await Promise.all(js), o = { races: rs.length };
     for (const k of ['walls', 'contacts', 'resets', 'passes', 'ret', 'win', 'best', 'done']) o[k] = rs.reduce((a, r) => a + r[k], 0) / rs.length;
-    o.score = o.ret * 12 + o.contacts * 0.6 + o.walls * 1.5 + o.resets * 0.3 + (o.win - 370) * 0.5 - o.passes * 0.04;
+    o.score = o.ret * 12 + o.contacts * 0.6 + o.walls * 1.5 + o.resets * 0.3 + (o.win - 370) * 0.5 + (o.best - 69) * 4 - o.passes * 0.04;
     return o;
   };
   const show = o => `score ${o.score.toFixed(1)} ret ${o.ret.toFixed(2)} contacts ${o.contacts.toFixed(1)} walls ${o.walls.toFixed(1)} resets ${o.resets.toFixed(1)} passes ${o.passes.toFixed(0)} win ${o.win.toFixed(1)} best ${o.best.toFixed(2)} done ${o.done}`;
   (async () => {
     if (process.argv[2] === 'check') { console.log(show(await evalT(JSON.parse(process.argv[3] || '{}'), +process.argv[4] || 500, 3))); process.exit(0); }
-    const STEPS = { trafK: [0.985, 0.975], lap1K: [0.95, 0.93], lap1T: [50, 70], lap1Gap: [2.2, 3], gapV: [0.12, 0.16], gapBrk: [0.14, 0.22], trafBrk: [0.92, 0.85] };
-    let bestT = {}, best = await evalT(bestT, 100, 1); console.log('base', show(best));
+    const STEPS = process.env.MPC ? { mpcCorner: [1.5, 3.5], mpcCare: [0.6, 1.6], mpcKeep: [3, 0.5], mpcPass: [4, 14], trafK: [0.985, 0.995], gapV: [0.09, 0.15] } : { trafK: [0.985, 0.975], lap1K: [0.95, 0.93], lap1T: [50, 70], lap1Gap: [2.2, 3], gapV: [0.12, 0.16], gapBrk: [0.14, 0.22], trafBrk: [0.92, 0.85] };
+    const SEEDS = +process.env.SEEDS || 1;
+    let bestT = process.env.MPC ? JSON.parse(process.env.MPC) : {}, best = await evalT(bestT, 100, SEEDS); console.log('base', show(best));
     for (let pass = 0; pass < (+process.argv[2] || 2); pass++) for (const k in STEPS) for (const v of STEPS[k]) {
-      const t = Object.assign({}, bestT, { [k]: v }), r = await evalT(t, 100, 1);
+      const t = Object.assign({}, bestT, { [k]: v }), r = await evalT(t, 100, SEEDS);
       console.log(k, v, show(r));
       if (r.score < best.score) { best = r; bestT = t; console.log('  kept', JSON.stringify(bestT)); }
     }
-    console.log('BEST', JSON.stringify(bestT)); console.log('verify', show(await evalT(bestT, 500, 3))); console.log('old   ', show(await evalT({}, 500, 3)));
+    console.log('BEST', JSON.stringify(bestT)); console.log('verify', show(await evalT(bestT, 1700, 3))); console.log('old   ', show(await evalT({ mpc: 0 }, 1700, 3)));
     process.exit(0);
   })();
 }

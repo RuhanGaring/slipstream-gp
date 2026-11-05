@@ -26,6 +26,8 @@
     uLawnK: { value: 2 },
     // the venue's light on the turf: rgb a tint, w how far toward a grey olive (overcast skies)
     uLawnGrade: { value: new THREE.Vector4(1, 1, 1, 0) },
+    uFarLawn: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uFarTex: { value: null },
     uRoadSky: { value: 3.2 },
     // the 3D grass map (js/r3-grass.js), so the ground can wear where the turf meets other surfaces
     uGrassMask: { value: null }, uGrassMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
@@ -69,7 +71,7 @@
   const LAWN_ROUGH = 0.78;
   const LAWN = [
     'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB;',
-    'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade;',
+    'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex;',
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
     'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
@@ -244,7 +246,7 @@
           (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW) * lawnFar(vMacroW, vFogWorld, cameraPosition, uSunDir);\n'
             + '  { float gm = texture2D(uGrassMask, (vMacroW - uGrassMaskB.xy) / uGrassMaskB.zw).r;\n'
             + '    diffuseColor.rgb *= mix(vec3(1.0), vec3(0.92, 0.8, 0.62), (1.0 - smoothstep(0.15, 0.75, gm)) * 0.55); }\n'
-            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);' : ''))
+            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);\n#ifdef USE_FOG\n  float fFar = smoothstep(200.0, 760.0, length(vFogWorld - cameraPosition));\n  if (fFar > 0.001) {\n    vec2 fW = vFogWorld.xz;\n    float fA = textureLod(uFarTex, fW / 1500.0, 2.0).g, fB = textureLod(uFarTex, fW / 530.0 + 0.4, 1.0).g;\n    vec3 fC = mix(diffuseColor.rgb, uFarLawn.rgb * (0.5 + dot(diffuseColor.rgb, vec3(1.2))), uFarLawn.a);\n    fC *= 1.0 + smoothstep(0.34, 0.16, fB) * 0.08;\n    fC = mix(fC, fC * vec3(0.56, 0.6, 0.54), smoothstep(0.34, 0.62, fA * 0.65 + fB * 0.5));\n    diffuseColor.rgb = mix(diffuseColor.rgb, fC, fFar);\n  }\n#endif' : ''))
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' +
           `  roughnessFactor = clamp(roughnessFactor * mix(${f(1 - mac.ramt)}, ${f(1 + mac.ramt)}, 1.0 - mcr), 0.04, 1.0);` +
           // turf is a matte tangle of blades: the photo's own 0.55 left a glassy sky sheen on it
