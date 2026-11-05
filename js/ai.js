@@ -25,7 +25,7 @@
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
-    trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
+    hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
   };
 
@@ -529,7 +529,7 @@
       for (const o of race.cars) {
         if (o === car || !o.inPit) continue;
         const ds = relS(tr, car, o);
-        if (ds > 0 && ds < 25 && Math.abs(o.loc.d - car.loc.d) < 2.5) { vt = Math.min(vt, o.speed + Math.max(0, ds - 7) * 1.2); if (o.speed < 1) b.stuckT = 0; }
+        if (ds > 0 && ds < 25 && Math.abs(o.loc.d - car.loc.d) < 3.2) { vt = Math.min(vt, o.speed + Math.max(0, ds - 7) * 1.2); if (o.speed < 1) b.stuckT = 0; }
       }
       if (toBox < 60 && !p.served) {
         vt = Math.min(vt, Math.sqrt(2 * 4.5 * Math.max(0, toBox - 0.5)));

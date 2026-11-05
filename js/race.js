@@ -105,7 +105,7 @@
             // an early first stop drops you into traffic on cold tyres with full fuel
             const early = !o.comp || o.wear === 0 ? Math.max(0, Math.ceil(R * 0.3) - k) * 2.5 : 0;
             const a = stint(c0, w0, k, pre0) + early;
-            const t1 = a + o.loss + stint(c1, 0, R - k);
+            const t1 = a + o.loss + stint(c1, 0, R - k) + (o.bias ? o.bias.k * k : 0);
             if (okSeq([c0, c1]) && (!best || t1 < best.t)) best = { t: t1, seq: [c0, c1], stops: [k] };
             if (R >= 6) for (const c2 of C) for (let k2 = k + 2; k2 < R; k2++) {
               const t2 = a + o.loss * 2 + stint(c1, 0, k2 - k) + stint(c2, 0, R - k2);
@@ -199,7 +199,7 @@
       if (!sim) Object.assign(assists, { gripMul: 1.12, abs: true, tc: 2, autoGear: true, stability: isPlayer ? 1 : 0 });
       assists.tyreSim = sim;
       // AI start tyre: the planner's choice for the whole race, with a little personal preference
-      const stratBias = { S: (rng() - 0.5) * 0.5, M: (rng() - 0.5) * 0.3, H: (rng() - 0.5) * 0.5 };
+      const stratBias = { S: (rng() - 0.5) * 1.2, M: (rng() - 0.5) * 0.8, H: (rng() - 0.5) * 1.2, k: (rng() - 0.5) * 1.6 }; // k: leans to an earlier or later stop
       let startComp = 'M', startPlan = null;
       if (sim && mode !== 'tt') {
         const wr = Math.max(1, 22 / Math.max(3, race.laps));
@@ -464,8 +464,8 @@
     // each car takes the hit on its own side of the contact (normal into it)
     // the crush is shared: each car's structure takes about half the energy of the closing speed
     const rvx = vbx - vax, rvy = vby - vay; // B's surface relative to A's at the contact
-    if (a.dm && F1.Damage.impact(race, a, best.x, best.y, -nx, -ny, power * 0.72, 0.55, rvx, rvy)) race.fx.push({ type: 'break', x: best.x, y: best.y, power, car: a });
-    if (b.dm && F1.Damage.impact(race, b, best.x, best.y, nx, ny, power * 0.72, 0.55, -rvx, -rvy)) race.fx.push({ type: 'break', x: best.x, y: best.y, power, car: b });
+    if (a.dm && F1.Damage.impact(race, a, best.x, best.y, -nx, -ny, power * F1.AI.P.hitK, 0.55, rvx, rvy)) race.fx.push({ type: 'break', x: best.x, y: best.y, power, car: a });
+    if (b.dm && F1.Damage.impact(race, b, best.x, best.y, nx, ny, power * F1.AI.P.hitK, 0.55, -rvx, -rvy)) race.fx.push({ type: 'break', x: best.x, y: best.y, power, car: b });
     if (power > 1.5) {
       race.fx.push({ type: 'car', x: best.x, y: best.y, power, car: a, other: b });
       for (const c of [a, b]) {

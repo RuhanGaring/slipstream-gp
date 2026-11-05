@@ -21,8 +21,8 @@ if (!isMainThread) {
     c.brain.prof = F1.Raceline.speedProfile(tr, tr.line, c.spec, { pace: 1, grip: g, gripB: gB, brakePace: 1, brake: 1 });
     const n = segEnd.length, t = new Float64Array(n), bad = new Uint8Array(n);
     // (every test on the same fresh tyres and the same tank, or a long session drifts away from itself)
-    for (const w of c.wheels) w.wear = 0;
-    c.fuel = 10;
+    for (const w of c.wheels) w.wear = +process.env.COACH_WEAR || 0;
+    c.fuel = +process.env.COACH_FUEL || 10;
     const wait0 = c.lapTimes.length; let g0 = 0;
     while (c.lapTimes.length === wait0 && g0++ < 240 * 400) { F1.Race.step(race, DT); race.fx.length = 0; }
     const start = race.time; let k = 0;
