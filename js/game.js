@@ -193,6 +193,7 @@
   Game.tiltZero = () => { tilt.zero = null; };
   const useTilt = () => Game.settings.touchSteer === 'tilt';
   window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'range') return; // typing a name or a seed
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
     if (e.repeat && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) return;
     keys.add(e.code);

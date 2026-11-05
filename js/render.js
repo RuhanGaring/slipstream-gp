@@ -436,10 +436,22 @@
         if (rd.kind === 'rail' || rd.kind === 'steps') continue;
         for (let k = 0; k < rd.pts.length - 1; k++) {
           const a = rd.pts[k], c = rd.pts[k + 1], l = Math.hypot(c[0] - a[0], c[1] - a[1]);
-          for (let t = 0; t <= l; t += 3) { const x = a[0] + (c[0] - a[0]) * t / (l || 1), y = a[1] + (c[1] - a[1]) * t / (l || 1), q = key(x, y); if (!g.has(q)) g.set(q, []); g.get(q).push([x, y, rd.w / 2 + 1]); }
+          for (let t = 0; t <= l; t += 3) { const x = a[0] + (c[0] - a[0]) * t / (l || 1), y = a[1] + (c[1] - a[1]) * t / (l || 1), q = key(x, y); if (!g.has(q)) g.set(q, []); g.get(q).push([x, y, rd.w / 2 + 2]); }
         }
       }
+      // (the corners of a junction are carriageway too: the kerb swings out round them)
+      if (site.net) site.net.nodes.forEach((nd, ni) => {
+        const es = site.net.edges.filter(e => e.a === nd || e.b === nd || e.a === ni || e.b === ni);
+        if (es.length < 2) return;
+        const q = key(nd.x, nd.y); if (!g.has(q)) g.set(q, []);
+        g.get(q).push([nd.x, nd.y, Math.max(...es.map(e => e.w)) / 2 + 8]);
+      });
+      // the pit lane and its apron
       return (x, y) => {
+        let bi = -1, bd = 1e18;
+        tr.hash.near(x, y, 60, i => { const q = (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2; if (q < bd) { bd = q; bi = i; } });
+        if (bi >= 0 && !isNaN(tr.pit.off[bi])) { const dl = (x - tr.x[bi]) * tr.nx[bi] + (y - tr.y[bi]) * tr.ny[bi]; if (dl * tr.pit.side > 0 && Math.abs(dl) < Math.abs(tr.pit.off[bi]) + tr.pit.lane / 2 + 14) return true; }
+
         const i0 = Math.floor(x / 20), j0 = Math.floor(y / 20);
         for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const q of g.get((i0 + i) + ',' + (j0 + j)) || []) if (Math.hypot(x - q[0], y - q[1]) < q[2]) return true;
         return false;
@@ -461,7 +473,7 @@
         const ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l;
         for (let t = rnd() * 12; t < l; t += 10 + rnd() * 8) for (const sd of [-1, 1]) {
           if (rnd() < 0.35) continue;
-          const o = rd.w / 2 + 1.6, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
+          const o = rd.w / 2 + 2.4, x = a[0] + ux * t - uy * sd * o, y = a[1] + uy * t + ux * sd * o;
           const u = site.inland(x, y);
           if (u < 4 || !clearance(tr, x, y, 2, W) || inBuilding(x, y, 1.2) || onStreet(x, y) || inWall(x, y)) continue;
           if (u < 70 && rnd() < 0.15) addDecor(W, { type: 'palm', x, y, r: 3.5 + rnd() * 2, a: rnd() * 6 });
@@ -496,7 +508,7 @@
         if (site.inland(px, py) < 8) continue;
         const e = 3, g = Math.hypot(site.H(px + e, py) - site.H(px - e, py), site.H(px, py + e) - site.H(px, py - e)) / (2 * e);
         if (!(g > 0.35 || (site.park && site.park(px, py)))) continue;
-        if (rnd() < 0.4 || inBuilding(px, py, 2) || onRoad(px, py) || inWall(px, py) || !clearance(tr, px, py, 3, W)) continue;
+        if (rnd() < 0.4 || inBuilding(px, py, 2) || onRoad(px, py) || onStreet(px, py) || inWall(px, py) || !clearance(tr, px, py, 3, W)) continue;
         addDecor(W, { type: 'tree', x: px, y: py, r: 3 + rnd() * 2.8, c: W.theme.tree[Math.floor(rnd() * W.theme.tree.length)] });
       }
     }

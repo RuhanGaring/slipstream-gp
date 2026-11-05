@@ -358,7 +358,7 @@
     });
     // procedural circuits: a new layout from any seed
     {
-      const e = tile('<span class="flg gen"><em>GEN</em></span><span>ANY SEED</span>', 'Procedural Circuit', 'A NEW LAYOUT', 'gen');
+      const e = tile('<span class="flg gen"><em>GEN</em></span><span>ANY SEED</span>', 'Procedural Circuit', genMaps().length ? genMaps().length + ' SAVED' : 'A NEW LAYOUT', 'gen');
       items.push({
         el: e,
         onFocus: () => {
@@ -391,30 +391,109 @@
 
   // ---------- circuit generator ----------
   const GEN_STYLES = { city: 'Harbour City', park: 'Parkland', mountain: 'Mountain Pass', modern: 'Modern Autodrome', classic: 'Classic Layout' };
+  const GEN_NOTES = { city: 'Streets through a generated town', park: 'Green venue with run-off', mountain: 'Climbs and drops on terrain', modern: 'Purpose-built autodrome', classic: 'Ready instantly' };
   const cityIds = new Map(); // style and seed to built circuit, this session
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  // Saved circuits keep their seed and candidate (the id rebuilds the circuit) and a small outline,
+  // so the list can draw them without building anything.
+  const GEN_MAX = 48;
+  const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
+  const genMaps = () => { const a = lsGet('slip_maps', []); return Array.isArray(a) ? a.filter(m => m && m.id && Array.isArray(m.pts)) : []; };
+  const genRecent = () => { const a = lsGet('slip_gen_recent', []); return Array.isArray(a) ? a : []; };
+  const publishNames = () => { F1.MapNames = {}; for (const m of genMaps()) F1.MapNames[m.id] = m.name; };
+  publishNames();
+  function genOutline(tr) {
+    let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+    for (let i = 0; i < tr.N; i++) { a = Math.min(a, tr.x[i]); b = Math.min(b, tr.y[i]); c = Math.max(c, tr.x[i]); d = Math.max(d, tr.y[i]); }
+    const k = 999 / Math.max(c - a, d - b, 1), pts = [];
+    for (let q = 0; q < 96; q++) { const i = Math.floor(q / 96 * tr.N); pts.push(Math.round((tr.x[i] - a) * k), Math.round((tr.y[i] - b) * k)); }
+    return pts;
+  }
+  const genRecord = (def, tr, style, seed) => ({ id: def.id, style, seed, name: def.name, pts: genOutline(tr), km: tr.L / 1000, corners: tr.apexes.length, at: Date.now() });
+  function genSave(def, tr, style, seed) {
+    const r = genRecord(def, tr, style, seed), list = genMaps().filter(m => m.id !== r.id);
+    list.unshift(r); lsSet('slip_maps', list.slice(0, GEN_MAX)); publishNames();
+    return r;
+  }
+  function genRemember(def, tr, style, seed) {
+    const list = genRecent().filter(m => m.id !== def.id);
+    list.unshift(genRecord(def, tr, style, seed)); lsSet('slip_gen_recent', list.slice(0, 8));
+  }
+  function genSetName(id, name) {
+    const list = genMaps(), m = list.find(x => x.id === id);
+    if (!m) return;
+    m.name = name; lsSet('slip_maps', list); publishNames();
+    F1.Race.renameTrack(id, name);
+  }
+  function genDelete(id) { lsSet('slip_maps', genMaps().filter(m => m.id !== id)); publishNames(); }
+  function genThumb(cv, pts) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 160, H = cv.clientHeight || 90;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const g = cv.getContext('2d'), pad = 10, k = Math.min((W - pad * 2) / 999, (H - pad * 2) / 999);
+    let mx = 0, my = 0; for (let i = 0; i < pts.length; i += 2) { mx = Math.max(mx, pts[i]); my = Math.max(my, pts[i + 1]); }
+    const ox = (W - mx * k) / 2, oy = (H - my * k) / 2;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.beginPath();
+    for (let i = 0; i < pts.length; i += 2) { const x = ox + pts[i] * k, y = oy + pts[i + 1] * k; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.closePath(); g.lineJoin = 'round'; g.lineWidth = 2.2;
+    g.strokeStyle = '#fff'; g.stroke();
+    g.fillStyle = '#e10600'; g.beginPath(); g.arc(ox + pts[0] * k, oy + pts[1] * k, 3.4, 0, 6.283); g.fill();
+  }
+  // a name edited where it is shown; Enter keeps it, Esc goes back
+  function genRename(host, value, done) {
+    const inp = document.createElement('input');
+    inp.className = 'gx-name'; inp.maxLength = 28; inp.value = value; inp.setAttribute('aria-label', 'Circuit name');
+    host.textContent = ''; host.appendChild(inp);
+    let over = false;
+    const end = keep => {
+      if (over) return; over = true;
+      const v = inp.value.replace(/\s+/g, ' ').trim();
+      inp.remove();
+      setTimeout(() => done(keep && v ? v : value), 0); // (after this key, or it reaches the menu too)
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') end(true); else if (e.key === 'Escape') end(false); });
+    inp.addEventListener('blur', () => { if (inp.isConnected) end(true); });
+    inp.addEventListener('click', e => e.stopPropagation());
+    setTimeout(() => { inp.focus(); inp.select(); }, 30); // (after this key, or it types itself into the box)
+  }
+  const genCount = () => genMaps().length;
+  function genTabs(el) { const t = el.querySelector('.gx-n'); if (t) t.textContent = genCount(); }
+  function genHead(cur) {
+    const e = h('div', 'gx-head', `<h1 class="pg-t">Circuit generator</h1><div class="gx-tabs" role="tablist"><button role="tab" class="${cur === 'create' ? 'sel' : ''}" data-to="gen">Create</button><button role="tab" class="${cur === 'saved' ? 'sel' : ''}" data-to="genSaved">Saved <i class="gx-n">${genCount()}</i></button></div>`);
+    e.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (b.classList.contains('sel')) return; Audio.ui.select(); if (UI.cur && UI.cur.el) UI.cur.el.dispatchEvent(new Event('gx-tab')); go(b.dataset.to); }));
+    return e;
+  }
   S.gen = () => {
-    const el = h('div', 'wk');
+    const el = h('div', 'wk gx');
     const wrap = h('div', 'wk-body stage');
     const flow = F1.Game.flow;
     if (!flow.genSeed) flow.genSeed = F1.TrackGen.randomSeed();
     if (!flow.genStyle) flow.genStyle = 'city';
     el.appendChild(header('track'));
-    wrap.innerHTML = `<h1 class="pg-t">Circuit generator</h1>`;
-    const split = h('div', 'split');
-    const list = h('div', 'list');
-    const det = h('div', 'detail');
-    det.innerHTML = `<div><div class="country"></div><h2></h2><div class="blurb"></div><div class="gen-ai"><i></i><span></span></div></div><canvas></canvas><div class="stats"></div>`;
-    const cv = det.querySelector('canvas');
-    const aiEl = det.querySelector('.gen-ai');
-    const race = h('div', 'li', `<span class="flag">GO</span><span><div class="nm">Race This Circuit</div><div class="sub">CHOOSE A TEAM NEXT</div></span><span class="sub"></span>`);
+    wrap.appendChild(genHead('create'));
+    const split = h('div', 'gx-split');
+    const rail = h('div', 'gx-rail');
+    const stage = h('div', 'detail gx-stage');
+    stage.innerHTML = `<div class="gx-top"><div><h2></h2><div class="country"></div></div><div class="gen-ai"><i></i><span></span></div></div>
+      <div class="gx-map"><canvas></canvas><div class="gx-load"><svg viewBox="0 0 200 120" aria-hidden="true"><path pathLength="100" d="M30 86C14 62 26 26 62 24c26-2 34 18 58 14 22-4 44 2 50 26 5 22-16 36-40 32-28-5-44-2-68 2-22 4-48 2-62-12z"/></svg></div></div>
+      <div class="stats"></div>`;
+    const cv = stage.querySelector('canvas'), aiEl = stage.querySelector('.gen-ai'), map = stage.querySelector('.gx-map');
+    const nameEl = stage.querySelector('h2'), subEl = stage.querySelector('.country'), statsEl = stage.querySelector('.stats');
+    const styles = Object.keys(GEN_STYLES);
+    const styleEls = styles.map(k => {
+      const e = h('div', 'gx-style', `<b>${GEN_STYLES[k]}</b><small>${GEN_NOTES[k]}</small>`);
+      rail.appendChild(e); return e;
+    });
+    const seedRow = h('div', 'gx-seed', `<span class="ar-l" role="button" aria-label="Previous seed"></span><label>Seed<input type="text" inputmode="numeric" maxlength="6" autocomplete="off"></label><span class="ar-r" role="button" aria-label="Next seed"></span>`);
+    const seedIn = seedRow.querySelector('input');
     const roll = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">New Circuit</div><div class="sub">RANDOM SEED</div></span><span class="sub">${compact() ? '' : 'R'}</span>`);
-    const seedRow = h('div', 'li gen-seed', `<span class="flag">#</span><span><div class="nm"></div><div class="sub">${compact() ? 'TAP TO STEP' : 'TYPE A SEED, OR &#9664; &#9654; TO STEP'}</div></span><span class="sub"></span>`);
-    const styleRow = h('div', 'li gen-seed', `<span class="flag">&#9670;</span><span><div class="nm"></div><div class="sub">${compact() ? 'TAP TO CHANGE THE STYLE' : '&#9664; &#9654; TO CHANGE THE STYLE'}</div></span><span class="sub"></span>`);
-    [race, roll, styleRow, seedRow].forEach(x => list.appendChild(x));
-    let typed = 0; // time of the last digit typed (digits within a moment build one number)
-    let settle = null;
-    let shown = null, job = 0; // the circuit on show (null while a town is being laid out), the latest request
-    // the AI learns a circuit once (its racing line and limits), in the background
+    const save = h('div', 'li', `<span class="flag">KEEP</span><span><div class="nm"></div><div class="sub"></div></span><span class="sub">${compact() ? '' : 'F'}</span>`);
+    const race = h('div', 'li gx-go', `<span class="flag">GO</span><span><div class="nm">Race This Circuit</div><div class="sub"></div></span><span class="sub"></span>`);
+    [seedRow, roll, save, race].forEach(x => rail.appendChild(x));
+    const recent = h('div', 'gx-recent');
+    let settle = null, shown = null, job = 0, typed = 0, naming = false;
+    const here = () => UI.cur && UI.cur.el === el;
     const aiStatus = () => {
       if (!shown) { aiEl.className = 'gen-ai'; aiEl.querySelector('span').textContent = ''; return; }
       const st = F1.LearnJob.status(shown);
@@ -422,65 +501,101 @@
       aiEl.style.setProperty('--p', st.p || 0);
       aiEl.querySelector('span').textContent =
         st.state === 'done' ? 'AI DRIVERS KNOW THIS CIRCUIT'
-          : st.state === 'running' ? `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round(st.p * 100)}%  (${st.stage === 'line' ? 'RACING LINE' : 'LIMITS'})`
+          : st.state === 'running' ? `AI LEARNING ${st.stage === 'line' ? 'THE RACING LINE' : 'THE LIMITS'}  ${Math.round(st.p * 100)}%`
             : st.state === 'failed' ? 'AI LEARNING FAILED: THEY WILL DRIVE IT CAUTIOUSLY'
               : 'AI DRIVERS WILL LEARN THIS CIRCUIT';
     };
-    const offAI = F1.LearnJob.onChange(() => { if (UI.cur && UI.cur.el === el) aiStatus(); });
+    const offAI = F1.LearnJob.onChange(() => { if (here()) aiStatus(); });
+    const saved = () => shown && genMaps().find(m => m.id === shown);
+    const buttons = () => {
+      const s = saved();
+      save.querySelector('.nm').textContent = s ? 'Rename Circuit' : 'Save Circuit';
+      save.querySelector('.sub').textContent = s ? 'IN YOUR SAVED CIRCUITS' : 'KEEP IT AND NAME IT';
+      save.classList.toggle('off', !shown); race.classList.toggle('off', !shown);
+      race.querySelector('.sub').textContent = shown ? 'CHOOSE A TEAM NEXT' : 'STILL BUILDING';
+    };
+    const recentEls = () => {
+      const list = genRecent().filter(m => m.id !== shown).slice(0, 6);
+      recent.innerHTML = ''; recent.hidden = !list.length;
+      list.forEach(m => {
+        const e = h('div', 'gx-thumb', `<canvas></canvas><span>${esc(m.name)}</span>`);
+        recent.appendChild(e);
+        e.addEventListener('click', () => { flow.genStyle = m.style; flow.genSeed = m.seed; show(); });
+        genThumb(e.querySelector('canvas'), m.pts);
+      });
+    };
     const paint = def => {
       shown = def.id;
       F1.LearnJob.restore(def.id);
       const tr = F1.Race.getTrack(def.id);
-      aiStatus();
+      aiStatus(); buttons();
       clearTimeout(settle);
-      // start learning once the player stops flicking through seeds
-      settle = setTimeout(() => { if (UI.cur && UI.cur.el === el) F1.LearnJob.start(def.id); }, 700);
+      // start learning and remember it once the player stops flicking through seeds
+      settle = setTimeout(() => { if (!here()) return; F1.LearnJob.start(def.id); genRemember(def, tr, flow.genStyle, flow.genSeed); recentEls(); }, 700);
       flow.track = def.id;
-      det.querySelector('.country').textContent = `${def.country.toUpperCase()}  /  ${def.style.toUpperCase()}`;
-      det.querySelector('h2').textContent = def.name;
-      det.querySelector('.blurb').textContent = def.blurb;
+      map.classList.remove('busy');
+      nameEl.textContent = def.name;
+      subEl.textContent = `${def.country}  /  ${GEN_STYLES[flow.genStyle]}  /  SEED ${flow.genSeed}`.toUpperCase();
       const best = F1.Game.bestLap(def.id, flow.mode);
-      det.querySelector('.stats').innerHTML = `<div><b>${(tr.L / 1000).toFixed(3)} km</b><span>LENGTH</span></div><div><b>${tr.apexes.length}</b><span>CORNERS</span></div><div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div><div><b>${best ? U.fmtTime(best) : 'NO TIME'}</b><span>YOUR BEST</span></div>`;
+      statsEl.innerHTML = `<div><b>${(tr.L / 1000).toFixed(3)} km</b><span>LENGTH</span></div><div><b>${tr.apexes.length}</b><span>CORNERS</span></div><div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div><div><b>${best ? U.fmtTime(best) : 'None yet'}</b><span>YOUR BEST LAP</span></div>`;
       requestAnimationFrame(() => drawTrackMap(cv, tr, { corners: true }));
     };
     // A classic circuit is ready at once. The elevation-aware styles take some seconds, tried on
-    // the worker pool in the background; a seed already built this session comes straight back.
-    const show = () => {
+    // the worker pool in the background; a seed already built or saved comes straight back.
+    function show() {
       const seed = flow.genSeed, my = ++job, style = flow.genStyle, key = style + seed;
-      styleRow.querySelector('.nm').textContent = GEN_STYLES[style];
-      seedRow.querySelector('.nm').textContent = String(seed);
+      styleEls.forEach((e, k) => e.classList.toggle('sel', styles[k] === style));
+      if (document.activeElement !== seedIn) seedIn.value = String(seed);
       if (style === 'classic') { paint(F1.Tracks.byId('gen-' + seed)); return; }
       const known = cityIds.get(key);
       if (known) { paint(F1.Tracks.byId(known)); return; }
       shown = null; flow.track = null;
       clearTimeout(settle);
-      aiStatus();
-      const what = style === 'city' ? 'Streets, buildings and a lap through them.' : 'Terrain and a lap graded to fit it.';
-      det.querySelector('.country').textContent = GEN_STYLES[style].toUpperCase();
-      det.querySelector('h2').textContent = style === 'city' ? 'Laying out the town' : 'Laying out the circuit';
-      det.querySelector('.blurb').textContent = what + ' This takes a few seconds.';
-      det.querySelector('.stats').innerHTML = '';
-      cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
-      const live = () => my === job && UI.cur && UI.cur.el === el;
-      F1.Gen2Pool.make(seed, style, n => { if (live()) det.querySelector('.blurb').textContent = `${what} ${n} layouts tried.`; }).then(res => {
+      aiStatus(); buttons();
+      map.classList.add('busy');
+      const what = style === 'city' ? 'Laying out streets and buildings' : 'Grading a lap into the terrain';
+      nameEl.textContent = 'Building circuit';
+      subEl.textContent = `${GEN_STYLES[style]}  /  SEED ${seed}`.toUpperCase();
+      statsEl.innerHTML = `<div class="gx-note">${what}. This takes a few seconds.</div>`;
+      const live = () => my === job && here();
+      F1.Gen2Pool.make(seed, style, n => { if (live() && !shown) statsEl.firstChild.textContent = `${what}. ${n} layouts tried.`; }).then(res => {
         if (!live()) return;
         const def = F1.TrackGen2.adopt(res);
         cityIds.set(key, def.id);
         paint(def);
       }).catch(() => {
         if (!live()) return;
-        det.querySelector('h2').textContent = 'No circuit for this seed';
-        det.querySelector('.blurb').textContent = compact() ? 'Tap New Circuit for another.' : 'Press R for a new one.';
+        map.classList.remove('busy');
+        nameEl.textContent = 'No circuit for this seed';
+        statsEl.innerHTML = `<div class="gx-note">No layout passed the checks. ${compact() ? 'Tap New Circuit' : 'Press R'} to try another seed.</div>`;
       });
-    };
+    }
     const setSeed = v => { flow.genSeed = U.clamp(Math.floor(v) || 1, 1, 999999); show(); };
-    const styles = Object.keys(GEN_STYLES), turn = k => { flow.genStyle = styles[(styles.indexOf(flow.genStyle) + k + styles.length) % styles.length]; show(); };
-    split.appendChild(list); split.appendChild(det);
+    const setStyle = k => { flow.genStyle = k; show(); };
+    seedIn.addEventListener('input', () => { seedIn.value = seedIn.value.replace(/\D/g, ''); });
+    seedIn.addEventListener('keydown', e => {
+      if (e.key === 'Enter') seedIn.blur();
+      else if (e.key === 'Escape') { seedIn.value = String(flow.genSeed); seedIn.blur(); }
+    });
+    seedIn.addEventListener('blur', () => { const v = +seedIn.value; if (v && v !== flow.genSeed) setSeed(v); else seedIn.value = String(flow.genSeed); });
+    const rename = () => {
+      if (!shown || naming) return;
+      const def = F1.Tracks.byId(shown), tr = F1.Race.getTrack(shown);
+      const rec = saved() || genSave(def, tr, flow.genStyle, flow.genSeed);
+      buttons(); genTabs(el);
+      naming = true;
+      genRename(nameEl, rec.name, name => { naming = false; genSetName(rec.id, name); nameEl.textContent = name; });
+    };
+    stage.appendChild(recent);
+    split.appendChild(rail); split.appendChild(stage);
     wrap.appendChild(split);
     el.appendChild(wrap);
-    el.appendChild(foot([['&#8593;&#8595;', 'Select'], ['0-9', 'Seed'], ['R', 'New circuit'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
-    show();
+    el.appendChild(foot([['&#8593;&#8595;', 'Select'], ['0-9', 'Seed'], ['R', 'New'], ['F', 'Save'], ['TAB', 'Saved circuits'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
+    show(); recentEls();
+    const leave = () => { job++; offAI(); clearTimeout(settle); };
+    el.addEventListener('gx-tab', leave);
     const onKey = code => {
+      if (naming) return true;
       const m = /^(?:Digit|Numpad)(\d)$/.exec(code);
       if (m) {
         const now = performance.now(), d = +m[1];
@@ -490,15 +605,78 @@
       }
       if (code === 'Backspace' && performance.now() - typed < 1500) { setSeed(Math.floor(flow.genSeed / 10) || 1); typed = performance.now(); return true; }
       if (code === 'KeyR') { setSeed(F1.TrackGen.randomSeed()); Audio.ui.tick(); return true; }
+      if (code === 'KeyF') { rename(); return true; }
+      if (code === 'Tab') { leave(); go('genSaved'); return true; }
       return false;
     };
+    const raceIt = () => { if (shown) { leave(); go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team'); } };
     const items = [
-      { el: race, activate: () => { if (shown) go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team'); } },
+      ...styles.map((k, i) => ({ el: styleEls[i], activate: () => setStyle(k), left: () => setStyle(styles[(styles.indexOf(flow.genStyle) + styles.length - 1) % styles.length]), right: () => setStyle(styles[(styles.indexOf(flow.genStyle) + 1) % styles.length]) })),
+      { el: seedRow, activate: () => seedIn.focus(), left: () => setSeed(flow.genSeed - 1), right: () => setSeed(flow.genSeed + 1) },
       { el: roll, activate: () => setSeed(F1.TrackGen.randomSeed()) },
-      { el: styleRow, activate: () => turn(1), left: () => turn(-1), right: () => turn(1) },
-      { el: seedRow, left: () => setSeed(flow.genSeed - 1), right: () => setSeed(flow.genSeed + 1) },
+      { el: save, activate: rename },
+      { el: race, activate: raceIt },
     ];
-    return { el, items, onKey, focus: 0, back: () => { job++; offAI(); clearTimeout(settle); go('track'); } };
+    return { el, items, onKey, focus: items.length - 1, primary: { label: 'RACE', fn: raceIt }, back: () => { leave(); go('track'); } };
+  };
+
+  // the player's kept circuits
+  S.genSaved = () => {
+    const el = h('div', 'wk gx');
+    const wrap = h('div', 'wk-body stage');
+    const flow = F1.Game.flow;
+    el.appendChild(header('track'));
+    wrap.appendChild(genHead('saved'));
+    const maps = genMaps();
+    const grid = h('div', 'gx-grid');
+    const act = h('div', 'gx-act', `<button class="m-btn gx-rn">Rename</button><button class="m-btn gx-del">Delete</button>`);
+    const items = [];
+    let naming = false;
+    const cur = () => maps[UI.focus];
+    const open = m => {
+      flow.genStyle = m.style; flow.genSeed = m.seed; flow.track = m.id;
+      if (m.id.startsWith('gen2-')) cityIds.set(m.style + m.seed, m.id);
+      go(flow.kind === 'spectate' ? 'setup' : 'team');
+    };
+    const rename = () => {
+      const m = cur(); if (!m || naming) return;
+      naming = true;
+      const nm = items[UI.focus].el.querySelector('b');
+      genRename(nm, m.name, name => { naming = false; genSetName(m.id, name); m.name = name; nm.textContent = name; });
+    };
+    const del = () => { const m = cur(); if (m) { genDelete(m.id); go('genSaved'); } };
+    maps.forEach(m => {
+      const best = F1.Game.bestLap(m.id, flow.mode);
+      const e = h('div', 'gx-card', `<canvas></canvas><b></b><small>${GEN_STYLES[m.style] || ''}  /  SEED ${m.seed}</small><small>${m.km.toFixed(2)} KM  /  ${m.corners} CORNERS  /  ${best ? U.fmtTime(best) : 'NOT RACED'}</small>`);
+      e.querySelector('b').textContent = m.name;
+      grid.appendChild(e);
+      items.push({ el: e, activate: () => { if (!naming) open(m); } });
+      requestAnimationFrame(() => genThumb(e.querySelector('canvas'), m.pts));
+    });
+    wrap.appendChild(grid);
+    if (maps.length) {
+      const d = act.querySelector('.gx-del');
+      act.querySelector('.gx-rn').addEventListener('click', rename);
+      d.addEventListener('click', () => sure(del)(d));
+      wrap.appendChild(act);
+    } else {
+      const e = h('div', 'gx-empty', `<h2>No saved circuits yet</h2><p>Roll a layout you like, save it and give it a name. It stays here for next time.</p>`);
+      const b = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">Open The Generator</div><div class="sub">BACK TO CREATE</div></span><span class="sub"></span>`);
+      e.appendChild(b); grid.appendChild(e);
+      items.push({ el: b, activate: () => go('gen') });
+    }
+    el.appendChild(wrap);
+    el.appendChild(foot(maps.length ? [['&#8592;&#8594;', 'Select'], ['ENTER', 'Race'], ['N', 'Rename'], ['X', 'Delete'], ['TAB', 'Create'], ['ESC', 'Back']] : [['ENTER', 'Open'], ['TAB', 'Create'], ['ESC', 'Back']]));
+    const onKey = code => {
+      if (naming) return true;
+      if (code === 'Tab') { go('gen'); return true; }
+      if (code === 'KeyN' && maps.length) { rename(); return true; }
+      if (code === 'KeyX' && maps.length) { sure(del)(act.querySelector('.gx-del')); return true; }
+      return false;
+    };
+    const scr = { el, items, onKey, nav: maps.length ? 'grid' : 'v', cols: compact() ? 2 : 4, focus: 0, back: () => go('track') };
+    if (maps.length) scr.primary = { label: 'RACE', fn: () => { const m = cur(); if (m && !naming) open(m); } };
+    return scr;
   };
 
   // team performance as segmented meters, scaled across the grid (the slowest still shows some)

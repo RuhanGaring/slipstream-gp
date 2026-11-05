@@ -646,6 +646,11 @@
   // hand-made circuits first, then generated ones (made on demand from the seed in the id)
   const GEN = new Map();
   function byId(id) {
+    const d = findDef(id), n = d && F1.MapNames && F1.MapNames[d.id]; // the player's own name for a saved circuit
+    if (n) d.name = n;
+    return d;
+  }
+  function findDef(id) {
     const d = DEFS.find(x => x.id === id) || GEN.get(id);
     if (d) return d;
     const m = /^gen-(\d+)$/.exec(id || '');
