@@ -209,7 +209,6 @@
   window.addEventListener('pointerdown', e => {
     Audio.init();
     if (e.button === 0 && UIm.UI.cur && UIm.UI.cur.id === 'title') UIm.key('Enter');
-    if (e.button === 0 && Game.state === 'loading' && Game.onLoadReady) Game.onLoadReady();
   });
 
   // ---------- mouse steering ----------
@@ -356,7 +355,6 @@
       return;
     }
     if (Game.state === 'loading') {
-      if ((code === 'Enter' || code === 'Space' || code === 'NumpadEnter') && Game.onLoadReady) Game.onLoadReady();
       return;
     }
     if (UIm.UI.cur) UIm.key(code);
@@ -1210,7 +1208,6 @@
         const goRace = () => {
           if (went) return;
           went = true;
-          Game.onLoadReady = null;
           fade.classList.add('on');
           setTimeout(() => {
             load.on = false;
@@ -1240,38 +1237,28 @@
             else if (race.mode === 'tt') HUD.message('TIME TRIAL', 'blue', race.ghost ? 'GHOST ' + U.fmtTime(race.ghost.t) : 'SET A BENCHMARK LAP', 3);
           }, 380);
         };
-        setTimeout(() => {
-          Game.onLoadReady = goRace;
-          const sc = UIm.UI.cur;
-          if (sc && sc.ready) sc.ready();
-          setTimeout(goRace, 6500);
-        }, 1600);
+        setTimeout(goRace, 300); // straight on as soon as everything is loaded
       };
-      // a procedural circuit the AI has not learned yet: finish learning it first
+      // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
+      // so nobody ever races the unlearned AI
       const st = def.gen && F1.LearnJob ? F1.LearnJob.status(def.id) : null;
       if (st && st.state !== 'done') {
         const el = document.querySelector('#scr-loading .ld-learn');
         const show = s => {
           if (!el || s.id !== def.id) return;
           el.style.setProperty('--p', s.p || 0);
-          el.textContent = s.state === 'failed' ? 'AI LEARNING FAILED: THEY WILL DRIVE CAUTIOUSLY'
-            : `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round((s.p || 0) * 100)}%   /   ENTER: RACE NOW ${s.lineReady ? '(RACING LINE READY)' : 'WITH CAUTIOUS AI'}`;
+          el.textContent = `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round((s.p || 0) * 100)}%`;
           el.classList.add('on');
         };
         const off = F1.LearnJob.onChange(show);
         show(F1.LearnJob.status(def.id));
-        // Enter (or a click) races straight away with cautious AI. Learning stops so the
-        // race gets the whole CPU; it starts again the next time this seed is picked
-        let started = false;
-        const go = skip => {
-          if (started) return;
-          started = true; off(); Game.onLoadReady = null;
-          if (skip === true) F1.LearnJob.cancel();
-          if (el) el.classList.remove('on');
-          setTimeout(build, 60);
-        };
-        Game.onLoadReady = () => go(true);
-        F1.LearnJob.start(def.id).then(() => go(false));
+        const go = () => { off(); if (el) el.classList.remove('on'); setTimeout(build, 60); };
+        // (a run that failed goes again; only after three does the race go ahead without it, as the
+        // alternative is a loading screen that never ends)
+        const learn = left => F1.LearnJob.start(def.id).then(() => {
+          if (F1.LearnJob.status(def.id).state === 'done' || !left) go(); else learn(left - 1);
+        }, () => { if (left) learn(left - 1); else go(); });
+        learn(2);
       } else setTimeout(build, 60);
     }, 380);
   }

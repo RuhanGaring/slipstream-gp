@@ -1371,12 +1371,7 @@
         <div class="ld-prog"><div class="ld-bar"><i></i></div><div class="ld-state">LOADING CIRCUIT</div></div>
       </div>`;
     requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
-    const scr = { el, items: [] };
-    scr.ready = () => {
-      el.classList.add('ready');
-      el.querySelector('.ld-state').innerHTML = compact() ? 'TAP TO START' : '<span class="key">ENTER</span> START';
-    };
-    return scr;
+    return { el, items: [] };
   };
 
   // the second press within a few seconds does it: a mistaken key must not end anyone's race
