@@ -53,7 +53,11 @@
     kF: 220e3, kR: 190e3, cF: 6500, cR: 6000, arbF: 50e3, arbR: 95e3,
     // differential
     diffPre: 80, diffPower: 0.35, diffCoast: 0.25, diffK: 200,
-    lockF: 0.36, // steering lock (front wheel, rad)
+    lockF: 0.41, // steering lock (front wheel, rad)
+    // mechanical balance in slow corners: extra front cornering grip, full below lowV0 and gone
+    // at lowV1 (m/s), where the wings set the balance. Without it the front washes out with the rear far
+    // from its limit. Arcade takes less, as its yaw assist already helps the car rotate
+    lowTurn: 0.14, lowV0: 20, lowV1: 42, steerRateLow: 1.6,
     rollF: 0.6,
   };
   // magic-formula shape for the normalised slip: peak 1 at s = 1, about 0.85 when sliding
@@ -223,7 +227,9 @@
       const beta = Math.atan2(c.v, Math.abs(c.u));
       target += beta * 0.7 * a.stability;
     }
-    const rate = (Math.abs(target) < Math.abs(c.steer) ? 3.2 : 2.2) * (ctl.steerDirect != null ? 1.6 : 1);
+    // (the low speed factor is the quicker turn-in of a human on keys, pad or touch; direct steering already has it)
+    const quick = ctl.steerDirect != null ? 1.6 : U.lerp(sp.steerRateLow, 1, U.clamp((speed - sp.lowV0) / (sp.lowV1 - sp.lowV0), 0, 1));
+    const rate = (Math.abs(target) < Math.abs(c.steer) ? 3.2 : 2.2) * quick;
     c.steer = U.approach(c.steer, target, rate * dt);
 
     // --- gearbox ---
@@ -274,6 +280,7 @@
 
     // --- suspension: loads from springs, dampers and bars over the road surface ---
     const cs = Math.cos(c.steer), ss = Math.sin(c.steer);
+    const turnF = 1 + sp.lowTurn * (1 - 0.8 * throttle) * (1 - 0.4 * a.stability) * U.clamp((sp.lowV1 - speed) / (sp.lowV1 - sp.lowV0), 0, 1);
     let mask = 0, kerb = 0, off = 0;
     const roadC = c.zRoad = Tracks.surfZ(tr, i0, c.loc.d);
     for (let k = 0; k < 4; k++) {
@@ -428,7 +435,7 @@
       }
       // camber: body roll tilts the wheels; the loaded outside tyre likes about -1 degree
       w.camber = (w.front ? sp.camberF : sp.camberR) + c.roll * 57.3 * sp.camberGain * Math.sign(w.y) + (D ? (D.camber ? D.camber[k] : D.p[F1.Damage.CORNER[k]] * 5 * Math.sign(w.y)) : 0);
-      const muY = mu * (1 - 0.006 * (w.camber + 1) * (w.camber + 1));
+      const muY = mu * (1 - 0.006 * (w.camber + 1) * (w.camber + 1)) * (w.front ? turnF : 1);
       const muXc = mu * sp.muX * (1 - 0.004 * w.camber * w.camber);
       const Dy = muY * Fz, Dx = muXc * Fz;
 

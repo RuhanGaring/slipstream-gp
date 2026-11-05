@@ -489,7 +489,7 @@
       inp.thr = U.approach(inp.thr, touch.thr ? 1 : 0, (touch.thr ? 6 : 12) * dt);
       inp.brk = U.approach(inp.brk, touch.brk ? 1 : 0, (touch.brk ? 7 : 14) * dt);
     } else {
-      const toward = st === 0 ? 7 : (Math.sign(st) !== Math.sign(inp.steer) && inp.steer !== 0 ? 9 : (arcade ? 4.2 : 3.8));
+      const toward = st === 0 ? 7 : (Math.sign(st) !== Math.sign(inp.steer) && inp.steer !== 0 ? 9 : (arcade ? 4.2 : 3.8) * U.lerp(1.4, 1, U.clamp((p.speed - 20) / 22, 0, 1))); // (quicker into a slow corner)
       inp.steer = U.approach(inp.steer, st, toward * dt);
       inp.thr = U.approach(inp.thr, thrK ? 1 : 0, (thrK ? 6 : 12) * dt);
       inp.brk = U.approach(inp.brk, brkK ? 1 : 0, (brkK ? 7 : 14) * dt);
