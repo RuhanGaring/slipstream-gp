@@ -24,6 +24,8 @@
     // wet track: the share of the tyres' grip the plan uses, a margin on top, and how far in from
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
+    // racecraft margins, tuned on full 20-car races (tools/racetune.js)
+    trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
   };
 
@@ -119,7 +121,7 @@
       if (o === car || o.retired || o.ghostT > 0) continue;
       if (o.inLane !== car.inLane && !isNaN(tr.pit.wall[o.loc.i])) continue; // the pit wall separates us
       const ds = relS(tr, car, o);
-      if (ds < -30 || ds > (o.speed < 20 ? 280 : 110)) continue;
+      if (ds < -30 || ds > (o.speed < 40 ? 280 : 110)) continue;
       b.near.push(o);
       if (ds > 0 && ds < b.gapAhead) { b.gapAhead = ds; b.ahead = o; }
       if (ds < 0 && -ds < b.gapBehind) { b.gapBehind = -ds; b.behind = o; }
@@ -345,7 +347,7 @@
     {
       const reach = v * v / 40 + 30;
       let hz = null, hzd = 1e9;
-      for (let k = 0; k < b.near.length; k++) { const o = b.near[k], ds = b.nds[k]; if (ds > 0 && ds < reach && ds < hzd && o.speed < 20 && v > o.speed + 4 && !o.inPit) { hz = o; hzd = ds; } }
+      for (let k = 0; k < b.near.length; k++) { const o = b.near[k], ds = b.nds[k]; if (ds > 0 && ds < reach && ds < hzd && (o.speed < 20 || v > o.speed + 18) && v > o.speed + 4 && !o.inPit) { hz = o; hzd = ds; } }
       if (hz) {
         const E = edgeOf(tr), j = hz.loc.i, rR = E.R[j] - hz.loc.d, rL = hz.loc.d + E.L[j], sg = rR >= rL ? 1 : -1, room = Math.max(rR, rL);
         if (room > 2.4) {
@@ -440,7 +442,7 @@
     if (car.wetness > 0.02) aCap *= Math.min(1, (car.grip == null ? 0.972 : car.grip) / 0.972); // wet brakes bite less
     const aReq = b && b.aReq != null ? b.aReq : 0;
     let thr = 0, brk = 0;
-    if (aReq > P.brkOn * (b ? b.brkK : 1) * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
+    if (aReq > P.brkOn * (b ? b.brkK * (b.gapAhead < 40 ? P.trafBrk : 1) : 1) * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
     else if (err < -1.2) brk = U.clamp(-err * P.errBrk, 0, 1);
     // once on the brakes, stay on them and bleed the pedal off (no on/off chatter): the
     // tyres now build slip progressively, so a held, smoothly released pedal is quicker
@@ -617,10 +619,10 @@
     if (car.dm) { if (tr.brk[leadIdx] || kl > 1 / 500) vt *= car.dm.paceK; }
     else vt *= 1 - car.wingDmg * 0.3 * Math.max(cornerK, tr.brk[leadIdx] ? 0.8 : 0);
     // racing in traffic: nobody drives qualifying limits with a car inches away
-    if (((b.ahead && b.gapAhead < 40) || b.alongside) && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= 0.995;
+    if (((b.ahead && b.gapAhead < 40) || b.alongside) && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= P.trafK;
     // the first lap is all elbows: everyone leaves a little more
-    const lap1 = b.style && race.time - race.startTime < 35;
-    if (lap1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= 0.97;
+    const lap1 = b.style && race.time - race.startTime < P.lap1T;
+    if (lap1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= P.lap1K;
     // in too hot, this one corner
     if (b.hot) { if (Tracks.fwd(tr, b.hotS, car.loc.s) < 40) b.hot = 0; else vt *= b.hot; }
     // fuel load: a heavier car brakes later and corners slower than the reference
@@ -653,12 +655,14 @@
       let blk = null, bds = 1e9;
       for (let k = 0; k < b.near.length; k++) {
         const o = b.near[k], ds = b.nds[k];
-        if (ds <= 0 || ds > (o.speed < 20 ? 280 : 80)) continue;
+        // (the bigger the closing speed the sooner it counts, and the wider: a slow car may be crossing)
+        const cl = Math.max(0, v - o.speed), side = 2.35 + Math.min(1.8, cl * 0.05);
+        if (ds <= 0 || ds > (o.speed < 20 ? 280 : Math.max(80, cl * cl / 18 + 40))) continue;
         if (o === b.hazard && Math.abs(o.loc.d - car.loc.d) > 2.4) continue; // round it already
         // where our own line takes us by the time we get there: a car beside our lane
         // now is in it if the line swings across before we reach it
         const there = ds < 40 ? U.clamp(tr.line.off[o.loc.i], b.lo == null ? -tr.hw : b.lo, b.hi == null ? tr.hw : b.hi) : planLat;
-        if ((Math.abs(o.loc.d - myLat) < 2.35 || Math.abs(o.loc.d - planLat) < 2.35 || Math.abs(o.loc.d - there) < 2.35) && ds < bds) { blk = o; bds = ds; }
+        if ((Math.abs(o.loc.d - myLat) < side || Math.abs(o.loc.d - planLat) < side || Math.abs(o.loc.d - there) < side) && ds < bds) { blk = o; bds = ds; }
       }
       if (blk) {
         const gap = bds - car.spec.len;
@@ -667,7 +671,7 @@
         // (sitting in a tow on a straight, a driver closes right up to the gearbox)
         // (with no run to try, a driver hangs back a little and saves his tyres)
         const wait = b.style && v - blk.speed < 0.5 ? 2.5 * (1 - Math.min(1, b.style.nerve)) : 0;
-        const want = (b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + 0.09 * v + wait + (nearBrake ? 0.08 * v : 0)) * (lap1 ? 1.6 : 1);
+        const want = (b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + P.gapV * v + wait + (nearBrake ? P.gapBrk * v : 0)) * (lap1 ? P.lap1Gap : 1);
         const closing = v - blk.speed;
         if (blk.ctl.brake > 0.25 && gap < want + 25) vt = Math.min(vt, blk.speed + Math.max(0, gap - want) * 0.5);
         // (in a tow the run is the point: it may close right up before easing off)
