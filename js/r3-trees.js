@@ -47,6 +47,7 @@
     '  transformed = vec3(tPos.x, tPos.y - 0.15, tPos.z) + tRight * position.x * tW + vec3(0.0, position.y * tH, 0.0);',
     '  vTRight = tRight; vTFwd = vec3(tF.x, 0.0, tF.y);',
     '  vTTint = vec3(1.0 + tVar.y * 0.13, 1.0 + tVar.y * 0.05, 1.0 - tVar.y * 0.16) * (1.0 + tVar.y * 0.1);',
+    '  if (fract(tPos.x * 0.137 + tPos.z * 0.211) < 0.012) vTTint = vec3(1.45, 0.95, 0.6);   // here and there a dead one',
   ].join('\n');
   const FRAG_PARS = [
     'uniform sampler2D uTNrm; uniform vec2 uTCrown;',
@@ -55,7 +56,7 @@
   ].join('\n');
   // (alpha from a softer level: at close range an atlas texel is several pixels and the 0.5 test
   // would show it as a staircase along every branch)
-  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl);';
+  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl) * 1.4;';
   const FRAG_NORMAL = [
     '  vec3 tN0 = texture2D(uTNrm, vTUv0).xyz * 2.0 - 1.0, tN1 = texture2D(uTNrm, vTUv1).xyz * 2.0 - 1.0;',
     // a baked view-space normal back to world space: x along that view's right, z toward it
@@ -79,7 +80,7 @@
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = FRAG_PARS + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));')
+      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.95, 1.02, 0.92), vec3(1.75, 1.62, 1.08), smoothstep(0.012, 0.1, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + FRAG_NORMAL)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_TRANS);
   }
