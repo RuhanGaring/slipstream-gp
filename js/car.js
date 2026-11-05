@@ -36,7 +36,7 @@
     mass: 768, fuelMax: 40, wb: 3.6, cgFront: 0.455, cgH: 0.30, trackF: 1.62, trackR: 1.56,
     Iz: 1000, Iyy: 1050, Ixx: 260, R: 0.36, len: 5.6, wid: 2.0,
     // aero (Z-mode, cornering); X-mode on straights is lower drag and lower downforce
-    ClA: 4.4, aeroBal: 0.46, CdA: 1.12, xModeCl: 0.74, xModeCd: 0.68,
+    ClA: 4.53, aeroBal: 0.46, CdA: 1.12, xModeCl: 0.74, xModeCd: 0.68,
     rh0F: 0.045, rh0R: 0.085, hRef: 0.05, hStall: 0.012, geGain: 0.45,
     // power unit: spec.power is the nominal total used by the speed planner
     power: 750000, iceShare: 0.533, rpmPeak: 11200, rpmLimit: 12300, rpmIdle: 4000,
@@ -57,7 +57,7 @@
     // mechanical balance in slow corners: extra front cornering grip, full below lowV0 and gone
     // at lowV1 (m/s), where the wings set the balance. Without it the front washes out with the rear far
     // from its limit. Arcade takes less, as its yaw assist already helps the car rotate
-    lowTurn: 0.14, lowV0: 20, lowV1: 42, steerRateLow: 1.6,
+    lowTurn: 0.14, lowGrip: 0.06, lowDown: 0.2, lowAbs: 0.7, lowV0: 20, lowV1: 42, steerRateLow: 1.6,
     rollF: 0.6,
   };
   // magic-formula shape for the normalised slip: peak 1 at s = 1, about 0.85 when sliding
@@ -218,6 +218,7 @@
     c.v = -c.vx * sh + c.vy * ch;
     const speed = c.speed = Math.hypot(c.vx, c.vy);
     const W = c.wheels;
+    const lowK = U.clamp((sp.lowV1 - speed) / (sp.lowV1 - sp.lowV0), 0, 1); // 1 in 1st and 2nd gear corners, 0 at speed
 
     // --- steering ---
     let target;
@@ -267,7 +268,7 @@
     const hMean = (c.rhF + c.rhR) / 2;
     let ge = 1 + sp.geGain * (1 - U.clamp(hMean / sp.hRef, 0, 2));
     if (hMean < sp.hStall) ge *= U.lerp(0.72, 1, U.clamp(hMean / sp.hStall, 0, 1)); // floor stalls
-    const ClA = sp.ClA * (xm ? sp.xModeCl : 1) * ge;
+    const ClA = sp.ClA * (xm ? sp.xModeCl : 1) * ge * (1 + sp.lowDown * lowK);
     const down = ClA * q;
     const dirty = 1 - c.dfMul; // wake from a car ahead costs the front more than the rear
     let balF = sp.aeroBal + U.clamp(1.2 * ((c.rhR - c.rhF) - (sp.rh0R - sp.rh0F)), -0.05, 0.05);
@@ -405,7 +406,7 @@
       const Fz = Math.max(0, w.Fz);
       // grip: load sensitivity, surface, compound, temperature, wear, pressure, camber, rubber
       const wetT = c.wetness || 0;
-      let mu = sp.mu * (w.front ? 1 : sp.muRear) * S.mu * (wetT > 0 ? surfWet(w.surf, wetT) : 1) * a.gripMul * (1 - sp.muLoadK * (Math.max(Fz, 60) / sp.Fz0 - 1));
+      let mu = sp.mu * (1 + sp.lowGrip * lowK) * (w.front ? 1 : sp.muRear) * S.mu * (wetT > 0 ? surfWet(w.surf, wetT) : 1) * a.gripMul * (1 - sp.muLoadK * (Math.max(Fz, 60) / sp.Fz0 - 1));
       mu = Math.max(sp.mu * 0.55 * S.mu, mu);
       if (D && D.puncture[k]) mu *= 0.35; // a deflated tyre rolls on its rim edge
       let condF = 1;
@@ -483,7 +484,8 @@
       // ABS as a slip controller: pressure eases off in proportion as the slip approaches the
       // peak, before the wheel overshoots into a lock (rears held shorter, to keep side grip)
       if (brake > 0.05) {
-        const lim = w.front ? 0.92 : 0.72, start = lim - 0.15;
+        // (in a slow corner the fronts are turning too, so they give up braking slip to keep steering)
+        const lim = (w.front ? 0.92 : 0.72) * (w.front ? 1 - sp.lowAbs * lowK * Math.min(1, Math.abs(tanA) / Math.tan(sp.alphaPk)) : 1), start = lim - 0.15;
         const target = U.clamp(1 - (-over - start) / (lim - start) * 0.6 - Math.max(0, -over - lim) * 3, 0.12, 1);
         w.bmod += (target - w.bmod) * Math.min(1, (target < w.bmod ? 45 : 12) * dt);
       } else w.bmod = Math.min(1, w.bmod + 7 * dt);
