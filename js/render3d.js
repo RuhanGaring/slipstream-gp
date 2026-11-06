@@ -15,8 +15,8 @@
       ridge: ['#9c9a7a', '#6f7a52', '#515f3c'], ridgeH: 110, jag: 7 },
     lucerne: { sunEl: 55, sunAz: 160, sun: '#fff6e8', sunI: 3.2, top: '#2a70c4', hor: '#c2dcf0', bot: '#6f8a99', fog: '#c6dbea', fogN: 600, fogF: 5200, cloud: 0.28, haze: 0.7, exp: 0.92, env: 1.0,
       ridge: ['#74776a', '#4f5a46', '#3a4636'], ridgeH: 380, jag: 16 },
-    hakone: { farLawn: [0.66, 0.58, 0.27, 0.86], sunNeutral: 0.3, sunEl: 26, sunAz: 110, sun: '#ffdfb4', sunI: 3.5, top: '#4f85c6', hor: '#dfe6ea', bot: '#7d8c78', fog: '#ded9cc', fogN: 260, fogF: 5600, cloud: 0.4, haze: 0.65, exp: 1.02, env: 0.95,
-      ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 560, jag: 30, lawnDesat: 0.46 },
+    hakone: { farLawn: [0.54, 0.52, 0.24, 0.74], sunNeutral: 0.3, sunEl: 26, sunAz: 110, sun: '#ffdfb4', sunI: 3.5, top: '#4f85c6', hor: '#dfe6ea', bot: '#7d8c78', fog: '#ded9cc', fogN: 260, fogF: 5600, cloud: 0.4, haze: 0.65, exp: 1.02, env: 0.95,
+      ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 620, jag: 26, lawnDesat: 0.3, lawnGrade: [1.8, 1.47, 1.02], fieldK: 1 },
     rimal: { exag: 3.2, sunEl: 8, sunAz: 265, sun: '#ff9d5c', sunI: 2.8, top: '#2b3f72', hor: '#f4a466', bot: '#9a7a55', fog: '#e7b38a', fogN: 500, fogF: 5200, cloud: 0.18, haze: 1.6, exp: 1.05, env: 0.8,
       ridge: ['#d2a172', '#b88a5e', '#9c7350'], ridgeH: 60, jag: 4 },
     // (with an HDR probe the sun, sky and fog colour come from the probe; these set the rest)
@@ -910,8 +910,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     {
       // turf under a clear sky is lighter and more yellow-green; under cloud, greyer and more olive
       const L0 = LOOKS[Tracks.lookOf(tr)] || LOOKS.kestrel, oc = U.smooth((L0.cloud - 0.42) / 0.3);
-      F1.R3S.U.uLawnGrade.value.set(1.48 - 0.12 * oc, 1.2 - 0.16 * oc, 1.0, Math.max(0.4 * oc, L0.lawnDesat || 0.22));
+      const lg = L0.lawnGrade || [1.48 - 0.12 * oc, 1.2 - 0.16 * oc, 1.0];
+      F1.R3S.U.uLawnGrade.value.set(lg[0], lg[1], lg[2], Math.max(0.4 * oc, L0.lawnDesat || 0.22));
       F1.R3S.U.uFarLawn.value.set(...(L0.farLawn || [0.3, 0.36, 0.17, 0]));
+      F1.R3S.U.uFieldK.value = L0.fieldK == null ? 0.7 : L0.fieldK;
     }
     F1.R3S.patchTree(built.root);
     // lawn stripes along the start straight (strength 0: the reference circuits show none)
@@ -919,6 +921,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     scene.add(built.root);
     applyLook(Tracks.lookOf(tr));
     backdropFor(Tracks.lookOf(tr), built.root);
+    {
+      const ft = built.root.userData.foot, S3 = F1.R3S.U;
+      S3.uRingH.value.set(ft ? ft.x : 0, ft ? ft.z : 0, ft ? ft.r : 1e9, ft ? ft.on : 0);
+      if (ft) S3.uFootT.value.set(ft.t[0], ft.t[1], ft.t[2]);
+    }
     applyScenery();
     applyAniso(built.root);
     clearFx();
@@ -3028,7 +3035,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, half = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2;
     // the hills and mountains round the venue: a ring of real terrain from 0.9 km past the
     // circuit's far corner out to about 13 km from its middle (inside the 14 km far plane)
-    root.userData.backdrop = { cx, cz, R: half + 500, Ri: half + 500, Ro: Math.min(half + 11000, 13200), tr };
+    root.userData.backdrop = { cx, cz, R: half + 900, Ri: half + 900, Ro: Math.min(half + 11000, 13200), tr };
   }
   // The hills and mountains round the venue, as real terrain: a ring of ground rising from where
   // the venue's own land ends to ranges several kilometres off. Where the venue has a real place
@@ -3104,23 +3111,21 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       let mx = 0; for (let k = 0; k < H.length; k++) if (H[k] > mx) mx = H[k];
       peak = Math.max(60, mx * EXAG);
     }
-    const A = 720, NR = 104, Ri = bd.Ri, Ro = bd.Ro;
-    // the foothills: three ridges one behind the other, each with its own skyline, so the land climbs
-    // in steps and every ridge hides the foot of the next. Taken as the higher of the ridge and the
-    // ground behind it, as one spur stands in front of another
-    const fhA = U.clamp(peak * 0.16, 50, 220), span = Ro - Ri;
-    const RIDGES = [[0.11, 0.5, 1000], [0.2, 0.8, 1500], [0.33, 1, 2200]];
-    const foothill = (x, z, t, rho, th) => {
-      let top = 0;
-      RIDGES.forEach(([at, k, w], n) => {
-        const cx = Math.cos(th) * (3 + n * 1.7), cz = Math.sin(th) * (3 + n * 1.7);
-        const r0 = Ri + span * at + (vn(cx * 1.8 + n * 9, cz * 1.8 - n * 4) - 0.5) * span * 0.16;
-        const crest = fhA * k * (0.45 + 0.75 * vn(cx * 1.3 + n * 7, cz * 1.3 - n * 3) + 0.35 * vn(cx * 3.7 - n, cz * 3.7 + n * 2));
-        const q = (rho - r0) / (rho < r0 ? w * 0.55 : w * 1.5);
-        top = Math.max(top, crest * Math.exp(-q * q) * (0.6 + 0.85 * land(x / 700 + n, z / 700 - n)));
-      });
-      return top * U.smooth(t / 0.05);
+    // what each venue's hills are made of, matched to photographs of such country: cover is the
+    // share under trees, line the tree line and snow the old snow line as parts of the peak height,
+    // mix how far the open ground leaves the venue's own tones for this one, belt trees at the foot
+    const MTN = {
+      hakone: { forA: '#161e15', forB: '#2f3b26', forC: '#4f4530', foot: '#a89c70', open: '#7c7760', rockA: '#a89c8e', rockB: '#3f3e40', scree: '#a59a88', cover: -0.02, line: 0.46, mix: 1, belt: 0.9, rk: [0.15, 0.36, 0.88], soft: 0.1, gully: 0.5, bump: 1.65, low: 0.14, amb: 0.66, scrub: 0.62, crest: 1, warm: 0.7, footT: [0.98, 0.91, 0.72] },
+      lucerne: { forA: '#142419', forB: '#28402a', open: '#7f9048', rockA: '#a3a199', rockB: '#6b6962', scree: '#b3b0a6', cover: 0.16, line: 0.55, mix: 1, belt: 1, snow: 0.9 },
+      sierra: { forA: '#2b3020', forB: '#454a2e', forC: '#5c5636', open: '#6c604b', rockA: '#8f8b82', rockB: '#5f584f', scree: '#a69c8c', cover: -0.1, line: 0.75, mix: 1, belt: 0.4, rk: [0.13, 0.34, 0.85], soft: 0.14, gully: 0.6, foot: '#a39160', low: 0.1, scrub: 0.5, crest: 0.5, warm: 0.6, footT: [1.0, 0.9, 0.68] },
+      varenna: { forA: '#25351f', forB: '#3f4e2a', open: '#8f8a5c', rockA: '#a8a08e', rockB: '#6f685a', scree: '#b9b19f', cover: 0.12, line: 0.85, mix: 0.7, belt: 1 },
+      nordwald: { forA: '#172519', forB: '#2a3d27', open: '#5f7344', rockA: '#7d7b74', rockB: '#55534d', scree: '#918e85', cover: 0.3, line: 0.95, mix: 1, belt: 1 },
+      bahia: { forA: '#223a22', forB: '#3a5a30', open: '#7d9053', rockA: '#8f8876', rockB: '#615c50', scree: '#a59e8b', cover: 0.22, line: 0.95, mix: 1, belt: 1 },
+      rimal: { forA: '#6b5a3f', forB: '#7c6a4c', open: '#c79c6c', rockA: '#b8916a', rockB: '#8e6c4e', scree: '#d2ad80', cover: -1, line: 1, mix: 0, belt: 0 },
+      lonestar: { forA: '#4a4a2c', forB: '#5e5c38', open: '#a9916a', rockA: '#b08e6c', rockB: '#83664c', scree: '#c2a884', cover: -0.32, line: 1, mix: 0.4, belt: 0 },
     };
+    const C = MTN[id] || { forA: '#1d2f1e', forB: '#33492a', open: L.ridge[0], rockA: '#8a857b', rockB: '#5d5952', scree: '#a39d90', cover: 0.18, line: 1, mix: 0.5, belt: 1 };
+    const A = 640, NR = 84, Ri = bd.Ri, Ro = bd.Ro;
     const gC = tr && tr.H ? tr.H(bd.cx, bd.cz) : 0;
     const nv = A * NR, pos = new Float32Array(nv * 3), colr = new Float32Array(nv * 3), hh = new Float32Array(nv), sea = new Uint8Array(nv);
     for (let j = 0; j < NR; j++) {
@@ -3137,17 +3142,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           if (r == null) { sea[k] = 1; h = -4 - g0; }   // the sea: flat, a little below the land
           // heights 1.6 times the real ones, as games and panoramas do: true-scale hills a few
           // kilometres off sit only a degree or two over the horizon, behind the trackside trees
-          else h = (r * EXAG + (land(x / 260, z / 260) - 0.5) * Math.min(90, Math.abs(r) * 0.14 + 4)) * rise;
+          else h = (r * EXAG + (land(x / 260, z / 260) - 0.5) * Math.min(25, Math.abs(r) * 0.08 + 4)) * rise;
         } else {
-          const massif = 0.45 + 0.55 * U.smooth((vn(x / lamM, z / lamM) - 0.2) / 0.6);
+          const massif = 0.25 + 0.75 * U.smooth((vn(x / lamM, z / lamM) - 0.2) / 0.6);
           // (with a higher range far behind, so the skyline has layers)
           h = peak * rise * far * massif * land(x / lam, z / lam) * (1 + 1.1 * U.smooth((t - 0.62) / 0.3));
-          h *= 0.88 + 0.28 * land(x / 240 + 3, z / 240 - 3);   // broken crests, not domes
-        }
-        if (!sea[k]) {
-          const fh = foothill(x, z, t, rho, th), nw = vn(x / 430 + 1.7, z / 430 + 2.9), nv2 = vn(x / 170 - 4.1, z / 170 + 1.3);
-          const cutK = peak > 1200 ? 1.35 : 1, cut = ((1 - Math.abs(2 * nw - 1)) ** 5 * 0.3 + (1 - Math.abs(2 * nv2 - 1)) ** 5 * 0.15) * cutK;
-          h = (Math.max(h, fh) + fh * 0.12) * (1 - cut);
         }
         pos[k * 3] = x; pos[k * 3 + 1] = g0 + h; pos[k * 3 + 2] = z; hh[k] = h;
       }
@@ -3202,26 +3201,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     }
     g.setAttribute('aShade', new THREE.BufferAttribute(shade, 1));
     g.setAttribute('aLand', new THREE.BufferAttribute(Float32Array.from(sea, v => (v ? 0 : 1)), 1));
+    g.setAttribute('aH', new THREE.BufferAttribute(Float32Array.from(hh, v => Math.max(0, v)), 1));
     const S3 = F1.R3S.U;
-    // what each venue's hills are made of, matched to photographs of such country: cover is the
-    // share under trees, line the tree line and snow the old snow line as parts of the peak height,
-    // mix how far the open ground leaves the venue's own tones for this one, belt trees at the foot
-    const MTN = {
-      hakone: { forA: '#1c2619', forB: '#39432a', forC: '#5a4a2c', foot: '#b3a67c', open: '#6f6d4c', rockA: '#a89478', rockB: '#514840', scree: '#ad9e88', cover: -0.02, line: 0.46, mix: 1, belt: 0, rk: [0.15, 0.36, 0.88], soft: 0.1, gully: 0.5, bump: 1.85, low: 0.46, amb: 0.68 },
-      lucerne: { forA: '#142419', forB: '#28402a', open: '#7f9048', rockA: '#a3a199', rockB: '#6b6962', scree: '#b3b0a6', cover: 0.16, line: 0.55, mix: 1, belt: 1, snow: 0.9 },
-      sierra: { forA: '#2b3020', forB: '#454a2e', forC: '#5c5636', open: '#6c604b', rockA: '#8f8b82', rockB: '#5f584f', scree: '#a69c8c', cover: -0.1, line: 0.75, mix: 1, belt: 0.4, rk: [0.13, 0.34, 0.85], soft: 0.14, gully: 0.6, foot: '#a39160', low: 0.34 },
-      varenna: { forA: '#25351f', forB: '#3f4e2a', open: '#8f8a5c', rockA: '#a8a08e', rockB: '#6f685a', scree: '#b9b19f', cover: 0.12, line: 0.85, mix: 0.7, belt: 1 },
-      nordwald: { forA: '#172519', forB: '#2a3d27', open: '#5f7344', rockA: '#7d7b74', rockB: '#55534d', scree: '#918e85', cover: 0.3, line: 0.95, mix: 1, belt: 1 },
-      bahia: { forA: '#223a22', forB: '#3a5a30', open: '#7d9053', rockA: '#8f8876', rockB: '#615c50', scree: '#a59e8b', cover: 0.22, line: 0.95, mix: 1, belt: 1 },
-      rimal: { forA: '#6b5a3f', forB: '#7c6a4c', open: '#c79c6c', rockA: '#b8916a', rockB: '#8e6c4e', scree: '#d2ad80', cover: -1, line: 1, mix: 0, belt: 0 },
-      lonestar: { forA: '#4a4a2c', forB: '#5e5c38', open: '#a9916a', rockA: '#b08e6c', rockB: '#83664c', scree: '#c2a884', cover: -0.32, line: 1, mix: 0.4, belt: 0 },
-    };
-    const C = MTN[id] || { forA: '#1d2f1e', forB: '#33492a', open: L.ridge[0], rockA: '#8a857b', rockB: '#5d5952', scree: '#a39d90', cover: 0.18, line: 1, mix: 0.5, belt: 1 };
     // the valleys hold the trees and the rock shows where slopes are too steep to keep soil
+    const lawnish = !!(tr && tr.def && tr.def.style === 'park' || (tr && tr.def && !tr.def.style)), S3Low = { value: lawnish ? C.low || 0 : 0 };
+    root.userData.foot = { x: bd.cx, z: bd.cz, r: Ri, on: S3Low.value > 0 ? (C.woods ? 1 : 0.5) : 0, t: C.footT || [1.02, 1, 0.92] };
     const hz = {
       uHaze: S3.uFogCol, uSunDir: S3.uSunDir, uSunCol: S3.uSunCol, uAmb: { value: new THREE.Color() },
-      uFootHaze: { value: C.low || 0 }, uAmbK: { value: C.amb || 1 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
-      uHazeD: { value: 10500 }, uHazeH: { value: Math.max(300, peak * 0.9) },
+      uFootHaze: S3Low, uFootT: S3.uFootT, uScrub: { value: C.scrub || 0 }, uCrest: { value: C.crest || 0 }, uWarm: { value: C.warm || 0 }, uAmbK: { value: C.amb || 1 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
+      uHazeD: { value: 7800 }, uHazeH: { value: Math.max(300, peak * 0.9) },
       uBump: { value: C.bump || (desert ? 0.42 : arid ? 1.15 : 1) }, uGully: { value: desert ? 0.3 : 0.62 },
       uRock: { value: C.rk ? new THREE.Vector3(...C.rk) : new THREE.Vector3(arid ? 0.12 : 0.3, arid ? 0.32 : 0.56, desert ? 0.5 : arid ? 0.85 : 0.7) },
       uForA: { value: col(C.forA) }, uForB: { value: col(C.forB) }, uForC: { value: col(C.forC || C.forB) }, uFootC: { value: col(C.foot || (desert ? '#c39a6b' : '#3b5022')) }, uMeadow: { value: col(C.open) }, uRockA: { value: col(C.rockA) }, uRockB: { value: col(C.rockB) }, uScree: { value: col(C.scree) },
@@ -3236,16 +3224,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       uniforms: hz,
       vertexShader: `#include <common>
 #include <logdepthbuf_pars_vertex>
-attribute vec3 color; attribute float aShade, aLand; varying vec3 vW, vN, vC; varying float vS, vLand;
+attribute vec3 color; attribute float aShade, aLand, aH; varying vec3 vW, vN, vC; varying float vS, vLand, vH;
 void main() {
-  vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normal; vC = color; vS = aShade; vLand = aLand;
+  vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normal; vC = color; vS = aShade; vLand = aLand; vH = aH;
   gl_Position = projectionMatrix * viewMatrix * w;
   #include <logdepthbuf_vertex>
 }`,
       fragmentShader: `#include <common>
 #include <logdepthbuf_pars_fragment>
-varying vec3 vW, vN, vC; varying float vS, vLand;
-uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFootHaze, uAmbK; uniform sampler2D uE, uCrown;
+varying vec3 vW, vN, vC; varying float vS, vLand, vH;
+uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFootHaze, uAmbK, uScrub, uCrest, uWarm; uniform vec3 uFootT; uniform sampler2D uE, uCrown;
 const mat2 R1 = mat2(0.8, 0.6, -0.6, 0.8), R2 = mat2(0.28, -0.96, 0.96, 0.28);
 void main() {
   #include <logdepthbuf_fragment>
@@ -3253,11 +3241,12 @@ void main() {
   // one eroded landform (tools/mtn_bake.py) at three scales, turned so the tile never lines up, and
   // a fourth, close in, for the grain of the canopy and the rock
   vec3 a = texture2D(uE, R1 * p / 12400.0).rgb, b = texture2D(uE, R2 * p / 3700.0 + 0.37).rgb, c = texture2D(uE, p / 1050.0 + 0.71).rgb, e = texture2D(uE, R1 * p / 290.0 + 0.13).rgb;
+  vec3 f = texture2D(uE, R2 * p / 83.0 + 0.53).rgb;   // the finest ribs, for ranges close to the road
   // tree crowns, laid on the plane the slope faces most, so a steep side is not smeared
   vec3 Nn = abs(normalize(vN));
   vec2 q = Nn.y > 0.62 ? p : (Nn.x > Nn.z ? vW.zy : vW.xy);
   float crown = texture2D(uCrown, q / 310.0).r * 0.55 + texture2D(uCrown, R2 * q / 117.0 + 0.2).r * 0.55, stand = texture2D(uCrown, R1 * q / 1730.0 + 0.3).g;
-  vec2 sl = ((a.rg - 0.5) * R1 * 1.5 + (b.rg - 0.5) * R2 * 1.3 + (c.rg - 0.5) * 0.8 + (e.rg - 0.5) * R1 * 0.35) * 2.0 * uBump;
+  vec2 sl = ((a.rg - 0.5) * R1 * 1.5 + (b.rg - 0.5) * R2 * 0.85 + (c.rg - 0.5) * 0.7 + (e.rg - 0.5) * R1 * 0.4 + (f.rg - 0.5) * R2 * 0.42) * 2.0 * uBump;
   float basin = (a.b - 0.5) * 0.9 + (b.b - 0.5) * 1.3 + (c.b - 0.5) * 0.8;   // + a gully, - a spur
   vec3 N = normalize(vN), n = normalize(vec3(N.x - sl.x, N.y, N.z - sl.y));
   float slope = 1.0 - n.y, alt = vW.y, tl = uCover.y + (b.r - 0.5) * 300.0;
@@ -3266,22 +3255,25 @@ void main() {
   float patchN = a.b * 0.55 + b.b * 0.75 + c.b * 0.35 - 0.82 + (stand - 0.45) * 1.3 + basin * uSoft.y;
   float fm = smoothstep(-uSoft.x, uSoft.x, patchN + uCover.x) * (1.0 - smoothstep(tl - 40.0, tl + 70.0, alt)) * (1.0 - smoothstep(0.34, 0.5, slope));
   float rho = length(p - uRing.xy), foot = 1.0 - smoothstep(uRing.z + 150.0, uRing.z + 1000.0 + (b.b - 0.5) * 1200.0, rho);
-  fm = max(fm, foot * uRing.w);
+  fm = max(fm, foot * uRing.w * smoothstep(0.38, 0.52, texture2D(uCrown, R1 * p / 900.0).g));
   float stand2 = texture2D(uCrown, R2 * p / 4100.0 + 0.61).g;
   vec3 forest = mix(uForA, uForB, smoothstep(0.3, 0.56, stand2 * 0.7 + stand * 0.3 + (crown - 0.45) * 0.7 - basin * 0.14));
   forest = mix(forest, uForC, 0.45 * smoothstep(0.58, 0.74, stand * 0.45 + stand2 * 0.45 + (crown - 0.45) * 0.5));
   forest *= clamp((0.1 + crown * 2.1) * (0.82 + stand * 0.3), 0.1, 1.7);
   vec3 open = mix(vC, uMeadow, uCover.z) * (0.72 + 0.56 * stand) * (0.86 + 0.28 * crown) * (1.0 + 0.2 * clamp(-basin, 0.0, 1.0));
   // low scrub on the open ground, in flecks, thickest in the gullies
-  open = mix(open, uForA * (0.7 + crown), smoothstep(0.42, 0.66, crown + (stand - 0.45) * 0.7 + basin * 0.3) * uSoft.y);
+  open = mix(open, uForA * (0.7 + crown), smoothstep(0.42, 0.66, crown * 0.4 + 0.24 + (stand - 0.45) * 0.9 + basin * 0.46) * uSoft.y);
   vec3 alb = mix(open, forest, fm);
   alb *= 1.0 - uGully * 0.42 * clamp(basin, 0.0, 1.0);
   // bare rock on the steep ground and above the trees: beds that follow the height, cut by gullies
   float rk = smoothstep(uRock.x, uRock.y, slope - basin * 0.14 + clamp((alt - tl) / max(uCover.y, 200.0), -0.2, 0.5) * 0.3) * uRock.z;
+  rk *= mix(1.0, smoothstep(uHazeH * 0.2, uHazeH * 0.52, vH), uCrest);
   float beds = sin((alt + (stand - 0.45) * 500.0) * 0.038 + (e.b - 0.5) * 4.0) * 0.5 + 0.5;
   float seam = smoothstep(0.86, 0.98, sin((alt + (e.r - 0.5) * 90.0 + (stand - 0.45) * 300.0) * 0.11) * 0.5 + 0.5);
-  vec3 stone = mix(uRockB, uRockA, beds * 0.3 + stand * 0.42 + 0.28 * c.g) * (0.62 + 0.76 * e.g) * (0.72 + 0.56 * crown) * (1.0 - 0.8 * clamp(basin * 1.3, 0.0, 1.0)) * (1.0 - 0.42 * seam);
+  vec3 stone = mix(uRockB, uRockA, beds * 0.08 + stand * 0.56 + 0.36 * c.g) * (0.62 + 0.76 * e.g) * (0.72 + 0.56 * crown) * (0.74 + 0.52 * f.g) * (1.0 - 0.8 * clamp(basin * 1.3, 0.0, 1.0)) * (1.0 - 0.12 * seam);
   alb = mix(alb, stone, rk);
+  // scrub holding on in the small gullies, thinning with height
+  alb = mix(alb, uForA * (0.8 + crown * 0.9), uScrub * smoothstep(0.36, 0.66, e.b * 0.34 + b.b * 0.34 + c.b * 0.3 + crown * 0.08 + basin * 0.1 - 0.06) * (1.0 - smoothstep(uBase + uHazeH * 0.3, uBase + uHazeH * 0.8, alt)));
   // scree: pale fans in the gullies below the rock
   float sc = smoothstep(0.02, 0.35, basin) * smoothstep(0.1, 0.3, slope) * (1.0 - fm) * smoothstep(tl - 220.0, tl + 60.0, alt);
   alb = mix(alb, uScree * (0.78 + 0.44 * e.b), sc * 0.75);
@@ -3290,21 +3282,24 @@ void main() {
     alb = mix(alb, vec3(0.86, 0.89, 0.93), sn);
   }
   // the very foot takes the colour of the venue's own ground, so one runs into the other
-  if (vLand < 1.5) alb = mix(uFootC, alb, smoothstep(uBase + 6.0, uBase + 60.0 + (b.b - 0.5) * 90.0 + (c.r - 0.5) * 60.0, alt));
+  if (vLand < 1.5) alb = mix(uFootC, alb, smoothstep(6.0, 60.0 + (b.b - 0.5) * 90.0 + (c.r - 0.5) * 60.0, vH));
   if (vLand < 0.5) alb = vC;
   n = normalize(n + vec3((e.r - 0.5) * 1.1 + (c.r - 0.5) * 0.6, 0.0, (e.g - 0.5) * 1.1 + (c.g - 0.5) * 0.6) * rk);   // broken faces
   float ndl = max(dot(n, uSunDir), 0.0);
+  alb *= mix(vec3(1.0), mix(vec3(0.84, 0.93, 1.12), vec3(1.14, 1.0, 0.82), smoothstep(0.08, 0.55, ndl * mix(0.3, 1.0, vS))), uWarm);
   vec3 col = alb * (uSunCol * 0.3183 * ndl * mix(0.2, 1.0, vS) + uAmb * uAmbK * (0.8 + 0.2 * n.y) * (1.0 - 0.55 * clamp(basin * 1.4, 0.0, 1.0)));
   // the air: blue is scattered first, so each range is bluer than the one in front of it. Thinner
   // higher up, which is why the tops stand clear
   float d = length(vW - cameraPosition), hk = pow(d / uHazeD, 1.45) * mix(1.1, 0.7, clamp((vW.y - uBase) / uHazeH, 0.0, 1.0));
   vec3 T = exp(-hk * vec3(0.62, 0.86, 1.34));
-  col = col * T + uHaze * mix(vec3(1.0), uTint, smoothstep(2000.0, 8000.0, d)) * (1.0 - T);
+  // (the blue belongs to the high air: low down the haze keeps the colour of the valley it lies in)
+  col = col * T + uHaze * mix(vec3(1.0), uTint, smoothstep(2000.0, 8000.0, d) * smoothstep(40.0, 420.0, vH)) * (1.0 - T);
   // warm haze lying on the low ground of a dry valley
-  col = mix(col, uHaze * vec3(1.07, 1.0, 0.86), uFootHaze * (1.0 - smoothstep(uBase + 30.0, uBase + uHazeH * 0.34, vW.y)) * smoothstep(900.0, 3000.0, d));
+  if (uFootHaze > 0.0) { float lowK = 1.0 - smoothstep(4.0, 14.0 + uHazeH * uFootHaze, vH + (b.b - 0.5) * 60.0 * smoothstep(10.0, 70.0, vH)); float rP = textureLod(uCrown, p / 2300.0, 2.0).g, rQ = textureLod(uCrown, p / 640.0 + 0.3, 1.0).g; vec3 rC = uHaze * uFootT * (0.82 + rP * 0.2 + rQ * 0.2); rC = mix(rC, rC * vec3(0.84, 0.84, 0.8), smoothstep(0.36, 0.72, rP * 0.6 + rQ * 0.6)); col = mix(col, rC, pow(lowK, 2.2)); }
   // and the same valley fog as the plain in front, so no land is ever clearer than what is nearer
   float fk = uFogK * (vW.y - cameraPosition.y), fLine = abs(fk) > 1e-4 ? (1.0 - exp(-fk)) / fk : 1.0;
-  gl_FragColor = vec4(mix(col, uHaze * mix(vec3(1.0), vec3(0.86, 0.94, 1.06), smoothstep(1500.0, 6000.0, d)), clamp(1.0 - exp(-uFogD * exp(-uFogK * cameraPosition.y) * d * fLine * 0.5), 0.0, 1.0)), 1.0);
+  float fHi = smoothstep(20.0, 260.0, vH), fSun = pow(max(dot(normalize(vW - cameraPosition), uSunDir), 0.0), 6.0);
+  gl_FragColor = vec4(mix(col, uHaze * mix(vec3(1.0), vec3(0.86, 0.94, 1.06), fHi * smoothstep(1500.0, 6000.0, d)) + uSunCol * fSun * 0.12, clamp(1.0 - exp(-uFogD * exp(-uFogK * cameraPosition.y) * d * fLine * mix(1.0, 0.5, fHi)), 0.0, 1.0)), 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`,

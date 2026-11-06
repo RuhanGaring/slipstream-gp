@@ -28,6 +28,9 @@
     uLawnGrade: { value: new THREE.Vector4(1, 1, 1, 0) },
     uFarLawn: { value: new THREE.Vector4(0, 0, 0, 0) },
     uFarTex: { value: null },
+    uRingH: { value: new THREE.Vector4(0, 0, 1e9, 0) },
+    uFootT: { value: new THREE.Vector3(1, 1, 1) },
+    uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
     // the 3D grass map (js/r3-grass.js), so the ground can wear where the turf meets other surfaces
     uGrassMask: { value: null }, uGrassMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
@@ -71,7 +74,7 @@
   const LAWN_ROUGH = 0.78;
   const LAWN = [
     'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB;',
-    'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex;',
+    'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex; uniform vec4 uRingH; uniform vec3 uFootT; uniform float uFieldK;',
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
     'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
@@ -138,6 +141,17 @@
     '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',
+    // a real field is never one colour: the warped patches of a sward that has grown, dried and been
+    // walked on unevenly, from tens of metres down to the clump (see the owner's reference shots)
+    '  float fw = tfN(w / 53.0) - 0.5; vec2 fq = w + vec2(fw, -fw * 0.7 + tfN(w / 31.0 + 4.0) - 0.5) * 38.0;',
+    '  float fBig = tfN(fq / 61.0) * 0.62 + tfN(fq / 23.0 + 3.1) * 0.38, fMid = tfN(fq / 8.7 + 1.3) * 0.6 + tfN(fq / 3.3 + 7.7) * 0.4;',
+    '  vec3 fC = mix(vec3(0.82, 1.0, 0.8), vec3(1.18, 1.03, 0.68), smoothstep(0.36, 0.6, fBig + (fMid - 0.5) * 0.4));',
+    '  fC *= mix(0.72, 1.14, smoothstep(0.3, 0.68, fMid + (fBig - 0.5) * 0.3)) * (0.84 + 0.32 * sp);',
+    '  fC = mix(fC, vec3(1.16, 0.98, 0.66), smoothstep(0.72, 0.84, fMid * 0.62 + sp * 0.26 + (1.0 - fBig) * 0.3) * 0.7);',
+    '  float fCl = tfN(fq / 1.3 + 2.2) * 0.62 + tfN(fq / 0.47 + 5.0) * 0.38;',
+    '  fC *= mix(0.66, 1.12, smoothstep(0.3, 0.6, fCl));',
+    '  fC = mix(fC, vec3(1.14, 0.94, 0.6), smoothstep(0.6, 0.7, fCl * 0.55 + fMid * 0.5) * smoothstep(0.42, 0.6, fBig) * 0.8);',
+    '  c *= mix(vec3(1.0), fC, uFieldK);',
     '  return c * (1.0 + uLawn.w * band * (0.6 * dot(vd, uLawn.xy) + 0.35));',
     '}',
     'float lawnBreak(sampler2D tex, vec2 w) {',
@@ -246,13 +260,14 @@
           (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW) * lawnFar(vMacroW, vFogWorld, cameraPosition, uSunDir);\n'
             + '  { float gm = texture2D(uGrassMask, (vMacroW - uGrassMaskB.xy) / uGrassMaskB.zw).r;\n'
             + '    diffuseColor.rgb *= mix(vec3(1.0), vec3(0.92, 0.8, 0.62), (1.0 - smoothstep(0.15, 0.75, gm)) * 0.55); }\n'
-            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);\n#ifdef USE_FOG\n  float fFar = smoothstep(110.0, 520.0, length(vFogWorld - cameraPosition));\n  if (fFar > 0.001) {\n    vec2 fW = vFogWorld.xz;\n    float fA = textureLod(uFarTex, fW / 1500.0, 2.0).g, fB = textureLod(uFarTex, fW / 530.0 + 0.4, 1.0).g;\n    vec3 fC = mix(diffuseColor.rgb, uFarLawn.rgb * (0.5 + dot(diffuseColor.rgb, vec3(1.2))), uFarLawn.a);\n    fC *= 0.64 + fA * 0.76 + smoothstep(0.34, 0.16, fB) * 0.08;\n    fC = mix(fC, fC * vec3(1.16, 1.03, 0.72), smoothstep(0.3, 0.6, fB) * uFarLawn.a);\n    fC = mix(fC, fC * vec3(0.56, 0.6, 0.54), smoothstep(0.34, 0.62, fA * 0.65 + fB * 0.5));\n    fC = mix(fC, uFarLawn.rgb * 1.5, smoothstep(650.0, 1500.0, length(vFogWorld - cameraPosition)) * uFarLawn.a * 0.7);\n    diffuseColor.rgb = mix(diffuseColor.rgb, fC, fFar);\n  }\n#endif' : ''))
+            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);\n#ifdef USE_FOG\n  float fFar = smoothstep(110.0, 520.0, length(vFogWorld - cameraPosition));\n  if (fFar > 0.001) {\n    vec2 fW = vFogWorld.xz;\n    float fA = textureLod(uFarTex, fW / 1500.0, 2.0).g, fB = textureLod(uFarTex, fW / 530.0 + 0.4, 1.0).g;\n    vec3 fC = mix(diffuseColor.rgb, uFarLawn.rgb * (0.5 + dot(diffuseColor.rgb, vec3(1.2))), uFarLawn.a);\n    fC *= 0.64 + fA * 0.76 + smoothstep(0.34, 0.16, fB) * 0.08;\n    fC = mix(fC, fC * vec3(1.16, 1.03, 0.72), smoothstep(0.3, 0.6, fB) * uFarLawn.a);\n    fC = mix(fC, fC * vec3(0.56, 0.6, 0.54), smoothstep(0.34, 0.62, fA * 0.65 + fB * 0.5));\n    fC = mix(fC, vec3(0.74, 0.68, 0.46) * (0.9 + fA * 0.3), smoothstep(650.0, 1500.0, length(vFogWorld - cameraPosition)) * uFarLawn.a * 0.6);\n    diffuseColor.rgb = mix(diffuseColor.rgb, fC, fFar);\n  }\n#endif' : ''))
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' +
           `  roughnessFactor = clamp(roughnessFactor * mix(${f(1 - mac.ramt)}, ${f(1 + mac.ramt)}, 1.0 - mcr), 0.04, 1.0);` +
           // turf is a matte tangle of blades: the photo's own 0.55 left a glassy sky sheen on it
           (mac.lawn ? `\n  roughnessFactor = max(roughnessFactor, ${f(LAWN_ROUGH)});` : ''));
       if (mac.lawn) {
         // turf is a matte tangle: no mirror-like glancing reflection off it toward a low sun
+        sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', '#include <opaque_fragment>\n#ifdef USE_FOG\n  if (uRingH.w > 0.0) { float rP = textureLod(uFarTex, vFogWorld.xz / 2300.0, 2.0).g, rQ = textureLod(uFarTex, vFogWorld.xz / 640.0 + 0.3, 1.0).g; vec3 rC = uFogCol * uFootT * (0.82 + rP * 0.2 + rQ * 0.2); rC = mix(rC, rC * vec3(0.84, 0.84, 0.8), smoothstep(0.36, 0.72, rP * 0.6 + rQ * 0.6)); rC = mix(rC, vec3(0.03, 0.042, 0.026), smoothstep(0.53, 0.62, rP * 0.7 + rQ * 0.46) * step(0.75, uRingH.w)); gl_FragColor.rgb = mix(gl_FragColor.rgb, rC, smoothstep(uRingH.z * 0.62, uRingH.z * 0.86, length(vFogWorld.xz - uRingH.xy))); }\n#endif');
         sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= 0.06 + 0.5 * diffuseColor.rgb; reflectedLight.indirectSpecular *= 0.15 + 0.6 * diffuseColor.rgb;');
         // the tufts tilt the surface: the gradient of the tuft field, in world space, into the view-space normal
         sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', [

@@ -12,7 +12,7 @@
 
   // species per look and how tall each grows for a decor radius r (metres)
   const SETS = {
-    fir: { names: ['fir_0', 'fir_1', 'fir_2'], h: r => 6 + r * 2.1 },
+    fir: { names: ['fir_0', 'fir_1', 'fir_2'], rare: 'broad4', h: r => 6 + r * 2.1 },
     quiver: { names: ['quiver'], h: r => 3.2 + r * 0.6 },
     broad: { names: ['broad1', 'broad2', 'broad4'], h: r => 5 + r * 1.55 },
   };
@@ -24,7 +24,7 @@
 
   const VERT_PARS = [
     'attribute vec4 tPos; attribute vec2 tVar;',
-    'uniform float uTAspect;',
+    'uniform float uTAspect; uniform float uTDead;',
     'varying vec2 vTUv0; varying vec2 vTUv1; varying float vTBl; varying vec2 vTAng; varying vec2 vTLoc;',
     'varying vec3 vTRight; varying vec3 vTFwd; varying vec3 vTTint;',
   ].join('\n');
@@ -47,16 +47,17 @@
     '  transformed = vec3(tPos.x, tPos.y - 0.15, tPos.z) + tRight * position.x * tW + vec3(0.0, position.y * tH, 0.0);',
     '  vTRight = tRight; vTFwd = vec3(tF.x, 0.0, tF.y);',
     '  vTTint = vec3(1.0 + tVar.y * 0.13, 1.0 + tVar.y * 0.05, 1.0 - tVar.y * 0.16) * (1.0 + tVar.y * 0.1);',
-    '  if (fract(tPos.x * 0.137 + tPos.z * 0.211) < 0.012) vTTint = vec3(1.45, 0.95, 0.6);   // here and there a dead one',
+    '  if (tVar.y < -1.5) vTTint = vec3(0.56, 0.58, 0.42);',
+    '  if (fract(tPos.x * 0.137 + tPos.z * 0.211) < uTDead) vTTint = vec3(1.45, 0.95, 0.6);   // here and there a dead one',
   ].join('\n');
   const FRAG_PARS = [
-    'uniform sampler2D uTNrm; uniform vec2 uTCrown;',
+    'uniform sampler2D uTNrm; uniform vec2 uTCrown; uniform float uTSkirt;',
     'varying vec2 vTUv0; varying vec2 vTUv1; varying float vTBl; varying vec2 vTAng; varying vec2 vTLoc;',
     'varying vec3 vTRight; varying vec3 vTFwd; varying vec3 vTTint;',
   ].join('\n');
   // (alpha from a softer level: at close range an atlas texel is several pixels and the 0.5 test
   // would show it as a staircase along every branch)
-  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl) * 1.4;';
+  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl); diffuseColor.a = smoothstep(0.22, 0.52, diffuseColor.a); if (uTSkirt > 0.5) diffuseColor.a *= mix(1.0 - smoothstep(0.06, 0.12, abs(vTLoc.x - 0.5)), 1.0, smoothstep(0.015, 0.075, vTLoc.y));';
   const FRAG_NORMAL = [
     '  vec3 tN0 = texture2D(uTNrm, vTUv0).xyz * 2.0 - 1.0, tN1 = texture2D(uTNrm, vTUv1).xyz * 2.0 - 1.0;',
     // a baked view-space normal back to world space: x along that view's right, z toward it
@@ -73,14 +74,14 @@
   // sunlight through the leaves toward the eye
   const FRAG_TRANS = [
     '  float tTr = pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 4.0);',
-    '  totalEmissiveRadiance += diffuseColor.rgb * uSunCol * tTr * 0.22 * smoothstep(uTCrown.x - uTCrown.y, uTCrown.x, vTLoc.y);',
+    '  totalEmissiveRadiance += diffuseColor.rgb * (uSunCol * tTr * 0.42 * smoothstep(uTCrown.x - uTCrown.y, uTCrown.x, vTLoc.y) + vec3(0.085, 0.115, 0.09));',
   ].join('\n');
 
   function patchLit(sh, u) {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = FRAG_PARS + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.74, 0.8, 0.72), vec3(2.05, 1.86, 1.08), smoothstep(0.02, 0.17, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
+      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.86, 1.0, 0.86), vec3(1.6, 1.5, 0.82), smoothstep(0.02, 0.17, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + FRAG_NORMAL)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_TRANS);
   }
@@ -104,7 +105,7 @@
       return t;
     };
     const color = load(s.color, true), nrm = load(s.normal, false);
-    const u = { uTAspect: { value: s.W / s.H }, uTNrm: { value: nrm }, uTCrown: { value: new THREE.Vector2(CROWN[0], CROWN[1]) } };
+    const u = { uTAspect: { value: s.W / s.H }, uTNrm: { value: nrm }, uTCrown: { value: new THREE.Vector2(CROWN[0], CROWN[1]) }, uTSkirt: { value: /^fir/.test(name) ? 1 : 0 }, uTDead: { value: /^fir/.test(name) ? 0.03 : 0.008 } };
     const lit = new THREE.MeshStandardMaterial({ map: color, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75, metalness: 0 });
     lit.userData.patchExtra = sh => patchLit(sh, u);
     lit.userData.patchKey = 'tree';
@@ -181,7 +182,7 @@
       }
       map.needsUpdate = nrm.needsUpdate = true;
     });
-    const lit = new THREE.MeshStandardMaterial({ map, normalMap: nrm, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, metalness: 0 });
+    const lit = new THREE.MeshStandardMaterial({ map, normalMap: nrm, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, color: '#8f9484' });
     return (shellMats = { lit });
   }
 
@@ -253,7 +254,7 @@
     if (deep.length && set === SETS.fir) { buildShell(root, tr, deep, names, set); items = items.filter(it => !(it.forest && it.deep)); }
     const rnd = U.rng(91), tiles = new Map();
     for (const it of items) {
-      const sp = names[Math.floor(rnd() * names.length)];
+      const sp = set.rare && rnd() < 0.08 && getSpecies(set.rare) ? set.rare : names[Math.floor(rnd() * names.length)];
       const key = sp + '|' + Math.floor(it.x / 450) + ',' + Math.floor(it.y / 450) + (it.deep ? 'd' : '');
       let t = tiles.get(key); if (!t) tiles.set(key, t = { sp, list: [], deep: !!it.deep });
       t.list.push(it);
@@ -267,7 +268,7 @@
       list.forEach((it, k) => {
         const h = set.h(it.r) * (0.72 + rnd() * 0.56);
         pos[k * 4] = it.x; pos[k * 4 + 1] = Tracks.groundAt(tr, it.x, it.y); pos[k * 4 + 2] = it.y; pos[k * 4 + 3] = h;
-        vr[k * 2] = rnd() * Math.PI * 2; vr[k * 2 + 1] = rnd() * 2 - 1;
+        vr[k * 2] = rnd() * Math.PI * 2; vr[k * 2 + 1] = sp === set.rare ? -2 : rnd() * 2 - 1;
         x0 = Math.min(x0, it.x); x1 = Math.max(x1, it.x); z0 = Math.min(z0, it.y); z1 = Math.max(z1, it.y); hMax = Math.max(hMax, h);
       });
       const g = quad();
