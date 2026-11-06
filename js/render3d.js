@@ -15,8 +15,8 @@
       ridge: ['#9c9a7a', '#6f7a52', '#515f3c'], ridgeH: 110, jag: 7 },
     lucerne: { sunEl: 55, sunAz: 160, sun: '#fff6e8', sunI: 3.2, top: '#2a70c4', hor: '#c2dcf0', bot: '#6f8a99', fog: '#c6dbea', fogN: 600, fogF: 5200, cloud: 0.28, haze: 0.7, exp: 0.92, env: 1.0,
       ridge: ['#74776a', '#4f5a46', '#3a4636'], ridgeH: 380, jag: 16 },
-    hakone: { farLawn: [0.66, 0.58, 0.27, 0.86], sunNeutral: 0.3, sunEl: 26, sunAz: 110, sun: '#ffe6c4', sunI: 3.1, top: '#4f85c6', hor: '#dfe6ea', bot: '#7d8c78', fog: '#ded9cc', fogN: 260, fogF: 5600, cloud: 0.4, haze: 0.65, exp: 1.02, env: 0.95,
-      ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 560, jag: 24, lawnDesat: 0.46 },
+    hakone: { farLawn: [0.66, 0.58, 0.27, 0.86], sunNeutral: 0.3, sunEl: 26, sunAz: 110, sun: '#ffdfb4', sunI: 3.5, top: '#4f85c6', hor: '#dfe6ea', bot: '#7d8c78', fog: '#ded9cc', fogN: 260, fogF: 5600, cloud: 0.4, haze: 0.65, exp: 1.02, env: 0.95,
+      ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 560, jag: 30, lawnDesat: 0.46 },
     rimal: { exag: 3.2, sunEl: 8, sunAz: 265, sun: '#ff9d5c', sunI: 2.8, top: '#2b3f72', hor: '#f4a466', bot: '#9a7a55', fog: '#e7b38a', fogN: 500, fogF: 5200, cloud: 0.18, haze: 1.6, exp: 1.05, env: 0.8,
       ridge: ['#d2a172', '#b88a5e', '#9c7350'], ridgeH: 60, jag: 4 },
     // (with an HDR probe the sun, sky and fog colour come from the probe; these set the rest)
@@ -3207,9 +3207,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // share under trees, line the tree line and snow the old snow line as parts of the peak height,
     // mix how far the open ground leaves the venue's own tones for this one, belt trees at the foot
     const MTN = {
-      hakone: { forA: '#1c2619', forB: '#39432a', forC: '#5a4a2c', foot: '#b3a67c', open: '#6f6d4c', rockA: '#a89478', rockB: '#514840', scree: '#ad9e88', cover: -0.02, line: 0.46, mix: 1, belt: 0, rk: [0.15, 0.36, 0.88], soft: 0.1, gully: 0.5, bump: 1.5, low: 0.52 },
+      hakone: { forA: '#1c2619', forB: '#39432a', forC: '#5a4a2c', foot: '#b3a67c', open: '#6f6d4c', rockA: '#a89478', rockB: '#514840', scree: '#ad9e88', cover: -0.02, line: 0.46, mix: 1, belt: 0, rk: [0.15, 0.36, 0.88], soft: 0.1, gully: 0.5, bump: 1.85, low: 0.46, amb: 0.68 },
       lucerne: { forA: '#142419', forB: '#28402a', open: '#7f9048', rockA: '#a3a199', rockB: '#6b6962', scree: '#b3b0a6', cover: 0.16, line: 0.55, mix: 1, belt: 1, snow: 0.9 },
-      sierra: { forA: '#2b3020', forB: '#454a2e', forC: '#5c5636', open: '#6c604b', rockA: '#8f8b82', rockB: '#5f584f', scree: '#a69c8c', cover: -0.1, line: 0.75, mix: 1, belt: 0.4, rk: [0.13, 0.34, 0.85], soft: 0.14, gully: 0.6, foot: '#6b6242' },
+      sierra: { forA: '#2b3020', forB: '#454a2e', forC: '#5c5636', open: '#6c604b', rockA: '#8f8b82', rockB: '#5f584f', scree: '#a69c8c', cover: -0.1, line: 0.75, mix: 1, belt: 0.4, rk: [0.13, 0.34, 0.85], soft: 0.14, gully: 0.6, foot: '#a39160', low: 0.34 },
       varenna: { forA: '#25351f', forB: '#3f4e2a', open: '#8f8a5c', rockA: '#a8a08e', rockB: '#6f685a', scree: '#b9b19f', cover: 0.12, line: 0.85, mix: 0.7, belt: 1 },
       nordwald: { forA: '#172519', forB: '#2a3d27', open: '#5f7344', rockA: '#7d7b74', rockB: '#55534d', scree: '#918e85', cover: 0.3, line: 0.95, mix: 1, belt: 1 },
       bahia: { forA: '#223a22', forB: '#3a5a30', open: '#7d9053', rockA: '#8f8876', rockB: '#615c50', scree: '#a59e8b', cover: 0.22, line: 0.95, mix: 1, belt: 1 },
@@ -3220,7 +3220,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // the valleys hold the trees and the rock shows where slopes are too steep to keep soil
     const hz = {
       uHaze: S3.uFogCol, uSunDir: S3.uSunDir, uSunCol: S3.uSunCol, uAmb: { value: new THREE.Color() },
-      uFootHaze: { value: C.low || 0 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
+      uFootHaze: { value: C.low || 0 }, uAmbK: { value: C.amb || 1 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
       uHazeD: { value: 10500 }, uHazeH: { value: Math.max(300, peak * 0.9) },
       uBump: { value: C.bump || (desert ? 0.42 : arid ? 1.15 : 1) }, uGully: { value: desert ? 0.3 : 0.62 },
       uRock: { value: C.rk ? new THREE.Vector3(...C.rk) : new THREE.Vector3(arid ? 0.12 : 0.3, arid ? 0.32 : 0.56, desert ? 0.5 : arid ? 0.85 : 0.7) },
@@ -3245,7 +3245,7 @@ void main() {
       fragmentShader: `#include <common>
 #include <logdepthbuf_pars_fragment>
 varying vec3 vW, vN, vC; varying float vS, vLand;
-uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFootHaze; uniform sampler2D uE, uCrown;
+uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFootHaze, uAmbK; uniform sampler2D uE, uCrown;
 const mat2 R1 = mat2(0.8, 0.6, -0.6, 0.8), R2 = mat2(0.28, -0.96, 0.96, 0.28);
 void main() {
   #include <logdepthbuf_fragment>
@@ -3294,14 +3294,14 @@ void main() {
   if (vLand < 0.5) alb = vC;
   n = normalize(n + vec3((e.r - 0.5) * 1.1 + (c.r - 0.5) * 0.6, 0.0, (e.g - 0.5) * 1.1 + (c.g - 0.5) * 0.6) * rk);   // broken faces
   float ndl = max(dot(n, uSunDir), 0.0);
-  vec3 col = alb * (uSunCol * 0.3183 * ndl * mix(0.2, 1.0, vS) + uAmb * (0.8 + 0.2 * n.y) * (1.0 - 0.55 * clamp(basin * 1.4, 0.0, 1.0)));
+  vec3 col = alb * (uSunCol * 0.3183 * ndl * mix(0.2, 1.0, vS) + uAmb * uAmbK * (0.8 + 0.2 * n.y) * (1.0 - 0.55 * clamp(basin * 1.4, 0.0, 1.0)));
   // the air: blue is scattered first, so each range is bluer than the one in front of it. Thinner
   // higher up, which is why the tops stand clear
   float d = length(vW - cameraPosition), hk = pow(d / uHazeD, 1.45) * mix(1.1, 0.7, clamp((vW.y - uBase) / uHazeH, 0.0, 1.0));
   vec3 T = exp(-hk * vec3(0.62, 0.86, 1.34));
   col = col * T + uHaze * mix(vec3(1.0), uTint, smoothstep(2000.0, 8000.0, d)) * (1.0 - T);
   // warm haze lying on the low ground of a dry valley
-  col = mix(col, uHaze, uFootHaze * (1.0 - smoothstep(uBase + 30.0, uBase + uHazeH * 0.34, vW.y)) * smoothstep(900.0, 3000.0, d));
+  col = mix(col, uHaze * vec3(1.07, 1.0, 0.86), uFootHaze * (1.0 - smoothstep(uBase + 30.0, uBase + uHazeH * 0.34, vW.y)) * smoothstep(900.0, 3000.0, d));
   // and the same valley fog as the plain in front, so no land is ever clearer than what is nearer
   float fk = uFogK * (vW.y - cameraPosition.y), fLine = abs(fk) > 1e-4 ? (1.0 - exp(-fk)) / fk : 1.0;
   gl_FragColor = vec4(mix(col, uHaze * mix(vec3(1.0), vec3(0.86, 0.94, 1.06), smoothstep(1500.0, 6000.0, d)), clamp(1.0 - exp(-uFogD * exp(-uFogK * cameraPosition.y) * d * fLine * 0.5), 0.0, 1.0)), 1.0);

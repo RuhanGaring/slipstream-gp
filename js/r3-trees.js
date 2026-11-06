@@ -80,7 +80,7 @@
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = FRAG_PARS + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.95, 1.02, 0.92), vec3(1.75, 1.62, 1.08), smoothstep(0.012, 0.1, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
+      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.74, 0.8, 0.72), vec3(2.05, 1.86, 1.08), smoothstep(0.02, 0.17, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + FRAG_NORMAL)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_TRANS);
   }
