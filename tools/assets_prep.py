@@ -155,8 +155,8 @@ card(broad + small, 'leaves.png', 900, seed=3, leaf_px=(34, 62))
 card(twigs, 'conifer.png', 520, shape='tri', seed=5, leaf_px=(70, 130))
 
 # ---- skies: equirect panoramas, 4096 x 2048 ----
-SKIES = {'kestrel': 'overcast_soil_puresky', 'varenna': 'citrus_orchard_road_puresky', 'lucerne': 'kloofendal_48d_partly_cloudy_puresky',
-         'hakone': 'sunflowers_puresky', 'rimal': 'industrial_sunset_puresky'}
+SKIES = {'kestrel': 'overcast_soil_puresky', 'varenna': 'kloofendal_43d_clear_puresky', 'lucerne': 'kloofendal_48d_partly_cloudy_puresky',
+         'hakone': 'sunflowers_puresky', 'rimal': 'qwantani_afternoon_puresky'}
 for tid, a in SKIES.items():
     im = Image.open(SRC / f'sky_{a}.jpg').convert('RGB').resize((4096, 2048), Image.LANCZOS)
     im.save(OUT / f'sky_{tid}.jpg', quality=82, optimize=True)

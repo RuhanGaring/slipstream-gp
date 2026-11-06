@@ -17,8 +17,8 @@ from PIL import Image
 
 SRC = pathlib.Path(sys.argv[1])
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SKIES = {'kestrel': 'overcast_soil_puresky', 'varenna': 'citrus_orchard_road_puresky', 'lucerne': 'kloofendal_48d_partly_cloudy_puresky',
-         'hakone': 'sunflowers_puresky', 'rimal': 'industrial_sunset_puresky',
+SKIES = {'kestrel': 'overcast_soil_puresky', 'varenna': 'kloofendal_43d_clear_puresky', 'lucerne': 'kloofendal_48d_partly_cloudy_puresky',
+         'hakone': 'sunflowers_puresky', 'rimal': 'qwantani_afternoon_puresky',
          'ileverte': 'kloofendal_38d_partly_cloudy_puresky', 'sierra': 'syferfontein_18d_clear_puresky',
          'bahia': 'qwantani_late_afternoon_puresky', 'nordwald': 'kloppenheim_06_puresky', 'lonestar': 'lonely_road_afternoon_puresky'}
 # python tools/hdr_prep.py DOWNLOAD_DIR [venue ...]: only those venues

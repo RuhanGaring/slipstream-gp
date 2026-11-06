@@ -17,7 +17,7 @@
       ridge: ['#74776a', '#4f5a46', '#3a4636'], ridgeH: 380, jag: 16 },
     hakone: { farLawn: [0.54, 0.52, 0.24, 0.74], sunNeutral: 0.3, sunEl: 26, sunAz: 110, sun: '#ffdfb4', sunI: 3.5, top: '#4f85c6', hor: '#dfe6ea', bot: '#7d8c78', fog: '#ded9cc', fogN: 260, fogF: 5600, cloud: 0.4, haze: 0.65, exp: 1.02, env: 0.95,
       ridge: ['#7c8378', '#566652', '#3b4d3e'], ridgeH: 620, jag: 26, lawnDesat: 0.3, lawnGrade: [1.8, 1.47, 1.02], fieldK: 1 },
-    rimal: { exag: 3.2, sunEl: 8, sunAz: 265, sun: '#ff9d5c', sunI: 2.8, top: '#2b3f72', hor: '#f4a466', bot: '#9a7a55', fog: '#e7b38a', fogN: 500, fogF: 5200, cloud: 0.18, haze: 1.6, exp: 1.05, env: 0.8,
+    rimal: { fogK: 2.6, exag: 3.2, sunEl: 8, sunAz: 265, sun: '#ff9d5c', sunI: 2.8, top: '#2b3f72', hor: '#f4a466', bot: '#9a7a55', fog: '#e7b38a', fogN: 500, fogF: 5200, cloud: 0.18, haze: 1.6, exp: 1.05, env: 0.8,
       ridge: ['#d2a172', '#b88a5e', '#9c7350'], ridgeH: 60, jag: 4 },
     // (with an HDR probe the sun, sky and fog colour come from the probe; these set the rest)
     ileverte: { sunEl: 38, sunAz: 140, sun: '#fff4e6', sunI: 2.8, top: '#3f7fc8', hor: '#cfe0ef', bot: '#7d9088', fog: '#c9dbe9', fogN: 600, fogF: 5200, cloud: 0.4, haze: 0.7, exp: 1.0, env: 1.0,
@@ -3163,7 +3163,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const veg = [col(L.ridge[2]), col(L.ridge[1]), col(L.ridge[0])];
     const rock = col(desert ? '#b8916a' : arid ? '#9a8a76' : '#7e7a72'), rockD = col(desert ? '#8e6c4e' : '#5d5952'), snow = col('#eef2f6');
     const snowLine = real ? 1e9 : id === 'hakone' ? peak * 0.62 : 1e9; // real places: as in the racing season, no snow
-    const c = new THREE.Color(), seaC = col('#2d5468');
+    const c = new THREE.Color(), seaC = col(desert ? '#b4c6cc' : '#2d5468');
     for (let k = 0; k < nv; k++) {
       const x = pos[k * 3], z = pos[k * 3 + 2], h = hh[k], slope = 1 - nr.getY(k), hf = h / peak;
       const n1 = vn(x / 140, z / 140), n2 = vn(x / 37, z / 37);
@@ -3215,7 +3215,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       uForA: { value: col(C.forA) }, uForB: { value: col(C.forB) }, uForC: { value: col(C.forC || C.forB) }, uFootC: { value: col(C.foot || (desert ? '#c39a6b' : '#3b5022')) }, uMeadow: { value: col(C.open) }, uRockA: { value: col(C.rockA) }, uRockB: { value: col(C.rockB) }, uScree: { value: col(C.scree) },
       uCover: { value: new THREE.Vector4(C.cover, gC + peak * C.line, C.mix, C.snow ? gC + peak * C.snow : 0) },
       uRing: { value: new THREE.Vector4(bd.cx, bd.cz, Ri, C.belt) },
-      uTint: { value: new THREE.Color(desert ? 0.86 : 0.6, desert ? 0.78 : 0.74, desert ? 0.78 : 1) }, uE: { value: T.photo('mtn', 1, false) },
+      uTint: { value: new THREE.Color(desert ? 1.14 : 0.6, desert ? 1.14 : 0.74, desert ? 1.17 : 1) }, uE: { value: T.photo('mtn', 1, false) },
     };
     hz.uE.value.flipY = false;
     S3.uFarTex.value = crownTex();
