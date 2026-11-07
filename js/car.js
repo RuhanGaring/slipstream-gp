@@ -49,6 +49,9 @@
     alphaPk: 0.105, kappaPk: 0.1, shapeC: 1.35, relax: 0.35, muRear: 1.08,
     B: 15.5, C: 1.45, // legacy lateral shape, kept for the speed planner's calibration
     pColdF: 21.5, pColdR: 19.5, pOptF: 25.5, pOptR: 23.5, camberF: -3.2, camberR: -2.0, camberGain: 0.8,
+    // the car setup's own effects (js/setup.js): static toe against the base car (rad, front out and
+    // rear in), tyre wear and heat from camber and toe, and each wheel's cold pressure if set apart
+    toeF: 0, toeR: 0, wearF: 1, wearR: 1, pCold: null, toeGain: 0,
     // suspension (wheel rates, N/m) and anti-roll bars
     kF: 220e3, kR: 190e3, cF: 6500, cR: 6000, arbF: 50e3, arbR: 95e3,
     // differential
@@ -121,7 +124,7 @@
       c.wheels.push({
         x: pos[k][0], y: pos[k][1], front, Fz: 0, alpha: 0, Fx: 0, Fy: 0, kappa: 0, omega: 0,
         slide: 0, lock: 0, spin: 0, surf: SURF.ASPHALT, temp: 85, tS: 85, tC: 85, wear: 0, wx: 0, wy: 0,
-        press: front ? spec.pColdF : spec.pColdR, camber: front ? spec.camberF : spec.camberR,
+        press: spec.pCold ? spec.pCold[k] : front ? spec.pColdF : spec.pColdR, camber: front ? spec.camberF : spec.camberR,
         brakeT: 300, bmod: 1, comp: 0, road: 0, roadPrev: 0, zw: 0,
       });
     }
@@ -443,7 +446,7 @@
       // contact patch velocity in the wheel frame
       const vxb = c.u - c.r * w.y, vyb = c.v + c.r * w.x;
       let vxw = vxb, vyw = vyb;
-      const toe = D ? (D.toe ? D.toe[k] : D.p[F1.Damage.CORNER[k]] * 0.07 * D.toeSign[k]) : 0;
+      const toe = (D ? (D.toe ? D.toe[k] : D.p[F1.Damage.CORNER[k]] * 0.07 * D.toeSign[k]) : 0) + (w.front ? sp.toeF : -sp.toeR) * Math.sign(w.y) + (w.front && sp.toeGain ? sp.toeGain * c.steer * Math.max(0, 1 - Math.abs(c.steer) / 0.15) : 0);
       let cw = cs, sw = ss;
       if (toe) { const ang = (w.front ? c.steer : 0) + toe; cw = Math.cos(ang); sw = Math.sin(ang); }
       if (w.front || toe) { vxw = vxb * cw + vyb * sw; vyw = -vxb * sw + vyb * cw; }
@@ -507,16 +510,18 @@
       if (tyreSim) {
         const vSlip = Math.hypot(w.kappa * Math.abs(vxw), vyw);
         const pSlip = Math.hypot(fx, fy) * vSlip;
-        const flex = Fz * Math.abs(vxw);
+        const pCold = sp.pCold ? sp.pCold[k] : w.front ? sp.pColdF : sp.pColdR;
+        // an under-inflated tyre flexes more, and a stiffer one less
+        const flex = Fz * Math.abs(vxw) * (1 + 0.044 * ((w.front ? SPEC.pColdF : SPEC.pColdR) - pCold)), wearK = w.front ? sp.wearF : sp.wearR;
         const warm = w.temp < c.compound.topt ? c.compound.warm : 1;
         const amb = c.ambient || 32;
-        w.tS += ((pSlip / 4200 + flex * 5e-6) * warm - (0.035 + 0.0013 * speed) * (w.tS - amb) - 0.9 * (w.tS - w.tC)) * dt;
+        w.tS += ((pSlip * wearK / 4200 + flex * 5e-6) * warm - (0.035 + 0.0013 * speed) * (w.tS - amb) - 0.9 * (w.tS - w.tC)) * dt;
         w.tC += ((flex * 8e-6) * warm + 0.45 * (w.tS - w.tC) - 0.006 * (w.tC - amb)) * dt;
         w.temp = 0.6 * w.tS + 0.4 * w.tC;
-        w.press = (w.front ? sp.pColdF : sp.pColdR) * (w.tC + 273) / 298;
+        w.press = pCold * (w.tC + 273) / 298;
         // rain tyres on a dry track overheat and chew themselves up
         const dryK = c.compound.wet ? 1 + 3.2 * Math.pow(Math.max(0, 1 - (c.wetness || 0) / 0.4), 2) : 1;
-        w.wear = Math.min(1, w.wear + pSlip * c.compound.wear * dryK * (c.wearRate || 1) * 3.0e-10 * dt * 60);
+        w.wear = Math.min(1, w.wear + pSlip * wearK * c.compound.wear * dryK * (c.wearRate || 1) * 3.0e-10 * dt * 60);
       }
       // carbon brakes: heat from braking power, cooled by airflow
       w.brakeT += (Tb * Math.abs(w.omega) / 1100 - (0.5 + 0.07 * speed) * (w.brakeT - 60) * 0.011) * dt;

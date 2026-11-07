@@ -1155,6 +1155,10 @@
     launch({ track: def.id, mode: f.mode, round: ch.round + 1 });
   }
 
+  // Car setups, one per circuit ('*': a championship's, for every round without its own)
+  const setups = () => { try { return JSON.parse(localStorage.getItem('slip_setups')) || {}; } catch (e) { return {}; } };
+  Game.carSetup = id => { const a = setups(); return F1.Setup.clean(a[id] || a['*'] || F1.Setup.BASE); };
+  Game.saveCarSetup = (id, s) => { const a = setups(); a[id] = F1.Setup.clean(s); try { localStorage.setItem('slip_setups', JSON.stringify(a)); } catch (e) { /* private window: this session only */ } };
   function cfgFromFlow(o) {
     const f = Game.flow, R = Game.raceDefaults;
     const sim = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim');
@@ -1165,6 +1169,7 @@
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
       grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists, compound: R.compound,
       ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, spectate: !!o.spectate, noGhost: o.quali != null || !!o.practice,
+      setup: sim && R.setupOn && !o.spectate && F1.Setup ? Game.carSetup(o.track) : null,
     };
   }
 

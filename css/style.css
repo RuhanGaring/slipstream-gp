@@ -349,9 +349,22 @@ body.mobile #pitpanel { bottom: auto; top: 22%; max-width: calc(100vw - 16px); }
 .dr-card.f .dn small, .dr-card.f .meta { color: #55555f; }
 
 /* option rows (race setup, settings) */
-#scr-setup .wk-body { right: 5vw; }
+#scr-setup .wk-body, #scr-carsetup .wk-body { right: 5vw; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-#scr-setup .two { grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 3vw; height: calc(100% - 68px); }
+#scr-setup .two, #scr-carsetup .two { grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 3vw; height: calc(100% - 68px); }
+#scr-carsetup .opts { overflow-y: auto; scrollbar-width: none; padding: 2px 12px 40px 0; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 60px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 60px), transparent); }
+#scr-carsetup .opt { min-height: 46px; }
+#scr-carsetup .opt.chg .on { color: var(--f1); }
+#scr-carsetup .opt.chg.f .on { color: inherit; }
+.pg-t .cs-for { display: inline-block; margin-left: 16px; font-size: 16px; font-weight: 700; font-style: normal; letter-spacing: .14em; color: var(--m-ink-3); vertical-align: middle; }
+.cs-open .cs-go { justify-self: end; padding-right: 14px; font-weight: 900; font-size: 14px; letter-spacing: .08em; }
+.cs-help { padding: 22px 22px 16px; min-height: 164px; }
+.cs-t { font-size: 24px; font-weight: 900; font-style: italic; text-transform: uppercase; line-height: 1.05; }
+.cs-help p { margin: 10px 0 0; font-size: 14px; line-height: 1.45; color: #c9c9d3; }
+.cs-rg { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-top: 12px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--m-ink-3); }
+.cs-panel .wk-grid b { text-transform: none; font-size: 15px; font-variant-numeric: tabular-nums; }
+.cs-panel .wk-grid b i { font-style: normal; font-weight: 600; font-size: 12px; color: var(--m-ink-3); }
+.cs-reset { margin-top: 10px; justify-content: center; }
 #scr-setup .opts { overflow-y: auto; scrollbar-width: none; padding: 2px 12px 40px 0; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 60px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 60px), transparent); }
 .opts { display: flex; flex-direction: column; gap: 3px; }
 .opt { display: grid; grid-template-columns: 1fr 290px; align-items: center; min-height: 52px; padding: 6px 8px 6px 18px; background: var(--carbon); cursor: pointer; transition: background .15s, color .15s; flex: none; }

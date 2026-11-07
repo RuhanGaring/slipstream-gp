@@ -779,6 +779,11 @@
     }
     if (sim) {
       add(optRow('Starting tyre', 'Auto takes what the engineer would, and rain tyres on a wet grid', ['auto', 'S', 'M', 'H'], () => R.compound, v => { R.compound = v; updSummary(); }, v => (v === 'auto' ? 'AUTO' : F1.Car.COMPOUNDS[v].name)), 'Car');
+      if (kind !== 'spectate') {
+        add(optRow('Car setup', 'Default is the balanced setup the whole field runs. Custom runs your own', [false, true], () => !!R.setupOn, v => { R.setupOn = v; updSummary(); }, v => (v ? 'CUSTOM' : 'DEFAULT')));
+        const ed = h('div', 'opt cs-open', '<div class="on">Edit car setup<small>Wings, differential, geometry, suspension, brakes, tyres</small></div><div class="cs-go">OPEN &#9654;</div>');
+        add({ el: ed, activate: () => { R.setupOn = true; go('carsetup'); } });
+      }
       if (kind !== 'tt') add(optRow('Weather', 'Dry, light or heavy rain, or a changeable day', ['dry', 'light', 'heavy', 'mixed'], () => R.weather || 'dry', v => { R.weather = v; updSummary(); }, v => v.toUpperCase()), 'Conditions');
       if (kind !== 'tt') add(optRow('Safety car', 'A crash can bring it out', ['on', 'off', 'always'], () => R.safetyCar || 'on', v => { R.safetyCar = v; }, v => v.toUpperCase()));
       if (kind !== 'tt') add(optRow('Mandatory pit stop', 'Use two compounds in races of 5 laps or more', [true, false], () => R.mandatory !== false, v => { R.mandatory = v; }, v => (v ? 'ON' : 'OFF')));
@@ -813,6 +818,7 @@
           ${kind !== 'tt' ? `<div><span>Distance</span><b>${R.laps} laps</b></div><div><span>${kind === 'spectate' ? 'Field' : 'Opponents'}</span><b>${kind === 'spectate' ? R.field : R.field - 1}, ${Data.DIFFICULTY[R.difficulty].name.toLowerCase()}</b></div>` : ''}
           ${sim ? `<div><span>Tyre</span><b class="c-${R.compound}">${R.compound === 'auto' ? 'auto' : F1.Car.COMPOUNDS[R.compound].name.toLowerCase()}</b></div>` : ''}
           ${sim && kind !== 'tt' ? `<div><span>Weather</span><b>${wx}</b></div>` : ''}
+          ${sim && kind !== 'spectate' ? `<div><span>Car setup</span><b>${R.setupOn ? 'Custom' : 'Default'}</b></div>` : ''}
         </div>`;
       const cv = info.querySelector('canvas');
       if (cv) requestAnimationFrame(() => drawTrackMap(cv, peek(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
@@ -820,6 +826,78 @@
     updSummary();
     return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1, pickable: false,
       primary: { label: kind === 'tt' ? 'START SESSION' : kind === 'champ' ? 'START CHAMPIONSHIP' : kind === 'weekend' ? 'START WEEKEND' : kind === 'spectate' ? 'START WATCHING' : 'START RACE', fn: () => F1.Game.startFromFlow() } };
+  };
+
+  // ---------- car setup ----------
+  // The setup screen of an F1 game: the same fields in the same units, and each one drives the car
+  // model (js/setup.js). A setup belongs to its circuit (a championship shares one) and saves as it
+  // is changed. The panel explains the field in focus and shows what the whole setup comes to.
+  S.carsetup = () => {
+    const G = F1.Game, St = F1.Setup, flow = G.flow, R = G.raceDefaults, key = flow.kind === 'champ' ? '*' : flow.track;
+    const def = key === '*' ? null : F1.Tracks.byId(key);
+    const t = Data.TEAMS[flow.team || 0], spec = Object.assign({}, F1.Car.SPEC, { ClA: F1.Car.SPEC.ClA * t.aero, CdA: F1.Car.SPEC.CdA * (1 - (t.aero - 0.96) * 0.5) });
+    const cur = G.carSetup(key);
+    const el = h('div', 'wk');
+    el.appendChild(header('setup'));
+    const wrap = h('div', 'wk-body stage');
+    wrap.innerHTML = `<h1 class="pg-t">Car setup</h1>`;
+    const two = h('div', 'two'), opts = h('div', 'opts'), sum = h('div', 'weekend');
+    const items = [], rows = [];
+    const panel = h('div', 'wk-info cs-panel');
+    const sameAs = id => { const p = St.preset(id); return St.FIELDS.every(f => Math.abs(p[f.k] - cur[f.k]) < 1e-6); };
+    const fmtOf = f => v => v.toFixed(f.dp) + f.unit;
+    let focusF = null;
+    const pct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+    function paint() {
+      const r = St.readout(spec, cur), f = focusF;
+      panel.innerHTML = `<div class="cs-help"><div class="cs-t">${f ? f.name : 'Setup'}</div><p>${f ? f.desc : 'Load a starting point, then change one thing at a time. The field keeps the balanced car.'}</p>
+          ${f ? `<div class="cs-rg"><span>Range ${f.min.toFixed(f.dp)} to ${f.max.toFixed(f.dp)}${f.unit}</span><span>Balanced ${f.base.toFixed(f.dp)}${f.unit}</span></div>` : ''}</div>
+        <div class="wk-grid">
+          <div><span>Downforce, 250 km/h</span><b>${r.down.toFixed(1)} kN <i>${pct(r.downPct)}</i></b></div>
+          <div><span>Drag, 250 km/h</span><b>${r.drag.toFixed(1)} kN <i>${pct(r.dragPct)}</i></b></div>
+          <div><span>Top speed</span><b>${Math.round(r.top)} km/h</b></div>
+          <div><span>Rake</span><b>${r.rake.toFixed(0)} mm</b></div>
+          <div><span>Aero balance</span><b>${r.bal.toFixed(1)}% front</b></div>
+          <div><span>Roll stiffness</span><b>${r.mech.toFixed(1)}% front</b></div>
+          <div><span>Peak brake force</span><b>${r.brake.toFixed(1)} kN</b></div>
+          <div><span>Hot pressure F / R</span><b>${r.hotF.toFixed(1)} / ${r.hotR.toFixed(1)} psi</b></div>
+        </div>`;
+      for (const q of rows) { q.row.el.classList.toggle('chg', Math.abs(cur[q.f.k] - q.f.base) > 1e-6); }
+    }
+    const changed = () => { G.saveCarSetup(key, cur); R.setupOn = true; paint(); };
+    const preset = optRow('Starting point', 'Load a preset, then adjust it', ['custom', ...Object.keys(St.PRESETS)], () => Object.keys(St.PRESETS).find(sameAs) || 'custom', v => {
+      if (v !== 'custom') Object.assign(cur, St.preset(v));
+      rows.forEach(q => q.row.render()); changed();
+    }, v => (v === 'custom' ? 'CUSTOM' : St.PRESETS[v].name.toUpperCase()));
+    preset.onFocus = () => { focusF = null; paint(); };
+    opts.appendChild(preset.el); items.push(preset);
+    for (const g of St.GROUPS) {
+      opts.appendChild(h('div', 'opt sec', g));
+      for (const f of St.FIELDS.filter(x => x.group === g)) {
+        const row = optRow(f.name, '', fineRange(f.min, f.max, f.step), () => cur[f.k], v => { cur[f.k] = v; preset.render(); changed(); }, fmtOf(f));
+        row.onFocus = () => { focusF = f; paint(); };
+        // a mouse or a finger can drag along the bar
+        const bar = row.el.querySelector('.pips');
+        const vals = fineRange(f.min, f.max, f.step);
+        const pick = e => { const b = bar.getBoundingClientRect(), k = Math.round(Math.max(0, Math.min(1, (e.clientX - b.left) / b.width)) * (vals.length - 1)); cur[f.k] = vals[k]; row.render(); preset.render(); changed(); };
+        if (vals.length > 12) { bar.style.cursor = 'pointer'; bar.addEventListener('pointerdown', e => { bar.setPointerCapture(e.pointerId); pick(e); bar.onpointermove = pick; }); bar.addEventListener('pointerup', () => { bar.onpointermove = null; }); }
+        opts.appendChild(row.el); items.push(row); rows.push({ row, f });
+      }
+    }
+    const reset = h('div', 'btn cs-reset', '<span>Reset to balanced</span>');
+    const done = h('div', 'btn go', '<span>Done</span><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg></span>');
+    sum.appendChild(panel); sum.appendChild(reset); sum.appendChild(done);
+    teamVars(sum, t);
+    two.appendChild(opts); two.appendChild(sum);
+    wrap.appendChild(two);
+    if (def) wrap.querySelector('.pg-t').insertAdjacentHTML('beforeend', `<small class="cs-for">${def.name}</small>`);
+    else wrap.querySelector('.pg-t').insertAdjacentHTML('beforeend', '<small class="cs-for">Every round</small>');
+    el.appendChild(wrap);
+    items.push({ el: reset, activate: () => { Object.assign(cur, St.preset('balanced')); rows.forEach(q => q.row.render()); preset.render(); changed(); } });
+    items.push({ el: done, activate: () => go('setup') });
+    el.appendChild(foot([['&#8593;&#8595;', 'Select'], ['&#8592;&#8594;', 'Change'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
+    paint();
+    return { el, items, back: () => go('setup'), focus: 1, pickable: false, primary: { label: 'DONE', fn: () => go('setup') } };
   };
 
   // ---------- settings draft and APPLY ----------

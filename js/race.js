@@ -195,6 +195,8 @@
     for (const r of field) {
       const isPlayer = r === roster[pIdx];
       const spec = teamSpec(r.team);
+      // the player's own setup, in simulation mode, when they asked for one
+      if (isPlayer && sim && cfg.setup && F1.Setup) Object.assign(spec, F1.Setup.apply(Object.assign({}, Car.SPEC, spec), cfg.setup));
       // the whole field runs with the player's damage setting
       const dmgMode = (cfg.assists || {}).damage;
       const assists = isPlayer ? Object.assign({}, cfg.assists || {}) : { abs: true, tc: 1, autoGear: true, stability: 0, steerAssist: 1, gripMul: 1, damage: dmgMode === 'full' ? 'full' : dmgMode !== false };

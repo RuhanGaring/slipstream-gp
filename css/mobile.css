@@ -20,7 +20,7 @@ body.compact .scr .btn.go { display: none; } /* the bar carries it */
 /* screens scroll as one column */
 body.compact .scr { overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
 body.compact .scr::-webkit-scrollbar { display: none; }
-body.compact .wk-body, body.compact #scr-setup .wk-body, body.compact #scr-mode .wk-body, body.compact .tm .wk-body { position: relative; left: auto; right: auto; top: auto; bottom: auto; width: auto;
+body.compact .wk-body, body.compact #scr-setup .wk-body, body.compact #scr-carsetup .wk-body, body.compact #scr-mode .wk-body, body.compact .tm .wk-body { position: relative; left: auto; right: auto; top: auto; bottom: auto; width: auto;
   padding: 62px max(14px, env(safe-area-inset-right)) 92px max(14px, env(safe-area-inset-left)); }
 body.compact .menu-wrap, body.compact #scr-settings .menu-wrap, body.compact #scr-controls .menu-wrap, body.compact #scr-gfxadv .menu-wrap,
 body.compact #scr-results .menu-wrap, body.compact #scr-standings .menu-wrap, body.compact #scr-pause .menu-wrap {
@@ -90,8 +90,8 @@ body.compact .dr-card .meta { margin-top: 4px; font-size: 11px; }
 body.compact #shade.on.show { background: rgba(8, 8, 12, .72); }
 
 /* race setup and settings: option rows a thumb can work */
-body.compact .two, body.compact #scr-setup .two { display: flex; flex-direction: column; gap: 14px; height: auto; }
-body.compact #scr-setup .opts { overflow: visible; padding: 0; -webkit-mask-image: none; mask-image: none; }
+body.compact .two, body.compact #scr-setup .two, body.compact #scr-carsetup .two { display: flex; flex-direction: column; gap: 14px; height: auto; }
+body.compact #scr-setup .opts, body.compact #scr-carsetup .opts { overflow: visible; padding: 0; -webkit-mask-image: none; mask-image: none; }
 body.compact .opt { grid-template-columns: minmax(0, 1fr) minmax(150px, 46%); min-height: 54px; padding: 6px 6px 6px 14px; }
 body.compact .opt .on { font-size: 14px; }
 body.compact .opt .on small { font-size: 11px; }
