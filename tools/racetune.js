@@ -4,7 +4,7 @@
 // usage: node tools/racetune.js [passes]     verify: node tools/racetune.js check '{"trafK":0.99}' [seedBase]
 const { Worker, isMainThread, workerData, parentPort } = require('worker_threads');
 const os = require('os');
-const TRACKS = ['kestrel', 'hakone', 'bahia', 'sierra', 'lonestar'], DIFFS = [2, 4];
+const TRACKS = process.env.TRACKS ? process.env.TRACKS.split(',') : ['kestrel', 'hakone', 'bahia', 'sierra', 'lonestar'], DIFFS = [2, 4];
 if (!isMainThread) {
   const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js']);
   const base = Object.assign({}, F1.AI.P), DT = 1 / 240;
