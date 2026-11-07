@@ -732,7 +732,7 @@
       const lineMode = race.mode === 'arcade' ? Game.raceDefaults.lineArcade : Game.raceDefaults.lineSim;
       if (!race.assistProf) {
         const handling = race.handling === 'arcade' || race.mode === 'arcade' ? 'arcade' : 'sim';
-        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', 0.94 * (handling === 'arcade' ? 1.12 : 1)));
+        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', handling === 'arcade' ? 0.94 * 1.12 : 1));
       }
       if (!race.cornerMarks) race.cornerMarks = F1.Raceline.cornerMarks(race.track, race.track.line, race.assistProf);
       assist = { tr: race.track, car: p, mode: lineMode, prof: race.assistProf, marks: race.cornerMarks };
@@ -795,10 +795,10 @@
     const p = race.player;
     if (p && mode !== 'tv' && mode !== 'show') {
       const lineMode = race.mode === 'arcade' ? Game.raceDefaults.lineArcade : race.mode === 'tt' ? Game.raceDefaults.lineSim : Game.raceDefaults.lineSim;
-      // braking cues follow the limits the AI learned, with a small margin for a human
+      // braking cues show the plan the fastest AI really drives
       if (!race.assistProf) {
         const handling = race.handling === 'arcade' || race.mode === 'arcade' ? 'arcade' : 'sim';
-        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', 0.94 * (handling === 'arcade' ? 1.12 : 1)));
+        race.assistProf = F1.Raceline.speedProfile(race.track, race.track.line, p.spec, Race.planOpts(race.track, handling !== 'arcade', handling === 'arcade' ? 0.94 * 1.12 : 1));
       }
       if (!race.cornerMarks) race.cornerMarks = F1.Raceline.cornerMarks(race.track, race.track.line, race.assistProf);
       Render.drawAssistLine(ctx, race.track, p, lineMode, race.assistProf, race.cornerMarks);

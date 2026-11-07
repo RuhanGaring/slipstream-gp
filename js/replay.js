@@ -110,6 +110,31 @@
   };
   Recorder.prototype.raceAt = function (f, i) { const p = this.at(f); return p.R[p.k * NR + i]; };
 
+  // ---------- saving a session for analysis ----------
+  // Everything the recorder holds, every car at twenty samples a second, as a file the player can
+  // keep and tools can read: who was in the race, the lap times, and the samples (little-endian
+  // 32-bit floats, base64: frames x cars x NF). tools/raceread.js compares the player with the AI.
+  Recorder.prototype.exportData = function (extra) {
+    const race = this.race, n = this.count(), car = this.n * NF, A = new Float32Array(n * car), R = new Float32Array(n * NR);
+    this.chunks.forEach((c, i) => { const m = Math.min(CHUNK, n - i * CHUNK); if (m > 0) { A.set(c.subarray(0, m * car), i * CHUNK * car); R.set(this.rchunks[i].subarray(0, m * NR), i * CHUNK * NR); } });
+    const b64 = a => { const u = new Uint8Array(a.buffer), parts = []; for (let i = 0; i < u.length; i += 0x8000) parts.push(String.fromCharCode.apply(null, u.subarray(i, i + 0x8000))); return btoa(parts.join('')); };
+    return Object.assign({
+      v: 1, track: race.track.id, trackName: race.track.name, mode: race.mode, sim: !!race.sim, laps: race.laps, hz: HZ, frames: n, nf: NF, nr: NR,
+      fields: ['x', 'y', 'h', 'speed', 'u', 'steer', 'zh', 'pitch', 'roll', 'ax', 'ay', 'rpm', 'gear', 's', 'd', 'throttle', 'brake', 'flags', 'compound', 'pos', 'lap', 'soc', 'dist'],
+      player: race.player ? race.player.id : -1,
+      cars: race.cars.map(c => ({ id: c.id, code: c.driver.code, name: c.driver.last, team: c.team.name, skill: c.driver.skill, player: !!c.isPlayer, pace: c.profPace, lapTimes: (c.lapTimes || []).map(l => ({ t: l.t, valid: l.valid, secs: l.secs, comp: l.comp })), best: c.bestLap, finish: c.finishTime, pos: c.pos, pits: c.pitStops, retired: !!c.retired, tyres: c.tyreHist, assist: c.isPlayer ? c.assist : undefined })),
+      events: this.events, samples: b64(A), race_samples: b64(R),
+    }, extra || {});
+  };
+  function saveRace(race, extra) {
+    if (!race || !race.rec) return false;
+    const d = new Date(), p = x => String(x).padStart(2, '0'), name = `slipstream-race-${race.track.id}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(race.rec.exportData(extra))], { type: 'application/json' })), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return name;
+  }
+
   // ---------- playback ----------
   function Player(rec) {
     this.rec = rec; this.race = rec.race;
@@ -228,5 +253,5 @@
     if (race.sc && sr.sc) Object.assign(race.sc, sr.sc);
   };
 
-  F1.Replay = { HZ, Recorder, Player };
+  F1.Replay = { HZ, Recorder, Player, saveRace };
 })(typeof window !== 'undefined' ? window : globalThis);

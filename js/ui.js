@@ -1476,7 +1476,7 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT TO MENU' : 'QUIT WEEKEND', sure(() => F1.Game.quitToMenu())]] : [[o.race.mode === 'tt' ? 'END SESSION' : F1.Game.flow.kind === 'spectate' ? 'STOP WATCHING' : 'QUIT TO MENU', o.race.mode === 'tt' || F1.Game.flow.kind === 'spectate' ? () => F1.Game.quitToMenu() : sure(() => F1.Game.quitToMenu())]])];
+    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())], ['SAVE RACE DATA', e => { e.textContent = F1.Replay.saveRace(F1.Game.race, { difficulty: F1.Game.raceDefaults.difficulty }) ? 'SAVED TO DOWNLOADS' : 'NOTHING TO SAVE'; }]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT TO MENU' : 'QUIT WEEKEND', sure(() => F1.Game.quitToMenu())]] : [[o.race.mode === 'tt' ? 'END SESSION' : F1.Game.flow.kind === 'spectate' ? 'STOP WATCHING' : 'QUIT TO MENU', o.race.mode === 'tt' || F1.Game.flow.kind === 'spectate' ? () => F1.Game.quitToMenu() : sure(() => F1.Game.quitToMenu())]])];
     const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: () => fn(e) }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
@@ -1531,6 +1531,7 @@
     if (champ) mk('CONTINUE', () => F1.Game.champContinue());
     else { mk(F1.Game.flow.kind === 'spectate' ? 'WATCH ANOTHER' : 'RACE AGAIN', () => F1.Game.restart()); mk('MAIN MENU', () => F1.Game.quitToMenu()); }
     if (F1.Game.canReplay()) mk('WATCH REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToResults(() => go('results', o))));
+    if (F1.Game.canReplay()) mk('SAVE RACE DATA', () => { const b = items[items.length - 1].el.querySelector('span'); b.textContent = F1.Replay.saveRace(F1.Game.race, { difficulty: F1.Game.raceDefaults.difficulty }) ? 'SAVED TO DOWNLOADS' : 'NOTHING TO SAVE'; });
     wrap.appendChild(acts);
     el.appendChild(wrap);
     return tableKeys(tbl, { el, items, nav: 'h' });

@@ -232,6 +232,15 @@
       if (fwdI(m.brake, m.turnIn) > fwdI(m.brake, m.apex) || used.has(m.brake)) { m.brake = -1; continue; }
       used.add(m.brake);
     }
+    // the bar goes where the fastest driver was measured going for the pedal (tools/brakemarks.js),
+    // which is later than where the plan starts to fall: the speed comes off slowly at first
+    const on = G.F1.Limits && G.F1.Limits[tr.id] && G.F1.Limits[tr.id].simOn;
+    if (on) for (const m of out) {
+      if (m.brake < 0) continue;
+      let best = -1, bd = 1e9;
+      for (const s of on) { const d = fwdI(m.brake, Math.round(s / ds) % N) * ds; if (d < 130 && d < bd) { bd = d; best = Math.round(s / ds) % N; } }
+      if (best >= 0 && fwdI(best, m.apex) < fwdI(m.brake, m.apex)) m.brake = best;
+    }
     return out;
   }
 
