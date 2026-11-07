@@ -968,6 +968,7 @@
     add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; touched(); }, v => v.toUpperCase()));
     add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', fineRange(0.25, 2.5, 0.05), () => st.tSens || 1, v => { st.tSens = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', fineRange(0.25, 2.5, 0.05), () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Road feel', 'The car shakes and nods over the road surface', [0, 0.6, 1, 1.5], () => (st.roadFeel == null ? 1 : st.roadFeel), v => { st.roadFeel = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1: 'NORMAL', 1.5: 'STRONG' })[v]));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; touched(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; touched(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
@@ -1128,7 +1129,7 @@
     const g = h('div', 'ctl-grid');
     const touchRows = compact() ? `<div class="crumbs" style="margin-top:6px">TOUCH</div>${rows([['Steer', 'LEFT PAD'], ['Gas / brake', 'RIGHT PEDALS'], ['Overtake / pit', 'OVT PIT'], ['Camera / pause', 'CAM II']])}` : '';
     g.innerHTML = `<div>${touchRows}<div class="crumbs" style="margin-top:${compact() ? 22 : 6}px">DRIVING</div>${rows([['Throttle', 'W &#8593;'], ['Brake / reverse', 'S &#8595;'], ['Steer', 'A D'], ['Overtake mode (simulation)', 'SPACE'], ['Shift up / down (manual)', 'E Q'], ['Pit strategy (simulation)', 'P'], ['Reset car (arcade)', 'R']])}</div>
-      <div><div class="crumbs" style="margin-top:6px">GENERAL</div>${rows([['Pause', 'ESC'], ['Camera mode', 'C'], ['Zoom near / standard / far', 'Z'], ['Mouse steering on / off', 'RMB'], ['Mute', 'M'], ['Hide HUD', 'H'], ['Menu select', 'ENTER'], ['Back', 'ESC']])}
+      <div><div class="crumbs" style="margin-top:6px">GENERAL</div>${rows([['Pause', 'ESC'], ['Camera mode', 'C'], ['Tilt camera', '- / +'], ['Turn camera', '[ / ]'], ['Reset camera angle', '\\'], ['Zoom near / standard / far', 'Z'], ['Mouse steering on / off', 'RMB'], ['Mute', 'M'], ['Hide HUD', 'H'], ['Menu select', 'ENTER'], ['Back', 'ESC']])}
       <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Pause', 'START']])}
       <div class="crumbs" style="margin-top:22px">RACING WHEEL</div>${rows([['Calibrate, map buttons, force feedback', 'WHEEL SETTINGS']])}</div>`;
     wrap.appendChild(g);

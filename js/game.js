@@ -201,7 +201,19 @@
     Audio.init();
     onKey(e.code, e.repeat);
   });
-  window.addEventListener('keyup', e => { keys.delete(e.code); if (F1.Viewer) F1.Viewer.keyUp(e.code); });
+  window.addEventListener('keyup', e => { keys.delete(e.code); if (F1.Viewer) F1.Viewer.keyUp(e.code); if (camSaved && CAM_KEYS.has(e.code)) { camSaved = false; Game.saveSettings(); } });
+  // the player's own angle for each camera, held keys for a smooth move, kept between races
+  const CAM_KEYS = new Set(['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'BracketLeft', 'BracketRight']);
+  let camSaved = false, camNow = 'chase';
+  function camKeys(m, dt) {
+    camNow = m;
+    if (Game.state !== 'race' || Game.paused) return;
+    const tilt = (keys.has('Equal') || keys.has('NumpadAdd') ? 1 : 0) - (keys.has('Minus') || keys.has('NumpadSubtract') ? 1 : 0), turn = (keys.has('BracketRight') ? 1 : 0) - (keys.has('BracketLeft') ? 1 : 0);
+    if (!tilt && !turn) return;
+    const all = Game.settings.camAdj || (Game.settings.camAdj = {}), a = all[m] || (all[m] = { p: 0, y: 0 });
+    a.p = Math.max(-0.7, Math.min(0.7, a.p + tilt * 0.35 * dt)); a.y = Math.max(-1.2, Math.min(1.2, a.y + turn * 0.5 * dt));
+    camSaved = true;
+  }
   window.addEventListener('blur', () => { keys.clear(); if (Game.state === 'race' && !Game.paused) pause(); });
   // (a phone counts the end of a tap as the gesture that may start sound, not the start)
   window.addEventListener('pointerup', () => Audio.init());
@@ -298,6 +310,7 @@
   }
   function onKey(code, repeat) {
     if (code === 'F9') { graphicsReport(); return; }
+    if (code === 'Backslash' && Game.state === 'race' && Game.settings.camAdj) { delete Game.settings.camAdj[camNow]; Game.saveSettings(); return; }
     if (code === 'KeyM') { Game.muted = !Game.muted; Audio.setVolumes({ master: Game.muted ? 0 : Game.settings.master }); return; }
     // watching a replay: Esc goes back, everything else is the viewer's
     if (Game.state === 'replay') {
@@ -742,6 +755,7 @@
     const RP = Game.state === 'replay' && Game.replay;
     if (vw && RP) vw.focus = RP.view(vw.focus);
     const camMode = vw ? vw.mode : mode === 'tv' || mode === 'show' ? mode : Game.settings.camera;
+    camKeys(camMode, dt);
     const focus = vw ? vw.focus : mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
     const step = ZOOM_STEPS[Game.settings.zoomStep == null ? 1 : Game.settings.zoomStep] || ZOOM_STEPS[1];
     R3.render({

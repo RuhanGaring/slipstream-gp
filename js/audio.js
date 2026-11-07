@@ -105,6 +105,8 @@
     // a little less bass than a studio microphone would give: onboard cameras carry small
     // capsules that are lighter in the low end (a gentle shelf, nothing removed)
     const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = 240; shelf.gain.value = -2;
+    // and a notch for the boom around 100 Hz, used only by the cameras on the car's outside
+    const boom = ctx.createBiquadFilter(); boom.type = 'peaking'; boom.frequency.value = 105; boom.Q.value = 0.9; boom.gain.value = 0;
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
     if (A.worklet) {
@@ -118,12 +120,12 @@
     if (!node) {
       legacy = legacyEngine(cheap); node = legacy.out;
     }
-    node.connect(shelf); shelf.connect(eq); eq.connect(lp); lp.connect(out);
+    node.connect(shelf); shelf.connect(boom); boom.connect(eq); eq.connect(lp); lp.connect(out);
     if (pan) { out.connect(pan); pan.connect(dest || A.sfx); } else out.connect(dest || A.sfx);
     out.connect(A.verbIn);
     const roomSend = ctx.createGain(); roomSend.gain.value = 0.1;
     out.connect(roomSend); roomSend.connect(A.roomIn);
-    return { node, legacy, out, lp, eq, shelf, pan, roomSend, last: {} };
+    return { node, legacy, out, lp, eq, shelf, boom, pan, roomSend, last: {} };
   }
   // send parameters (only when they change enough)
   function setVoice(v, o) {
@@ -381,7 +383,12 @@
     const engLvl = (onboard ? 0.95 : 0.82) * far;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
     R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
-    R.engine.shelf.gain.setTargetAtTime(onboard ? -3 : -2, t, 0.2);
+    // the small capsules on the car's outside (T-cam, nose, sidepod) hear far less bass than the driver
+    // does; the cockpit and helmet views keep their fuller sound
+    const camMic = mode === 'tcam' || mode === 'nose' || mode === 'side';
+    R.engine.shelf.gain.setTargetAtTime(camMic ? -13 : onboard ? -3 : -2, t, 0.2);
+    R.engine.boom.gain.setTargetAtTime(camMic ? -10 : 0, t, 0.2);
+    R.engine.shelf.frequency.setTargetAtTime(camMic ? 340 : 240, t, 0.2);
     // the engine's faint room: a touch more on board, where the dry low end is closest
     R.engine.roomSend.gain.setTargetAtTime(onboard ? 0.14 : 0.1, t, 0.3);
     const air = onboard ? (mode === 'tcam' ? 15000 : 9000) : Math.max(1500, 15000 / (1 + me.d / 60)) * (me.fwd < -0.3 ? 0.75 : 1);

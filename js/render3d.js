@@ -3430,6 +3430,40 @@ void main() {
   let _vsg = null;
   function velShadowGeo() { if (!_vsg) { _vsg = new THREE.PlaneGeometry(8, 3.9); _vsg.rotateX(-Math.PI / 2); _vsg.translate(0, 0.03, 0); } return _vsg; }
 
+  // Road feel. No road is flat: a car rides small swells and ripples, and a real onboard shows the
+  // whole chassis nodding and shivering over them. The height of the road is a fixed noise along the
+  // circuit, so every car rides the same bumps at the same spot; the front and rear axles each read
+  // it where they are, which is what tips the car nose to tail, and the two sides do the same for
+  // roll. Stronger on kerbs, run-off, grass and gravel, and on a street circuit. It moves the drawn
+  // car and the cameras on it, never the physics, so it costs the AI and the lap times nothing.
+  const ROUGH = []; ROUGH[0] = 1; ROUGH[1] = 2.6; ROUGH[2] = 1.5; ROUGH[3] = 4; ROUGH[4] = 6; ROUGH[5] = 0.8; ROUGH[6] = 1;
+  const rnd1 = i => { const x = Math.sin(i * 127.1 + 11.3) * 43758.5453; return x - Math.floor(x); };
+  const noise1 = x => { const i = Math.floor(x), f = x - i, t = f * f * (3 - 2 * f), a = rnd1(i), b = rnd1(i + 1); return (a + (b - a) * t) * 2 - 1; };
+  // metres of road height at distance s along the lap, on side lane
+  const roadH = (s, lane) => noise1(s / 5.5 + lane) * 0.0072 + noise1(s / 1.6 + lane * 2.3) * 0.0038 + noise1(s / 0.42 + lane * 4.1) * 0.0015;
+  function roadFeel(c, ud, body, dt) {
+    const k0 = F1.Game && F1.Game.settings && F1.Game.settings.roadFeel != null ? F1.Game.settings.roadFeel : 1, W = c.wheels;
+    body.userData.feelP = body.userData.feelR = 0; // (what the helmet rides, r3-car updateHead)
+    if (!k0 || !c.loc || !W || W.length !== 4) return;
+    const dx = c.x - camera.position.x, dz = c.y - camera.position.z;
+    if (dx * dx + dz * dz > 22500) return; // (past 150 m it cannot be seen)
+    const tr = state.tr, wb = (c.spec && c.spec.wb) || 3.6, s = c.loc.s, v = Math.abs(c.u || 0);
+    const street = tr && tr.def && tr.def.style === 'street' ? 1.35 : 1, k = k0 * street * Math.min(1, v / 40);
+    const rF = (ROUGH[W[0].surf] + ROUGH[W[1].surf]) / 2 || 1, rR = (ROUGH[W[2].surf] + ROUGH[W[3].surf]) / 2 || 1;
+    const hF = roadH(s + wb * 0.55, 0) * rF * k, hR = roadH(s - wb * 0.45, 0) * rR * k;
+    const hL = (roadH(s, 3) * (ROUGH[W[0].surf] + ROUGH[W[2].surf]) / 2 || 0) * k, hS = (roadH(s, 7) * (ROUGH[W[1].surf] + ROUGH[W[3].surf]) / 2 || 0) * k;
+    // the springs and tyres take the sharp edge off what reaches the chassis
+    const a = Math.min(1, dt * 110);
+    // (it comes in waves: quiet, then busy, about a second from one to the next, whatever the speed)
+    ud.feelT = (ud.feelT || 0) + dt;
+    const rough = noise1(ud.feelT * 1.9 + c.id * 7.3), g = Math.max(0, Math.min(1, (rough + 0.1) / 0.45)), big = 0.3 + 1.5 * g * g * (3 - 2 * g);
+    ud.feelP = (ud.feelP || 0) + ((hF - hR) / wb * big - (ud.feelP || 0)) * a;
+    ud.feelR = (ud.feelR || 0) + ((hS - hL) / 1.6 * 0.25 - (ud.feelR || 0)) * a; // (a stiff car on wide tyres mostly nods: far less side to side)
+    ud.feelH = (ud.feelH || 0) + ((hF + hR) * 0.5 * (0.5 + 0.5 * big) - (ud.feelH || 0)) * a;
+    body.rotation.z += ud.feelP; body.rotation.x += ud.feelR; body.position.y += ud.feelH;
+    body.userData.feelP = ud.feelP; body.userData.feelR = ud.feelR;
+  }
+
   let frameNo = 0;
   const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
   let focusCar = null, camMode = '';
@@ -3457,6 +3491,7 @@ void main() {
       body.rotation.z = pr + (c.pitch || 0);
       body.rotation.x = rr + (c.roll || 0);
       ud.ground.rotation.set(rr, 0, pr);
+      roadFeel(c, ud, body, dt);
       const PW = c.wheels && c.wheels.length === 4 ? c.wheels : null;
       bu.wheels.forEach((w, k) => {
         const pw = PW && PW[k], wd = w.userData;
@@ -3720,6 +3755,7 @@ void main() {
   const C = { yaw: 0, mode: '', look: V(0, 0, 0), tv: null, fov: 60, last: null };
   // (free, top, map, heli, blimp, orbit, nose and side are the replay and spectator cameras)
   const MODES = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'tv', 'orbit', 'show', 'free', 'top', 'map', 'heli', 'blimp', 'nose', 'side'];
+  const CAM_LAG = 0.06; // seconds the camera's road nod runs behind the car
   const ON_CAR = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'nose', 'side']; // cameras on or just behind a car
   const V2S = new THREE.Vector2();
   function setFov(f, dt, snap) {
@@ -3903,6 +3939,18 @@ void main() {
       camera.position.x += (Math.random() - 0.5) * o.shake * 0.12;
       camera.position.y += (Math.random() - 0.5) * o.shake * 0.08;
     }
+    // the camera feels the road too: the same nod as the chassis, at its rate, a little smaller, and
+    // a beat late (a true delay, not smoothing, so it keeps every bump as sharp as the car's)
+    if (ON_CAR.includes(mode)) {
+      const fo = live.get(o.focus), Q = C.feelQ || (C.feelQ = []);
+      C.feelT = (C.feelT || 0) + (o.dt || 0);
+      if (o.dt > 0 || !Q.length) Q.push(C.feelT, fo && fo.userData.feelP ? fo.userData.feelP : 0); // (not while paused: time stands still)
+      while (Q.length > 2 && Q[2] <= C.feelT - CAM_LAG) Q.splice(0, 2);
+      camera.rotateX(Q[1] * 0.75);
+    }
+    // the player's own angle for this camera: + and - tilt it, [ and ] turn it (js/game.js camKeys)
+    const aj = ON_CAR.includes(mode) && F1.Game && F1.Game.settings.camAdj && F1.Game.settings.camAdj[mode];
+    if (aj) { camera.rotateY(-aj.y); camera.rotateX(aj.p); }
     // debug: a fixed camera, G.__freeCam = [x, y, z, lookX, lookY, lookZ] (world metres)
     if (G.__freeCam) { const f = G.__freeCam; camera.position.set(f[0], f[1], f[2]); camera.lookAt(f[3], f[4], f[5]); }
   }

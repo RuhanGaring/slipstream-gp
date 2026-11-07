@@ -989,6 +989,8 @@
     const ck = u.cockpit;
     if (ck) {
       if (u.helmet) u.helmet.forEach(m => { if (m.userData.cast == null) m.userData.cast = m.castShadow; m.castShadow = m.userData.cast && !!(mask & 1); });
+      const hm = ck.helmet && ck.helmet.hm;
+      if (hm) { const fine = !!(mask & 1), l = fine ? hm.geo.hi : hm.geo.lo; hm.shell.geometry = l.shell; hm.visor.geometry = l.visor; hm.hardware.visible = fine; }
       put(ck.group, !!(mask & 3), root);
       ck.inner = inner;
       for (const { ch, h } of ck.kids) { const on = inner || h; if (on && ch.parent !== ck.group) ck.group.add(ch); else if (!on && ch.parent === ck.group) ck.group.remove(ch); }
@@ -1862,40 +1864,36 @@
     const inner = cockpitInterior(K, mesh);
     group.add(inner.grp);
     // --- driver: reclined torso (outside views only), helmet, arms reaching the grips ---
-    const hips = new THREE.Vector3(0.48, 0.52, 0), chest = new THREE.Vector3(0.13, 0.79, 0);
+    // (eye level is EYE.y, the height of the cockpit camera: the helmet's visor sits level with it)
+    const hips = new THREE.Vector3(0.48, 0.44, 0), chest = new THREE.Vector3(0.13, 0.67, 0);
     const torso = mesh(new THREE.CapsuleGeometry(0.15, 0.3, 6, 14), K.suit);
     placeBone(torso, hips, chest, 1); torso.scale.z = 1.25; torso.scale.x = 0.85;
     group.add(torso);
-    // helmet: rounded shell in the driver's colour, iridium visor band, rear spoiler
-    const P = teamParts(team), helmet = [torso];
-    const shell = mesh(new THREE.SphereGeometry(0.13, 32, 24), P.helmetMat);
-    shell.scale.set(1.12, 1, 0.95); shell.position.set(0.25, 0.93, 0);
-    const visor = mesh(new THREE.SphereGeometry(0.1335, 32, 10, Math.PI - 0.95, 1.9, 1.22, 0.42), K.M.visor, false);
-    visor.scale.copy(shell.scale); visor.position.copy(shell.position);
-    const spoiler = mesh(new THREE.BoxGeometry(0.03, 0.01, 0.11), P.helmetMat);
-    spoiler.position.set(0.12, 1.02, 0); spoiler.rotation.z = 0.35;
-    const stripe = mesh(new THREE.SphereGeometry(0.1315, 32, 6, 0, Math.PI * 2, 0.45, 0.12), P.accMat, false);
-    stripe.scale.copy(shell.scale); stripe.position.copy(shell.position);
+    // the helmet (js/r3-helmet.js), the driver's own design in the team's colours
+    const helmet = [torso], dv = team.drivers[driverIdx] || team.drivers[0], H = F1.R3Helmet.make(team, driverIdx, dv);
+    const shell = mesh(H.geo.hi.shell, H.shellMat), visor = mesh(H.geo.hi.visor, H.visorMat, false), hardware = mesh(H.geo.hardware, H.hardwareMat);
+    for (const m of [shell, visor, hardware]) m.position.set(0.25, EYE.y, 0);
     // the head turns about the base of the neck: helmet parts live in a pivot there
-    const NECK = new THREE.Vector3(0.17, 0.84, 0), head = new THREE.Group();
+    const NECK = new THREE.Vector3(0.17, EYE.y - 0.09, 0), head = new THREE.Group();
     head.position.copy(NECK); head.rotation.order = 'YZX'; group.add(head);
-    for (const m of [shell, visor, spoiler, stripe]) { m.position.sub(NECK); head.add(m); }
-    helmet.push(shell, visor, spoiler, stripe);
+    for (const m of [shell, visor, hardware]) { m.position.sub(NECK); head.add(m); }
+    helmet.push(shell, visor, hardware);
+    helmet.hm = { shell, visor, hardware, geo: H.geo }; // the merged level draws a lighter helmet (levels)
     const collar = mesh(new THREE.TorusGeometry(0.075, 0.03, 8, 18), K.M.cockpit);
-    collar.position.set(0.16, 0.82, 0); collar.rotation.x = Math.PI / 2; collar.rotation.y = -0.35;
+    collar.position.set(0.16, EYE.y - 0.11, 0); collar.rotation.x = Math.PI / 2; collar.rotation.y = -0.35;
     collar.position.sub(NECK); head.add(collar); helmet.push(collar); // hidden with the helmet in the cockpit view
     // In the cockpit view the helmet and the outside-view torso are hidden, but the driver's
     // head and shoulders still shade the wheel, the hands and the lap when the sun is behind.
     // Stand-ins that draw nothing (no colour, no depth) and only cast shadow keep that.
     const ghost = shadowOnly();
-    const hs = mesh(new THREE.SphereGeometry(0.13, 16, 12), ghost); hs.scale.copy(shell.scale); hs.position.copy(shell.position); head.add(hs);
+    const hs = mesh(new THREE.SphereGeometry(0.13, 16, 12), ghost); hs.scale.set(1.12, 1, 0.95); hs.position.copy(shell.position); head.add(hs);
     const ts = mesh(torso.geometry, ghost); ts.position.copy(torso.position); ts.quaternion.copy(torso.quaternion); ts.scale.copy(torso.scale); group.add(ts);
     // arms: the scanned, dressed arms (makeArm), shoulders low in the tub
     const arms = [];
     for (const sd of [-1, 1]) {
       const arm = makeArm(sd, team, MD && MD.thumb, MD && handPose(MD.id) ? MD.id : null);
       if (!arm) continue;
-      arm.shoulder = new THREE.Vector3(0.34, 0.66, 0.115); // the right one; the left is solved mirrored
+      arm.shoulder = new THREE.Vector3(0.34, 0.54, 0.115); // the right one; the left is solved mirrored
       group.add(arm.mesh);
       arms.push(arm);
     }
@@ -2015,7 +2013,13 @@
     P.vz += (-ay * 0.12 - KN * P.z - CN * P.vz + lim(P.z, 0.012)) * sdt; P.z += P.vz * sdt;
     P.vy += (-P.azF * 0.35 - KN * P.y - CN * P.vy + lim(P.y, 0.02)) * sdt; P.y += P.vy * sdt; // the spine and seat soak up most of it
     for (const k of ['x', 'y', 'z']) if (!isFinite(P[k])) { P[k] = 0; P['v' + k] = 0; }
-    ck.head.position.set(ck.neck.x + P.x, ck.neck.y + P.y, ck.neck.z + P.z);
+    // the road comes up through the seat: the helmet shakes nose to tail and side to side with the
+    // chassis, a head's height above it, and never up and down
+    // (a beat behind the car, as a neck passes it on: a true delay, so it stays as sharp as the chassis)
+    const Q = P.feelQ || (P.feelQ = []);
+    if (dt > 0 || !Q.length) Q.push(h.t, root.userData.feelP || 0, root.userData.feelR || 0);
+    while (Q.length > 3 && Q[3] <= h.t - 0.08) Q.splice(0, 3);
+    ck.head.position.set(ck.neck.x + P.x + Q[1] * 0.75, ck.neck.y + P.y, ck.neck.z + P.z + Q[2] * 2.6);
     // (the onboard cameras stay locked to the chassis; only the visible helmet moves)
   }
 
