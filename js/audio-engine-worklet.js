@@ -166,8 +166,8 @@
           // radiation from the pipe mouth: rises with frequency (a first difference)
           const radO = pipe - this.rad * 0.82; this.rad = pipe;
           let y = (pipe * 0.7 + radO * 0.35) * (1 - 0.55 * view);
-          if (!cheap && view > 0.01) {
-            // the on-board mix: the plenum's two resonances over the mic pulse train, its low-passed
+          if (view > 0.01) {
+            // the voice every car and every camera uses (js/audio.js shapes it per microphone): the plenum's two resonances over the mic pulse train, its low-passed
             // body, and the bright intake hiss the pulses modulate
             const Tn = this.T, me = this.menv; this.menv *= mdec;
             this.mlp += (me - this.mlp) * mlpK;

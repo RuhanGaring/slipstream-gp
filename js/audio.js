@@ -6,8 +6,8 @@
 // The rest of the car: tyre squeal and scrub, lock-up judder, road roar by surface, kerb
 // thumps timed to the kerb blocks, gravel and grass crunch, wind and helmet buffeting,
 // plank and wall scraping, rain and spray, shifts, the pit limiter, impacts and breakages.
-// The mix changes with the camera: on board the intake and wind are close, outside the
-// exhaust leads, and a little room reverb ties it together.
+// Every car has the one engine sound, at every camera. A camera changes only what a microphone
+// there would change: its EQ, level, distance, Doppler and how much of the track's reverb it hears.
 // If the AudioWorklet is not available, a simpler oscillator engine stands in.
 (function (G) {
   'use strict';
@@ -65,6 +65,21 @@
     }
     A.roomIn = ctx.createGain(); A.roomIn.gain.value = 1;
     A.roomIn.connect(A.room); A.room.connect(A.sfx);
+    // The open air of a circuit: nothing for the first moments, then a few separate slaps off
+    // grandstands and pit buildings, then a long tail that gets darker as it dies away. A camera
+    // away from the car hears this; the further away, the more of it against the direct sound.
+    A.air = ctx.createConvolver();
+    {
+      const sr = ctx.sampleRate, phone = F1.Game && F1.Game.mobile && F1.Game.mobile(), L = Math.floor(sr * (phone ? 1.1 : 2.2)), ir = ctx.createBuffer(2, L, sr);
+      for (let ch = 0; ch < 2; ch++) {
+        const a = ir.getChannelData(ch); let lp = 0;
+        for (let i = Math.floor(sr * 0.03); i < L; i++) { const u = i / L; lp += ((Math.random() * 2 - 1) - lp) * (0.34 - 0.29 * u); a[i] = lp * Math.exp(-i / (sr * 0.5)); }
+        for (let k = 0; k < 9; k++) { const at = Math.floor(sr * (0.045 + 0.2 * Math.random())), g = (0.5 + Math.random()) * (1 - k * 0.07) * 0.2, wd = Math.floor(sr * 0.004); for (let i = 0; i < wd; i++) a[at + i] += g * (Math.random() * 2 - 1) * (1 - i / wd); }
+      }
+      A.air.buffer = ir;
+    }
+    A.airIn = ctx.createGain(); A.airIn.gain.value = 0.14;
+    A.airIn.connect(A.air); A.air.connect(A.sfx);
     A.on = true;
     // The engine worklet. Three ways in, as browsers differ: the file itself from the site
     // (Safari and some mobile browsers refuse in-memory modules), then a blob URL, then a
@@ -104,9 +119,10 @@
     const eq = ctx.createBiquadFilter(); eq.type = 'peaking'; eq.frequency.value = 1800; eq.Q.value = 0.8; eq.gain.value = 0;
     // a little less bass than a studio microphone would give: onboard cameras carry small
     // capsules that are lighter in the low end (a gentle shelf, nothing removed)
-    const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = 240; shelf.gain.value = -2;
+    const shelf = ctx.createBiquadFilter(); shelf.type = 'lowshelf'; shelf.frequency.value = cheap ? MIC.out.shelfF : 240; shelf.gain.value = cheap ? MIC.out.shelf : -2;
     // and a notch for the boom around 100 Hz, used only by the cameras on the car's outside
-    const boom = ctx.createBiquadFilter(); boom.type = 'peaking'; boom.frequency.value = 105; boom.Q.value = 0.9; boom.gain.value = 0;
+    const boom = ctx.createBiquadFilter(); boom.type = 'peaking'; boom.frequency.value = 105; boom.Q.value = 0.9; boom.gain.value = cheap ? MIC.out.boom : 0;
+    if (cheap) { eq.frequency.value = MIC.out.eqF; eq.gain.value = MIC.out.eq; } // another car is always heard from outside it
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
     if (A.worklet) {
@@ -122,10 +138,13 @@
     }
     node.connect(shelf); shelf.connect(boom); boom.connect(eq); eq.connect(lp); lp.connect(out);
     if (pan) { out.connect(pan); pan.connect(dest || A.sfx); } else out.connect(dest || A.sfx);
-    out.connect(A.verbIn);
+    const verbSend = ctx.createGain(); verbSend.gain.value = cheap ? MIC.out.verb : 1;
+    out.connect(verbSend); verbSend.connect(A.verbIn);
+    const airSend = ctx.createGain(); airSend.gain.value = 0;
+    out.connect(airSend); airSend.connect(A.airIn);
     const roomSend = ctx.createGain(); roomSend.gain.value = 0.1;
     out.connect(roomSend); roomSend.connect(A.roomIn);
-    return { node, legacy, out, lp, eq, shelf, boom, pan, roomSend, last: {} };
+    return { node, legacy, out, lp, eq, shelf, boom, pan, roomSend, verbSend, airSend, last: {} };
   }
   // send parameters (only when they change enough)
   function setVoice(v, o) {
@@ -138,7 +157,7 @@
   function stopVoice(v) {
     if (!v) return;
     try { v.out.gain.setTargetAtTime(0, A.ctx.currentTime, 0.05); } catch (x) { /* already stopped */ }
-    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); else if (v.node.port) v.node.port.postMessage({ stop: 1 }); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
+    setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); else if (v.node.port) v.node.port.postMessage({ stop: 1 }); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); v.verbSend.disconnect(); v.airSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
   }
   // the fallback: oscillators through a waveshaper (the original engine sound)
   function legacyEngine(cheap) {
@@ -323,6 +342,19 @@
   }
 
   let lastT = 0;
+  // What the microphone at each camera does to the engine. In the driver's ears the low end is
+  // full and the top dull. The small capsules on the car (T-cam, nose, sidepod) lose the bass
+  // and the boom around 100 Hz. Off the car the seat and chassis no longer carry the low end, the
+  // exhaust's presence comes up, and the open air adds its reverb. lp 0: set by distance instead.
+  // air: send to the circuit's reverb; verb: send to the short room; level: to keep the loudness.
+  const MIC = {
+    cockpit: { level: 0.95, shelf: -3, shelfF: 240, boom: 0, eq: 1.5, eqF: 1800, lp: 9000, room: 0.14, verb: 1, air: 0 },
+    helmet: { level: 0.95, shelf: -3, shelfF: 240, boom: 0, eq: 1.5, eqF: 1800, lp: 9000, room: 0.14, verb: 1, air: 0 },
+    tcam: { level: 0.95, shelf: -13, shelfF: 340, boom: -10, eq: 1.5, eqF: 1800, lp: 15000, room: 0.14, verb: 1, air: 0 },
+    nose: { level: 0.95, shelf: -13, shelfF: 340, boom: -10, eq: 1, eqF: 2200, lp: 0, room: 0.1, verb: 0.7, air: 0.35 },
+    side: { level: 0.95, shelf: -13, shelfF: 340, boom: -10, eq: 1, eqF: 2200, lp: 0, room: 0.1, verb: 0.7, air: 0.35 },
+    out: { level: 1, shelf: -6, shelfF: 260, boom: -3, eq: 2.5, eqF: 2400, lp: 0, room: 0.06, verb: 0.5, air: 0.85 },
+  };
   // listener = the player's car; cam = the game camera ({ mode, ... })
   function updateRace(race, p, cam, paused) {
     if (!A.on || !R.engine || !R.loops) return;
@@ -371,27 +403,26 @@
     };
     const me = src('me', p.x, p.y);
     // --- the player's engine ---
-    // view: 1 on board, 0 outside (the exhaust leads). On board uses the voicing fitted to a
-    // T-cam microphone recording (js/audio-engine-worklet.js); the T-cam, cockpit and helmet
-    // views all sit at the airbox, the cockpit and helmet a little duller (lp below)
-    const view = onboard ? 1 : 0;
+    // the voicing fitted to a T-cam microphone recording (js/audio-engine-worklet.js), at every
+    // camera; MIC above does the rest
+    const view = 1, mic = MIC[mode] || MIC.out, airK = race.track && race.track.def && race.track.def.style === 'street' ? 1.4 : 1;
     const harv = (p.harvest || 0) * Math.min(1, v / 30);
     const dopMe = onboard ? 1 : +me.dop.toFixed(3);
     setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: dopMe, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
     // outside: the level falls past 10 m, the air takes the top end off, and the car sits where it is
     const far = onboard ? 1 : Math.min(1, Math.pow(10 / me.d, 1.25));
-    const engLvl = (onboard ? 0.95 : 0.82) * far;
+    const engLvl = mic.level * far;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
-    R.engine.eq.gain.setTargetAtTime(onboard ? 1.5 : -1, t, 0.2);
-    // the small capsules on the car's outside (T-cam, nose, sidepod) hear far less bass than the driver
-    // does; the cockpit and helmet views keep their fuller sound
-    const camMic = mode === 'tcam' || mode === 'nose' || mode === 'side';
-    R.engine.shelf.gain.setTargetAtTime(camMic ? -13 : onboard ? -3 : -2, t, 0.2);
-    R.engine.boom.gain.setTargetAtTime(camMic ? -10 : 0, t, 0.2);
-    R.engine.shelf.frequency.setTargetAtTime(camMic ? 340 : 240, t, 0.2);
-    // the engine's faint room: a touch more on board, where the dry low end is closest
-    R.engine.roomSend.gain.setTargetAtTime(onboard ? 0.14 : 0.1, t, 0.3);
-    const air = onboard ? (mode === 'tcam' ? 15000 : 9000) : Math.max(1500, 15000 / (1 + me.d / 60)) * (me.fwd < -0.3 ? 0.75 : 1);
+    R.engine.eq.gain.setTargetAtTime(mic.eq, t, 0.2);
+    R.engine.eq.frequency.setTargetAtTime(mic.eqF, t, 0.2);
+    R.engine.shelf.gain.setTargetAtTime(mic.shelf, t, 0.2);
+    R.engine.boom.gain.setTargetAtTime(mic.boom, t, 0.2);
+    R.engine.shelf.frequency.setTargetAtTime(mic.shelfF, t, 0.2);
+    R.engine.roomSend.gain.setTargetAtTime(mic.room, t, 0.3);
+    R.engine.verbSend.gain.setTargetAtTime(mic.verb, t, 0.3);
+    // the direct sound falls with distance faster than the reverb does
+    R.engine.airSend.gain.setTargetAtTime(mic.air * airK * Math.min(2.5, Math.pow(far, -0.6)), t, 0.2);
+    const air = mic.lp || Math.max(1500, 15000 / (1 + me.d / 60)) * (me.fwd < -0.3 ? 0.75 : 1);
     R.engine.lp.frequency.setTargetAtTime(air, t, 0.1);
     if (R.engine.pan) at(R.engine.pan.pan, onboard ? 0 : U.clamp(me.lat * 0.85, -1, 1), 0.05);
     if (R.carBus) {
@@ -474,12 +505,13 @@
       if (!n || n.d > 400) { e.out.gain.setTargetAtTime(0, t, 0.1); return; }
       const c = n.c, s0 = src('c' + c.id, c.x, c.y), dop = s0.dop, lat = s0.lat, fwd = s0.fwd;
       const cdead = c.dm && c.dm.failed === 'ENGINE';
-      setVoice(e, { rpm: cdead ? 700 : c.rpm, thr: cdead ? 0 : (c.throttleOut != null ? c.throttleOut : 0.5), speed: c.speed, gear: c.gear, dop: +dop.toFixed(3), kers: 0, on: cdead ? 0 : 1, gain: 1 });
+      setVoice(e, { rpm: cdead ? 700 : c.rpm, thr: cdead ? 0 : (c.throttleOut != null ? c.throttleOut : 0.5), speed: c.speed, gear: c.gear, dop: +dop.toFixed(3), kers: 0, view: 1, on: cdead ? 0 : 1, gain: 1 });
       // level falls with distance; the air takes the top end off far-away cars; behind is duller
-      const lvl = 0.75 / (1 + (n.d / 9) ** 1.6);
+      const lvl = 0.95 / (1 + (n.d / 9) ** 1.6); // (0.75 by the old voice, about 2 dB louder)
       at(e.out.gain, lvl, 0.06);
       at(e.lp.frequency, Math.max(900, 15000 / (1 + n.d / 25) * (fwd < 0 ? 0.7 : 1)), 0.08);
       if (e.pan) at(e.pan.pan, U.clamp(lat * 0.9, -1, 1), 0.06);
+      at(e.airSend.gain, (onboard ? 0.3 : 0.7) * airK * Math.min(2.5, 1 + n.d / 40), 0.2);
     });
   }
 
