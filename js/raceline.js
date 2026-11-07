@@ -307,10 +307,10 @@
   // apart is how far the bend turns the car: each bend of the line is measured from where it starts
   // to where it ends. One that turns the car a little is a wiggle and takes the average. One
   // that truly turns it (WIGGLE to CORNER degrees between the two) keeps its real tightness.
-  // The hand-made circuits have their plans coached on point curvature (js/limits.js simB), so they
-  // keep it.
+  // A hand-made circuit keeps point curvature until its plan has been coached on this reading
+  // (js/limits.js: felt).
   function feltKap(tr, line, opt) {
-    const L = G.F1.Limits && G.F1.Limits[tr.id], W = opt.reach != null ? opt.reach : L && L.simB ? 0 : F1.Raceline.REACH;
+    const L = G.F1.Limits && G.F1.Limits[tr.id], W = opt.reach != null ? opt.reach : L && L.simB && !L.felt ? 0 : F1.Raceline.REACH;
     if (!W) return line.kap;
     const key = 'felt' + W;
     if (line[key]) return line[key];
@@ -549,7 +549,7 @@
   // set a circuit's racing line and everything derived from it
   function applyLine(tr, line0) {
     // (the hand-made circuits have coached lines of their own)
-    const L = G.F1.Limits && G.F1.Limits[tr.id], off = L && L.simB ? line0.off : apexHairpins(tr, line0.off);
+    const L = G.F1.Limits && G.F1.Limits[tr.id], off = L && L.simB && !L.felt ? line0.off : apexHairpins(tr, line0.off);
     const line = off === line0.off ? line0 : lineFromOffsets(tr, off);
     tr.line = line;
     tr.prof = speedProfile(tr, tr.line, Car.SPEC);

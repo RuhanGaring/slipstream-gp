@@ -1,0 +1,188 @@
+// The driving coach, with the line in the lesson. The racing line comes from a model of the car and
+// tools/coach.js only tunes the speeds along it, so whatever the model got wrong about where to
+// turn in, apex and run out stays wrong. This tries it for real: a lone car drives flying laps with
+// every stretch of road nudged in one of sixteen ways (corner speed, braking grip, the line at the
+// entry, the apex and the exit, when the brakes go on, how fast the throttle winds on, and how early
+// the car turns in, each both ways), the time of each stretch is compared with the plan as it
+// stands, and a nudge is kept only where the car was truly quicker there and stayed clean. Nothing
+// is taken from a lap-time model, so a gain found here is one the car really makes.
+// Runs on every thread the machine has.
+// usage: node tools/linecoach.js <track,track|all> [rounds]    writes OUT/<track>.json (default tools/data/linecoach)
+//        node tools/linecoach.js apply DIR [track,track]       stores the result in js/lines.js and js/limits.js
+const { Worker, isMainThread, workerData, parentPort } = require('worker_threads');
+const fs = require('fs'), os = require('os'), path = require('path');
+const LOAD = ['util.js', 'tracks.js', 'car.js', 'raceline.js', 'lines.js', 'limits.js', 'data.js', 'ai.js', 'race.js'];
+const DT = 1 / 240;
+if (!isMainThread) {
+  const F1 = require('./load')(LOAD);
+  if (process.env.FELT && F1.Limits[workerData.id]) F1.Limits[workerData.id].felt = [1];
+  const race = F1.Race.create({ track: workerData.id, mode: 'tt', laps: 4, difficulty: 4, team: 0, driver: 0, seed: 7, field: 1, assists: {} });
+  race.autoPlayer = true;
+  const c = race.player, tr = race.track, E = F1.Raceline.lineLimits(tr);
+  const lap = (off, g, gB, segEnd, T) => {
+    F1.Raceline.applyLine(tr, F1.Raceline.lineFromOffsets(tr, off));
+    tr.aiTune = T;
+    tr.rubber.fill(+process.env.COACH_RUB || 0.6); // (rubber builds with every lap driven: left alone, a long session gets a second quicker by itself)
+    c.brain.prof = F1.Raceline.speedProfile(tr, tr.line, c.spec, { pace: 1, grip: g, gripB: gB, brakePace: 1, brake: 1 });
+    const n = segEnd.length, t = new Float64Array(n), bad = new Uint8Array(n);
+    // Every test on the same worn tyres and the same tank, held there through the lap, or a long
+    // session drifts away from itself. Tyre temperature and the battery are left alone: they settle
+    // over the first lap as they would in a race, and a car set to the ideal temperature each
+    // lap runs a second and a half quicker than any car really does.
+    const hold = () => { for (const w of c.wheels) w.wear = +process.env.COACH_WEAR || 0; c.fuel = +process.env.COACH_FUEL || 10; };
+    const wait0 = c.lapTimes.length; let g0 = 0;
+    while (c.lapTimes.length === wait0 && g0++ < 240 * 400) { hold(); F1.Race.step(race, DT); race.fx.length = 0; }
+    const start = race.time; let k = 0;
+    const wait = c.lapTimes.length; let guard = 0;
+    while (c.lapTimes.length === wait && guard++ < 240 * 400) {
+      hold(); F1.Race.step(race, DT);
+      for (const f of race.fx) if (f.type === 'wall' && f.power > 2) bad[k] = 1;
+      race.fx.length = 0;
+      const s = c.loc.s, i = c.loc.i;
+      if (c.loc.d < -E.L[i] - 0.7 || c.loc.d > E.R[i] + 0.7 || (Math.abs(c.r) > 1.6 && c.speed > 20 && Math.abs(c.v) > 6) || c.brain.stuckT > 0.3) bad[k] = 1;
+      while (k < n - 1 && s >= segEnd[k] && s < segEnd[k] + 200) { t[k] = race.time - start; k++; }
+    }
+    t[n - 1] = race.time - start;
+    const tot = t[n - 1];
+    for (let q = n - 1; q > 0; q--) t[q] -= t[q - 1];
+    if (guard >= 240 * 400) bad.fill(1);
+    return { t: Array.from(t), bad: Array.from(bad), tot };
+  };
+  parentPort.on('message', m => { parentPort.postMessage({ k: m.k, r: lap(Float64Array.from(m.off), Float64Array.from(m.g), Float64Array.from(m.gB), m.segEnd, { brk: Float32Array.from(m.bk), ramp: Float32Array.from(m.ra), look: Float32Array.from(m.lk) }) }); });
+  parentPort.postMessage({ ready: true });
+} else if (process.argv[2] === 'apply') {
+  const F1 = require('./load')(['util.js', 'tracks.js', 'car.js', 'raceline.js', 'lines.js', 'limits.js']);
+  const dir = process.argv[3], only = process.argv[4] ? process.argv[4].split(',') : null, Ls = F1.Lines, L = F1.Limits, st = L.stride;
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.json')) continue;
+    const o = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    if ((only && !only.includes(o.id)) || !L[o.id] || !Ls[o.id]) continue;
+    const pick = (a, k) => a.filter((_, i) => i % k === 0);
+    Ls[o.id] = pick(o.off, Ls.stride);
+    L[o.id].sim = pick(o.g, st); L[o.id].simB = pick(o.gB, st); L[o.id].simLap = [+o.best.toFixed(3)];
+    if (process.env.FELT) L[o.id].felt = [1]; else { L[o.id].simBk = pick(o.bk, st); L[o.id].simTr = pick(o.ra, st); L[o.id].simLk = pick(o.lk, st); }
+    console.log(o.id, o.first.toFixed(3), '->', o.best.toFixed(3));
+  }
+  let a = '// Generated by tools/optline.js and tools/linecoach.js: racing line offsets per circuit,\n// stored every 2 samples. Do not edit by hand.\n(function (G) {\n  G.F1 = G.F1 || {};\n  G.F1.Lines = { stride: ' + Ls.stride + ',\n';
+  for (const id of Object.keys(Ls)) if (id !== 'stride') a += `    ${/^[a-z]\w*$/i.test(id) ? id : JSON.stringify(id)}: [${Array.from(Ls[id]).join(',')}],\n`;
+  a += "  };\n})(typeof window !== 'undefined' ? window : globalThis);\n";
+  fs.writeFileSync(path.join(__dirname, '..', 'js', 'lines.js'), a);
+  let s = '// Generated by tools/learn.js, tools/coach.js and tools/linecoach.js: per-circuit grip multipliers the AI has learned it\n// can use, stored every 5 samples (10 m). sim and simB, where a circuit has both, are the plan the\n// coach found fastest, for corners and for braking. Do not edit by hand.\n(function (G) {\n  G.F1 = G.F1 || {};\n  G.F1.Limits = { stride: ' + st + ',\n';
+  for (const id of Object.keys(L)) {
+    if (id === 'stride') continue;
+    s += `    ${/^[a-z]\w*$/i.test(id) ? id : JSON.stringify(id)}: {\n`;
+    for (const k of Object.keys(L[id])) s += `      ${k}: [${Array.from(L[id][k]).join(',')}],\n`;
+    s += '    },\n';
+  }
+  s += "  };\n})(typeof window !== 'undefined' ? window : globalThis);\n";
+  fs.writeFileSync(path.join(__dirname, '..', 'js', 'limits.js'), s);
+} else {
+  const F1 = require('./load')(LOAD);
+  const ids = !process.argv[2] || process.argv[2] === 'all' ? F1.Tracks.DEFS.map(d => d.id) : process.argv[2].split(',');
+  if (process.env.FELT) for (const id of ids) if (F1.Limits[id]) F1.Limits[id].felt = [1];
+  const ROUNDS = +process.argv[3] || 40, OUT = process.env.OUT || path.join(__dirname, 'data', 'linecoach');
+  const NT = Math.max(2, os.cpus().length - 1), ARMS = +process.env.COACH_ARMS || 16;
+  fs.mkdirSync(OUT, { recursive: true });
+  const coach = async id => {
+    const tr = F1.Race.getTrack(id), N = tr.N, g0 = F1.Race.learnedGrip(tr, 'sim') || new Float64Array(N).fill(1), E = F1.Raceline.lineLimits(tr);
+    const ws = await Promise.all(Array.from({ length: NT }, () => new Promise(res => { const w = new Worker(__filename, { workerData: { id } }); w.once('message', () => res(w)); })));
+    const call = (w, msg) => new Promise(res => { const f = m => { if (m.k === msg.k) { w.off('message', f); res(m.r); } }; w.on('message', f); w.postMessage(msg); });
+    const gB0 = F1.Race.learnedBrake(tr), base0 = Float64Array.from(g0, x => x * (gB0 ? 1 : 0.95)), baseB0 = gB0 ? Float64Array.from(gB0) : Float64Array.from(g0, x => x * 0.85);
+    const off0 = Float64Array.from(tr.line.off);
+    const prof = F1.Raceline.speedProfile(tr, tr.line, F1.Car.SPEC, { pace: 1, grip: base0, gripB: baseB0, brakePace: 1, brake: 1 });
+    // stretches: from a little before one braking point to a little before the next
+    const stops = [];
+    for (let i = 0, on = false, top = 0, at = 0; i < N; i++) {
+      const down = prof[(i + 1) % N] < prof[i] - 0.02;
+      if (down && !on) { on = true; top = prof[i]; at = i; }
+      if (!down && on) { on = false; if (top - prof[i] > 1.2) stops.push(at * tr.ds); }
+    }
+    const segEnd = stops.map(x => x - 45).filter(x => x > 30).filter((x, i, a) => !i || x - a[i - 1] > 50); segEnd.push(tr.L + 1);
+    const n = segEnd.length;
+    const segAt = new Int16Array(N); for (let i = 0; i < N; i++) { const s = i * tr.ds; let k = 0; while (k < n - 1 && s >= segEnd[k]) k++; segAt[i] = k; }
+    // each stretch's three places to move the line: where braking starts, the slowest point, and the
+    // run out to the exit (halfway to the end of the corner's speed recovery, at most 90 m on)
+    const marks = [];
+    for (let k = 0; k < n; k++) {
+      const a = k ? Math.round(segEnd[k - 1] / tr.ds) : 0, b = Math.min(N - 1, Math.round(segEnd[k] / tr.ds)), brake = Math.min(b, a + Math.round(45 / tr.ds));
+      let apex = brake; for (let i = brake; i < Math.min(b, brake + Math.round(320 / tr.ds)); i++) if (prof[i] < prof[apex]) apex = i;
+      marks.push([brake, apex, Math.min(b, apex + Math.round(Math.min(90, Math.max(30, (apex - brake) * tr.ds)) / tr.ds))]);
+    }
+    const W = Math.round(30 / tr.ds), B = Math.round(48 / tr.ds);
+    const mix = (base, kk) => {
+      const o = Float64Array.from(base);
+      for (let i = 0; i < N; i++) { let m = 0, c = 0; for (let q = -W; q <= W; q += 3) { m += Math.log(kk[segAt[(i + q + N) % N]]); c++; } o[i] = base[i] * Math.exp(m / c); }
+      return o;
+    };
+    // a raised cosine of the line, kept on the road
+    const bend = (off, at, by) => { for (let q = -B; q <= B; q++) { const i = (at + q + N) % N; off[i] = off[i] + by * 0.5 * (1 + Math.cos(Math.PI * q / B)); } };
+    const legal = off => { for (let i = 0; i < N; i++) off[i] = Math.max(-E.L[i] + 0.02, Math.min(E.R[i] - 0.02, off[i])); return off; };
+    let C = new Float64Array(n).fill(1), Br = new Float64Array(n).fill(1), Off = Float64Array.from(off0), dC = 0.012, dB = 0.04, dL = 0.32, seq = 0;
+    // timing, carried on from what is stored
+    const ones = new Float64Array(N).fill(1), had = k => { const a = F1.Limits[id] && F1.Limits[id][k], st = F1.Limits.stride; return a ? Float64Array.from({ length: N }, (_, i) => { const f = i / st, q = Math.floor(f) % a.length, t = f - Math.floor(f); return a[q] + (a[(q + 1) % a.length] - a[q]) * t; }) : ones; };
+    const bk0 = had('simBk'), ra0 = had('simTr'), lk0 = had('simLk');
+    let Tm = { b: new Float64Array(n).fill(1), r: new Float64Array(n).fill(1), l: new Float64Array(n).fill(1) };
+    const copyT = t => ({ b: t.b.slice(), r: t.r.slice(), l: t.l.slice() });
+    const run = (cs, bs, o, w, t = Tm) => call(w, { k: ++seq, off: Array.from(o), g: Array.from(mix(base0, cs)), gB: Array.from(mix(baseB0, bs)), bk: Array.from(mix(bk0, t.b)), ra: Array.from(mix(ra0, t.r)), lk: Array.from(mix(lk0, t.l)), segEnd });
+    // the plan as it stands: the middle one of five laps, each stretch taken on its own
+    const baseLap = async () => {
+      const rs = (await Promise.all(ws.slice(0, 5).map(w => run(C, Br, Off, w)))).sort((a, b) => a.tot - b.tot);
+      const mid = rs[rs.length >> 1];
+      return { tot: mid.tot, bad: mid.bad, t: mid.t.map((_, s) => rs.map(r => r.t[s]).sort((a, b) => a - b)[rs.length >> 1]) };
+    };
+    await baseLap(); // (the first laps of a session are on cold state: not a fair reference)
+    let base = await baseLap();
+    const first = base.tot, firstBad = base.bad.reduce((a, b) => a + b, 0);
+    let best = { tot: base.tot, C: C.slice(), B: Br.slice(), Off: Off.slice(), T: copyT(Tm) };
+    const rnd = F1.U.rng(1234 + id.length);
+    const apply = (a, s, cs, bs, o, t) => {
+      const kT = dC / 0.012; // the timing steps shrink with the rest
+      if (a === 0 || a === 1) cs[s] *= a ? 1 - dC : 1 + dC;
+      else if (a === 2 || a === 3) bs[s] *= a === 3 ? 1 - dB : 1 + dB;
+      else if (a === 10 || a === 11) t.b[s] *= a === 11 ? 1 - 0.07 * kT : 1 + 0.07 * kT;
+      else if (a === 12 || a === 13) t.r[s] *= a === 13 ? 1 - 0.3 * kT : 1 + 0.3 * kT;
+      else if (a === 14 || a === 15) t.l[s] *= a === 15 ? 1 - 0.1 * kT : 1 + 0.1 * kT;
+      else bend(o, marks[s][(a - 4) >> 1], a & 1 ? -dL : dL);
+    };
+    let solo = false;
+    for (let rd = 0; rd < ROUNDS; rd++) {
+      const arms = Array.from({ length: n }, () => Array.from({ length: ARMS }, () => []));
+      await Promise.all(ws.map(async w => {
+        for (let l = 0; l < 4; l++) {
+          const cs = C.slice(), bs = Br.slice(), o = Off.slice(), tt = copyT(Tm), pick = new Int8Array(n);
+          for (let s = 0; s < n; s++) { const a = Math.floor(rnd() * ARMS); pick[s] = a; apply(a, s, cs, bs, o, tt); }
+          const r = await run(cs, bs, legal(o), w, tt);
+          for (let s = 0; s < n; s++) arms[s][pick[s]].push({ t: r.t[s], bad: r.bad[s] || r.bad[(s + 1) % n] });
+        }
+      }));
+      let moved = 0, lineMoved = 0;
+      const wins = [];
+      for (let s = 0; s < n; s++) {
+        let bestA = -1, gain = 0.004;
+        arms[s].forEach((L, a) => {
+          if (L.length < 2) return;
+          const bads = L.filter(x => x.bad).length, ts = L.map(x => x.t).sort((x, y) => x - y), med = ts[ts.length >> 1], d = base.t[s] - med;
+          if (bads === 0 && d > gain) { gain = d; bestA = a; }
+          else if (base.bad[s] && bads * 2 < L.length && bestA < 0) bestA = a; // a stretch hitting something takes any nudge that stops it
+        });
+        if (bestA >= 0) wins.push({ s, a: bestA, gain });
+      }
+      // every winner at once, as a rule. Stretches lean on each other, so a set that came out slower
+      // is followed by the single best change alone, which cannot be undone by its neighbours
+      wins.sort((x, y) => y.gain - x.gain);
+      for (const w of solo ? wins.slice(0, 1) : wins) { moved++; if (w.a > 3) lineMoved++; apply(w.a, w.s, C, Br, Off, Tm); }
+      legal(Off);
+      base = await baseLap();
+      const badN = base.bad.reduce((a, b) => a + b, 0);
+      if (base.tot < best.tot && badN <= firstBad) { best = { tot: base.tot, C: C.slice(), B: Br.slice(), Off: Off.slice(), T: copyT(Tm) }; solo = false; }
+      else if (base.tot > best.tot + 0.03 || badN > firstBad) { C = best.C.slice(); Br = best.B.slice(); Off = best.Off.slice(); Tm = copyT(best.T); base = await baseLap(); solo = true; }
+      if (moved < 2 || rd % 5 === 4) { dC = Math.max(0.003, dC * 0.72); dB = Math.max(0.01, dB * 0.72); dL = Math.max(0.05, dL * 0.72); }
+      console.log(`${id} round ${rd + 1}/${ROUNDS} lap ${base.tot.toFixed(3)} best ${best.tot.toFixed(3)} moved ${moved}/${n} (line ${lineMoved}) bad ${badN} step ${dC.toFixed(3)}/${dB.toFixed(3)}/${dL.toFixed(2)}`);
+    }
+    await Promise.all(ws.map(w => w.terminate()));
+    const g = mix(base0, best.C), gB = mix(baseB0, best.B);
+    fs.writeFileSync(path.join(OUT, id + '.json'), JSON.stringify({ id, first, best: best.tot, off: Array.from(best.Off, x => +x.toFixed(3)), g: Array.from(g, x => +x.toFixed(4)), gB: Array.from(gB, x => +x.toFixed(4)), bk: Array.from(mix(bk0, best.T.b), x => +x.toFixed(3)), ra: Array.from(mix(ra0, best.T.r), x => +x.toFixed(3)), lk: Array.from(mix(lk0, best.T.l), x => +x.toFixed(3)) }));
+    console.log(`DONE ${id} ${first.toFixed(3)} -> ${best.tot.toFixed(3)}  (${n} stretches)`);
+  };
+  (async () => { for (const id of ids) await coach(id); process.exit(0); })();
+}
