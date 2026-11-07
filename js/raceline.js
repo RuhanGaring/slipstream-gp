@@ -302,16 +302,37 @@
   // sensitivity makes downforce worth less than its raw newtons.
   const MU_G = 0.873, MU_A = 0.788; // fitted to tools/calib.js on the current physics
   // How bent the road is, as a car feels it. Curvature read at a single point takes a short wiggle
-  // in the road data for a hairpin, and the plan brakes for a chicane a car can take flat, so it is
-  // averaged along the line, over the road a car covers in a moment. The hand-made circuits have
-  // their plans coached on point curvature (js/limits.js simB), so they keep it.
+  // in the road data for a hairpin, and the plan brakes for a chicane a car can take flat; averaged
+  // along the road, a real hairpin blurs into something easier than it is. What tells them
+  // apart is how far the bend turns the car: each bend of the line is measured from where it starts
+  // to where it ends. One that turns the car a little is a wiggle and takes the average. One
+  // that truly turns it (WIGGLE to CORNER degrees between the two) keeps its real tightness.
+  // The hand-made circuits have their plans coached on point curvature (js/limits.js simB), so they
+  // keep it.
   function feltKap(tr, line, opt) {
     const L = G.F1.Limits && G.F1.Limits[tr.id], W = opt.reach != null ? opt.reach : L && L.simB ? 0 : F1.Raceline.REACH;
     if (!W) return line.kap;
     const key = 'felt' + W;
     if (line[key]) return line[key];
-    const N = tr.N, k = new Float64Array(N);
-    for (let i = 0; i < N; i++) { let s = 0; for (let q = -W; q <= W; q++) s += line.kap[(i + q + N) % N]; k[i] = s / (2 * W + 1); }
+    const N = tr.N, avg = new Float64Array(N), near = new Float64Array(N), real = new Float64Array(N), K = line.kap, ds = tr.ds;
+    for (let i = 0; i < N; i++) {
+      let s = 0; for (let q = -W; q <= W; q++) s += K[(i + q + N) % N]; avg[i] = s / (2 * W + 1);
+      s = 0; for (let q = -2; q <= 2; q++) s += K[(i + q + N) % N]; near[i] = s / 5;
+    }
+    // bends: runs of the same sign, from a sample that is on neither
+    const R = F1.Raceline, sg = i => (Math.abs(near[i]) > 1 / 400 ? Math.sign(near[i]) : 0);
+    let st = 0; while (st < N - 1 && sg(st)) st++;
+    for (let q = 0; q < N;) {
+      const s0 = sg((st + q) % N);
+      if (!s0) { q++; continue; }
+      let e = q, turn = 0;
+      while (e < N && sg((st + e) % N) === s0) { turn += K[(st + e) % N] * ds; e++; }
+      const deg = Math.abs(turn) * 57.3, t = Math.max(0, Math.min(1, (deg - R.WIGGLE) / (R.CORNER - R.WIGGLE))), m = t * t * (3 - 2 * t);
+      if (m > 0) for (let p = q - W; p < e + W; p++) { const i = (st + p + N * 2) % N, edge = p < q ? (p - q + W) / W : p >= e ? (e + W - 1 - p) / W : 1; real[i] = Math.max(real[i], m * edge); }
+      q = e;
+    }
+    const k = new Float64Array(N);
+    for (let i = 0; i < N; i++) k[i] = avg[i] + (near[i] - avg[i]) * real[i];
     return (line[key] = k);
   }
   function speedProfile(tr, line0, spec, opt = {}) {
@@ -481,8 +502,55 @@
     const stored = storedOffsets(tr);
     return applyLine(tr, stored ? lineFromOffsets(tr, stored) : computeLine(tr));
   }
+  // True hairpins, by the apex principles: the car comes in from the outside of the road, turns in
+  // late, clips the inside at a late apex and runs back out to the outside, which opens the corner to
+  // the widest arc the road allows and gets it on the throttle soonest. A line from the optimiser can
+  // cut one down to a radius tighter than the car can turn (about 8 m at full lock). A hairpin
+  // is a bend of the road itself that turns the car more than 100 degrees.
+  const smooth01 = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+  function hairpinsOf(tr) {
+    if (tr.pins) return tr.pins;
+    const N = tr.N, sm = new Float64Array(N), out = [];
+    for (let i = 0; i < N; i++) { let s = 0; for (let q = -4; q <= 4; q++) s += tr.kap[(i + q + N) % N]; sm[i] = s / 9; }
+    let st = 0; while (st < N - 1 && Math.abs(sm[st]) > 1 / 120) st++;
+    let cur = null;
+    for (let q = 0; q < N; q++) {
+      const i = (st + q) % N, g = Math.abs(sm[i]) > 1 / 120 ? Math.sign(sm[i]) : 0;
+      if (g && cur && cur.sg === g) { cur.e = st + q; cur.th += sm[i] * tr.ds; } else if (g) { cur = { sg: g, b: st + q, e: st + q, th: sm[i] * tr.ds }; out.push(cur); } else cur = null;
+    }
+    return (tr.pins = out.filter(b => Math.abs(b.th) * 57.3 > 100));
+  }
+  function apexHairpins(tr, off0) {
+    const pins = hairpinsOf(tr);
+    if (!pins.length) return off0;
+    const N = tr.N, ds = tr.ds, E = lineLimits(tr), w = i => (i + N * 3) % N;
+    let off = off0;
+    const K = lineFromOffsets(tr, off0).kap;
+    for (const B of pins) {
+      // (only where the line has cut it too tight: a hairpin the line already drives well is left alone)
+      let pk = 0; for (let i = B.b - 10; i <= B.e + 10; i++) pk = Math.max(pk, Math.abs(K[w(i)]));
+      if (pk < 1 / 14) continue;
+      const o = Float64Array.from(off), n = B.e - B.b, ai = Math.round(B.b + n * 0.6), blend = Math.round(50 / ds);
+      const inner = i => (B.sg > 0 ? E.R[w(i)] - 0.15 : -E.L[w(i)] + 0.15), outer = i => (B.sg > 0 ? -E.L[w(i)] + 0.3 : E.R[w(i)] - 0.3);
+      const t0 = B.b - Math.round(40 / ds), t1 = B.b, xo = B.e + Math.round(30 / ds), x1 = B.e + Math.round(60 / ds);
+      for (let i = t0 - blend; i <= x1 + blend; i++) {
+        const j = w(i);
+        if (i < t0) o[j] = off[j] + (outer(i) - off[j]) * smooth01((i - t0 + blend) / blend);
+        else if (i <= t1) o[j] = outer(i);
+        else if (i <= ai) o[j] = outer(i) + (inner(i) - outer(i)) * smooth01((i - t1) / Math.max(1, ai - t1));
+        else if (i <= xo) o[j] = inner(i) + (outer(i) - inner(i)) * smooth01((i - ai) / Math.max(1, xo - ai));
+        else if (i <= x1) o[j] = outer(i);
+        else o[j] = outer(i) + (off[j] - outer(i)) * smooth01((i - x1) / blend);
+      }
+      off = o;
+    }
+    return off;
+  }
   // set a circuit's racing line and everything derived from it
-  function applyLine(tr, line) {
+  function applyLine(tr, line0) {
+    // (the hand-made circuits have coached lines of their own)
+    const L = G.F1.Limits && G.F1.Limits[tr.id], off = L && L.simB ? line0.off : apexHairpins(tr, line0.off);
+    const line = off === line0.off ? line0 : lineFromOffsets(tr, off);
     tr.line = line;
     tr.prof = speedProfile(tr, tr.line, Car.SPEC);
     // kerb height follows the speed through the corner: tall ridged kerbs where the cars
@@ -503,5 +571,5 @@
     return tr;
   }
 
-  F1.Raceline = { REACH: 10, computeLine, cornerMarks, lineFromOffsets, lineLimits, kerbGrip, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
+  F1.Raceline = { REACH: 10, WIGGLE: 45, CORNER: 70, computeLine, cornerMarks, lineFromOffsets, lineLimits, kerbGrip, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
 })(typeof window !== 'undefined' ? window : globalThis);
