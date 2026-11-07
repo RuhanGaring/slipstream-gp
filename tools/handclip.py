@@ -110,7 +110,7 @@ JS = r"""([ti, steers, shoot]) => {
     if (shoot && steer === steers[0]) {
       const R = F1.R3.renderer, sc = new THREE.Scene(); sc.background = new THREE.Color(0x9aa6b8);
       sc.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.4)); const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(-2, 2, 1); sc.add(dl);
-      car.userData.lodGroups.forEach(g => g.visible = false); car.userData.wheels.forEach(w => w.visible = false); if (car.userData.far) car.userData.far.visible = false;
+      car.userData.lodGroups.forEach(g => g.visible = false); car.userData.wheels.forEach(w => w.visible = false); if (car.userData.farG) car.userData.farG.visible = false;
       ck.helmet.forEach(m => m.visible = false); ck.group.children.forEach(ch => { if (ch !== ck.pivot && !ch.isSkinnedMesh) ch.visible = false; });
       const right = ck.arms.find(x => x.sd > 0), g = right.mesh.geometry, ix = g.index.array, col = new Float32Array(g.attributes.position.count * 3).fill(0.32);
       hit[0].forEach((h, t) => { if (h) for (let k = 0; k < 3; k++) { const v = ix[t * 3 + k]; col[v * 3] = 1; col[v * 3 + 1] = 0.05; col[v * 3 + 2] = 0.05; } });

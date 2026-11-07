@@ -30,6 +30,7 @@
     uFarTex: { value: null },
     uRingH: { value: new THREE.Vector4(0, 0, 1e9, 0) },
     uFootT: { value: new THREE.Vector3(1, 1, 1) },
+    uLodJit: { value: 0 },
     uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
     // the 3D grass map (js/r3-grass.js), so the ground can wear where the turf meets other surfaces
@@ -280,16 +281,30 @@
     }
   }
 
+  // A car's detail levels dissolve into one another: the fade value comes down the normal matrix's
+  // scale (F1.R3Car lodHook: 0 steady, 0 to 1 coming in, 1 to 2 going out). Going and coming keep
+  // exactly opposite pixels, so nothing shows through. Interleaved gradient noise, moved each frame.
+  const LOD_CUT = [
+    '  if (vLodF > 0.004) {',
+    '    float lodN = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit, vec2(0.06711056, 0.00583715))));',
+    '    if (vLodF <= 1.002 ? lodN > vLodF : lodN < vLodF - 1.0) discard;',
+    '  }'].join('\n');
+  function patchLodFade(sh) {
+    sh.uniforms.uLodJit = U.uLodJit;
+    sh.vertexShader = 'varying float vLodF;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLodF = length(normalMatrix[0]) - 1.0;');
+    sh.fragmentShader = 'varying float vLodF; uniform float uLodJit;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT);
+  }
+
   // Patch a lit material once. Basic/shader materials (sky, particles, UI decals) keep theirs.
   function patch(m) {
     if (!m || m.userData.r3s || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return m;
     m.userData.r3s = true;
     const mac = m.userData.macro || null, liv = m.userData.livery || null, gr = m.userData.grass || null, ao = m.userData.carAO || null, wk = m.userData.wetK || null;
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
-    const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '';
+    const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
     const opaque = !m.transparent;
-    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); };
-    m.customProgramCacheKey = () => 'r3s2' + (opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '');
+    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); };
+    m.customProgramCacheKey = () => 'r3s2' + (opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
     m.needsUpdate = true;
     return m;
   }

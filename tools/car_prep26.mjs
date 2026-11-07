@@ -12,8 +12,8 @@
 //    stand on the ground;
 //  - the four wheels are split out (tyre, rim, hub, disc) into wheel-local space so they turn
 //    and steer; the steering wheel is split out into its own frame so it turns about its axis;
-//  - two simplified detail levels plus a one-mesh far level with the textures baked into
-//    vertex colours;
+//  - three simplified detail levels; all of them keep every surface's own UVs, so the livery
+//    stays where it is at every distance (the game merges the third into one mesh at load);
 //  - the model's race numbers are dropped (the game draws each driver's own number);
 //  - textures are resized for the web and re-encoded as WebP.
 import fs from 'node:fs';
@@ -285,7 +285,6 @@ for (const mat of mats) {
   matIndex.set(mat, matOut.length); matOut.push(o);
 }
 // encode, deduplicated by content across cars
-const far = new Map(); // texture -> raw 256x256 RGBA for baking far colours
 for (const [tex, e] of texOut) {
   const src = Buffer.from(tex.getImage());
   const hash = crypto.createHash('sha1').update(src).digest('hex').slice(0, 16);
@@ -298,7 +297,6 @@ for (const [tex, e] of texOut) {
   const fp = path.join(OUT, 'tex', file);
   if (!fs.existsSync(fp)) await img.webp({ quality: e.normal ? 92 : 84, alphaQuality: 90, effort: 5 }).toFile(fp);
   e.file = file; e.alpha = !opaque;
-  if (!e.normal) far.set(tex, await sharp(src).resize(256, 256, { fit: 'fill' }).ensureAlpha().raw().toBuffer());
 }
 const texList = [...texOut.values()].map(e => e.file);
 const texIdx = new Map([...texOut.keys()].map((t, i) => [t, i]));
@@ -330,6 +328,21 @@ function simplify(G, ratio, err, prune) {
   if (!out.length) return null;
   return compact(Object.assign({}, G, { idx: out }));
 }
+// The lower levels: errors in metres, and the normals and UVs count as well as the shape, or the
+// simplifier slides vertices across the texture and the livery smears into blotches. The tolerance
+// has to stay under about 2 cm: the models are nested shells (paint under carbon, each simplified
+// on its own), and at 6 cm the inner one comes through the outer as pale patches. No pruning of
+// small pieces either: a wing is many small pieces.
+function simplifyLow(G, ratio, err) {
+  const tri = G.idx.length / 3;
+  if (ratio >= 1 || tri < 48) return G;
+  const n = G.pos.length / 3, attr = new Float32Array(n * 5);
+  for (let i = 0; i < n; i++) { attr.set(G.nor.subarray(i * 3, i * 3 + 3), i * 5); attr.set(G.uv.subarray(i * 2, i * 2 + 2), i * 5 + 3); }
+  const target = Math.max(36, Math.floor(G.idx.length * ratio / 3) * 3);
+  const [out] = MeshoptSimplifier.simplifyWithAttributes(G.idx, G.pos, 3, attr, 5, [0.15, 0.15, 0.15, 0.8, 0.8], null, target, err, ['ErrorAbsolute']);
+  if (!out.length) return null;
+  return compact(Object.assign({}, G, { idx: out }));
+}
 function compact(G) {
   const n = G.pos.length / 3, map = new Int32Array(n).fill(-1); let k = 0;
   for (const i of G.idx) if (map[i] < 0) map[i] = k++;
@@ -344,7 +357,7 @@ const hubTf = W => (p, n) => [[p[0] - W.c[0], p[1] - W.c[1], p[2] - W.c[2]], n];
 const swTf = (p, n) => [toW(p[0], p[1], p[2]), dirW(n[0], n[1], n[2])];
 
 // interior and small cockpit-only parts are left out of the low detail level
-const lowSkip = n => /cinture|chrome|black_s|cockpit|kers|led|lcd|indicator|revs|whitelight|tag_|^black$|negro|colordriver|driver_color|_color(\.|$)/i.test(n);
+const lowSkip = n => /cinture|chrome|black_s|cockpit|kers|led|lcd|indicator|revs|whitelight|tag_|^black$|negro/i.test(n);
 
 const chunks = []; let off = 0;
 function put(arr) { const b = Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength); const pad = (4 - (b.length % 4)) % 4; const o = off; chunks.push(b, Buffer.alloc(pad)); off += b.length + pad; return [o, arr.length]; }
@@ -363,13 +376,13 @@ function pack(G, col) {
   if (col) r.col = put(col);
   return r;
 }
-let triCount = [0, 0, 0];
+let triCount = [0, 0, 0, 0];
 function lod(level) {
-  const ratio = level === 0 ? 0.3 : 0.065, err = level === 0 ? 0.0016 : 0.012;
+  const low = (G, wheel) => (level === 1 ? simplifyLow(G, wheel ? 0.1 : 0.08, wheel ? 0.008 : 0.016) : simplifyLow(G, 0.05, wheel ? 0.014 : 0.022));
   const body = [];
   for (const [mat, ix] of parts.body) {
     if (level > 0 && lowSkip(mname(mat))) continue;
-    const G = simplify(sub(mat, ix, shiftTf), ratio, err, level > 0);
+    const G = level === 0 ? simplify(sub(mat, ix, shiftTf), 0.3, 0.0016, false) : low(sub(mat, ix, shiftTf), false);
     if (!G) continue;
     triCount[level] += G.idx.length / 3; body.push(pack(G));
   }
@@ -378,13 +391,13 @@ function lod(level) {
     const w = wheels[k], c = [w.c[0] + DX, w.c[1] + DY, w.c[2]];
     const ps = [];
     for (const [mat, ix] of parts[k]) {
-      const G = simplify(sub(mat, ix, wheelTf(w)), level === 0 ? 0.45 : 0.1, level === 0 ? 0.001 : 0.008, level > 0);
+      const G = level === 0 ? simplify(sub(mat, ix, wheelTf(w)), 0.45, 0.001, false) : low(sub(mat, ix, wheelTf(w)), true);
       if (!G) continue;
       triCount[level] += G.idx.length / 3; ps.push(pack(G));
     }
     const hub = [];
     for (const [mat, ix] of parts[k + 'h']) {
-      const G = simplify(sub(mat, ix, hubTf(w)), level === 0 ? 0.45 : 0.1, level === 0 ? 0.001 : 0.008, level > 0);
+      const G = level === 0 ? simplify(sub(mat, ix, hubTf(w)), 0.45, 0.001, false) : low(sub(mat, ix, hubTf(w)), true);
       if (!G) continue;
       triCount[level] += G.idx.length / 3; hub.push(pack(G));
     }
@@ -392,45 +405,18 @@ function lod(level) {
   }
   return { body, wheels: W };
 }
-const lods = [lod(0), lod(1)];
+const lods = [lod(0), lod(1)], farL = lod(2);
 
-// far level: one mesh, opaque parts only, textures baked into vertex colours (linear)
-function sample(mat, u, v) {
-  const o = matOut[matIndex.get(mat)], c = o.c;
-  let r = c[0], g = c[1], b = c[2];
-  const tex = mat.getBaseColorTexture();
-  if (tex && far.has(tex)) {
-    const raw = far.get(tex), x = ((Math.floor(u * 256) % 256) + 256) % 256, y = ((Math.floor(v * 256) % 256) + 256) % 256, i = (y * 256 + x) * 4;
-    const lin = s => { s /= 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-    r *= lin(raw[i]); g *= lin(raw[i + 1]); b *= lin(raw[i + 2]);
-  }
-  return [r, g, b];
-}
+// the shadow mesh: the whole car in one mesh, shape only, for the sun's shadow maps. Their texels
+// are 10 cm and more, so it can go far lower than anything drawn on screen
 {
-  const pos = [], nor = [], col = [], idx = [];
-  const addG = (G, mat, offset) => {
-    if (!G) return;
-    const base = pos.length / 3;
-    for (let i = 0; i < G.pos.length / 3; i++) {
-      pos.push(G.pos[i * 3] + offset[0], G.pos[i * 3 + 1] + offset[1], G.pos[i * 3 + 2] + offset[2]);
-      nor.push(G.nor[i * 3], G.nor[i * 3 + 1], G.nor[i * 3 + 2]);
-      col.push(...sample(mat, G.uv[i * 2], G.uv[i * 2 + 1]));
-    }
-    for (const i of G.idx) idx.push(base + i);
-  };
-  for (const [mat, ix] of parts.body) {
-    const o = matOut[matIndex.get(mat)];
-    if (o.a === 'B' || lowSkip(o.n)) continue;
-    addG(simplify(sub(mat, ix, shiftTf), 0.035, 0.03, true), mat, [0, 0, 0]);
-  }
-  for (const k of ['FL', 'FR', 'RL', 'RR']) {
-    const w = wheels[k];
-    for (const bucket of [parts[k], parts[k + 'h']]) for (const [mat, ix] of bucket) addG(simplify(sub(mat, ix, shiftTf), 0.05, 0.04, true), mat, [0, 0, 0]);
-  }
-  const G = { mat: null, pos: Float32Array.from(pos), nor: Float32Array.from(nor), uv: new Float32Array(pos.length / 3 * 2), idx: Uint32Array.from(idx) };
-  triCount[2] = idx.length / 3;
-  var farG = pack(G, Uint8Array.from(col, x => Math.round(Math.pow(Math.min(1, x), 1 / 2.2) * 255)));
-  delete farG.m;
+  const pos = [], idx = [];
+  const addG = G => { if (!G) return; const base = pos.length / 3; for (const x of G.pos) pos.push(x); for (const i of G.idx) idx.push(base + i); };
+  for (const [mat, ix] of parts.body) if (matOut[matIndex.get(mat)].a !== 'B' && !lowSkip(mname(mat))) addG(simplify(sub(mat, ix, shiftTf), 0.02, 0.05, true));
+  for (const k of ['FL', 'FR', 'RL', 'RR']) for (const bucket of [parts[k], parts[k + 'h']]) for (const [mat, ix] of bucket) addG(simplify(sub(mat, ix, shiftTf), 0.02, 0.05, true));
+  triCount[3] = idx.length / 3;
+  var shadowG = pack({ mat: null, pos: Float32Array.from(pos), nor: new Float32Array(pos.length), uv: new Float32Array(pos.length / 3 * 2), idx: Uint32Array.from(idx) });
+  delete shadowG.m;
 }
 
 // steering wheel: full detail, in its own frame. The screen's UVs are laid out over its face
@@ -464,7 +450,7 @@ const meta = {
   v: 1, id: ID, name: NAME || ID, src: path.basename(SRC),
   mats: matOut, tex: texList, texAlpha: [...texOut.values()].map(e => !!e.alpha),
   sw: { c: [swC[0] + DX, swC[1] + DY, swC[2]], x: xW, y: yW, z: zW, grip: gripX, parts: swParts, lcd: matIndex.get(lcd.mat) },
-  nose, lods, far: farG,
+  nose, lods, farL, shadow: shadowG,
 };
 const json = Buffer.from(JSON.stringify(meta));
 const head = Buffer.alloc(8); head.write('SGPC', 0); head.writeUInt32LE(json.length, 4);

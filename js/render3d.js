@@ -3413,8 +3413,8 @@ void main() {
     applyAniso(body);
     // the car's stand-in for the outer shadow slices: its merged far model, drawn only into
     // their cars' maps (see the shadow-map wrapper in init)
-    if (body.userData.far) {
-      const proxy = new THREE.Object3D(), twin = new THREE.Mesh(body.userData.far.geometry, body.userData.far.material);
+    if (body.userData.shadowGeo) {
+      const proxy = new THREE.Object3D(), twin = new THREE.Mesh(body.userData.shadowGeo, body.userData.shadowMat);
       twin.castShadow = true; twin.receiveShadow = false; twin.matrixAutoUpdate = false; twin.matrixWorldAutoUpdate = false;
       proxy.userData.twin = twin; // drawn only into the cars' shadow maps, at the place this one marks
       body.add(proxy);
@@ -3435,6 +3435,7 @@ void main() {
   let focusCar = null, camMode = '';
   function updateCars(cars, dt, hideHelmet) {
     frameNo++;
+    F1.R3S.U.uLodJit.value = (frameNo % 64) * 5.588238;
     for (const c of cars) {
       const o = modelFor(c), ud = o.userData, body = ud.body, bu = body.userData;
       ud.seen = frameNo;
@@ -3486,17 +3487,24 @@ void main() {
         // full detail close up, the low-detail model further out, then the merged far mesh
         // (one draw call); in Rock even the player's car is low detail outside the cockpit
         const n0 = GFX.carNear || 50, n1 = Math.max(n0, GFX.carFar || 300);
+        // those distances are for a 60 degree lens on a 1080p picture: what counts is how many
+        // pixels the car covers, so a broadcast zoom keeps the full car and a small screen drops it sooner
+        const pxK = U.clamp(Math.tan(camera.fov * Math.PI / 360) / 0.57735 * 1080 / Math.max(360, H * DPR * (GFX.scale || 1)), 0.05, 2.2);
+        const dPx2 = d2 * pxK * pxK;
         // The level switches with a margin either side of each distance, so a car sitting at
         // one does not flicker between models; and the car the camera rides on (T-cam, nose,
         // sidepod, helmet, cockpit) is always full detail: the camera is placed after this, so
         // at speed the distance here is a frame stale, a metre or more out
         const prev = ud.lodL == null ? 1 : ud.lodL, h = 1.12;
         const up = (n, L) => (prev > L ? n / h : n * h); // easier to stay at the level it has
-        let L = d2 > up(n1, 1) ** 2 ? 2 : d2 > up(n0, 0) ** 2 ? 1 : 0;
-        if (c === focusCar && ONBOARD.has(camMode)) L = 0;
+        let L = dPx2 > up(n1, 1) ** 2 ? 2 : dPx2 > up(n0, 0) ** 2 ? 1 : 0;
+        // a long way off the decals are under a pixel: the far level's second draw call goes
+        if (bu.farG && bu.farG.children[1]) bu.farG.children[1].visible = dPx2 < (n1 * 2.4) ** 2;
+        const ride = c === focusCar && ONBOARD.has(camMode);
+        if (ride) L = 0;
         ud.lodL = L;
-        // the cockpit interior only within 10 m (or for the car being driven from inside)
-        RC.setLod(body, L, d2 < 100 || c === hideHelmet);
+        // the cockpit interior only close by (or for the car being driven from inside)
+        RC.setLod(body, L, dPx2 < 196 || c === hideHelmet, ride || c === hideHelmet ? 0 : Math.max(dt, 0.004));
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
         RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.ctl && c.ctl.wheelDeg != null ? c.ctl.wheelDeg * 0.36 / 180 : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel; a real wheel turns it by its own angle

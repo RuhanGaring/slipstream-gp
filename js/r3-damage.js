@@ -273,6 +273,7 @@
     const dm = c.dm, body = outer.userData.body, bu = body.userData;
     if (!dm || !bu.lodGroups) return;
     if (dm.soft && F1.Soft) syncSoft(scene, outer, c, dm.soft);
+    if (dm.hits.length || (dm.soft && dm.soft.ver > 0)) bu.hurt = true; // the far level has no dents to show
     const st = outer.userData.dmgState || (outer.userData.dmgState = { hits: 0, off: {} });
     // new dents (dm.hits is a rolling list; the count says how many we have applied)
     if (dm.hits.length && dm.hits[dm.hits.length - 1] !== st.last) {
