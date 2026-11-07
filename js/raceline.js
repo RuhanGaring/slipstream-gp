@@ -301,8 +301,21 @@
   // Grip model fitted to the physics on a skidpad (tools/calib.js): load
   // sensitivity makes downforce worth less than its raw newtons.
   const MU_G = 0.873, MU_A = 0.788; // fitted to tools/calib.js on the current physics
-  function speedProfile(tr, line, spec, opt = {}) {
-    const N = tr.N;
+  // How bent the road is, as a car feels it. Curvature read at a single point takes a short wiggle
+  // in the road data for a hairpin, and the plan brakes for a chicane a car can take flat, so it is
+  // averaged along the line, over the road a car covers in a moment. The hand-made circuits have
+  // their plans coached on point curvature (js/limits.js simB), so they keep it.
+  function feltKap(tr, line, opt) {
+    const L = G.F1.Limits && G.F1.Limits[tr.id], W = opt.reach != null ? opt.reach : L && L.simB ? 0 : F1.Raceline.REACH;
+    if (!W) return line.kap;
+    const key = 'felt' + W;
+    if (line[key]) return line[key];
+    const N = tr.N, k = new Float64Array(N);
+    for (let i = 0; i < N; i++) { let s = 0; for (let q = -W; q <= W; q++) s += line.kap[(i + q + N) % N]; k[i] = s / (2 * W + 1); }
+    return (line[key] = k);
+  }
+  function speedProfile(tr, line0, spec, opt = {}) {
+    const N = tr.N, line = { kap: feltKap(tr, line0, opt), dsl: line0.dsl };
     const pace = opt.pace || 0.96;
     const mu = spec.mu * MU_G * pace;
     // per-sample grip the AI has learned it can actually use (tools/learn.js)
@@ -490,5 +503,5 @@
     return tr;
   }
 
-  F1.Raceline = { computeLine, cornerMarks, lineFromOffsets, lineLimits, kerbGrip, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
+  F1.Raceline = { REACH: 10, computeLine, cornerMarks, lineFromOffsets, lineLimits, kerbGrip, cornersOf, techniqueLine, lapTime, storedOffsets, speedProfile, accelTable, brakingZones, prepare, applyLine, straighten };
 })(typeof window !== 'undefined' ? window : globalThis);
