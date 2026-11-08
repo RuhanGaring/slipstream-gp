@@ -138,3 +138,26 @@ body.compact #shade.on { background: rgba(8, 8, 12, .78); }
 body.compact .scr { scroll-padding: 60px 0 84px; }
 body.compact .two.adv .opts, body.compact .two.wh .opts { max-height: none; overflow: visible; }
 .m-back { background: var(--carbon-solid, #15171b); }
+
+/* home hub on a phone: tabs scroll along a sticky bar, tiles stack */
+body.compact #scr-main .hub { position: relative; inset: auto; transform: none; }
+body.compact .hub-top { position: sticky; top: 0; z-index: 5; height: auto; flex-direction: column; align-items: stretch; gap: 4px;
+  padding: calc(12px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); background: rgba(8, 8, 12, .94); }
+body.compact .hub-brand b { font-size: 20px; }
+body.compact .hub-tabs { height: 46px; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 0 4px; }
+body.compact .hub-tabs::-webkit-scrollbar { display: none; }
+body.compact .hub-tabs .key { display: none; }
+body.compact .hub-tab { flex: none; padding: 0 14px; font-size: 13px; }
+body.compact .hub-panes { position: relative; left: auto; right: auto; bottom: auto; height: auto;
+  padding: 14px max(14px, env(safe-area-inset-right)) 92px max(14px, env(safe-area-inset-left)); }
+body.compact .pane.on { display: flex; flex-direction: column; gap: 10px; }
+body.compact .htile { padding: 16px 18px; min-height: 0; }
+body.compact .htile.hero { min-height: 210px; }
+body.compact .t-title { font-size: 26px; }
+body.compact .htile.hero .t-title { font-size: 38px; }
+body.compact .t-text, body.compact .htile.hero .t-text { font-size: 13px; max-width: 58%; }
+body.compact .htile:not(.has-map) .t-text { max-width: none; }
+body.compact .t-map { width: 40%; height: 64%; right: 14px; bottom: 14px; }
+body.compact .t-stats b { font-size: 24px; }
+body.compact .htile.big:not(.has-map)::after { display: none; }
+body.compact .htile:not(.big) .t-map { width: 34%; height: 60%; }

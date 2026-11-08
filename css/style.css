@@ -873,3 +873,61 @@ body.compact .wl-skip { display: none; }
 /* phone: the results, standings and qualifying buttons stay in reach at the foot of the screen
    (they sat three swipes down, with nothing to say they were there) */
 body.compact .res-actions { position: sticky; bottom: 0; z-index: 3; margin-top: 10px; padding: 14px 0 8px; background: linear-gradient(to bottom, rgba(12, 15, 20, 0), #0c0f14 35%); }
+
+/* home hub: tabs along the top, a few big tiles per tab (js/ui.js S.main) */
+#scr-main .hub { position: absolute; inset: 0; }
+.hub-top { position: absolute; left: 0; right: 0; top: 0; height: 72px; display: flex; align-items: center; gap: 48px; padding: 0 5vw;
+  background: linear-gradient(180deg, rgba(10,10,14,.94), rgba(10,10,14,.6)); }
+.hub-top::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.08); }
+.hub-brand { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
+.hub-brand i { align-self: center; width: 28px; height: 12px; background: var(--f1); transform: skewX(-32deg); }
+.hub-brand b { font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: -.005em; }
+.hub-brand span { font-size: 11px; font-weight: 700; letter-spacing: .42em; color: var(--m-ink-3); }
+.hub-tabs { display: flex; align-items: center; align-self: stretch; gap: 2px; }
+.hub-tabs .key { margin: 0 10px; min-width: 26px; height: 24px; line-height: 24px; padding: 0 7px; border: 0; border-radius: 3px; background: #fff; color: #111; font-weight: 900; font-size: 11px; }
+.hub-tab { position: relative; z-index: 1; align-self: stretch; padding: 0 22px; border: 0; background: none; color: rgba(255,255,255,.5); font: 800 15px/1 var(--font); letter-spacing: .16em;
+  cursor: pointer; transition: color .15s; }
+.hub-tab:hover, .hub-tab.on { color: #fff; }
+.hub-tab::after { content: ''; position: absolute; left: 14px; right: 14px; bottom: 0; height: 4px; background: var(--f1); transform: scaleX(0); transition: transform .2s; }
+.hub-tab.on::after { transform: scaleX(1); }
+.hub-panes { position: absolute; left: 5vw; right: 5vw; bottom: 72px; height: min(480px, calc(100vh - 230px)); }
+.pane { display: none; height: 100%; grid-template-columns: 1.6fr 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; }
+.pane.on { display: grid; }
+.pane .htile:first-child { grid-row: 1 / 3; }
+.pane.n1 .htile:nth-child(2) { grid-column: 2 / 4; grid-row: 1 / 3; }
+.pane.n2 .htile:not(:first-child) { grid-column: 2 / 4; }
+.pane.n3 .htile:nth-child(4) { grid-column: 2 / 4; }
+.htile { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 22px 24px 20px; background: var(--carbon); cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%); transition: background .2s, color .2s; }
+.pane.on .htile { animation: tileIn .38s cubic-bezier(.2,.8,.2,1) both; }
+.pane.on .htile:nth-child(2) { animation-delay: .04s; } .pane.on .htile:nth-child(3) { animation-delay: .08s; } .pane.on .htile:nth-child(4) { animation-delay: .12s; }
+@keyframes tileIn { from { opacity: 0; transform: translateY(16px); } }
+.htile::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: rgba(255,255,255,.12); transition: background .2s; }
+.t-eye { position: relative; font-size: 12px; font-weight: 800; letter-spacing: .2em; color: var(--m-ink-3); }
+.t-title { position: relative; margin-top: 6px; font-size: 34px; font-weight: 900; font-style: italic; text-transform: uppercase; line-height: .95; letter-spacing: -.005em; text-wrap: balance; }
+.htile.hero .t-title { font-size: 60px; }
+.t-text { position: relative; margin-top: 10px; max-width: 42ch; font-size: 14px; line-height: 1.45; color: #c9c9d3; }
+.htile.hero .t-text { font-size: 16px; max-width: 34ch; }
+.t-stats { position: relative; display: flex; flex-wrap: wrap; gap: 8px 34px; margin-top: 14px; }
+.t-stats b { display: block; font-size: 32px; font-weight: 900; font-style: italic; line-height: 1; font-variant-numeric: tabular-nums; }
+.t-stats span { display: block; margin-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--m-ink-3); }
+.t-meta { position: relative; display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 14px; padding-right: 40px; }
+.t-meta span { padding: 4px 9px; background: rgba(255,255,255,.08); font-size: 11px; font-weight: 800; letter-spacing: .14em; white-space: nowrap; }
+.t-map { position: absolute; right: 22px; bottom: 22px; width: 54%; height: 58%; pointer-events: none; opacity: .85; }
+.t-go { position: absolute; right: 20px; bottom: 16px; font-style: normal; font-size: 22px; font-weight: 900; opacity: 0; transform: translateX(-8px); transition: opacity .2s, transform .2s; }
+.htile.has-map .t-go { bottom: auto; top: 18px; }
+.htile.f { background: #fff; color: #111; }
+.htile.f::before { background: var(--f1); }
+.htile.f .t-eye { color: var(--f1); }
+.htile.f .t-text { color: #3a3a44; }
+.htile.f .t-stats span { color: #6a6a74; }
+.htile.f .t-meta span { background: rgba(0,0,0,.08); }
+.htile.f .t-map { filter: invert(1); opacity: 1; }
+.htile.f .t-go { opacity: 1; transform: none; color: var(--f1); }
+@media (max-height: 760px) { .htile.hero .t-title { font-size: 48px; } .t-title { font-size: 28px; } .t-text { font-size: 13px; } .htile.hero .t-text { font-size: 14px; } .t-stats b { font-size: 26px; } }
+/* big tiles with no circuit to draw carry speed stripes instead */
+.htile.big:not(.has-map)::after { content: ''; position: absolute; right: -60px; bottom: 60px; width: 64%; height: 196px; transform: skewX(-32deg); pointer-events: none;
+  background: repeating-linear-gradient(180deg, rgba(255,255,255,.07) 0 16px, transparent 16px 30px);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 70%); mask-image: linear-gradient(90deg, transparent, #000 70%); transition: background .2s; }
+.htile.big.f:not(.has-map)::after { background: repeating-linear-gradient(180deg, rgba(225,6,0,.6) 0 16px, transparent 16px 30px); }
+.htile:not(.big) .t-map { width: 38%; height: 44%; right: 18px; bottom: 16px; }

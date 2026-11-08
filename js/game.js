@@ -476,6 +476,7 @@
       if (pressed(12)) onKey('ArrowUp'); if (pressed(13)) onKey('ArrowDown');
       if (pressed(14)) onKey('ArrowLeft'); if (pressed(15)) onKey('ArrowRight');
       if (pressed(0)) onKey('Enter'); if (pressed(1) || pressed(9) && Game.paused) onKey('Escape');
+      if (pressed(4)) onKey('KeyQ'); if (pressed(5)) onKey('KeyE'); // bumpers: menu tabs
     }
     padPrev = gp.buttons.map(x => x.value);
     return out;

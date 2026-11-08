@@ -142,7 +142,7 @@
     return false;
   }
 
-  const PAD_FOOT = { ENTER: 'A', ESC: 'B', '&#8593;&#8595;': 'D-PAD', '&#8592;&#8594;': 'D-PAD', M: null, BKSP: null, TAB: null, N: null, X: null, R: null, F: null, '0-9': null };
+  const PAD_FOOT = { ENTER: 'A', ESC: 'B', '&#8593;&#8595;': 'D-PAD', '&#8592;&#8594;': 'D-PAD', '&#8593;&#8595;&#8592;&#8594;': 'D-PAD', M: null, BKSP: null, TAB: null, N: null, X: null, R: null, F: null, '0-9': null };
   function foot(parts) {
     const f = h('div', 'foot');
     const pad = F1.Game.usingPad;
@@ -235,38 +235,140 @@
     return { el, items: [], onKey: c => { if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') { Audio.init(); Audio.ui.select(); F1.Game.menuMusic(); go(F1.Game.firstRun() ? 'welcome' : 'main'); return true; } return false; }, click: true };
   };
 
+  // The home hub: a few tabs along the top (Q and E, or LB and RB, switch them), each with a
+  // handful of big tiles. HOME holds what the player most likely wants next, so the first
+  // screen is never a wall of options.
   S.main = () => {
     const el = h('div');
-    const wrap = h('div', 'menu-wrap stage');
-    wrap.innerHTML = `<div class="brand" style="margin-bottom:44px"><span class="w1" style="font-size:64px">SLIPSTREAM</span><span class="w2" style="font-size:18px">GRAND PRIX</span></div>`;
-    const menu = h('div', 'menu');
+    const hub = h('div', 'hub stage');
     const career = F1.Game.champSaved('career'), saved = F1.Game.champSaved('champ');
     const last = F1.Game.lastRun && F1.Game.lastRun();
+    const D = F1.Game.daily ? F1.Game.daily() : null;
+    const P = F1.Profile.get(), T = F1.Profile.TROPHIES, won = T.filter(t => P.trophies[t[0]]).length;
     const N = F1.Tracks.DEFS.length;
-    const entries = [
-      ...(career ? [['CONTINUE CAREER', career.offers ? 'The season is over. Your contract offers are waiting.' : `Season ${career.career.season}, round ${career.round + 1} of ${N}: ${F1.Tracks.DEFS[career.round].name}`, () => F1.Game.champResume('career')]] : []),
-      ...(saved ? [['CONTINUE CHAMPIONSHIP', `Round ${saved.round + 1} of ${N}: ${F1.Tracks.DEFS[saved.round].name}`, () => F1.Game.champResume('champ')]] : []),
-      ...(last ? [['RACE AGAIN', `${F1.Tracks.byId(last.track).name}, ${F1.Data.TEAMS[last.team].name}. ${last.kind === 'tt' ? 'Time trial' : F1.Game.raceDefaults.laps + ' laps'}, straight to the grid.`, () => F1.Game.runLast()]] : []),
-      ...(F1.Game.daily ? [(() => { const D = F1.Game.daily(), P = F1.Profile.get(), done = P.daily[D.key]; return ['DAILY RACE', `Today: ${D.name} in the ${D.teamName}, ${D.laps} laps from P${D.grid}.${done ? ' Best today P' + done + '.' : ''}${P.streak > 1 ? ' Streak ' + P.streak + ' days.' : ''}`, () => F1.Game.runDaily()]; })()] : []),
-      ['QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', () => { F1.Game.flow = { kind: 'race' }; go('mode'); }],
-      ['GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
-      [career ? 'NEW CAREER' : 'CAREER', career ? 'Start again in the slowest car. Your saved career is replaced when the first race starts.' : 'Start in the slowest car. Beat your team\u2019s targets, earn a better seat, season after season.', () => F1.Game.careerStart()],
-      [saved ? 'NEW CHAMPIONSHIP' : 'CHAMPIONSHIP', saved ? `A fresh title fight. Your saved championship (round ${saved.round + 1}) is replaced when the first race starts.` : `${N} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
-      ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
-      ['SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }],
-      ['DRIVER PROFILE', 'Your record, best results at every circuit and the trophies you have won.', () => go('profile', { back: 'main' })],
-      ['SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' })],
-      ['CONTROLS', compact() ? 'Touch, gamepad and racing wheel.' : 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })],
+    const flowTo = kind => () => { F1.Game.flow = { kind }; go('mode'); };
+    const tName = id => { const d = F1.Tracks.byId(id); return d ? d.name : ''; };
+    // one tile: id, small label above, title, a line of text, what it does, chips along the foot, a circuit drawn on it
+    const t = (id, eye, title, text, fn, o = {}) => ({ id, eye, title, text, fn, meta: o.meta || [], map: o.map || null, stats: o.stats || null });
+
+    const T_CAREER = career
+      ? t('career', 'CONTINUE', 'CAREER', career.offers ? 'The season is over. Your contract offers are waiting.' : `Season ${career.career.season}, round ${career.round + 1} of ${N}: ${F1.Tracks.DEFS[career.round].name}.`, () => F1.Game.champResume('career'), { map: career.offers ? null : F1.Tracks.DEFS[career.round].id, meta: ['SEASON ' + career.career.season, 'ROUND ' + (career.round + 1)] })
+      : t('career', 'NEW', 'CAREER', 'Start in the slowest car. Beat your team’s targets, earn a better seat, season after season.', () => F1.Game.careerStart(), { meta: ['MULTI-SEASON', 'CONTRACTS'] });
+    const T_CHAMP = saved
+      ? t('champ', 'CONTINUE', 'CHAMPIONSHIP', `Round ${saved.round + 1} of ${N}: ${F1.Tracks.DEFS[saved.round].name}.`, () => F1.Game.champResume('champ'), { map: F1.Tracks.DEFS[saved.round].id, meta: ['ROUND ' + (saved.round + 1) + ' OF ' + N] })
+      : t('champ', 'NEW', 'CHAMPIONSHIP', `${N} rounds, points for the top ten, one title. Race days or full weekends.`, flowTo('champ'), { meta: [N + ' ROUNDS'] });
+    const T_QUICK = t('quick', 'RACE', 'QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', flowTo('race'), { meta: ['ANY CIRCUIT', 'ANY TEAM'] });
+    const T_LAST = last && t('last', 'JUMP BACK IN', 'RACE AGAIN', `${tName(last.track)}, ${F1.Data.TEAMS[last.team].name}. ${last.kind === 'tt' ? 'Time trial' : F1.Game.raceDefaults.laps + ' laps'}, straight to the grid.`, () => F1.Game.runLast(), { map: /^gen/.test(last.track) ? null : last.track, meta: [last.kind === 'tt' ? 'TIME TRIAL' : 'RACE', (last.mode || 'arcade').toUpperCase()] });
+    const T_DAILY = D && t('daily', 'TODAY', 'DAILY RACE', `${D.name} in the ${D.teamName}, ${D.laps} laps from P${D.grid}.`, () => F1.Game.runDaily(),
+      { map: D.track, meta: [P.daily[D.key] ? 'BEST TODAY P' + P.daily[D.key] : 'NOT RACED YET', ...(P.streak > 1 ? ['STREAK ' + P.streak] : [])] });
+    const stat = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+    const T_PROFILE = t('profile', 'YOUR RECORD', 'DRIVER PROFILE', '', () => go('profile', { back: 'main' }),
+      { stats: stat(P.races, 'Races') + stat(P.wins, 'Wins') + stat(P.podiums, 'Podiums') + stat(won + '/' + T.length, 'Trophies') });
+
+    // the big tile on HOME: carry on with whatever is under way, else the quickest way into a race
+    const hero = career ? T_CAREER : saved ? T_CHAMP : T_LAST || Object.assign({}, T_QUICK, { eye: 'START HERE' });
+    const home = [hero, T_DAILY, hero !== T_LAST && T_LAST ? T_LAST : hero.id === 'quick' ? t('weekend2', 'RACE', 'GRAND PRIX WEEKEND', 'Practice, knockout qualifying, then the race.', flowTo('weekend')) : T_QUICK, T_PROFILE].filter(Boolean);
+    const TABS = [
+      ['HOME', home],
+      ['RACE', [
+        Object.assign({}, T_QUICK, { id: 'quick-r' }),
+        t('weekend', 'RACE', 'GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', flowTo('weekend'), { meta: ['PRACTICE', 'QUALIFYING', 'RACE'] }),
+        t('tt', 'SOLO', 'TIME TRIAL', 'Hot laps against your own ghost.', flowTo('tt'), { meta: ['GHOST'] }),
+        t('spectate', 'WATCH', 'SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }, { meta: ['TV DIRECTOR', 'FREE CAMERA'] }),
+      ]],
+      ['SEASONS', [
+        Object.assign({}, T_CAREER, { id: 'career-s' }),
+        Object.assign({}, T_CHAMP, { id: 'champ-s' }),
+        career && t('career-new', 'START AGAIN', 'NEW CAREER', 'Start again in the slowest car. Your saved career is replaced when the first race starts.', () => F1.Game.careerStart()),
+        saved && t('champ-new', 'START AGAIN', 'NEW CHAMPIONSHIP', `A fresh title fight. Your saved championship (round ${saved.round + 1}) is replaced when the first race starts.`, flowTo('champ')),
+      ].filter(Boolean)],
+      ['OPTIONS', [
+        t('settings', 'OPTIONS', 'SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' }), { meta: ['SOUND', 'CAMERA', 'GRAPHICS', 'ASSISTS'] }),
+        t('controls', 'OPTIONS', 'CONTROLS', compact() ? 'Touch, gamepad and racing wheel.' : 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })),
+      ]],
     ];
-    const items = entries.map(([t, s, fn]) => {
-      const e = h('div', 'mi', `${t}<small>${s}</small>`);
-      menu.appendChild(e);
-      return { el: e, activate: () => { UI.lastMainName = t; fn(); } };
+
+    const pad = F1.Game.usingPad;
+    const top = h('div', 'hub-top');
+    top.innerHTML = `<div class="hub-brand"><i></i><b>SLIPSTREAM</b><span>GRAND PRIX</span></div>`;
+    const tabsEl = h('div', 'hub-tabs');
+    tabsEl.appendChild(h('span', 'key', pad ? 'LB' : 'Q'));
+    const tabBtns = TABS.map(([name], k) => { const b = h('button', 'hub-tab', name); b.addEventListener('click', () => { if (UI.cur === scr) { Audio.ui.move(); setTab(k); } }); tabsEl.appendChild(b); return b; });
+    tabsEl.appendChild(h('span', 'key', pad ? 'RB' : 'E'));
+    top.appendChild(tabsEl);
+    hub.appendChild(top);
+
+    const panesEl = h('div', 'hub-panes');
+    const items = [], panes = [], paints = [];
+    TABS.forEach(([, tiles], k) => {
+      const pane = h('div', `pane n${Math.min(3, tiles.length - 1)}`);
+      const first = items.length;
+      tiles.forEach((d, j) => {
+        const e = h('div', 'htile' + (j === 0 ? ' hero' : '') + (j === 0 || tiles.length === 2 ? ' big' : '') + (d.map ? ' has-map' : ''),
+          `<div class="t-eye">${d.eye}</div><div class="t-title">${d.title}</div>${d.text ? `<div class="t-text">${d.text}</div>` : ''}` +
+          (d.stats ? `<div class="t-stats">${d.stats}</div>` : '') +
+          (d.meta.length ? `<div class="t-meta">${d.meta.map(m => `<span>${m}</span>`).join('')}</div>` : '') +
+          (d.map ? '<canvas class="t-map"></canvas>' : '') + '<i class="t-go">&#8594;</i>');
+        pane.appendChild(e);
+        if (d.map) paints.push({ tab: k, cv: e.querySelector('canvas'), id: d.map, done: false });
+        items.push({ el: e, tab: k, id: d.id, activate: () => { UI.lastMainName = d.id; UI.mainTab = k; d.fn(); } });
+      });
+      panes.push({ el: pane, first, n: tiles.length });
+      panesEl.appendChild(pane);
     });
-    wrap.appendChild(menu);
-    el.appendChild(wrap);
-    el.appendChild(foot([['&#8593;&#8595;', 'select'], ['ENTER', 'confirm'], '|', ['M', 'mute']]));
-    return { el, items, focus: Math.max(0, entries.findIndex(e => e[0] === UI.lastMainName)), back: () => go('title') };
+    hub.appendChild(panesEl);
+    el.appendChild(hub);
+    el.appendChild(foot([[pad ? 'LB / RB' : 'Q / E', 'tabs'], ['&#8593;&#8595;&#8592;&#8594;', 'select'], ['ENTER', 'confirm'], '|', ['M', 'mute']]));
+
+    // circuits are drawn once their tab is on screen (a hidden canvas has no size)
+    const paint = k => requestAnimationFrame(() => paints.forEach(p => {
+      if (p.tab !== k || p.done || !p.cv.isConnected || !p.cv.clientWidth) return;
+      try { drawTrackMap(p.cv, peek(p.id), { mono: true, w: 4, pad: 14, bare: true }); p.done = true; } catch (e) { /* no map for this one */ }
+    }));
+    let tab = 0;
+    function setTab(k, focusId) {
+      tab = (k + TABS.length) % TABS.length;
+      UI.mainTab = tab;
+      panes.forEach((p, i) => p.el.classList.toggle('on', i === tab));
+      tabBtns.forEach((b, i) => b.classList.toggle('on', i === tab));
+      const p = panes[tab], at = focusId ? items.findIndex(it => it.tab === tab && it.id === focusId) : -1;
+      setFocus(at >= 0 ? at : p.first, true);
+      paint(tab);
+    }
+    // arrows move to the nearest tile that way; off the left or right edge goes to the next tab
+    const move = (dx, dy) => {
+      const cur = items[UI.focus].el.getBoundingClientRect(), cx = cur.left + cur.width / 2, cy = cur.top + cur.height / 2;
+      let best = -1, bs = 1e9;
+      items.forEach((it, i) => {
+        if (it.tab !== tab || i === UI.focus) return;
+        const r = it.el.getBoundingClientRect();
+        const ahead = dx > 0 ? r.left - cur.right : dx < 0 ? cur.left - r.right : dy > 0 ? r.top - cur.bottom : cur.top - r.bottom;
+        if (ahead < -4) return;
+        const side = dx ? Math.max(0, Math.abs(r.top + r.height / 2 - cy) - (r.height + cur.height) / 2 + 1) : Math.max(0, Math.abs(r.left + r.width / 2 - cx) - (r.width + cur.width) / 2 + 1);
+        const off = dx ? Math.abs(r.top - cur.top) : Math.abs(r.left - cur.left);
+        const s = ahead + side * 4 + off * 0.05;
+        if (s < bs) { bs = s; best = i; }
+      });
+      if (best >= 0) { setFocus(best); return; }
+      if (dx) { Audio.ui.move(); setTab(tab + dx); }
+    };
+    const onKey = c => {
+      if (c === 'KeyQ' || c === 'PageUp') { Audio.ui.move(); setTab(tab - 1); return true; }
+      if (c === 'KeyE' || c === 'PageDown' || c === 'Tab') { Audio.ui.move(); setTab(tab + 1); return true; }
+      if (c === 'ArrowLeft' || c === 'KeyA') { move(-1, 0); return true; }
+      if (c === 'ArrowRight' || c === 'KeyD') { move(1, 0); return true; }
+      if (c === 'ArrowUp' || c === 'KeyW') { move(0, -1); return true; }
+      if (c === 'ArrowDown' || c === 'KeyS') { move(0, 1); return true; }
+      return false;
+    };
+    const startTab = UI.mainTab != null && UI.mainTab < TABS.length ? UI.mainTab : 0;
+    const startAt = items.findIndex(it => it.tab === startTab && it.id === UI.lastMainName);
+    const scr = { el, items, onKey, focus: startAt >= 0 ? startAt : panes[startTab].first, back: () => go('title') };
+    tab = startTab;
+    panes[tab].el.classList.add('on');
+    tabBtns[tab].classList.add('on');
+    setTimeout(() => { if (UI.cur === scr) paint(tab); }, 0);
+    return scr;
   };
 
   // ---------- race-weekend chrome ----------
