@@ -20,6 +20,7 @@
   const VERSION = 8;     // bump when physics or AI changes make stored results stale
   const STRIDE_LINE = 2, STRIDE_GRIP = 5;
   const G_MIN = 0.8, G_MAX = 1.4;
+  const LINE_SLOTS = 14; // racing-line searchers, the most threads a browser is given
 
   // ---------- 1. racing line ----------
   // the same move as tools/optline.js: a smooth lateral bump, kept if the lap gets quicker
@@ -125,6 +126,9 @@
   // ctx holds a worker's state (one per thread; a single-threaded host keeps several)
   const CTX = { runners: {}, opt: {} };
   function* handle(msg, ctx = CTX) {
+    // msg.slot: one of several searchers sharing this thread, each with its own state (see
+    // LINE_SLOTS: the line must not depend on how many threads the player's CPU has)
+    if (msg.slot != null) { const s = ctx.slots || (ctx.slots = {}); ctx = s[msg.slot] || (s[msg.slot] = { runners: {}, opt: {} }); }
     if (msg.cmd === 'optInit') return optInit(ctx.opt, msg.id, msg.off);
     if (msg.cmd === 'optBatch') return yield* optBatch(ctx.opt, msg.moves, msg.n, msg.seed, msg.anneal);
     if (msg.cmd === 'init') {
@@ -175,7 +179,13 @@
 
     // --- stage 1: racing line ---
     const TOTAL = opts.lineIters || 45000, PER = opts.lineBatch || 12;
-    const batches = Math.max(1, Math.ceil(TOTAL / (PER * nW)));
+    // the search runs as LINE_SLOTS searchers whatever the thread count (a thread takes
+    // several when there are fewer): the same seeds and the same merges every time, so a
+    // 6-core laptop learns the very line a 16-core desktop does. The total work is the same
+    // either way; with fewer threads it only takes longer. (The page-only fallback keeps its
+    // own small search.)
+    const V = opts.lineSlots || (pool.kind === 'local' ? nW : Math.max(nW, LINE_SLOTS));
+    const batches = Math.max(1, Math.ceil(TOTAL / (PER * V)));
     const lim = F1.Raceline.lineLimits(tr), evalT = lineEval(tr, lim, null);
     // opts.start (offsets every STRIDE_LINE samples): search on from that line (pulled inside
     // the limits) instead of from scratch
@@ -183,7 +193,7 @@
     if (opts.start) for (let i = 0; i < N; i++) { const f = i / STRIDE_LINE, L = opts.start, k = Math.floor(f) % L.length, t = f - Math.floor(f); off[i] = lim.clamp(i, L[k] + (L[(k + 1) % L.length] - L[k]) * t); }
     const t0 = evalT(off);
     let tBest = t0, moves = [];
-    await Promise.all(Array.from({ length: nW }, (_, w) => pool.call(w, { cmd: 'optInit', id, off })));
+    await Promise.all(Array.from({ length: V }, (_, v) => pool.call(v % nW, { cmd: 'optInit', id, off, slot: v })));
     // opts.converge: keep running whole rounds of the search (each starting bold again from
     // the best line so far) until a round gains less than that fraction of the lap
     // opts.line (offsets every STRIDE_LINE samples): race this line, learn only the limits
@@ -194,8 +204,8 @@
     for (let b = 0; b < batches; b++) {
       if (cancelled()) return null;
       const anneal = 1 - b / batches;
-      const res = await Promise.all(Array.from({ length: nW }, (_, w) =>
-        pool.call(w, { cmd: 'optBatch', moves, n: PER, seed: 1 + b * 7919 + w * 104729, anneal })));
+      const res = await Promise.all(Array.from({ length: V }, (_, v) =>
+        pool.call(v % nW, { cmd: 'optBatch', moves, n: PER, seed: 1 + b * 7919 + v * 104729, anneal, slot: v })));
       const found = [].concat(...res.map(x => x.found)).sort((p, q) => q[3] - p[3]);
       // the best bumps, as long as their centres are well apart
       moves = [];

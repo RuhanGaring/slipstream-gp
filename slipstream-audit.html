@@ -1,0 +1,121 @@
+<title>Slipstream Audit</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Layout: a race engineer's debrief sheet. Summary first, one column, timing-screen tables. */
+:root {
+  --bg: #f3f4f1; --panel: #ffffff; --fg: #1a1d21; --dim: #545b62; --line: #d9dcd6; --accent: #b3261e; --good: #17693b; --warn: #7f5600;
+  --disp: 'Barlow Condensed', 'Arial Narrow', sans-serif; --body: 'Source Sans 3', 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #14171a; --panel: #1c2024; --fg: #eceeea; --dim: #a0a7ad; --line: #30363b; --accent: #ff7a70; --good: #5fce92; --warn: #e6b94f; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #14171a; --panel: #1c2024; --fg: #eceeea; --dim: #a0a7ad; --line: #30363b; --accent: #ff7a70; --good: #5fce92; --warn: #e6b94f; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 17px/1.55 var(--body); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 40px; }
+h1, h2 { font-family: var(--disp); font-style: italic; font-weight: 700; line-height: 1.05; text-wrap: balance; margin: 0; }
+h1 { font-size: 46px; } h2 { font-size: 30px; margin-bottom: 10px; }
+p { margin: 0 0 10px; max-width: 66ch; } section { min-width: 0; }
+.lede { color: var(--dim); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; background: var(--panel); }
+th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); text-align: left; font-weight: 600; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+.up { color: var(--good); font-weight: 600; } .warn { color: var(--warn); font-weight: 600; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 7px; max-width: 66ch; }
+.ask { background: var(--panel); border: 1px solid var(--line); padding: 16px 18px; }
+.ask h3 { margin: 0 0 4px; font-size: 18px; }
+.asks { display: grid; gap: 12px; }
+</style>
+<div class="wrap">
+  <header>
+    <h1>Slipstream audit debrief</h1>
+    <p class="lede">Ten judges reviewed the whole game overnight on 5 November 2026. Confirmed fixes are pushed as 83944fd and 6faa19e. Frame rate went up, not down.</p>
+  </header>
+
+  <section>
+    <h2>Scores before fixes</h2>
+    <p>These are the judges' scores on the build they saw. The panel has not been run again, so there are no after scores.</p>
+    <div class="scroll"><table>
+      <tr><th>Area</th><th class="n">Score</th><th>Worst finding</th><th>Status</th></tr>
+      <tr><td>AI and race sim</td><td class="n">4.0</td><td>Tuned without damage, so default races were a wreck-fest</td><td class="up">Fixed</td></tr>
+      <tr><td>UX</td><td class="n">4.5</td><td>Phone, pad and wheel could not choose a tyre</td><td class="up">Fixed</td></tr>
+      <tr><td>Code</td><td class="n">4.5</td><td>HUD messages stopped on lap 2, best laps stopped saving</td><td class="up">Fixed</td></tr>
+      <tr><td>Audio</td><td class="n">4.5</td><td>Engine voices never stopped running</td><td class="up">Fixed in code, not heard</td></tr>
+      <tr><td>Game design</td><td class="n">4.5</td><td>Overtake mode never worked in a race</td><td class="up">Fixed</td></tr>
+      <tr><td>Performance</td><td class="n">5.0</td><td>The game never adapts to the machine</td><td class="warn">Part done</td></tr>
+      <tr><td>UI</td><td class="n">5.5</td><td>Phone race HUD overlapped itself</td><td class="up">Fixed, checked in shots</td></tr>
+      <tr><td>Maps</td><td class="n">5.6</td><td>Bahia pit entry trapped cars behind the wall</td><td class="up">Fixed</td></tr>
+      <tr><td>Graphics</td><td class="n">6.0</td><td>Grandstand crowd upside down</td><td class="up">Fixed</td></tr>
+      <tr><td>Physics</td><td class="n">6.0</td><td>Hybrid battery ran flat after lap 1</td><td class="up">Fixed</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Frame rate</h2>
+    <p>1600 x 900, High preset, RTX 3060, before any audit fix and after all of them. Single runs can vary by 10 to 15 per cent.</p>
+    <div class="scroll"><table>
+      <tr><th>View</th><th class="n">Before fps</th><th class="n">After fps</th><th class="n">Slowest 1% before</th><th class="n">Slowest 1% after</th></tr>
+      <tr><td>Kestrel chase</td><td class="n">103.5</td><td class="n up">116.8</td><td class="n">21.5 ms</td><td class="n up">13.2 ms</td></tr>
+      <tr><td>Kestrel T-cam</td><td class="n">114.4</td><td class="n up">134.4</td><td class="n">14.6 ms</td><td class="n up">10.3 ms</td></tr>
+      <tr><td>Mont-Aurele chase</td><td class="n">80.3</td><td class="n up">83.2</td><td class="n">19.7 ms</td><td class="n up">16.9 ms</td></tr>
+      <tr><td>Mont-Aurele T-cam</td><td class="n">89.8</td><td class="n up">93.4</td><td class="n">31.8 ms</td><td class="n up">14.8 ms</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Race retest</h2>
+    <p>20 matched races, full damage, 5 laps, safety car off, on Kestrel, Sierra, Lone Star, Hakone and Bahia at Pro and Legend. Old is the build before the second fix batch.</p>
+    <div class="scroll"><table>
+      <tr><th>Measure</th><th class="n">Old</th><th class="n">New</th></tr>
+      <tr><td>Contacts</td><td class="n">717</td><td class="n up">318</td></tr>
+      <tr><td>Wall hits</td><td class="n">318</td><td class="n up">30</td></tr>
+      <tr><td>Car resets</td><td class="n">1085</td><td class="n up">162</td></tr>
+      <tr><td>Missed mandatory stop penalties</td><td class="n">185</td><td class="n up">9</td></tr>
+      <tr><td>Position changes</td><td class="n">2791</td><td class="n up">3294</td></tr>
+      <tr><td>Typical driver's best lap</td><td class="n">82.51 s</td><td class="n up">70.31 s</td></tr>
+      <tr><td>Winner's race time</td><td class="n">406.1 s</td><td class="n up">381.4 s</td></tr>
+      <tr><td>Cars retired</td><td class="n">46</td><td class="n warn">99</td></tr>
+    </table></div>
+    <p style="margin-top:12px">Retirements doubled on purpose: a wreck now pulls off instead of limping round and being reset. It is still about 5 of 20 cars per race, which is high.</p>
+    <p>Stopped car test: a car parked on the racing line used to take hits at up to 216 km/h and block the field. In four new runs nobody hit it and 55 of 61 cars got past.</p>
+  </section>
+
+  <section>
+    <h2>Decisions for you</h2>
+    <div class="asks">
+      <div class="ask"><h3>Braking realism</h3><p>Your friend may be right about the brakes. The car stops about 35 per cent too short: 318 to 87 km/h takes 95 m, against 153 m in a 2026 simulation. So all brake points sit late, even with the coached fastest lap. Fixing it means less downforce and brake force, relearning every circuit, and a different feel for all players, so it is your call.</p></div>
+      <div class="ask"><h3>Real logos and names</h3><p>Car textures show real sponsors and makers, and some driver names sit close to real people, while the README says everything is fictional. Left unchanged, as they are your choice. The names are quick to change, the liveries are a big job.</p></div>
+      <div class="ask"><h3>Live race on a worker thread</h3><p>Still your question from earlier. The sim takes about 2.4 ms of each frame. Moving it is a large rewrite with little fps gain.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fixed</h2>
+    <ul>
+      <li>Race messages, best laps, the end of a race, retiring, double clicks, a lost second APPLY, one error ending the game.</li>
+      <li>Tyre choice by tap, pad and wheel. AUTO starting tyre, so a wet grid is not on slicks.</li>
+      <li>Championship saves each round and can be continued. Quit asks twice.</li>
+      <li>Overtake mode from lap 2. Safety car no longer penalises passing a car that pitted, and a crash can bring it out.</li>
+      <li>Arcade has no damage by default, as its card says. Ghosts are per handling and qualifying leaves them alone.</li>
+      <li>Hybrid battery, grass that slows a car, wall hits that no longer spin cars, refused overrev downshifts. All 11 circuits re-coached.</li>
+      <li>AI goes round stopped cars, leaves room on lap 1, makes visible mistakes, keeps its mandatory stop. Difficulty steps evened out. Qualifying times use real pace.</li>
+      <li>Pit entries on Bahia, Sierra and Lone Star. Traffic in the pit lane. Overtake zones for city circuits.</li>
+      <li>Graphics: crowd, Hakone sun, Kestrel road, windows, garages, rubber, shade, kerb ends, sparks, tree edges.</li>
+      <li>Sound: engine voices stop, hidden tabs go quiet, audible tyres, off-throttle engine, other cars' hits, barrier grind, crowd reactions, wheel guns, results music, 8 other cars.</li>
+      <li>Phone HUD, touch controls page, results open on your row, contrast fixes, name tags no longer stack.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Not done</h2>
+    <ul>
+      <li>Phones and weak laptops: no start tier or automatic step-down, car textures still huge on the GPU, shaders no lighter. None of this has been tested on a real phone.</li>
+      <li>Generated circuits are not coached, so Legend there drives about a level down. It would add a minute or two of waiting.</li>
+      <li>Tyre strategy still has one answer. There are no flags, no spoken radio and no per-venue ambience. Stats and records screens are missing.</li>
+      <li>Settings still have no tabs, the gamepad has no settings, and there are no accessibility options beyond pinch zoom.</li>
+      <li>Authored maps are big rings, and city laps miss the Monaco shape. Redrawing needs a relearn per circuit.</li>
+      <li>Coached solo laps came out 0.4 to 0.8 s slower than the previous coaching on Varenna, Sierra, Bahia, Nordwald and Lone Star after the physics changes.</li>
+      <li>Sound changes were checked in code only. Nobody has listened to them.</li>
+    </ul>
+  </section>
+</div>

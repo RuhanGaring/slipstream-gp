@@ -16,13 +16,20 @@ Then open http://localhost:8931. There is also an `f1-racing` entry in the paren
 
 - **Arcade**: drive with W A S D only. Automatic gears, traction and stability help, extra grip, a full racing line that turns red where you need to brake, no tyre wear, damage, pits or penalties. R resets the car.
 - **Simulation**: tyre temperature and wear, soft, medium and hard compounds, fuel burn, front wing damage, track limits strikes and penalties, DRS (Space), pit strategy (P, then 1, 2 or 3) with a pit-lane autopilot. ABS, traction control, gearbox (E and Q for manual) and steering assist are options.
-- **Quick Race**, **Championship** (5 rounds, points to P10 plus fastest lap) and **Time Trial** (ghost of your best lap, saved per circuit).
+- **Quick Race**, **Championship** (one round at every circuit, points to P10 plus fastest lap) and **Time Trial** (ghost of your best lap, saved per circuit).
+- **Career**: start in the slowest car, beat each team's target to build a reputation, sign for a better team when the season ends. **Daily Race**: the date picks the circuit, the car, the weather, the laps and the grid slot; the profile keeps the best result and the streak.
+- **First launch**: asks what kind of driver you are (New driver, Racer, Sim driver), sets everything to match and puts you on the grid. **Race Again** on the main menu reruns your last setup with nothing to pick.
+- **Flashback**: hold Backspace (View on a pad, the rewind button on a phone) to run the race backwards up to 30 seconds, let go to drive from there. Set per race in Race setup; none in time trials or qualifying.
+- **Racecraft**: a car about to be lapped (blue flags) or too slow to race (damage, or far off the pace) waves faster cars through: off the line on the next straight, then a lift. Career and Championship are saved apart, so starting one never touches the other.
+- **Driving help**: Brake help (Low saves a corner, High does all the braking, watches the car ahead and feeds in the throttle), Steering help, seven AI levels from Beginner to Legend, and Match my pace, which moves the field to race you sector by sector from the second lap. With damage off, a hard wall hit costs speed and a moment of engine, so the walls are never quicker than the brakes.
+- **Race coach**: short tips at the moment they help, each stopping for good once seen. Settings > Race aids.
+- **Driver Profile**: career totals, best result and best laps per circuit, eighteen trophies. The results screen sums up your race and suggests what to try next.
 - **Spectate**: an all-AI race to watch, with a TV director that cuts between battles and cameras.
 - **Replays** of every session (race, weekend sessions, time trial, spectating): from the pause menu or the results. Timeline with lap and event markers (overtakes, contacts, pit stops, fastest laps, safety car), event list, highlights, slow motion and rewind, frame stepping, any car, any camera, and photos.
 
 ## Controls
 
-W or Up: throttle. S or Down: brake, and reverse when stopped. A and D: steer. Space: DRS. P: pit strategy. E and Q: shift. C: camera (chase, far chase, T-cam, cockpit, TV). Z: chase distance (near, standard, far). Right click: mouse steering on or off (the mouse turns a virtual wheel; tune sensitivity, deadzone, curve, self-centring, smoothing and invert in Settings). H: hide HUD. M: mute. Esc: pause. Gamepads work too.
+W or Up: throttle. S or Down: brake, and reverse when stopped. A and D: steer. Backspace: flashback. R: reset the car (in a simulation race, once stuck). Space: DRS. P: pit strategy. E and Q: shift. C: camera (chase, far chase, T-cam, cockpit, TV). Z: chase distance (near, standard, far). Right click: mouse steering on or off (the mouse turns a virtual wheel; tune sensitivity, deadzone, curve, self-centring, smoothing and invert in Settings). H: hide HUD. M: mute. Esc: pause. Gamepads work too.
 
 Replays and spectating: Left and Right (or , and .) change car, Up and Down jump to the leader or the last car, C and V cycle 14 cameras (chase, far chase, T-cam, cockpit, helmet, nose, sidepod, TV, helicopter, blimp, top down, map, orbit, free), 1 to 0 pick one directly, F free camera (W A S D, Q and E for height, drag or arrows to look, Shift for speed, wheel to zoom), T top down, G map, D director, Tab timing tower, H hide the overlay. In a replay: Space play or pause, J and L skip 5 s, U and I step a frame, [ and ] speed (down into rewind), N and B next or previous event, E event list, Y highlights, P photo, Home and End, or click and drag the timeline. Esc leaves.
 
@@ -57,7 +64,10 @@ Replays and spectating: Left and Right (or , and .) change car, Up and Down jump
 
 ## Tests
 
-- `node tools/simrace.js <track|all> <laps> <difficulty 0-4> <arcade|sim>`: full 20-car AI race, reports incidents and lap times.
+- `python tools/playcheck.py OUTDIR`: the player's whole journey in GPU Chromium on a clean profile, with screenshots: welcome, first race, flashback, pause, a race to the flag, debrief, profile, key mapping.
+- `node tools/fbtest.js [track] [mode]`: flashback snapshots: exact restore, cost, the race carries on.
+- `node tools/helpbot.js [track] [mode] [brakeHelp] [steerHelp] [secs] [difficulty]`: a first-time driver who never brakes, to measure the driving helps; `ADAPT=1` for Match my pace.
+- `node tools/simrace.js <track|all> <laps> <difficulty 0-6> <arcade|sim>`: full 20-car AI race, reports incidents and lap times (5 Beginner, 6 Novice).
 - `node tools/optline.js [track|all]`: re-optimise the racing lines, then relearn the limits.
 - `node tools/learn.js [track|all] [laps]`: relearn the AI's circuit limits.
 - `node tools/straighten.js [track|all]`: run the racing-line straightening pass (`Raceline.straighten`) over the stored lines, then relearn the limits. The lap-time model treats curves gentler than about 200 m radius as free and has no yaw inertia, so the random-bump optimisers leave ripples on straights and sudden flicks across the track; the pass smooths the lap, irons out ripples and spreads flicks over a longer run. Both optimisers run it automatically.

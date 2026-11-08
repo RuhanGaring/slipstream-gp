@@ -34,7 +34,7 @@
     if (!scr.back && !scr.primary && !scr.pickable) return;
     const bar = h('div', 'm-bar');
     if (scr.back) {
-      const b = h('button', 'm-btn m-back', '<span class="a">&#8592;</span>BACK');
+      const b = h('button', 'm-btn m-back', '<span class="a">&#8592;</span>' + (scr.backLabel || 'BACK'));
       b.addEventListener('click', () => { if (UI.cur !== scr) return; Audio.ui.back(); scr.back(); });
       bar.appendChild(b);
     }
@@ -142,8 +142,11 @@
     return false;
   }
 
+  const PAD_FOOT = { ENTER: 'A', ESC: 'B', '&#8593;&#8595;': 'D-PAD', '&#8592;&#8594;': 'D-PAD', M: null, BKSP: null, TAB: null, N: null, X: null, R: null, F: null, '0-9': null };
   function foot(parts) {
     const f = h('div', 'foot');
+    const pad = F1.Game.usingPad;
+    if (pad) parts = parts.filter(p => p === '|' || PAD_FOOT[p[0]] !== null).map(p => (p === '|' ? p : [PAD_FOOT[p[0]] || p[0], p[1]])).filter((p, k, a) => !(p === '|' && (k === a.length - 1 || a[k + 1] === '|')));
     f.innerHTML = parts.map(p => (p === '|' ? '<span class="sp"></span>' : `<span><span class="key">${p[0]}</span>${p[1]}</span>`)).join('');
     return f;
   }
@@ -227,9 +230,9 @@
 
   S.title = () => {
     const el = h('div');
-    el.innerHTML = `<div class="stage"><div class="brand"><span class="w1">SLIPSTREAM</span><span class="w2">GRAND PRIX</span></div><div class="press">${F1.Game.mobile && F1.Game.mobile() ? 'TAP TO START' : 'PRESS ENTER'}</div></div>
+    el.innerHTML = `<div class="stage"><div class="brand"><span class="w1">SLIPSTREAM</span><span class="w2">GRAND PRIX</span></div><div class="press">${F1.Game.mobile && F1.Game.mobile() ? 'TAP TO START' : [...(navigator.getGamepads ? navigator.getGamepads() : [])].some(g => g) ? 'PRESS ENTER OR A' : 'PRESS ENTER'}</div></div>
       <div class="legal">A fictional championship: teams, drivers and circuits are original. 2026 car models by Dave Love SketchFab (@Tyler_Dave), CC BY 4.0, modified; liveries and logos belong to their owners, no affiliation. Textures and skies: Poly Haven, ambientCG (CC0). See CREDITS.md.</div>`;
-    return { el, items: [], onKey: c => { if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') { Audio.init(); Audio.ui.select(); F1.Game.menuMusic(); go('main'); return true; } return false; }, click: true };
+    return { el, items: [], onKey: c => { if (c === 'Enter' || c === 'Space' || c === 'NumpadEnter') { Audio.init(); Audio.ui.select(); F1.Game.menuMusic(); go(F1.Game.firstRun() ? 'welcome' : 'main'); return true; } return false; }, click: true };
   };
 
   S.main = () => {
@@ -237,26 +240,33 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="brand" style="margin-bottom:44px"><span class="w1" style="font-size:64px">SLIPSTREAM</span><span class="w2" style="font-size:18px">GRAND PRIX</span></div>`;
     const menu = h('div', 'menu');
-    const saved = F1.Game.champSaved && F1.Game.champSaved();
+    const career = F1.Game.champSaved('career'), saved = F1.Game.champSaved('champ');
+    const last = F1.Game.lastRun && F1.Game.lastRun();
+    const N = F1.Tracks.DEFS.length;
     const entries = [
-      ...(saved ? [['CONTINUE CHAMPIONSHIP', `Round ${saved.round + 1} of ${F1.Tracks.DEFS.length}: ${F1.Tracks.DEFS[saved.round].name}`, () => F1.Game.champResume()]] : []),
+      ...(career ? [['CONTINUE CAREER', career.offers ? 'The season is over. Your contract offers are waiting.' : `Season ${career.career.season}, round ${career.round + 1} of ${N}: ${F1.Tracks.DEFS[career.round].name}`, () => F1.Game.champResume('career')]] : []),
+      ...(saved ? [['CONTINUE CHAMPIONSHIP', `Round ${saved.round + 1} of ${N}: ${F1.Tracks.DEFS[saved.round].name}`, () => F1.Game.champResume('champ')]] : []),
+      ...(last ? [['RACE AGAIN', `${F1.Tracks.byId(last.track).name}, ${F1.Data.TEAMS[last.team].name}. ${last.kind === 'tt' ? 'Time trial' : F1.Game.raceDefaults.laps + ' laps'}, straight to the grid.`, () => F1.Game.runLast()]] : []),
+      ...(F1.Game.daily ? [(() => { const D = F1.Game.daily(), P = F1.Profile.get(), done = P.daily[D.key]; return ['DAILY RACE', `Today: ${D.name} in the ${D.teamName}, ${D.laps} laps from P${D.grid}.${done ? ' Best today P' + done + '.' : ''}${P.streak > 1 ? ' Streak ' + P.streak + ' days.' : ''}`, () => F1.Game.runDaily()]; })()] : []),
       ['QUICK RACE', 'Pick a circuit and a team. Lights out in under a minute.', () => { F1.Game.flow = { kind: 'race' }; go('mode'); }],
       ['GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', () => { F1.Game.flow = { kind: 'weekend' }; go('mode'); }],
-      ['CHAMPIONSHIP', `${F1.Tracks.DEFS.length} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
+      [career ? 'NEW CAREER' : 'CAREER', career ? 'Start again in the slowest car. Your saved career is replaced when the first race starts.' : 'Start in the slowest car. Beat your team\u2019s targets, earn a better seat, season after season.', () => F1.Game.careerStart()],
+      [saved ? 'NEW CHAMPIONSHIP' : 'CHAMPIONSHIP', saved ? `A fresh title fight. Your saved championship (round ${saved.round + 1}) is replaced when the first race starts.` : `${N} rounds, points for the top ten, one title. Race days or full weekends.`, () => { F1.Game.flow = { kind: 'champ' }; go('mode'); }],
       ['TIME TRIAL', 'Hot laps against your own ghost.', () => { F1.Game.flow = { kind: 'tt' }; go('mode'); }],
       ['SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }],
+      ['DRIVER PROFILE', 'Your record, best results at every circuit and the trophies you have won.', () => go('profile', { back: 'main' })],
       ['SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' })],
       ['CONTROLS', compact() ? 'Touch, gamepad and racing wheel.' : 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })],
     ];
     const items = entries.map(([t, s, fn]) => {
       const e = h('div', 'mi', `${t}<small>${s}</small>`);
       menu.appendChild(e);
-      return { el: e, activate: fn };
+      return { el: e, activate: () => { UI.lastMainName = t; fn(); } };
     });
     wrap.appendChild(menu);
     el.appendChild(wrap);
     el.appendChild(foot([['&#8593;&#8595;', 'select'], ['ENTER', 'confirm'], '|', ['M', 'mute']]));
-    return { el, items, focus: UI.lastMain || 0, back: () => go('title'), onKey: c => { UI.lastMain = UI.focus; return false; } };
+    return { el, items, focus: Math.max(0, entries.findIndex(e => e[0] === UI.lastMainName)), back: () => go('title') };
   };
 
   // ---------- race-weekend chrome ----------
@@ -264,11 +274,11 @@
   // step tracker (where you are in the flow), the page title, and the prompts bar at the foot.
   const KIND = { race: 'QUICK RACE', weekend: 'GRAND PRIX WEEKEND', champ: 'CHAMPIONSHIP', tt: 'TIME TRIAL', spectate: 'SPECTATE' };
   const STEP_NAME = { mode: 'HANDLING', track: 'CIRCUIT', team: 'TEAM', driver: 'DRIVER', setup: 'SETUP' };
-  function steps(kind) { return kind === 'champ' ? ['mode', 'team', 'driver', 'setup'] : kind === 'spectate' ? ['mode', 'track', 'setup'] : ['mode', 'track', 'team', 'driver', 'setup']; }
+  function steps(kind) { return kind === 'career' ? ['mode', 'setup'] : kind === 'champ' ? ['mode', 'team', 'driver', 'setup'] : kind === 'spectate' ? ['mode', 'track', 'setup'] : ['mode', 'track', 'team', 'driver', 'setup']; }
   function header(cur) {
-    const flow = F1.Game.flow, list = steps(flow.kind), at = list.indexOf(cur);
+    const flow = F1.Game.flow, list = steps(flow.career ? 'career' : flow.kind), at = list.indexOf(cur);
     const e = h('div', 'hdr');
-    e.innerHTML = `<div class="hdr-ev"><span class="mark"><i></i>SLIPSTREAM GP</span><span class="ev">${KIND[flow.kind] || 'QUICK RACE'}</span>${flow.mode && cur !== 'mode' ? `<span class="ev dim">${flow.mode === 'sim' ? 'SIMULATION' : 'ARCADE'}</span>` : ''}</div>
+    e.innerHTML = `<div class="hdr-ev"><span class="mark"><i></i>SLIPSTREAM GP</span><span class="ev">${flow.career ? 'CAREER' : KIND[flow.kind] || 'QUICK RACE'}</span>${flow.mode && cur !== 'mode' ? `<span class="ev dim">${flow.mode === 'sim' ? 'SIMULATION' : 'ARCADE'}</span>` : ''}</div>
       <ol class="steps">${list.map((s, k) => `<li class="${k < at ? 'done' : k === at ? 'cur' : ''}"><b>${k + 1}</b>${STEP_NAME[s]}</li>`).join('')}</ol>`;
     return e;
   }
@@ -296,6 +306,63 @@
   const peek = id => (F1.Premade && F1.Premade[id]) || F1.Race.getTrack(id);
   const statCells = (tr, best) => `<div><b>${(tr.L / 1000).toFixed(3)}<small>KM</small></b><span>Circuit length</span></div><div><b>${tr.apexes.length}</b><span>Corners</span></div><div><b>${tr.drs.length}</b><span>Overtake zones</span></div><div><b>${best ? U.fmtTime(best) : 'NO TIME'}</b><span>Your best</span></div>`;
 
+  // the first time only: what kind of driver is this? Each answer sets up the game and starts a race
+  S.welcome = () => {
+    const el = h('div', 'wk');
+    const wrap = h('div', 'wk-body stage');
+    wrap.innerHTML = '<h1 class="pg-t">Welcome. How do you like to race?</h1>';
+    const cards = h('div', 'cards wl');
+    const mk = (title, tag, text, list, kind) => {
+      const c = h('div', 'card', `<h3>${title}</h3><div class="tag">${tag}</div><p>${text}</p><ul>${list.map(x => `<li>${x}</li>`).join('')}</ul>`);
+      cards.appendChild(c);
+      return { el: c, activate: () => F1.Game.welcome(kind) };
+    };
+    const items = [
+      mk('New driver', 'First time racing', 'The car brakes for you and helps with steering. All you do is enjoy it.', ['Brake and steering help', 'Beginner rivals who match your pace', 'Rewind any mistake'], 'new'),
+      mk('Racer', 'I play racing games', 'Arcade handling against a real field, with a braking guide and a few rewinds.', ['Rookie rivals', 'No wear, no pit stops', 'Five flashbacks a race'], 'fan'),
+      mk('Sim driver', 'Give me all of it', 'The full simulation: tyres, hybrid battery, damage, strategy and penalties.', ['Pro rivals', 'Pit strategy and tyre wear', 'Full damage'], 'sim'),
+    ];
+    wrap.appendChild(cards);
+    const skip = h('div', 'mi wl-skip', 'SKIP<small>Go to the main menu and set things up yourself</small>');
+    wrap.appendChild(skip);
+    items.push({ el: skip, activate: () => { F1.Game.welcome(null); go('main'); } });
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8592;&#8594;', 'Select'], ['ENTER', 'Start']]));
+    return { el, nav: 'h', items, focus: 0, backLabel: 'SKIP', back: () => { F1.Game.welcome(null); go('main'); } };
+  };
+
+  // ---------- driver profile ----------
+  S.profile = o => {
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage pf');
+    const P = F1.Profile.get(), T = F1.Profile.TROPHIES, won = T.filter(t => P.trophies[t[0]]).length;
+    wrap.innerHTML = `<div class="crumbs">YOUR RECORD</div><div class="h1">DRIVER PROFILE</div>`;
+    const stat = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+    const top = h('div', 'pf-stats', stat(P.races, 'Races') + stat(P.wins, 'Wins') + stat(P.podiums, 'Podiums') + stat(P.fastest, 'Fastest laps') + stat(P.laps, 'Laps') + stat(Math.round(P.km).toLocaleString(), 'Km driven') + stat(won + ' / ' + T.length, 'Trophies'));
+    wrap.appendChild(top);
+    const two = h('div', 'pf-two');
+    const rows = F1.Tracks.DEFS.map(d => {
+      const r = P.tracks[d.id] || {}, a = F1.Game.bestLap(d.id, 'arcade'), s = F1.Game.bestLap(d.id, 'sim');
+      return `<tr><td>${d.name}</td><td>${r.races || 0}</td><td>${r.best ? 'P' + r.best : '-'}</td><td>${a ? U.fmtTime(a) : '-'}</td><td>${s ? U.fmtTime(s) : '-'}</td></tr>`;
+    }).join('');
+    const tbl = h('div', 'pf-tbl', `<table class="res"><tr><th>CIRCUIT</th><th>RACES</th><th>BEST</th><th>ARCADE LAP</th><th>SIM LAP</th></tr>${rows}</table>`);
+    const tro = h('div', 'pf-tro', T.map(t => `<div class="${P.trophies[t[0]] ? 'got' : ''}"><b>${t[1]}</b><span>${t[2]}</span></div>`).join(''));
+    two.appendChild(tbl); two.appendChild(tro);
+    wrap.appendChild(two);
+    const back = h('div', 'btn', '<span>BACK</span><span class="arrow">&#8592;</span>');
+    back.style.maxWidth = '420px';
+    wrap.appendChild(back);
+    el.appendChild(wrap);
+    const doBack = () => go(o.back || 'main');
+    const onKey = c => {
+      const d = c === 'ArrowUp' || c === 'KeyW' ? -60 : c === 'ArrowDown' || c === 'KeyS' ? 60 : 0;
+      if (!d) return false;
+      tbl.scrollBy(0, d); tro.scrollBy(0, d);
+      return true;
+    };
+    return { el, items: [{ el: back, activate: doBack }], back: doBack, top: true, onKey };
+  };
+
   S.mode = () => {
     const el = h('div', 'wk');
     const flow = F1.Game.flow;
@@ -315,7 +382,7 @@
     wrap.appendChild(cards);
     el.appendChild(wrap);
     el.appendChild(foot([['&#8592;&#8594;', 'Select'], ['ENTER', 'Confirm'], ['ESC', 'Back']]));
-    const pick = m => () => { F1.Game.flow.mode = m; go(flow.kind === 'champ' ? 'team' : 'track'); };
+    const pick = m => () => { F1.Game.flow.mode = m; go(flow.career ? 'setup' : flow.kind === 'champ' ? 'team' : 'track'); };
     return { el, nav: 'h', items: [{ el: a, activate: pick('arcade') }, { el: b, activate: pick('sim') }], focus: flow.mode === 'sim' ? 1 : 0, back: () => go('main') };
   };
 
@@ -771,7 +838,8 @@
     const add = (o, sec) => { if (sec) { opts.appendChild(h('div', 'opt sec', sec)); } opts.appendChild(o.el); items.push(o); return o; };
     if (kind !== 'tt') {
       add(optRow('Race distance', '', [2, 3, 5, 8, 12, 20], () => R.laps, v => { R.laps = v; updSummary(); }, v => v + ' LAPS'), 'Race');
-      add(optRow('AI difficulty', 'How fast and how sure the field is. Legend is the fastest lap the car can do', [0, 1, 2, 3, 4], () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
+      add(optRow('AI difficulty', 'How fast and how sure the field is. Legend drives every corner at the limit, with extra engine', Data.ORDER, () => R.difficulty, v => { R.difficulty = v; updSummary(); }, v => Data.DIFFICULTY[v].name));
+      if (kind !== 'spectate') add(optRow('Match my pace', 'The field speeds up or eases off lap by lap, so there is always someone to race', [false, true], () => !!R.adaptive, v => { R.adaptive = v; updSummary(); }, v => (v ? 'ON' : 'OFF')));
       if (kind !== 'champ' && kind !== 'weekend' && kind !== 'spectate') add(optRow('Grid position', '', ['pole', 5, 10, 'back', 'random'], () => R.grid, v => { R.grid = v; updSummary(); }, v => v === 'pole' ? 'POLE' : v === 'back' ? 'BACK OF GRID' : v === 'random' ? 'RANDOM' : 'P' + v));
       add(optRow('Field size', '', [10, 16, 20], () => R.field, v => { R.field = v; updSummary(); }, v => v + ' CARS'));
       if (kind === 'weekend') add(optRow('Weekend format', 'Practice is a longer solo session before qualifying', ['full', 'quali'], () => R.wkFmt || 'full', v => { R.wkFmt = v; updSummary(); }, v => FMT[v]));
@@ -791,6 +859,12 @@
       if (kind !== 'spectate') add(optRow('Traction control', '', [0, 1, 2], () => R.tc, v => { R.tc = v; }, v => ['OFF', 'MEDIUM', 'FULL'][v]));
       if (kind !== 'spectate') add(optRow('Gearbox', '', [true, false], () => R.autoGear, v => { R.autoGear = v; }, v => (v ? 'AUTOMATIC' : 'MANUAL  E / Q')));
       if (kind !== 'spectate') add(optRow('Steering assist', 'Limits lock to the grip available', [true, false], () => R.steerAssist, v => { R.steerAssist = v; }, v => (v ? 'ON' : 'OFF')));
+    }
+    if (kind !== 'spectate') {
+      if (kind !== 'tt') add(optRow('Flashbacks', 'Rewind the race after a mistake and drive it again. Not in qualifying', [0, 1, 3, 5, 10, 'inf'], () => (R.flashbacks == null ? 5 : R.flashbacks), v => { R.flashbacks = v; }, v => (v === 'inf' ? 'UNLIMITED' : v ? v + ' PER RACE' : 'OFF')), 'Driving help');
+      const HELP = ['OFF', 'LOW', 'HIGH'];
+      add(optRow('Brake help', 'Low saves a corner you came in too fast. High does all the braking, watches the car ahead and feeds in the throttle', [0, 1, 2], () => R.brakeHelp | 0, v => { R.brakeHelp = v; }, v => HELP[v]), kind === 'tt' ? 'Driving help' : undefined);
+      add(optRow('Steering help', 'Guides the car along the line with you', [0, 1, 2], () => R.steerHelp | 0, v => { R.steerHelp = v; }, v => HELP[v]));
     }
     add(optRow('Damage', 'Full: soft-body crashes, parts break off, punctures, engine and gearbox failures', sim ? ['full', 'limited', 'off'] : ['off', 'full'], () => (!sim ? R.damageArcade || 'off' : R.damage === true ? 'limited' : R.damage === false ? 'off' : R.damage || 'full'), v => { if (sim) R.damage = v; else R.damageArcade = v; }, v => ({ full: 'FULL', limited: 'FRONT WING ONLY', off: 'OFF' })[v]), sim ? '' : 'Assists');
     if (kind !== 'spectate') add(optRow('Racing line', 'Red bar: brake. Yellow: turn in. Blue: apex. Green: track out.', ['full', 'brake', 'off'], () => (sim ? R.lineSim : R.lineArcade), v => { if (sim) R.lineSim = v; else R.lineArcade = v; }, v => ({ full: 'FULL', brake: 'BRAKING ONLY', off: 'OFF' })[v]));
@@ -824,7 +898,7 @@
       if (cv) requestAnimationFrame(() => drawTrackMap(cv, peek(flow.track), { mono: true, w: 3.5, pad: 10, bare: true }));
     }
     updSummary();
-    return { el, items, back: () => go(kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1, pickable: false,
+    return { el, items, back: () => go(flow.career ? 'mode' : kind === 'spectate' ? 'track' : 'driver'), focus: items.length - 1, pickable: false,
       primary: { label: kind === 'tt' ? 'START SESSION' : kind === 'champ' ? 'START CHAMPIONSHIP' : kind === 'weekend' ? 'START WEEKEND' : kind === 'spectate' ? 'START WATCHING' : 'START RACE', fn: () => F1.Game.startFromFlow() } };
   };
 
@@ -956,23 +1030,40 @@
     const pct = v => Math.round(v * 100) + '%';
     const opts2 = h('div', 'opts');
     let col = opts;
-    const add = (o, sec) => { if (sec) col.appendChild(h('div', 'opt sec', sec)); col.appendChild(o.el); items.push(o); };
+    // one section at a time: the first row picks it, and left and right move between them
+    const TABS = ['audio', 'display', 'aids', 'controls', 'graphics'], TAB_NAMES = { audio: 'SOUND', display: 'DISPLAY', aids: 'RACE AIDS', controls: 'CONTROLS', graphics: 'GRAPHICS' };
+    const tab = TABS.includes(o.tab) ? o.tab : (o.keep && UI.setTab) || 'audio';
+    UI.setTab = tab;
+    let here = 'audio';
+    const add = (r, sec) => { if (here !== tab) return; if (sec) col.appendChild(h('div', 'opt sec', sec)); col.appendChild(r.el); items.push(r); };
+    { const r = optRow('Section', '', TABS, () => tab, v => { go('settings', { back: o.back, keep: true, tab: v }); }, v => TAB_NAMES[v]); r.el.classList.add('tabrow'); col.appendChild(r.el); items.push(r); }
     add(optRow('Master volume', '', vols, () => st.master, v => { st.master = v; touched(); }, pct), 'AUDIO');
     add(optRow('Effects volume', '', vols, () => st.sfx, v => { st.sfx = v; touched(); }, pct));
     add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; touched(); }, pct));
     // which engine sound this browser runs (the realistic worklet, or the basic stand-in and why)
-    { const info = h('div', 'opt info', `<div class="on">Engine sound<small>${(F1.Audio && F1.Audio.A.engineInfo) || 'starts with the first key or tap'}</small></div><div></div>`); col.appendChild(info); }
+    if (tab === 'audio') { const info = h('div', 'opt info', `<div class="on">Engine sound<small>${(F1.Audio && F1.Audio.A.engineInfo) || 'starts with the first key or tap'}</small></div><div></div>`); col.appendChild(info); }
+    here = 'display';
     add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; touched(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; touched(); }, v => Math.round(v * 100) + '%'));
+    here = 'controls';
     add(optRow('Mobile mode', 'Touch controls in the race. Auto turns them on with a touch screen', ['auto', 'on', 'off'], () => st.mobile || 'auto', v => { st.mobile = v; touched(); }, v => v.toUpperCase()));
     add(optRow('Touch steering', 'Pad: slide a thumb. Tilt: turn the phone like a wheel', ['pad', 'tilt'], () => st.touchSteer || 'pad', v => { st.touchSteer = v; touched(); }, v => v.toUpperCase()));
     add(optRow('Pad sensitivity', 'How far the thumb slides for full lock', fineRange(0.25, 2.5, 0.05), () => st.tSens || 1, v => { st.tSens = v; touched(); }, v => Math.round(v * 100) + '%'));
     add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', fineRange(0.25, 2.5, 0.05), () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
+    here = 'display';
     add(optRow('Road feel', 'The car shakes and nods over the road surface', [0, 0.6, 1, 1.5], () => (st.roadFeel == null ? 1 : st.roadFeel), v => { st.roadFeel = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1: 'NORMAL', 1.5: 'STRONG' })[v]));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; touched(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; touched(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
     add(optRow('Name tags', 'Driver codes above nearby cars', [true, false], () => st.tags, v => { st.tags = v; touched(); }, v => (v ? 'ON' : 'OFF')));
+    const onOff0 = v => (v ? 'ON' : 'OFF');
+    here = 'aids';
+    add(optRow('Race coach', 'Short tips in your first races. Each stops once you have seen it', [true, false], () => st.hints !== false, v => { st.hints = v; touched(); }, onOff0), 'RACE AIDS');
+    add(optRow('Spotter', 'A bar at the edge of the screen when a car is alongside', [true, false], () => st.spotter !== false, v => { st.spotter = v; touched(); }, onOff0));
+    add(optRow('HUD size', '', [0.85, 1, 1.15, 1.3], () => st.hudSize || 1, v => { st.hudSize = v; touched(); }, v => Math.round(v * 100) + '%'), 'ACCESSIBILITY');
+    add(optRow('Colour-safe guide', 'Racing line and corner marks in colours that stay apart with colour blindness', [false, true], () => st.lineSafe === true, v => { st.lineSafe = v; touched(); }, onOff0));
+    add(optRow('Camera shake', 'The jolt on impacts', [true, false], () => st.shake !== false, v => { st.shake = v; touched(); }, onOff0));
+    here = 'controls';
     // fine steps: 0.05x apart below 1x, so a low-sensitivity setting can be found exactly
     add(optRow('Sensitivity', 'Right click in a race to switch mouse steering on. Hold left / right to scroll', fineRange(0.05, 1, 0.05).concat(fineRange(1.1, 3, 0.1)), () => st.mSens, v => { st.mSens = v; touched(); }, v => v.toFixed(2) + 'x'), 'MOUSE STEERING');
     add(optRow('Deadzone', 'Movement ignored around the centre', fineRange(0, 0.2, 0.01), () => st.mDead, v => { st.mDead = v; touched(); }, v => Math.round(v * 100) + '%'));
@@ -980,23 +1071,28 @@
     add(optRow('Self-centring', 'Pulls the wheel back when the mouse is still', fineRange(0, 4, 0.1), () => st.mCentre, v => { st.mCentre = v; touched(); }, v => (v ? v.toFixed(1) : 'OFF')));
     add(optRow('Smoothing', 'Time the steering takes to follow the mouse', fineRange(0, 0.2, 0.01), () => st.mSmooth, v => { st.mSmooth = v; touched(); }, v => (v ? Math.round(v * 1000) + ' MS' : 'OFF')));
     add(optRow('Invert', '', [false, true], () => st.mInvert, v => { st.mInvert = v; touched(); }, v => (v ? 'ON' : 'OFF')));
-    {
+    add(optRow('Stick sensitivity', 'Above 100% reaches full lock before the stick does', fineRange(0.5, 2, 0.1), () => st.padSens || 1, v => { st.padSens = v; touched(); }, v => Math.round(v * 100) + '%'), 'GAMEPAD');
+    add(optRow('Stick deadzone', 'Movement ignored around the centre', fineRange(0, 0.3, 0.02), () => (st.padDead == null ? 0.08 : st.padDead), v => { st.padDead = v; touched(); }, v => Math.round(v * 100) + '%'));
+    add(optRow('Stick curve', 'Progressive is gentler around the centre, for high-speed corners', [1, 1.5, 2.2], () => st.padCurve || 1, v => { st.padCurve = v; touched(); }, v => ({ 1: 'LINEAR', 1.5: 'PROGRESSIVE', 2.2: 'STRONG' })[v] || v));
+    if (tab === 'controls') {
       const wb = h('div', 'btn', '<span>WHEEL SETTINGS</span><span class="arrow">&#8594;</span>');
       wb.style.marginTop = '14px';
       col.appendChild(wb);
       items.push({ el: wb, activate: () => go('wheel', { back: o.back, from: 'settings' }) });
     }
     // graphics: a preset sets everything below it; touching any single option makes it CUSTOM
-    if (F1.R3 && document.body.classList.contains('three')) {
-      col = opts2;
+    if (tab === 'graphics' && F1.R3 && document.body.classList.contains('three')) {
+      here = 'graphics';
       const gx = st.gfx, P = F1.Game.GFX_PRESETS;
       const onOff = v => (v ? 'ON' : 'OFF');
       const setG = (k, v) => { gx[k] = v; gx.preset = 'custom'; touched(); };
       add(optRow('Quality preset', 'Rock and Potato are for phones and integrated graphics, and restart the game', ['rock', 'potato', 'low', 'medium', 'high', 'ultra', 'custom'], () => gx.preset, v => {
         if (v === 'custom') { gx.preset = 'custom'; touched(); return; }
         // potato and rock change how the WebGL context is made: applying one restarts the game
-        Object.assign(gx, P[v], { preset: v, boot: v === 'rock' || v === 'potato' ? v : '' }); touched();
+        Object.assign(gx, P[v], { preset: v, boot: v === 'rock' || v === 'potato' ? v : '' }); st.autoStep = 0; touched();
       }, v => v.toUpperCase()), 'GRAPHICS');
+      add(optRow('Auto quality', 'Lowers the graphics in a race if the frame rate drops. Choosing a preset starts it again', [true, false], () => st.autoQ !== false, v => { st.autoQ = v; st.autoStep = 0; touched(); }, onOff));
+      add(optRow('Frame rate target', 'What Auto quality holds', [30, 45, 60, 90, 120], () => st.autoTarget || 60, v => { st.autoTarget = v; touched(); }, v => v + ' FPS'));
       add(optRow('Post-processing', 'HDR pipeline. Off is fastest', [true, false], () => gx.post, v => setG('post', v), onOff));
       add(optRow('Scenery', 'Tree density, trackside boards and distant hills', ['full', 'reduced', 'sparse', 'minimal'], () => sceneryOf(gx), v => { Object.assign(gx, SCENERY[v], { scenery: v }); gx.preset = 'custom'; touched(); }, v => v.toUpperCase()));
       add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.7, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
@@ -1011,7 +1107,7 @@
       add(optRow('Exposure', '', [-1, -0.5, 0, 0.5, 1], () => gx.ev, v => { gx.ev = v; touched(); }, v => (v > 0 ? '+' : '') + v.toFixed(1) + ' EV'));
       const adv = h('div', 'btn', '<span>ADVANCED GRAPHICS</span><span class="arrow">&#8594;</span>');
       adv.style.marginTop = '14px';
-      opts2.appendChild(adv);
+      opts.appendChild(adv);
       items.push({ el: adv, activate: () => go('gfxadv', { back: o.back }) });
     }
     const ap = applyButton(opts, items, () => refresh());
@@ -1020,10 +1116,8 @@
     items.push({ el: back, activate: () => doBack() });
     function touched() { items.forEach(i => i.render && i.render()); ap.update(); }
     function refresh() { items.forEach(i => i.render && i.render()); ap.update(); }
-    const two = h('div', 'two');
-    opts.style.maxWidth = opts2.style.maxWidth = '';
-    two.appendChild(opts); two.appendChild(opts2);
-    wrap.appendChild(two);
+    opts.classList.add('opts-one');
+    wrap.appendChild(opts);
     el.appendChild(wrap);
     el.appendChild(foot([['&#8593;&#8595;', 'select'], ['&#8592;&#8594;', 'change'], ['ESC', 'back']]));
     const doBack = () => { if (!ap.leave()) return; if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
@@ -1128,11 +1222,14 @@
     const rows = (arr) => arr.map(([a, b]) => `<div class="ctl"><span>${a}</span><span class="k">${k(b)}</span></div>`).join('');
     const g = h('div', 'ctl-grid');
     const touchRows = compact() ? `<div class="crumbs" style="margin-top:6px">TOUCH</div>${rows([['Steer', 'LEFT PAD'], ['Gas / brake', 'RIGHT PEDALS'], ['Overtake / pit', 'OVT PIT'], ['Camera / pause', 'CAM II']])}` : '';
-    g.innerHTML = `<div>${touchRows}<div class="crumbs" style="margin-top:${compact() ? 22 : 6}px">DRIVING</div>${rows([['Throttle', 'W &#8593;'], ['Brake / reverse', 'S &#8595;'], ['Steer', 'A D'], ['Overtake mode (simulation)', 'SPACE'], ['Shift up / down (manual)', 'E Q'], ['Pit strategy (simulation)', 'P'], ['Reset car (arcade)', 'R']])}</div>
+    g.innerHTML = `<div>${touchRows}<div class="crumbs" style="margin-top:${compact() ? 22 : 6}px">DRIVING</div>${(() => { const K = F1.Game.keyName; return rows([['Throttle', K('thr') + ' &#8593;'], ['Brake / reverse', K('brk') + ' &#8595;'], ['Steer', K('left') + ' ' + K('right')], ['Flashback (hold)', K('flash')], ['Overtake mode (simulation)', K('drs')], ['Shift up / down (manual)', K('up') + ' ' + K('down')], ['Pit strategy (simulation)', K('pit')], ['Reset car (simulation: when stuck)', K('reset')]]); })()}</div>
       <div><div class="crumbs" style="margin-top:6px">GENERAL</div>${rows([['Pause', 'ESC'], ['Camera mode', 'C'], ['Tilt camera', '- / +'], ['Turn camera', '[ / ]'], ['Reset camera angle', '\\'], ['Zoom near / standard / far', 'Z'], ['Mouse steering on / off', 'RMB'], ['Mute', 'M'], ['Hide HUD', 'H'], ['Menu select', 'ENTER'], ['Back', 'ESC']])}
-      <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Pause', 'START']])}
+      <div class="crumbs" style="margin-top:22px">GAMEPAD</div>${rows([['Steer', 'LS'], ['Throttle / brake', 'RT LT'], ['Overtake / pit', 'A Y'], ['Gears', 'RB LB'], ['Flashback', 'VIEW'], ['Reset car', 'X'], ['Pause', 'START']])}
       <div class="crumbs" style="margin-top:22px">RACING WHEEL</div>${rows([['Calibrate, map buttons, force feedback', 'WHEEL SETTINGS']])}</div>`;
     wrap.appendChild(g);
+    const kb = h('div', 'btn', '<span>CHANGE KEYS</span><span class="arrow">&#8594;</span>');
+    kb.style.maxWidth = '420px';
+    wrap.appendChild(kb);
     const wb = h('div', 'btn', '<span>WHEEL SETTINGS</span><span class="arrow">&#8594;</span>');
     wb.style.maxWidth = '420px';
     wrap.appendChild(wb);
@@ -1141,7 +1238,42 @@
     wrap.appendChild(back);
     el.appendChild(wrap);
     const doBack = () => { if (o.back === 'pause') F1.Game.showPause(); else go(o.back || 'main'); };
-    return { el, items: [{ el: wb, activate: () => go('wheel', { back: o.back, from: 'controls' }) }, { el: back, activate: doBack }], back: doBack, top: true };
+    return { el, items: [{ el: kb, activate: () => go('keys', { back: o.back }) }, { el: wb, activate: () => go('wheel', { back: o.back, from: 'controls' }) }, { el: back, activate: doBack }], back: doBack, top: true };
+  };
+
+  // ---------- keyboard mapping ----------
+  S.keys = o => {
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    wrap.innerHTML = '<div class="crumbs">CONTROLS</div><div class="h1">KEYBOARD</div>';
+    const G0 = F1.Game, list = h('div', 'opts km');
+    const items = [];
+    const rows = G0.ACTIONS.map(([id, name]) => {
+      const e = h('div', 'opt', `<div class="on">${name}</div><div class="km-k"></div>`), k = e.querySelector('.km-k');
+      const render = () => { k.innerHTML = `<span class="key">${G0.keyName(id)}</span>`; };
+      render();
+      list.appendChild(e);
+      const it = { el: e, render, activate: () => {
+        k.textContent = 'PRESS A KEY';
+        e.classList.add('wait');
+        G0.capture = code => { e.classList.remove('wait'); if (code !== 'Escape') G0.bindKey(id, code); rows.forEach(r => r.render()); };
+      } };
+      items.push(it);
+      return it;
+    });
+    wrap.appendChild(list);
+    const rs = h('div', 'btn', '<span>RESET TO DEFAULTS</span><span class="arrow">&#8635;</span>');
+    rs.style.maxWidth = '420px';
+    wrap.appendChild(rs);
+    items.push({ el: rs, activate: () => { G0.bindsReset(); rows.forEach(r => r.render()); } });
+    const back = h('div', 'btn', '<span>BACK</span><span class="arrow">&#8592;</span>');
+    back.style.maxWidth = '420px';
+    wrap.appendChild(back);
+    const doBack = () => { G0.capture = null; go('controls', { back: o.back }); };
+    items.push({ el: back, activate: doBack });
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8593;&#8595;', 'select'], ['ENTER', 'change'], ['ESC', 'back']]));
+    return { el, items, back: doBack };
   };
 
   // ---------- racing wheel ----------
@@ -1424,7 +1556,7 @@
     const def = o.def, tr = o.tr;
     const num = o.round ? String(o.round).padStart(2, '0') : def.gen ? 'GEN' : String(F1.Tracks.DEFS.indexOf(def) + 1).padStart(2, '0');
     const rnd = o.round ? `ROUND ${o.round}  /  ` : '';
-    const session = o.quali != null ? rnd + 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.practice ? rnd + 'FREE PRACTICE' : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : o.weekend ? 'GRAND PRIX' : 'QUICK RACE';
+    const session = o.quali != null ? rnd + 'QUALIFYING  ' + ['Q1', 'Q2', 'Q3'][o.quali] : o.practice ? rnd + 'FREE PRACTICE' : o.mode === 'tt' ? 'TIME TRIAL' : o.round ? `ROUND ${o.round} OF ${o.total}` : o.weekend ? 'GRAND PRIX' : o.daily ? 'DAILY RACE' : 'QUICK RACE';
     const handling = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim') ? 'SIMULATION' : 'ARCADE';
     const tc = o.team.base === '#121417' ? o.team.accent : o.team.base;
     el.innerHTML = `
@@ -1464,7 +1596,19 @@
   };
   // a long table: up and down scroll it, and it opens on the player's own row
   const tableKeys = (tbl, scr) => {
-    requestAnimationFrame(() => { const me = tbl.querySelector('tr.me'); if (me) tbl.scrollTop = Math.max(0, me.offsetTop - tbl.clientHeight / 2); });
+    requestAnimationFrame(() => {
+      const me = tbl.querySelector('tr.me');
+      if (!me) return;
+      const y = el => el.getBoundingClientRect().top - tbl.getBoundingClientRect().top + tbl.scrollTop;
+      const want = y(me) + me.offsetHeight * 2 - tbl.clientHeight;
+      if (want <= 0) return;
+      // stopped on a row's top edge, just under the sticky header (a sliver of the row above
+      // showed over the column names)
+      const th = tbl.querySelector('th'), headH = th ? th.getBoundingClientRect().height : 0;
+      const rows = Array.from(tbl.querySelectorAll('tr')).filter(r => r.querySelector('td'));
+      const r = rows.find(x => y(x) - headH >= want) || me;
+      tbl.scrollTop = Math.max(0, y(r) - headH);
+    });
     scr.onKey = c => {
       if (c === 'ArrowUp' || c === 'KeyW') { tbl.scrollBy(0, -60); return true; }
       if (c === 'ArrowDown' || c === 'KeyS') { tbl.scrollBy(0, 60); return true; }
@@ -1477,15 +1621,17 @@
     const wrap = h('div', 'menu-wrap stage');
     wrap.innerHTML = `<div class="crumbs">${o.race.track.name.toUpperCase()}</div><div class="h1">PAUSED</div>`;
     const menu = h('div', 'menu');
-    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())], ['SAVE RACE DATA', e => { e.textContent = F1.Replay.saveRace(F1.Game.race, { difficulty: F1.Game.raceDefaults.difficulty }) ? 'SAVED TO DOWNLOADS' : 'NOTHING TO SAVE'; }]] : []), ['RESTART', () => F1.Game.restart()], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT TO MENU' : 'QUIT WEEKEND', sure(() => F1.Game.quitToMenu())]] : [[o.race.mode === 'tt' ? 'END SESSION' : F1.Game.flow.kind === 'spectate' ? 'STOP WATCHING' : 'QUIT TO MENU', o.race.mode === 'tt' || F1.Game.flow.kind === 'spectate' ? () => F1.Game.quitToMenu() : sure(() => F1.Game.quitToMenu())]])];
+    const entries = [['RESUME', () => F1.Game.resume()], ...(F1.Game.canReplay() ? [['REPLAY', () => F1.Game.watchReplay(() => F1.Game.backToPause())], ['SAVE RACE DATA', e => { e.textContent = F1.Replay.saveRace(F1.Game.race, { difficulty: F1.Game.raceDefaults.difficulty }) ? 'SAVED TO DOWNLOADS' : 'NOTHING TO SAVE'; }]] : []), ['RESTART', sure(() => F1.Game.restart())], ['SETTINGS', () => go('settings', { back: 'pause' })], ['CONTROLS', () => go('controls', { back: 'pause' })], ...(o.race.quali != null || o.race.practice ? [['END SESSION', () => F1.Game.endQuali()], [F1.Game.flow.kind === 'champ' ? 'QUIT TO MENU' : 'QUIT WEEKEND', sure(() => F1.Game.quitToMenu())]] : [[o.race.mode === 'tt' ? 'END SESSION' : F1.Game.flow.kind === 'spectate' ? 'STOP WATCHING' : 'QUIT TO MENU', o.race.mode === 'tt' ? () => go('ttend', { race: o.race }) : F1.Game.flow.kind === 'spectate' ? () => F1.Game.quitToMenu() : sure(() => F1.Game.quitToMenu())]])];
     const items = entries.map(([t, fn]) => { const e = h('div', 'mi', t); menu.appendChild(e); return { el: e, activate: () => fn(e) }; });
     wrap.appendChild(menu);
     el.appendChild(wrap);
     // session info on the right
-    const p = o.race.player;
+    // (spectating: the car being watched, not the hidden player's car)
+    const watched = F1.Game.spectate && F1.Viewer && F1.Viewer.focus ? F1.Viewer.focus(o.race) : null;
+    const p = watched || o.race.player;
     const info = h('div', 'summary pause-info');
     const lapStr = o.race.mode === 'tt' ? `${Math.max(0, p.lapTimes.length)} laps` : `${U.clamp(p.lap, 1, o.race.laps)} / ${o.race.laps}`;
-    info.innerHTML = `<div class="sm-t">SESSION</div>
+    info.innerHTML = `<div class="sm-t">${watched ? 'WATCHING  ' + p.driver.last.toUpperCase() : 'SESSION'}</div>
       <div class="sm-r"><span>${o.race.mode === 'tt' ? 'Laps completed' : 'Lap'}</span><b>${lapStr}</b></div>
       ${o.race.mode !== 'tt' ? `<div class="sm-r"><span>Position</span><b>P${p.pos}</b></div>` : ''}
       <div class="sm-r"><span>Best lap</span><b>${U.fmtTime(p.bestLap)}</b></div>
@@ -1493,6 +1639,27 @@
       ${o.race.sim ? `<div class="sm-r"><span>Tyres</span><b>${p.compound.name}  ${Math.round(Math.max(...p.wheels.map(w => w.wear)) * 100)}%</b></div><div class="sm-r"><span>Penalties</span><b>${p.penalty ? '+' + p.penalty + 's' : 'None'}</b></div>` : ''}`;
     el.appendChild(info);
     return { el, items, back: () => F1.Game.resume() };
+  };
+
+  // the end of a time trial: how the session went, and go again
+  S.ttend = o => {
+    const el = h('div');
+    const wrap = h('div', 'menu-wrap stage');
+    const race = o.race, p = race.player, tr = race.track, valid = p.lapTimes.filter(l => l.valid), secs = p.bestSecs || [];
+    const ideal = secs.every(s => isFinite(s)) ? secs[0] + secs[1] + secs[2] : null;
+    const pb = F1.Game.bestLap(tr.id, race.handling);
+    const stat = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+    wrap.innerHTML = `<div class="crumbs">${tr.name.toUpperCase()}</div><div class="h1">SESSION COMPLETE</div>`;
+    wrap.appendChild(h('div', 'pf-stats tt', stat(p.lapTimes.length, 'Laps') + stat(valid.length, 'Clean laps') + stat(U.fmtTime(p.bestLap), 'Best today') + stat(ideal ? U.fmtTime(ideal) : '--:--.---', 'Ideal lap') + stat(pb ? U.fmtTime(pb) : '--:--.---', 'All-time best')));
+    if (ideal && p.bestLap && p.bestLap - ideal > 0.05) wrap.appendChild(h('div', 'debrief', `<div class="db-tip">Your best sectors joined up are ${(p.bestLap - ideal).toFixed(3)} s quicker than your best lap. There is more in it.</div>`));
+    const acts = h('div', 'res-actions'), items = [];
+    const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
+    mk('KEEP DRIVING', () => F1.Game.resume());
+    mk('RESTART', () => F1.Game.restart());
+    mk('MAIN MENU', () => F1.Game.quitToMenu());
+    wrap.appendChild(acts);
+    el.appendChild(wrap);
+    return { el, items, nav: 'h', back: () => F1.Game.showPause() };
   };
 
   S.results = o => {
@@ -1526,6 +1693,30 @@
     tbl.style.maxHeight = '42vh'; tbl.style.overflow = 'auto';
     tbl.innerHTML = `<table class="res"><tr><th>POS</th><th>DRIVER</th><th>TEAM</th><th>TIME</th><th>BEST LAP</th><th>STOPS</th><th>GRID</th><th style="text-align:right">PTS</th></tr>${rows}</table>`;
     wrap.appendChild(tbl);
+    if (!F1.Game.spectate && race.player) {
+      const p = race.player, st = o.stats || {}, k = res.indexOf(p), pos = k + 1, moved = p.gridPos - pos;
+      const best = p.bestLap, gap = best && race.fastest ? best - race.fastest.t : null;
+      const lines = [];
+      lines.push(p.finished ? `<b>P${pos}</b> from P${p.gridPos}${moved > 0 ? `, ${moved} place${moved > 1 ? 's' : ''} gained` : moved < 0 ? `, ${-moved} lost` : ''}` : `<b>Did not finish</b> from P${p.gridPos}`);
+      if (best) lines.push(`Best lap <b>${U.fmtTime(best)}</b>${gap > 0.0005 ? `, ${gap.toFixed(3)} s off the fastest` : ', the fastest of the race'}`);
+      if (st.walls || st.hits) lines.push(`<b>${st.walls || 0}</b> wall hit${st.walls === 1 ? '' : 's'}, <b>${st.hits || 0}</b> contact${st.hits === 1 ? '' : 's'}`);
+      else if (p.finished) lines.push('<b>Clean race</b>: no contact at all');
+      if (o.flashbacks) lines.push(`<b>${o.flashbacks}</b> flashback${o.flashbacks > 1 ? 's' : ''} used`);
+      // what to try next
+      let tip = '';
+      const a = p.assist, dn = race.cfg.difficulty == null ? 2 : race.cfg.difficulty, rank = Data.ORDER.indexOf(dn);
+      if (!p.finished) tip = 'Tip: turn on Brake help, or lower the damage setting, to reach the flag.';
+      // (with Brake help on the braking is already done: the walls come from the steering)
+      else if ((st.walls || 0) >= 4) tip = !a.brakeHelp ? 'Tip: most of your time went at the walls. Brake where the guide turns red.' : !a.steerHelp ? 'Tip: most of your time went at the walls. Steering help in Race setup keeps the car on the road.' : 'Tip: most of your time went at the walls. Steer a little less when the car slides wide.';
+      else if (pos === 1 && rank < Data.ORDER.length - 1 && !race.adapt) tip = `You won. Try ${Data.DIFFICULTY[Data.ORDER[rank + 1]].name} next.`;
+      else if (pos > race.cars.length * 0.7 && rank > 0 && !race.adapt) tip = `Tip: ${Data.DIFFICULTY[Data.ORDER[rank - 1]].name} or Match my pace would give you a closer race.`;
+      else if (a.brakeHelp === 2 && pos <= 3) tip = 'You are ready to try Brake help on Low.';
+      const sc = o.scored || {};
+      if (sc.daily) lines.push(`Daily race: best <b>P${sc.daily.best || '-'}</b>, streak <b>${sc.daily.streak}</b>`);
+      const tro = (sc.got || []).map(t => `<div class="db-tro"><b>TROPHY</b>${t.name}<span>${t.text}</span></div>`).join('');
+      const db = h('div', 'debrief', `<div class="db-l">${lines.map(x => `<span>${x}</span>`).join('')}</div>${sc.best && p.finished ? '<div class="db-pb">BEST RESULT AT THIS CIRCUIT</div>' : ''}${tip ? `<div class="db-tip">${tip}</div>` : ''}${tro}`);
+      wrap.appendChild(db);
+    }
     const acts = h('div', 'res-actions');
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
@@ -1535,7 +1726,7 @@
     if (F1.Game.canReplay()) mk('SAVE RACE DATA', () => { const b = items[items.length - 1].el.querySelector('span'); b.textContent = F1.Replay.saveRace(F1.Game.race, { difficulty: F1.Game.raceDefaults.difficulty }) ? 'SAVED TO DOWNLOADS' : 'NOTHING TO SAVE'; });
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return tableKeys(tbl, { el, items, nav: 'h' });
+    return tableKeys(tbl, { el, items, nav: 'h', top: true });
   };
 
   S.standings = o => {
@@ -1543,12 +1734,17 @@
     const wrap = h('div', 'menu-wrap stage');
     const ch = F1.Game.champ;
     const done = ch.round >= F1.Tracks.DEFS.length - 1 && o.final;
-    wrap.innerHTML = `<div class="crumbs">CHAMPIONSHIP  /  AFTER ROUND ${ch.round + 1}</div><div class="h1">${done ? 'FINAL STANDINGS' : 'DRIVERS’ STANDINGS'}</div>`;
+    wrap.innerHTML = `<div class="crumbs">${ch.career ? 'CAREER  /  SEASON ' + ch.career.season : 'CHAMPIONSHIP'}  /  AFTER ROUND ${ch.round + 1}</div><div class="h1">${done ? 'FINAL STANDINGS' : 'DRIVERS’ STANDINGS'}</div>`;
     const list = Object.values(ch.table).sort((a, b) => b.pts - a.pts || b.wins - a.wins);
+    if (ch.career && ch.career.last) {
+      const L = ch.career.last, ok = !L.dnf && L.pos <= L.target;
+      wrap.appendChild(h('div', 'debrief', `<div class="db-l"><span>Team target <b>P${L.target}</b></span><span>${L.dnf ? '<b>Did not finish</b>' : 'You finished <b>P' + L.pos + '</b>'}</span><span>Reputation <b>${L.gain >= 0 ? '+' : ''}${L.gain}</b>, now <b>${ch.career.rep}</b></span></div><div class="db-tip">${ok ? 'The team is happy. Keep this up and better seats will open.' : 'The team expected more. Better seats need better results.'}</div>`));
+    }
     if (done) {
       const w = list[0];
       const banner = h('div', 'summary');
       banner.style.marginBottom = '14px';
+      if (ch.titleWon && ch.titleWon.length) { const tb = h('div', 'debrief', '<div class="db-tro"><b>TROPHY</b>World Champion<span>Win the championship</span></div>'); wrap.appendChild(tb); }
       banner.innerHTML = `<div class="sm-t">WORLD CHAMPION</div><div style="font-size:44px;font-weight:900;font-style:italic;line-height:1">${w.name}</div><div style="color:var(--ink-3);letter-spacing:.1em;font-weight:700;margin-top:4px">${w.team.toUpperCase()}  /  ${w.pts} POINTS</div>`;
       wrap.appendChild(banner);
     }
@@ -1559,11 +1755,29 @@
     const acts = h('div', 'res-actions');
     const items = [];
     const mk = (t, fn) => { const b = h('div', 'btn', `<span>${t}</span><span class="arrow">&#8594;</span>`); acts.appendChild(b); items.push({ el: b, activate: fn }); };
-    if (done) mk('MAIN MENU', () => F1.Game.quitToMenu());
+    if (done && ch.career) { mk('CONTRACT OFFERS', () => go('offers')); mk('SAVE AND QUIT', () => F1.Game.quitToMenu()); }
+    else if (done) mk('MAIN MENU', () => F1.Game.quitToMenu());
     else { mk('NEXT ROUND  ' + F1.Tracks.DEFS[ch.round + 1].name.toUpperCase(), () => F1.Game.champNext()); mk('SAVE AND QUIT', () => F1.Game.quitToMenu()); }
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return tableKeys(tbl, { el, items, nav: 'h' });
+    return tableKeys(tbl, { el, items, nav: 'h', top: true });
+  };
+
+  // the end of a career season: who wants you, and what they expect
+  S.offers = () => {
+    const el = h('div', 'wk');
+    const G0 = F1.Game, ch = G0.champ, now = G0.flow.team, wrap = h('div', 'wk-body stage');
+    wrap.innerHTML = `<h1 class="pg-t">Contract offers for season ${ch.career.season + 1}</h1>`;
+    const cards = h('div', 'cards wl'), items = [];
+    for (const k of G0.careerOffers()) {
+      const t = Data.TEAMS[k], c = h('div', 'card', `<h3>${t.name}</h3><div class="tag">${k === now ? 'Stay with your team' : 'New team'}</div><p>Car rating ${t.rating}. The team will expect <b>P${G0.careerTarget(k)}</b> each round.</p><ul><li>${t.engine} power</li><li>Reputation ${ch.career.rep}</li></ul>`);
+      cards.appendChild(c);
+      items.push({ el: c, activate: () => { F1.Profile.signed(k); G0.careerSign(k); } });
+    }
+    wrap.appendChild(cards);
+    el.appendChild(wrap);
+    el.appendChild(foot([['&#8592;&#8594;', 'Select'], ['ENTER', 'Sign'], ['ESC', 'Save and quit']]));
+    return { el, nav: 'h', items, focus: 0, back: () => F1.Game.quitToMenu() };
   };
 
   // qualifying session classification, with the knockout line
@@ -1590,7 +1804,7 @@
     { let armed = null; mk(o.round ? 'QUIT TO MENU' : 'QUIT WEEKEND', () => { const it = items[items.length - 1].el.querySelector('span'); if (!armed) { armed = it.textContent; it.textContent = 'PRESS AGAIN TO CONFIRM'; setTimeout(() => { it.textContent = armed; armed = null; }, 3000); return; } F1.Game.quitToMenu(); }); }
     wrap.appendChild(acts);
     el.appendChild(wrap);
-    return tableKeys(tbl, { el, items, nav: 'h' });
+    return tableKeys(tbl, { el, items, nav: 'h', top: true });
   };
 
   function go(id, opts) { return show(id, S[id], opts); }

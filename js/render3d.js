@@ -36,6 +36,9 @@
   let W = 1, H = 1;
   const state = { tr: null, look: null, root: null, gantry: [], cache: new Map(), water: null, tvCams: [] };
   const live = new Map(); // car object -> model
+  // the guide's corner marks; Okabe-Ito colours for Settings > Colour-safe guide
+  const LINE_STD = { brake: '#ff3b30', turn: '#ffcc1f', apex: '#3aa0ff', exit: '#2bd66b' }, LINE_SAFE = { brake: '#d55e00', turn: '#f0e442', apex: '#ffffff', exit: '#56b4e9' };
+  const LINE = Object.assign({}, LINE_STD);
 
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   const col = hex => new THREE.Color(hex);
@@ -896,13 +899,38 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   // ---------- circuit ----------
+  // a material's textures, including those it only holds as shader uniforms
+  function texturesOf(m, out) {
+    const look = o => { if (!o) return; for (const k in o) { const v = o[k] && o[k].value !== undefined ? o[k].value : o[k]; if (v && v.isTexture && !v.isRenderTargetTexture) out.add(v); } };
+    look(m); look(m.uniforms); look(m.userData);
+    if (m.userData) for (const k in m.userData) { const u = m.userData[k]; if (u && typeof u === 'object' && !u.isTexture) look(u); }
+  }
+  const KEEP_TRACKS = 4;
+  // free what a circuit no longer in use holds on the GPU. Materials in MATS are shared by every
+  // circuit, and a disposed geometry or texture would simply upload again if something still used it
+  function dropBuilt(b) {
+    const shared = new Set(Object.values(MATS)), mats = new Set(), texs = new Set();
+    b.root.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (!shared.has(m)) mats.add(m);
+    });
+    for (const m of mats) { texturesOf(m, texs); m.dispose(); }
+    if (b.turf && b.turf.tex) texs.add(b.turf.tex); // (held by a shared shader uniform, not by a material)
+    for (const t of texs) if (!t.isRenderTargetTexture && !state.keepTex.has(t)) t.dispose();
+  }
   function setTrack(tr, W2) {
     materials();
+    if (!state.keepTex) { state.keepTex = new Set(); for (const k in MATS) for (const f in MATS[k]) { const v = MATS[k][f]; if (v && v.isTexture) state.keepTex.add(v); } }
     if (state.tr === tr) return;
     if (state.root) scene.remove(state.root);
     if (F1.R3D) F1.R3D.clearDebris(scene);
     let built = state.cache.get(tr.id);
-    if (!built || built.tr !== tr) { built = buildTrack(tr, W2); state.cache.set(tr.id, built); }
+    if (built && built.tr !== tr) { dropBuilt(built); built = null; }
+    if (!built) built = buildTrack(tr, W2);
+    // the circuits kept ready are the last few used: each holds about 80 MB and its GPU buffers, and
+    // a long session (the home screen shows a new circuit each visit) would otherwise fill the tab
+    state.cache.delete(tr.id); state.cache.set(tr.id, built);
+    while (state.cache.size > KEEP_TRACKS) { const k = state.cache.keys().next().value; dropBuilt(state.cache.get(k)); state.cache.delete(k); }
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
@@ -1877,6 +1905,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const tex = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat);
     tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
     const scrub = T.photo('grass', 1, true), B = new THREE.Vector4(x0 - C / 2, z0 - C / 2, nx * C, nz * C);
+    gm.userData.urbanTex = tex; // (only the shader holds it otherwise: kept here so the circuit's cleanup finds it)
     gm.userData.patchKey = 'townGround';
     gm.userData.patchExtra = sh => {
       sh.uniforms.uUrban = { value: tex }; sh.uniforms.uUrbanB = { value: B }; sh.uniforms.uScrub = { value: scrub };
@@ -3423,7 +3452,36 @@ void main() {
     F1.R3S.patchTree(outer);
     scene.add(outer);
     live.set(car, outer);
+    holdCar(outer);
     return outer;
+  }
+  // A race builds twenty cars. Most of what they use is shared by a team and kept; each car also
+  // has parts of its own (helmet, cockpit, number), which must go when the car goes or every race
+  // leaves another few hundred buffers on the GPU. What only ever had one user is freed with it.
+  const carRes = new Map(); // geometry, material or texture -> [users now, most users ever]
+  function eachRes(o, fn) {
+    const seen = new Set();
+    o.traverse(m => {
+      if (m.geometry) seen.add(m.geometry);
+      for (const mt of Array.isArray(m.material) ? m.material : m.material ? [m.material] : []) {
+        seen.add(mt);
+        texturesOf(mt, seen);
+      }
+    });
+    seen.forEach(fn);
+  }
+  function holdCar(o) { eachRes(o, r => { const e = carRes.get(r) || [0, 0]; e[0]++; e[1] = Math.max(e[1], e[0]); carRes.set(r, e); }); }
+  function freeCar(o) {
+    // a skinned part's bone matrices live in a small float texture of its own
+    o.traverse(m => { if (m.isSkinnedMesh && m.skeleton && m.skeleton.boneTexture) { m.skeleton.boneTexture.dispose(); m.skeleton.boneTexture = null; } });
+    eachRes(o, r => {
+      // (a car-model texture is decoded once and its pixels then dropped: it could never be re-uploaded)
+      if (r.isTexture && r.image && typeof r.image.close === 'function') return;
+      const e = carRes.get(r);
+      if (!e) { r.dispose(); return; } // (a copy made for a dent, or a part of it)
+      if (--e[0] > 0) return;
+      if (e[1] <= 1) { r.dispose(); carRes.delete(r); }
+    });
   }
   // the velocity pass's scene and the ground patch a car's shadow falls on
   const velScene = new THREE.Scene();
@@ -3546,7 +3604,7 @@ void main() {
         RC.updateHead(body, c, dt);
       }
     }
-    for (const [car, o] of live) if (o.userData.seen !== frameNo) { scene.remove(o); for (const q of o.userData.velParts) velScene.remove(q); live.delete(car); }
+    for (const [car, o] of live) if (o.userData.seen !== frameNo) { scene.remove(o); for (const q of o.userData.velParts) velScene.remove(q); live.delete(car); freeCar(o); }
   }
 
   let ghostModel = null;
@@ -3741,13 +3799,13 @@ void main() {
       if (dA > 330 && ahead(m.exit) > 330) continue;
       if (m.brake >= 0 && ahead(m.brake) < 330 && nb < 6) {
         const mk = fx.marks[nb++], i = m.brake, p = P(i);
-        mk.visible = true; mk.position.set(p[0], 0.04 + Tracks.surfZ(tr, i, tr.line.off[i]), p[1]); mk.rotation.y = -Math.atan2(tr.ty[i], tr.tx[i]); mk.material.color.set('#ff3b30');
+        mk.visible = true; mk.position.set(p[0], 0.04 + Tracks.surfZ(tr, i, tr.line.off[i]), p[1]); mk.rotation.y = -Math.atan2(tr.ty[i], tr.tx[i]); mk.material.color.set(LINE.brake);
       }
       if (mode !== 'full') continue;
       const far = i => Math.abs(i - m.apex) * tr.ds > 14;
-      if (ahead(m.turnIn) < 330 && far(m.turnIn)) dot(m.turnIn, '#ffcc1f', 0.9);
-      if (dA < 330) dot(m.apex, '#3aa0ff', 1.05);
-      if (ahead(m.exit) < 330 && far(m.exit)) dot(m.exit, '#2bd66b', 0.9);
+      if (ahead(m.turnIn) < 330 && far(m.turnIn)) dot(m.turnIn, LINE.turn, 0.9);
+      if (dA < 330) dot(m.apex, LINE.apex, 1.05);
+      if (ahead(m.exit) < 330 && far(m.exit)) dot(m.exit, LINE.exit, 0.9);
     }
   }
 
@@ -4208,5 +4266,24 @@ void main() {
     return { x: (PJ.x + 1) / 2 * W, y: (1 - PJ.y) / 2 * H, d: camera.position.distanceTo(V(x, h, y)) };
   }
 
-  F1.R3 = { HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
+  // a flashback took a car back to before its damage: the next frame builds a clean model and the
+  // car's restored damage state is applied to it; parts lying on the track go too
+  function linePalette(safe) {
+    Object.assign(LINE, safe ? LINE_SAFE : LINE_STD);
+    const rgb = hex => [1, 3, 5].map(k => parseInt(hex.slice(k, k + 2), 16) / 255);
+    const set = (a, hex) => { const c = rgb(hex); a[0] = c[0]; a[1] = c[1]; a[2] = c[2]; };
+    if (!ACOL.std) ACOL.std = { red: ACOL.red.slice(), amber: ACOL.amber.slice(), green: ACOL.green.slice() };
+    if (safe) { set(ACOL.red, '#d55e00'); set(ACOL.amber, '#f0e442'); set(ACOL.green, '#56b4e9'); }
+    else for (const k of ['red', 'amber', 'green']) for (let i = 0; i < 3; i++) ACOL[k][i] = ACOL.std[k][i];
+  }
+  function dropCar(car) {
+    const o = live.get(car);
+    if (!o) return;
+    scene.remove(o);
+    for (const q of o.userData.velParts) velScene.remove(q);
+    live.delete(car);
+    freeCar(o);
+  }
+  function clearDebris() { if (F1.R3D) F1.R3D.clearDebris(scene); }
+  F1.R3 = { carModels: live, linePalette, dropCar, clearDebris, HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -27,7 +27,42 @@
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
     mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
+    // live grip reading: on, tyre load that counts as past the limit, metres off line that count as
+    // running wide, load below which there is grip to spare, the step down and up, the limits
+    live: 1, gripHot: 1.12, gripWide: 2, gripRoom: 0.92, gripDn: 0.008, gripUp: 0.004, gripMin: 0.95, gripMax: 1.04,
   };
+
+  // Reading the grip. A driver does not trust a stored plan: each time through a corner they feel how
+  // close the tyres came to letting go, and take that into the next lap. Here each car keeps a speed
+  // factor per corner, for this car on these tyres with this fuel on this track today. A corner taken
+  // with the tyres past their peak, a slide or a run wide brings it down at once; one taken with grip
+  // to spare lets it creep up. Traffic teaches nothing: a car in dirty air or fighting is not
+  // showing what the tyres have. The better the driver, the finer the feel.
+  function cornerMap(tr) {
+    if (tr.aiCorners) return tr.aiCorners;
+    const M = new Int16Array(tr.N).fill(-1), cs = F1.Raceline.cornersOf(tr), back = Math.round(70 / tr.ds);
+    cs.forEach((c, k) => { for (let q = c.startQ - back; q <= c.endQ; q++) M[(c.st + q + tr.N * 2) % tr.N] = k; });
+    M.n = cs.length;
+    return (tr.aiCorners = M);
+  }
+  function readGrip(car, b, tr, i) {
+    const M = cornerMap(tr), c = M[i];
+    if (!b.gripK) { b.gripK = new Float32Array(M.n).fill(1); b.gripC = -1; }
+    if (c !== b.gripC) {
+      if (b.gripC >= 0 && !b.gripDirty) {
+        const k = b.gripC, hot = b.gripPk > P.gripHot || b.gripWide > P.gripWide, q = 0.5 + 0.5 * (b.style ? b.style.skill : 1);
+        if (hot) b.gripK[k] = Math.max(P.gripMin, b.gripK[k] * (1 - P.gripDn));
+        else if (b.gripPk < P.gripRoom) b.gripK[k] = Math.min(P.gripMax, b.gripK[k] * (1 + P.gripUp * q));
+      }
+      b.gripC = c; b.gripPk = 0; b.gripWide = 0; b.gripDirty = false;
+    }
+    if (c >= 0) {
+      b.gripPk = Math.max(b.gripPk, car.satF || 0, (car.satR || 0) * 0.82);
+      b.gripWide = Math.max(b.gripWide, Math.abs(car.loc.d - tr.line.off[i]));
+      if ((b.ahead && b.gapAhead < 30) || b.alongside || b.mode !== 'race') b.gripDirty = true;
+    }
+  }
+  const gripAt = (b, tr, j) => { if (!P.live || !b.gripK) return 1; const c = cornerMap(tr)[j]; return c >= 0 ? b.gripK[c] : 1; };
 
   // How a driver differs from the plan. The plan is the fastest lap the car can do (tools/coach.js),
   // and driving it alone every car would brake at the same metre and hold the same line. A driver
@@ -97,6 +132,103 @@
     return b;
   }
 
+  // How fast a car can lap as it is now: its speed plan's average (time-weighted, so the
+  // harmonic mean), less what damage costs it. Used to tell a car too slow to race from a rival.
+  function paceOf(c) {
+    const p = c.brain && c.brain.prof;
+    if (!p) return 0;
+    if (p.hm == null) { let s = 0; for (let k = 0; k < p.length; k++) s += 1 / Math.max(5, p[k]); p.hm = p.length / s; }
+    return p.hm * (c.dm ? c.dm.paceK : 1 - (c.wingDmg || 0) * 0.3);
+  }
+
+  // Whether a car here can still turn into the pit lane: on the open stretch after the entry
+  // line, or already on the lane's side of the pit wall. A car that missed the opening and called
+  // itself in further on steered into the end of the wall and stuck there on full throttle.
+  function canJoinLane(tr, c) {
+    const past = Tracks.fwd(tr, tr.pit.sIn, c.loc.s);
+    if (past < pitOpen(tr)) return true;
+    const pw = tr.pit.wall[c.loc.i];
+    return !isNaN(pw) && c.loc.d * tr.pit.side > pw + 0.5;
+  }
+
+  // The way into the pit lane, as a speed plan for a car on its way in: the lane swings off the
+  // track (Sierra's moves 14 m sideways in 110 m), and on that curve a car still at its braking-
+  // board speed spun and sat in the entry backwards. The car's path in is the racing line, eased
+  // across to the pit side over the straight before the entry (pitW), then the lane. Along the
+  // lane its curvature meets a cornering limit with no help from downforce (PIT_LAT); before the
+  // entry only the extra turning of the crossing counts (the racing line's own corners are the
+  // plan's), at a gentle PIT_ACROSS sideways; then braked back from there at PIT_DEC. drive()
+  // brakes for it ahead of time like any corner: applied on the spot, it braked a car in the middle
+  // of the esses before. (The crossing used to be judged from the racing line's distance to the
+  // pit side at every point, as if the car never moved over before it: that held a car to 80 km/h
+  // at the entry line already on the pit side, two seconds a stop.)
+  const PIT_LAT = 9, PIT_DEC = 11, PIT_ACROSS = 7, PIT_VMIN = 12;
+  const REJOIN = 0.15; // (sideways per metre ahead, rejoining from off the road: about 8 degrees)
+  // The straight before the pit entry, where a car crosses to the pit side. Only the straight: a
+  // car that headed for the pit side a fixed 120 m out went across the grass when those 120 m
+  // began in a fast chicane (gen-777: nearly every in-lap reset there).
+  const PIT_RUN_MIN = 40;
+  function pitRun(tr) {
+    if (tr.pit.run == null) {
+      let run = 0, kk = Math.floor(tr.pit.sIn / tr.ds);
+      while (run < 260 && Math.abs(tr.line.kap[((kk % tr.N) + tr.N) % tr.N]) < 1 / 200) { run += tr.ds; kk--; }
+      tr.pit.run = Math.max(PIT_RUN_MIN, run);
+    }
+    return tr.pit.run;
+  }
+  const ease01 = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+  // how far over to the pit side a car on its way in is at point j: none at the start of the run,
+  // all of it at the entry and along the lane. Eased in and out: a car that snapped across the
+  // moment the run began, still turning out of the corner before it, spun (Lucerne).
+  function pitW(tr, j) {
+    const s = j * tr.ds, past = Tracks.fwd(tr, tr.pit.sIn, s);
+    if (past < tr.pit.len) return 1;
+    return ease01(1 - Tracks.fwd(tr, s, tr.pit.sIn) / pitRun(tr));
+  }
+  const pitTarget = (tr, j) => { const o = tr.pit.off[j]; return isNaN(o) ? tr.pit.side * (tr.hw - 1.8) : o; };
+  function pitLaneV(tr) {
+    const pit = tr.pit;
+    if (pit.vLane) return pit.vLane;
+    const N = tr.N, ds = tr.ds, v = new Float32Array(N).fill(1e3);
+    const i0 = Math.floor(pit.sIn / ds), i1 = Math.floor(pit.limitIn / ds), span = ((i1 - i0 + N) % N) + 2;
+    const back = Math.round(pitRun(tr) / ds);
+    const path = Float64Array.from(tr.line.off), W = new Float64Array(N);
+    for (let k = -back; k <= span; k++) {
+      const j = (i0 + k + N) % N, w = pitW(tr, j);
+      W[j] = w; path[j] = tr.line.off[j] + (pitTarget(tr, j) - tr.line.off[j]) * w;
+    }
+    const kp = F1.Raceline.lineFromOffsets(tr, path).kap;
+    for (let k = -back; k <= span; k++) {
+      const j = (i0 + k + N) % N;
+      if (k >= 0) v[j] = Math.max(pit.limit, Math.min(1e3, Math.sqrt(PIT_LAT / Math.max(Math.abs(kp[j]), 1e-5))));
+      else if (W[j] > 0.01) v[j] = Math.max(PIT_VMIN, Math.min(1e3, Math.sqrt(PIT_ACROSS / Math.max(Math.abs(kp[j] - tr.line.kap[j]), 1e-5))));
+    }
+    // braked back from each point (and on to 400 m before the entry)
+    for (let k = span; k > -Math.round(400 / ds); k--) {
+      const j = (i0 + k + N) % N, n = (j + 1) % N;
+      v[j] = Math.min(v[j], Math.sqrt(v[n] * v[n] + 2 * PIT_DEC * ds));
+    }
+    return (pit.vLane = v);
+  }
+
+  // overheated rear tyres are eased in curves the plan takes above this share of its grip
+  // (Nordwald's spins came at 0.67 to 0.94; most of Varenna's flat curves run under 0.6)
+  const HOT_LOAD = 0.35;
+  const loadAt = (prof, i) => (prof && prof.load ? prof.load[i] : 1);
+
+  // How far past the pit entry line the lane can still be joined: up to a little before the wall
+  // between lane and track begins. A car that has not merged by then carries on round the lap.
+  function pitOpen(tr) {
+    if (tr.pit.openU == null) {
+      let u = 0;
+      while (u < 300) { const i = Math.floor(((tr.pit.sIn + u) % tr.L) / tr.ds) % tr.N; if (!isNaN(tr.pit.wall[i])) break; u += tr.ds; }
+      tr.pit.openU = Math.max(0, Math.min(150, u - 15));
+    }
+    return tr.pit.openU;
+  }
+  // is car o letting car c by? (never assumed of a player who is driving)
+  const yieldsTo = (race, o, c) => !!(o.brain && o.brain.yield === c && !(o.isPlayer && !race.autoPlayer && !o.brain.pit));
+
   // forward distance along the lap from car a to car b (centre to centre)
   function relS(tr, a, b) {
     let d = b.loc.s - a.loc.s;
@@ -149,8 +281,32 @@
 
   // Where the car may be across the road at each point: over a kerb in the corners, all four
   // wheels on the asphalt everywhere else (Raceline.lineLimits). A stored line that strays
-  // past it is pulled back in as it is driven.
-  function edgeOf(tr) { return tr.aiEdge || (tr.aiEdge = F1.Raceline.lineLimits(tr)); }
+  // past it is pulled back in as it is driven. A kerb is worth its reach only at a kerb-worthy
+  // speed: through a chicane taken fast (the road's radius is tight, the line's is not) the car
+  // drifts half a metre to a metre wide of its line, and from the kerb's outer edge that is all four
+  // wheels off and the lap deleted (two fast chicanes on a generated circuit did it every lap). So
+  // the reach onto a kerb shrinks from all of it at 150 km/h until, by 230, the car aims 0.4 m
+  // inside the white line: a full metre of drift still leaves the inner wheels on the asphalt.
+  // (Not on the hand-made circuits: their coached lines already keep a wheel on at speed, and
+  // trimming them only cost time.)
+  function edgeOf(tr) {
+    if (tr.aiEdge && tr.aiEdge.line === tr.line) return tr.aiEdge;
+    const E = F1.Raceline.lineLimits(tr), coached = F1.Limits && F1.Limits[tr.id] && F1.Limits[tr.id].simB;
+    let v = null;
+    // (speeds from the Arcade plan, the quicker of the two, with its extra grip)
+    if (!coached) try { v = F1.Raceline.speedProfile(tr, tr.line, F1.Car.SPEC, F1.Race.planOpts(tr, false, 1.12)); } catch (e) { v = tr.prof || null; }
+    if (v) for (let i = 0; i < tr.N; i++) {
+      const kmh = v[i] * 3.6;
+      if (kmh <= KERB_V0) continue;
+      const cap = tr.hw + 0.45 - KERB_TRIM * Math.min(1, (kmh - KERB_V0) / (KERB_V1 - KERB_V0));
+      if (E.L[i] > cap) E.L[i] = cap;
+      if (E.R[i] > cap) E.R[i] = cap;
+    }
+    E.line = tr.line;
+    return (tr.aiEdge = E);
+  }
+  const KERB_V0 = 150, KERB_V1 = 230; // km/h
+  const KERB_TRIM = 0.85; // m taken off the kerb reach by KERB_V1 (0.5 still lost laps at 1 m of drift)
 
   // Looking ahead. In traffic a driver tries a handful of lanes and two speeds, each run forward
   // a few seconds on a simple model of the car against where the cars nearby will be, and takes
@@ -270,6 +426,7 @@
       }
       if (b.mode === 'tow' && b.target !== o) { b.mode = 'race'; b.target = null; }
       if (o) {
+        const yields = yieldsTo(race, o, car);
         const closing = v - o.speed;
         const theirProf = o.brain ? Math.min(o.brain.prof[i], o.speed + 3) : o.speed;
         const fasterPace = b.prof[i] > theirProf + 0.4;
@@ -297,13 +454,15 @@
           const st = b.style, urge = st ? st.nerve + Math.min(0.45, (b.stuckBehind || 0) / 25) : 0.55;
           go = ods < 30 && (closing > Math.max(0.35, 1.5 - urge) || (fasterPace && ods < 14));
         }
+        // (waved through: no run needed, only road)
+        if (yields && !braking) go = true;
         if (go) {
-          const pitting = o.brain && o.brain.pit, inside = pitting ? -tr.pit.side : nextCornerSign(tr, i, 260) || (lineOff > 0 ? -1 : 1);
+          const pitting = o.brain && o.brain.pit, inside = pitting ? -tr.pit.side : yields && o.brain.yieldSide ? -o.brain.yieldSide : nextCornerSign(tr, i, 260) || (lineOff > 0 ? -1 : 1);
           const after = nextCornerSign(tr, (i + Math.round(260 / tr.ds)) % tr.N, 260);
           const latIn = o.loc.d + inside * SEP, latOut = o.loc.d - inside * SEP;
           const okIn = Math.abs(latIn) < lim && laneFree(b, car, latIn, o, ods + 25);
           const pays = after === -inside || closing > 5 || br.room > 1e8;
-          const okOut = !braking && pays && b.aggr > 0.35 && Math.abs(latOut) < lim && laneFree(b, car, latOut, o, ods + 25);
+          const okOut = !braking && (pays || yields) && (b.aggr > 0.35 || yields) && Math.abs(latOut) < lim && laneFree(b, car, latOut, o, ods + 25);
           b.side = okIn ? inside : okOut ? -inside : 0;
           // set passes up on the approach: never ask for a big sidestep mid-corner
           const midCorner = Math.abs(tr.line.kap[i]) > 1 / 250;
@@ -326,10 +485,11 @@
       const o = b.target;
       b.passT += dt;
       const ds = o ? dsOf(o) : -99;
+      const yields = o && yieldsTo(race, o, car);
       let lat = o ? o.loc.d + b.side * SEP : 0;
       const needBrake = v * v / (2 * 38) * (1 - (br.z ? br.z.vOut * br.z.vOut / Math.max(1, v * v) : 1));
       // a run that has died: back in line rather than sitting out of the tow
-      const stalled = b.passT > 2.5 && ds > b.passDs + 2;
+      const stalled = !yields && b.passT > 2.5 && ds > b.passDs + 2;
       if (b.feint > 0 && (b.feint -= dt) <= 0) {
         const lat2 = o ? o.loc.d - b.side * SEP : 0;
         if (o && Math.abs(lat2) < lim && laneFree(b, car, lat2, o, ds + 25)) { b.side = -b.side; b.flipped = true; lat = lat2; }
@@ -344,15 +504,54 @@
       }
       // into the braking zone: overlapped down the inside the move is on (the car ahead must
       // leave room); otherwise not far enough up to stay there
-      const late = br.room < needBrake + 15 && ds > (b.side === b.inside ? 4.5 : 2.5);
-      if (!o || ds < -7 || ds > 45 || b.passT > 9 || Math.abs(lat) > lim + 0.3 || late || stalled || !laneFree(b, car, lat, o, Math.max(5, ds + 8))) {
+      // (a car letting us by is slower into the corner as well: alongside, the move is on)
+      const late = br.room < needBrake + 15 && ds > (yields ? 6 : b.side === b.inside ? 4.5 : 2.5);
+      if (!o || ds < -7 || ds > 45 || b.passT > (yields ? 14 : 9) || Math.abs(lat) > lim + 0.3 || late || stalled || !laneFree(b, car, lat, o, Math.max(5, ds + 8))) {
         if (o && ds > -7) b.coolT = 1.5; // not past: no fresh lunge straight away
         b.mode = 'race'; b.target = null;
       } else if (b.side > 0) lo = Math.max(lo, Math.min(lim, lat));
       else hi = Math.min(hi, Math.max(-lim, lat));
     }
+    // Letting a faster car by. A car about to be lapped (blue flags), or one too slow to race (damage,
+    // or far off the pace of the car behind), does not fight: on a straight it moves off the line to
+    // the side the faster car is not on and lifts once it is alongside, so the pass is done before the
+    // next braking zone instead of a queue forming behind it. In the corners it drives its own line.
+    // (Not on the way into the pits: that car is moving over anyway.)
+    {
+      const fb = b.behind;
+      let y = null;
+      if (fb && b.gapBehind < 70 && sinceStart > 8 && !car.inPit && !b.pit && !fb.inPit && !fb.finished && !car.finished && !(race.sc && race.sc.state !== 'none')) {
+        const lapping = fb.dist > car.dist + tr.L * 0.5;
+        const slower = fb.isPlayer && !race.autoPlayer
+          ? car.bestLap && fb.bestLap && fb.bestLap < car.bestLap * 0.95
+          : paceOf(car) < paceOf(fb) * 0.95;
+        if (lapping || slower) y = fb;
+      }
+      if (y !== b.yield) { b.yield = y; b.yieldSide = y ? (Math.abs(y.loc.d - car.loc.d) > 1 ? -Math.sign(y.loc.d - car.loc.d) : -(Math.sign(lineOff) || 1)) : 0; }
+      b.yieldLift = false;
+      if (y) {
+        if (b.mode === 'defend') b.mode = 'race';
+        // a much faster car closing in: never drift across into its path (in a corner or out of
+        // one, where the line would take this car back over), only away from it
+        const yds0 = relS(tr, car, y), cl = y.speed - car.speed;
+        if (yds0 > -70 && yds0 < 4 && cl > 6) {
+          if (y.loc.d > car.loc.d) hi = Math.min(hi, Math.max(lo, car.loc.d + 0.15)); else lo = Math.max(lo, Math.min(hi, car.loc.d - 0.15));
+        }
+        let straightNow = true;
+        for (let q = 0; straightNow && q * tr.ds < 70; q += 2) if (Math.abs(tr.line.kap[(i + q) % tr.N]) > 1 / 400) straightNow = false;
+        if (straightNow && br.room > 40) {
+          const yl = b.yieldSide * Math.max(1.2, tr.hw - 2.4);
+          // (only into a lane nobody else is using or about to use)
+          let free = true;
+          for (let k = 0; k < b.near.length && free; k++) { const o = b.near[k]; if (o !== y && b.nds[k] > -30 && b.nds[k] < 20 && Math.abs(o.loc.d - yl) < 3) free = false; }
+          if (free) { if (b.yieldSide > 0) lo = Math.max(lo, Math.min(hi, yl - 0.6)); else hi = Math.min(hi, Math.max(lo, yl + 0.6)); }
+          // (the lift once it is beside, not while it is still lined up behind)
+          b.yieldLift = yds0 > -12 && yds0 < 6 && Math.abs(y.loc.d - car.loc.d) > 1.2;
+        }
+      }
+    }
     // defend: one move to the inside when someone is close before a braking zone
-    if (P.mpc !== 1 && b.mode === 'race' && b.behind && b.gapBehind < 16 && b.aggr > 0.3 && sinceStart > 4) {
+    if (P.mpc !== 1 && b.mode === 'race' && b.behind && !b.yield && b.gapBehind < 16 && b.aggr > 0.3 && sinceStart > 4) {
       const z = br.z;
       // only on a true straight that runs all the way to the braking zone
       let onStraight = br.room < 300;
@@ -368,7 +567,7 @@
     }
     // cover: an attacker with a run who pulls out of the tow gets the door shut on the side
     // he picked, once, while he is still behind (moving across a car already alongside is a crash)
-    if (P.mpc !== 1 && b.mode === 'race' && b.behind && b.aggr > 0.3 && sinceStart > 4 && br.z && b.defended !== br.z.s0) {
+    if (P.mpc !== 1 && b.mode === 'race' && b.behind && !b.yield && b.aggr > 0.3 && sinceStart > 4 && br.z && b.defended !== br.z.s0) {
       const a = b.behind, rel = a.loc.d - car.loc.d;
       if (b.gapBehind > car.spec.len + 1.5 && b.gapBehind < 14 && Math.abs(rel) > 1.5 && a.speed > v + 0.5 && br.room > 60 && br.room < 450) {
         b.defended = br.z.s0;
@@ -474,11 +673,17 @@
     // moving off or back onto the line happens progressively: a driver drifts across a
     // straight over a second or two instead of flinging the car 10 m sideways at 250 km/h.
     // Following the line itself is never limited, only the change in distance from it
-    if (b && !b.pit && Math.abs(car.loc.d) < tr.hw + 1) {
+    // (a car on its way to the pits too, until its last run to the entry: half the resets at
+    // Bahia were cars on an in-lap)
+    const toPit = b && b.pit && b.pit.phase === 'approach' && !car.inPit ? Tracks.fwd(tr, car.loc.s, tr.pit.sIn) : -1;
+    if (b && (!b.pit || toPit > pitRun(tr) + 40) && Math.abs(car.loc.d) < tr.hw + 1) {
       const e0 = car.loc.d - tr.line.off[i], e = lat - tr.line.off[j];
       const maxShift = 0.4 + 5 * look / Math.max(8, v);
       lat = tr.line.off[j] + U.clamp(e, e0 - maxShift, e0 + maxShift);
     }
+    // back onto the road from the grass at a shallow angle, not straight for the line: on the
+    // low grip out there a sharp turn back is a spin into the traffic
+    if (b && !car.inPit && Math.abs(car.loc.d) >= tr.hw + 1) lat = car.loc.d + U.clamp(lat - car.loc.d, -REJOIN * look, REJOIN * look);
     const px = tr.x[j] + tr.nx[j] * lat, py = tr.y[j] + tr.ny[j] * lat;
     const dx = px - car.x, dy = py - car.y;
     const ch = Math.cos(car.h), sh = Math.sin(car.h);
@@ -596,6 +801,7 @@
     if (p.phase === 'in') {
       vt = toLimit < 400 && !inLimit ? Math.sqrt(pit.limit ** 2 + 2 * 9 * toLimit) : pit.limit;
       if (!inLimit && toLimit > 400) vt = profAt(b, tr, s);
+      if (!inLimit) vt = Math.min(vt, pitLaneV(tr)[car.loc.i]);
       car.limiter = inLimit;
       const toBox = Tracks.fwd(tr, s, box);
       for (const o of race.cars) {
@@ -640,6 +846,14 @@
     }
   }
 
+  function wetPlan(race, car, b) {
+    if (race.profFor && car.profPace) {
+      const gk = car.grip == null ? 1 : car.grip / 0.972;
+      const want = car.wetness > 0.05 ? U.clamp(Math.round(gk * (1 - (1 - P.wetK) * Math.min(1, car.wetness * 1.5)) / 0.04) * 0.04, 0.2, 1) : 1;
+      if (want !== (b.profK || 1)) { b.profK = want; b.prof = race.profFor(car.team, car.profPace, want); }
+    }
+  }
+
   function drive(race, car, dt) {
     const b = car.brain, tr = race.track;
     car.ctl.steer = 0;
@@ -672,16 +886,13 @@
     // the grip the tyres have now, in steps of 4 per cent, so the braking points move back and
     // the corner speeds come down as the physics has them (with downforce, a wet corner is
     // slower than the square root of the grip lost). The dry plan comes back as it dries.
-    if (race.profFor && car.profPace) {
-      const gk = car.grip == null ? 1 : car.grip / 0.972;
-      const want = car.wetness > 0.05 ? U.clamp(Math.round(gk * (1 - (1 - P.wetK) * Math.min(1, car.wetness * 1.5)) / 0.04) * 0.04, 0.2, 1) : 1;
-      if (want !== (b.profK || 1)) { b.profK = want; b.prof = race.profFor(car.team, car.profPace, want); }
-    }
+    wetPlan(race, car, b);
     // per-lap braking noise: small variations so AI lap times are not identical
     b.noiseT -= dt;
     if (b.noiseT <= 0) { b.noiseT = 2 + b.rng() * 3; b.noise = 1 + (b.rng() - 0.5) * 0.012 * (1.4 - b.aggr); }
+    if (P.live && race.green) readGrip(car, b, tr, i);
     const leadIdx = (i + Math.round((v * P.leadT + 2) / tr.ds)) % tr.N;
-    let vt = b.prof[leadIdx] * b.noise;
+    let vt = b.prof[leadIdx] * b.noise * gripAt(b, tr, leadIdx);
     if (b.style) { const st = b.style, slow = U.clamp((70 - vt) / 40, 0, 1); if (tr.brk[leadIdx] || Math.abs(tr.line.kap[leadIdx]) > 1 / 500) vt *= st.form * (st.slow * slow + st.fast * (1 - slow)); }
     // off-line penalty in corners, and a slower car with a damaged front wing
     const kl = Math.abs(tr.line.kap[leadIdx]);
@@ -707,6 +918,18 @@
     {
       const wr = Math.max(car.wheels[0].wear, car.wheels[1].wear, car.wheels[2].wear, car.wheels[3].wear);
       if (wr > 0.5 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= 1 - Math.min(0.15, (wr - 0.5) * 0.3);
+    }
+    // overheated rears: the car gets loose on the exits, so a driver eases off until they cool
+    // (a rear 50 degrees over its window has a fifth less grip, and the plan knows nothing of it;
+    // at Legend pace in a simulation race this was a field spinning at the same exit on lap 4).
+    // Only where it bites: corners it brakes for, and curves the plan takes near the grip limit.
+    // Soft rears run this hot all race, and easing in every curve cost the AI throttle through
+    // flat-out kinks, where the tyres have grip to spare. (The rear lets go with no warning in
+    // the tyre itself, so this has to come from the plan: easing on rear slip came too late.)
+    {
+      const over = Math.max(car.wheels[2].temp, car.wheels[3].temp) - car.compound.topt;
+      b.hotRear = over > 15 ? Math.min(1, (over - 15) / 25) : 0;
+      if (b.hotRear && (tr.brk[leadIdx] || (kl > 1 / 500 && loadAt(b.prof, leadIdx) > HOT_LOAD))) vt *= 1 - 0.06 * b.hotRear;
     }
     // tyre saving: a slightly earlier lift and gentler corner speed when told to manage
     if (b.manage && b.manage < 1 && (tr.brk[leadIdx] || kl > 1 / 500)) vt *= b.manage;
@@ -793,18 +1016,22 @@
     let latFn = b.style ? j => U.clamp(LL.clamp(j, tr.line.off[j] + (dodge ? dodge * tr.styleEnv[j] : styleAt(b, j)) + miss), lo, hi) : j => U.clamp(LL.clamp(j, tr.line.off[j]), lo, hi);
     if (b.pit && b.pit.phase === 'approach') {
       const d = Tracks.fwd(tr, car.loc.s, tr.pit.sIn);
-      if (tr.pit.run == null) {
-        let run = 0, kk = Math.floor(tr.pit.sIn / tr.ds);
-        while (run < 260 && Math.abs(tr.line.kap[(kk + tr.N) % tr.N]) < 1 / 200) { run += tr.ds; kk--; }
-        tr.pit.run = Math.max(120, run);
+      const past = Tracks.fwd(tr, tr.pit.sIn, car.loc.s), near = past < pitOpen(tr);
+      // across to the pit side over the straight before the entry, eased (pitW, as pitLaneV plans it)
+      if (d < pitRun(tr) || near) {
+        const base = latFn;
+        latFn = j => { const w = pitW(tr, j), pt = pitTarget(tr, j); if (w >= 1) return pt; const o = base(j); return o + (pt - o) * w; };
       }
-      if (d < tr.pit.run) latFn = j => (isNaN(tr.pit.off[j]) ? tr.pit.side * (tr.hw - 1.8) : tr.pit.off[j]);
-      if (!isNaN(tr.pit.off[i]) && Tracks.fwd(tr, tr.pit.sIn, car.loc.s) < 150 && Math.abs(car.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 + 1) {
+      // slow enough for the lane's curve and to get across to it (pitLaneV; the brake look-ahead
+      // below reads it too)
+      if (d < 500 || near) vt = Math.min(vt, pitLaneV(tr)[i]);
+      if (!isNaN(tr.pit.off[i]) && Tracks.fwd(tr, tr.pit.sIn, car.loc.s) < 150 && Math.abs(car.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 + 1 && canJoinLane(tr, car)) {
         b.pit.phase = 'in'; car.inPit = true; b.mode = 'race';
       }
     }
-    // recovering from an off: slow down until we are back on the asphalt
-    if (Math.abs(car.loc.d) > tr.hw + 1.2 && !car.inPit) vt = Math.min(vt, 30);
+    // recovering from an off: slow down until we are back on the asphalt, braking gently (on the
+    // grass a full stop, wheels locked, with the car turning back, spun it)
+    if (Math.abs(car.loc.d) > tr.hw + 1.2 && !car.inPit) vt = Math.min(vt, Math.max(30, car.u - 5));
     // look down the road for the hardest braking this approach needs (same modifiers
     // as the target speed: pace noise, line offset, damage, tyre condition)
     {
@@ -813,11 +1040,12 @@
       const scale = vt / Math.max(1, b.prof[leadIdx]) * dmK;
       const horizon = v * v / (car.wetness > 0.02 ? 24 * Math.min(1, (car.grip == null ? 0.972 : car.grip) / 0.972) : 24) + 15;
       let aReq = 0;
-      const lat = car.loc.d;
+      const lat = car.loc.d, pitV = b.pit && b.pit.phase === 'approach' && !car.inPit ? pitLaneV(tr) : null;
       let offRun = 0;
       for (let d = 4; d < horizon; d += 4) {
         const j = (i + Math.round(d / tr.ds)) % tr.N;
-        let vj = b.prof[j] * Math.min(scale, b.hot ? b.hot : 1.02);
+        let vj = b.prof[j] * Math.min(scale, b.hot ? b.hot : 1.02) * (gripAt(b, tr, j) / Math.max(0.5, gripAt(b, tr, leadIdx)));
+        if (pitV) vj = Math.min(vj, pitV[j]);
         // still off the racing line when we get there? that corner is slower: brake earlier.
         // The worst gap on the way in counts, not just the one at the corner: a car that
         // skipped the swing out to the far side arrives on the line but pointing the wrong
@@ -832,6 +1060,11 @@
     // safety car queue: never faster than the cap that keeps us off the car in front
     if (car.scCap != null && !car.inPit) vt = Math.min(vt, car.scCap);
     control(race, car, latFn, vt, dt);
+    // waving a faster car through: easing off the throttle while it goes by (a lift, never the brakes,
+    // so nobody behind is caught out)
+    if (b.yieldLift) car.ctl.throttle = 0;
+    // (and with hot rears, a gentler foot on the way out of a corner)
+    if (b.hotRear > 0 && Math.abs(tr.line.kap[car.loc.i]) > 1 / 600 && loadAt(b.prof, car.loc.i) > HOT_LOAD) car.ctl.throttle = Math.min(car.ctl.throttle, 1 - 0.6 * b.hotRear);
     if (b.followBrake > 0) {
       // emergency braking for the car ahead, eased if the rear is already stepping out
       const rs = car.satR != null ? U.clamp((car.satR - 1.1) * 1.6, 0, 1) : 0;
@@ -849,8 +1082,8 @@
     if ((car.speed < 2.5 || wrongWay || lost) && !car.finished && !queued) b.stuckT += dt; else b.stuckT = Math.max(0, b.stuckT - dt);
     // a car stopped on the racing line is a hazard: clear it quickly
     const onLine = Math.abs(car.loc.d) < tr.hw;
-    if (b.stuckT > (car.speed < 1.5 && onLine ? 1.2 : 3)) { race.recover(car); b.stuckT = 0; }
+    if (b.stuckT > (car.speed < 1.5 && onLine ? 1.2 : 3) && !b.helpOnly) { race.recover(car); b.stuckT = 0; }
   }
 
-  F1.AI = { P, makeBrain, drive, pitDrive, sense, relS, upcomingZone };
+  F1.AI = { P, makeBrain, drive, pitDrive, sense, relS, upcomingZone, wetPlan, pitOpen, edgeOf, pitLaneV, canJoinLane };
 })(typeof window !== 'undefined' ? window : globalThis);

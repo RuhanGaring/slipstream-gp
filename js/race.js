@@ -163,6 +163,7 @@
     };
     makeWeather(race, cfg);
     makeSafetyCar(race, cfg);
+    if (cfg.adaptive && mode !== 'tt') race.adapt = { k: 1, laps: [], queue: [] };
     // F1's two-compound rule for simulation races of five laps or more
     race.mandatory = sim && mode !== 'tt' && race.laps >= 5 && race.laps <= 80 && cfg.mandatory !== false;
     // a speed plan per team and pace; k scales the learned grip (a wet track: the plan is
@@ -195,6 +196,7 @@
     for (const r of field) {
       const isPlayer = r === roster[pIdx];
       const spec = teamSpec(r.team);
+      if (!isPlayer && diff.power) spec.power *= diff.power;
       // the player's own setup, in simulation mode, when they asked for one
       if (isPlayer && sim && cfg.setup && F1.Setup) Object.assign(spec, F1.Setup.apply(Object.assign({}, Car.SPEC, spec), cfg.setup));
       // the whole field runs with the player's damage setting
@@ -227,6 +229,7 @@
       // arcade cars carry extra grip, so their target speeds scale with it
       const gripK = sim ? 1 : 1.12;
       car.profPace = U.clamp(pace, 0.5, 1.0) * gripK;
+      car.basePace = pace;
       car.brain = AI.makeBrain(car, profFor(r.team, car.profPace), {
         pace: 1, aggr: diff.aggr * (0.8 + rng() * 0.4), seed: 100 + race.cars.length * 7, react: 0.18 + rng() * 0.25 + (1 - diff.pace) * 0.6,
         // (a time trial's ghost and the player's autopilot drive the plan as it is)
@@ -364,6 +367,7 @@
     return false;
   }
 
+  const WALL_HIT = 3, WALL_SCRUB = 0.035, WALL_KEEP_MIN = 0.35, WALL_LIMP = 0.08, WALL_LIMP_MAX = 1.5; // (m/s of impact, per m/s, s per m/s, s)
   function wallCollide(race, c) {
     const tr = race.track;
     const i0 = c.loc.i;
@@ -418,6 +422,16 @@
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
     c.r = U.clamp(c.r, -7, 7); // (the part that hits would snap off, not turn the whole car)
     const power = -vn;
+    // With no damage model (Arcade, or damage off) the bounce alone cost less than braking: a
+    // car that never braked lapped Mont-Aurele 20 s quicker off the walls than driven clean.
+    // A real hit now scrubs speed and the engine stumbles for a moment, as a hurt car would.
+    if (!c.dm && power > WALL_HIT) {
+      const keep = Math.max(WALL_KEEP_MIN, 1 - WALL_SCRUB * (power - WALL_HIT));
+      c.vx *= keep; c.vy *= keep;
+      // (the player is told why the car has gone flat: a hit worth more than half a second)
+      if (c.isPlayer && WALL_LIMP * power > 0.5 && !(c.limpSaid > race.time - 3)) { c.limpSaid = race.time; event(race, 'hardhit', c, ''); }
+      c.wallLimp = Math.min(WALL_LIMP_MAX, Math.max(c.wallLimp || 0, WALL_LIMP * power));
+    }
     if (c.dm) { if (F1.Damage.impact(race, c, bx, by, bnx, bny, power, 0, -vt * tx, -vt * ty)) race.fx.push({ type: 'break', x: bx, y: by, power, car: c }); }
     if (power > 2) {
       race.fx.push({ type: 'wall', x: bx, y: by, power, car: c });
@@ -533,6 +547,7 @@
         }
         if (!valid && c.isPlayer) event(race, 'deleted', c, 'LAP TIME DELETED');
         event(race, 'lap', c, '', { lapTime: lt, valid });
+        c.pitThisLap = false;
       } else if (race.mode === 'tt' && c.isPlayer) finishGhost(race, c, false);
       c.lapStart = t; c.secStart = t; c.curSec = [null, null, null]; c.lapValid = true;
       if (lapNo === 0) { c.lapStart = race.mode === 'tt' ? t : race.startTime; }
@@ -556,6 +571,12 @@
   }
 
   function sectorDone(race, c, si, st) {
+    // (and for a lap and a bit after a safety car: the queue's slow sectors, and last laps run
+    // behind it, swung the field's pace by a third around a restart)
+    const scQuiet = !(race.sc && race.sc.state !== 'none') && !(race.scClearT != null && race.time - race.scClearT < (race.track.refLap || 60) * 1.25);
+    if (race.adapt && c.lapTimes.length >= 1 && !c.pitThisLap && !c.inPit && !c.brain.pit && scQuiet) {
+      if (c.isPlayer) adaptField(race, si, st); else if (!c.retired && !c.incident) adaptSample(race, c, si, st, c.lapTimes.length * 3 + si);
+    }
     let cls = 'none';
     if (st < race.bestSec[si]) { race.bestSec[si] = st; cls = 'purple'; }
     else if (st < c.bestSecs[si]) cls = 'green';
@@ -642,6 +663,7 @@
     if (c.wingDmg > 0.05) { c.wingDmg = 0; }
     if (c.dm) F1.Damage.repair(c);
     c.pitStops++;
+    c.pitThisLap = true;
     c.pitRequest = false; c.pitPlan = null;
     c.stintLaps = 0; c.stintWear0 = 0; c.lastPitLap = c.lap;
     event(race, 'pitdone', c, 'PIT STOP');
@@ -655,7 +677,7 @@
     const [x, y, h] = Tracks.pointAt(tr, s, lane ? tr.pit.off[i] - tr.pit.side * 1.8 : tr.line.off[i]);
     const keepDist = c.dist - 20;
     // (three resets in a minute is a car that cannot go on)
-    if (!c.isPlayer && race.time - (c.recT || -1e9) < 25) { c.recN = (c.recN || 0) + 1; if (c.recN >= 2) c.incident = true; } else c.recN = 0;
+    if ((!c.isPlayer || race.autoPlayer) && race.time - (c.recT || -1e9) < 25) { c.recN = (c.recN || 0) + 1; if (c.recN >= 2) c.incident = true; } else c.recN = 0;
     c.recT = race.time;
     Car.place(c, x, y, h);
     Tracks.locate(tr, x, y, i, c.loc);
@@ -664,6 +686,117 @@
     c.ghostT = 3;
     c.brain.bias = 0; c.brain.mode = 'race';
     if (c.isPlayer) event(race, 'recover', c, 'CAR RESET');
+  }
+
+  // ---------------- driving help, for the player ----------------
+  // Brake help watches the speed plan a little way ahead and brakes when the car is too quick for
+  // it; on Low it only steps in to save a corner, on High it brakes for every one, so the player
+  // need only steer. Steering help blends the player's steering with what the AI would do at this
+  // moment. Both work on the car's controls, so the physics is the same as for anyone else.
+  const HELP_STEER = [0, 0.35, 0.72];
+  function drivingHelp(race, c, dt) {
+    const tr = race.track, A = c.assist, b = c.brain;
+    if (!race.green || c.inPit || c.finished || c.retired || (b.pit && b.pit.phase !== 'approach')) return;
+    if (A.steerHelp) {
+      const u = c.ctl, thr = u.throttle, brk = u.brake, st = u.steer, drs = u.drs;
+      const mine = st * Car.steerLimit(c);
+      b.helpOnly = true; AI.drive(race, c, dt); b.helpOnly = false;
+      const ai = u.steerDirect;
+      u.throttle = thr; u.brake = brk; u.steer = st; u.drs = drs;
+      u.steerDirect = ai == null ? null : mine + (ai - mine) * HELP_STEER[A.steerHelp];
+    }
+    if (A.brakeHelp) {
+      if (!A.steerHelp) AI.wetPlan(race, c, b);
+      const v = c.speed, ahead = (c.loc.i + Math.round((v * 0.18 + 2) / tr.ds)) % tr.N;
+      const over = v - b.prof[ahead] * (A.brakeHelp === 1 ? 1.05 : 1);
+      if (over > 0.4) {
+        c.ctl.brake = Math.max(c.ctl.brake, U.clamp(over / 5, 0.25, 1));
+        c.ctl.throttle = over > 1.5 ? 0 : Math.min(c.ctl.throttle, 0.3);
+        c.helped = true;
+      } else c.helped = false;
+      // and keeps the car off the one ahead when the driver has not seen it close up
+      if (A.brakeHelp === 2) {
+        const L = tr.L, ch = Math.cos(c.h), sh = Math.sin(c.h);
+        for (const o of race.cars) {
+          if (o === c || o.retired || o.inPit || o.ghostT > 0) continue;
+          let gap = o.loc.s - c.loc.s;
+          if (gap < -L / 2) gap += L; else if (gap > L / 2) gap -= L;
+          if (gap < 3 || gap > 8 + v * 0.9) continue;
+          const close = v - (o.speed * Math.cos(o.h) * ch + o.speed * Math.sin(o.h) * sh);
+          if (close < 1 || Math.abs(o.loc.d - c.loc.d) > 2.1) continue;
+          const room = gap - 6, need = close * close / (2 * 24); // (a firm stop, about 2.4 g)
+          if (need >= room) { c.ctl.throttle = 0; c.ctl.brake = Math.max(c.ctl.brake, U.clamp((need - room) / 6 + 0.4, 0.4, 1)); c.helped = true; }
+        }
+      }
+      // High help also feeds the throttle in: a beginner holds it flat out of every corner
+      if (A.brakeHelp === 2 && c.speed > 12) {
+        const slide = Math.max((c.satR || 0) - 0.92, (Math.abs(c.beta || 0) - 0.07) * 3);
+        if (slide > 0) c.ctl.throttle = Math.min(c.ctl.throttle, U.clamp(0.75 - slide * 2.2, 0, 1));
+      }
+    }
+  }
+
+  // Match my pace: the field aims to sit just ahead of the player (ADAPT_LEAD), so there is
+  // always someone to race. From the second lap on (the first is a standing start from wherever
+  // the grid slot is), every sector an AI car completes is a sample: its time set against the
+  // player's latest time for the same sector, and corrected for the pace that car was really
+  // driving to, since its plan may be older than the field's last change. The field then moves
+  // halfway to the median of the last samples each time the player completes a sector. (Comparing
+  // raw times, the field chased its own old pace and swung from 1.76 to 1.27 and back.) Speed
+  // plans are remade over a few frames, one car a step, so a change costs no hitch.
+  const ADAPT_LEAD = 0.992, ADAPT_BETA = 0.4, ADAPT_N = 24;
+  function adaptSample(race, c, si, st, key) {
+    const a = race.adapt, p = a.pSec && a.pSec[si];
+    if (!(p > 0) || !(st > 0)) return;
+    // (each car's sector time counts once, whichever side of the player's it came)
+    const seen = c.adSeen || (c.adSeen = [-1, -1, -1]);
+    if (seen[si] === key) return;
+    seen[si] = key;
+    // lap time goes about as pace to the power -BETA: the pace that would have put this car
+    // just ahead of the player here
+    const k = (c.adK || 1) * Math.pow(st / (p * ADAPT_LEAD), 1 / ADAPT_BETA);
+    if (!isFinite(k)) return;
+    (a.samples || (a.samples = [])).push(k);
+    if (a.samples.length > ADAPT_N) a.samples.shift();
+  }
+  function adaptField(race, si, st) {
+    const a = race.adapt;
+    (a.pSec || (a.pSec = [null, null, null]))[si] = a.pSec[si] ? 0.5 * (a.pSec[si] + st) : st;
+    // the field's latest time for this sector, from the cars that went through it before the
+    // player (a player at the back would otherwise wait a lap for the first sample)
+    for (const o of race.cars) {
+      if (o.isPlayer || o.retired || o.incident || o.inPit || o.finished) continue;
+      const n = o.lapTimes.length;
+      if (o.curSec[si] != null && n >= 1) adaptSample(race, o, si, o.curSec[si], n * 3 + si);
+      else if (n >= 2 && o.lapTimes[n - 1].secs[si] > 0) adaptSample(race, o, si, o.lapTimes[n - 1].secs[si], (n - 1) * 3 + si);
+    }
+    const smp = a.samples || [];
+    if (smp.length < 4) return;
+    const sorted = smp.slice().sort((x, y) => x - y), want = sorted[sorted.length >> 1];
+    // the useful range: past these the plans stop changing (corner pace is clamped at 0.5 and 1)
+    let lo = 0.35, hi = 2.2;
+    const run = race.cars.filter(o => !o.isPlayer && !o.retired);
+    if (run.length) { const bp = run.map(o => o.basePace || 1); hi = Math.min(hi, Math.max(1.6, 1 / Math.min(...bp))); lo = Math.max(lo, 0.3 / Math.max(...bp)); }
+    const step = a.n ? 0.12 : 0.25;
+    a.n = (a.n || 0) + 1;
+    const k = U.clamp(a.k + U.clamp((want - a.k) * 0.5, -step * a.k, step * a.k), lo, hi);
+    if (Math.abs(k - a.k) < 0.012) return;
+    a.k = k;
+    a.queue = run;
+  }
+  function adaptStep(race) {
+    const a = race.adapt, c = a.queue.pop();
+    if (!c) return;
+    const gripK = race.sim ? 1 : 1.12, pace = c.basePace * a.k;
+    if (c.basePower == null) c.basePower = c.spec.power;
+    // below the plan's slowest pace the car also holds back on the straights; a field sped up
+    // gets back the engine its level holds back (Beginner runs 72 per cent of it), or a quick new
+    // driver ran away from a field already at the top of its corner speed
+    const full = c.basePower / (race.diff.power || 1);
+    c.spec.power = a.k > 1 && full > c.basePower ? c.basePower + (full - c.basePower) * U.clamp((a.k - 1) / 0.6, 0, 1) : c.basePower * U.clamp(pace / 0.5, 0.6, 1);
+    c.profPace = U.clamp(pace, 0.5, 1) * gripK;
+    c.brain.prof = race.profFor(c.team, c.profPace, c.brain.profK || 1);
+    c.adK = a.k; // (the pace this car's plan now runs to, for adaptSample)
   }
 
   // ---------------- per-car modifiers: slipstream, dirty air, DRS ----------------
@@ -840,6 +973,7 @@
     if (sc.state === 'ending' && !sc.gone && Tracks.fwd(tr, s0, tr.pit.sIn) <= Tracks.fwd(tr, s0, s1)) sc.gone = true;
     if (sc.state === 'ending' && lead && lead.lap > sc.endLap) {
       sc.state = 'none'; sc.vis = false;
+      race.scClearT = race.time; // (Match my pace waits a lap after this: see sectorDone)
       race.cars.forEach(c => { c.scCap = null; });
       event(race, 'green', null, 'GREEN FLAG');
       return;
@@ -901,6 +1035,9 @@
       } else if (race.lightsT >= race.holdT) goGreen(race);
     }
 
+    if (race.adapt && race.adapt.queue.length) adaptStep(race);
+    { const p = race.player; if (p && !race.autoPlayer) p.stuckT = race.green && p.speed < 3 && !p.inPit && !p.finished && !p.retired ? (p.stuckT || 0) + dt : 0; }
+
     race.aeroT = (race.aeroT || 0) - dt;
     if (race.aeroT <= 0) { race.aeroT = 1 / 20; aeroMods(race); }
 
@@ -924,7 +1061,7 @@
         F1.Damage.step(race, c, dt);
         if (c.dm.failed && !c.dm.handled) {
           c.dm.handled = true;
-          if (!c.isPlayer) c.incident = true; // pull off the track and stop
+          if (!c.isPlayer || race.autoPlayer) c.incident = true; // pull off the track and stop
         }
         // a car that has stopped for good (no engine or a wheel gone) is out of the race
         if (c.dm.failed && c.speed < 1 && !c.retired && (c.isPlayer || c.incident)) {
@@ -933,8 +1070,9 @@
         }
       }
       // (a broken wing is a stop for a new one; this is a car that can no longer be driven)
-      if (!c.isPlayer && c.dm && !c.incident && !c.retired && !c.finished && c.dm.paceK < 0.62) c.incident = true;
-      const pitAuto = c.brain.pit && (c.brain.pit.phase !== 'approach' || Tracks.fwd(tr, c.loc.s, tr.pit.sIn) < 300);
+      // (in Spectate the player's car is driven by the AI too, and pulls off like any other)
+      if ((!c.isPlayer || race.autoPlayer) && c.dm && !c.incident && !c.retired && !c.finished && c.dm.paceK < 0.62) c.incident = true;
+      const pitAuto = c.brain.pit && (c.brain.pit.phase !== 'approach' || Tracks.fwd(tr, c.loc.s, tr.pit.sIn) < 300 || Tracks.fwd(tr, tr.pit.sIn, c.loc.s) < (AI.pitOpen ? AI.pitOpen(tr) : 60));
       const auto = !c.isPlayer || pitAuto || c.finished || race.autoPlayer;
       if (auto) {
         AI.drive(race, c, dt);
@@ -942,9 +1080,10 @@
       } else {
         // a racing wheel sets the front-wheel angle itself (js/game.js); anything else steers by ctl.steer
         c.ctl.steerDirect = c.ctl.wheelSteer != null ? c.ctl.wheelSteer : null;
+        if (c.assist.brakeHelp || c.assist.steerHelp) drivingHelp(race, c, dt);
         if (c.brain.pit && c.brain.pit.phase === 'approach') {
           const i = c.loc.i;
-          if (!isNaN(tr.pit.off[i]) && Tracks.fwd(tr, tr.pit.sIn, c.loc.s) < 150 && Math.abs(c.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 + 1 && Math.abs(c.loc.d) > tr.hw - 1) {
+          if (!isNaN(tr.pit.off[i]) && Tracks.fwd(tr, tr.pit.sIn, c.loc.s) < 150 && Math.abs(c.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 + 1 && Math.abs(c.loc.d) > tr.hw - 1 && (!AI.canJoinLane || AI.canJoinLane(tr, c))) {
             c.brain.pit.phase = 'in'; c.inPit = true;
             event(race, 'pitentry', c, 'PIT LANE  AUTOPILOT ENGAGED');
           }
@@ -954,19 +1093,21 @@
       if (c.isPlayer && race.sim && !c.inPit && !c.finished && !c.brain.pit) {
         const i = c.loc.i;
         const u = Tracks.fwd(tr, tr.pit.sIn, c.loc.s);
-        if (u < 140 && !isNaN(tr.pit.off[i]) && Math.abs(c.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 && Math.abs(c.loc.d) > tr.hw + 1) {
+        if (u < 140 && !isNaN(tr.pit.off[i]) && Math.abs(c.loc.d - tr.pit.off[i]) < tr.pit.lane / 2 && Math.abs(c.loc.d) > tr.hw + 1 && (!AI.canJoinLane || AI.canJoinLane(tr, c))) {
           c.brain.pit = { phase: 'in', service: 2.6, served: false };
           c.inPit = true;
           event(race, 'pitentry', c, 'PIT LANE  AUTOPILOT ENGAGED');
         }
       }
-      // arcade: the player cannot out-run the safety car queue
-      if (c.isPlayer && !race.sim && c.scCap != null && !c.inPit && c.u > c.scCap) { c.ctl.throttle = 0; c.ctl.brake = Math.max(c.ctl.brake, Math.min(0.6, (c.u - c.scCap) * 0.06)); }
+      // the player cannot out-run the safety car queue, and can see why (js/hud.js)
+      if (c.isPlayer && c.scCap != null && !c.inPit && c.u > c.scCap) { c.ctl.throttle = 0; c.ctl.brake = Math.max(c.ctl.brake, Math.min(0.6, (c.u - c.scCap) * 0.06)); }
       if (!race.green && race.mode !== 'tt') { c.ctl.brake = Math.max(c.ctl.brake, 1); if (!c.isPlayer) c.ctl.throttle = race.lightsOn > 0 ? 0.55 : 0; }
       // arcade: pit lane speed limit is automatic, no stop
       if (!race.sim && !c.inPit) {
         c.limiter = Tracks.inRange(tr, c.loc.s, tr.pit.limitIn, tr.pit.limitOut) && !isNaN(tr.pit.off[c.loc.i]) && Math.abs(c.loc.d - tr.pit.off[c.loc.i]) < tr.pit.lane / 2 + 1;
       }
+      // (a hard wall hit with no damage model: the engine stumbles for a moment)
+      if (c.wallLimp > 0) { c.wallLimp -= dt; c.ctl.throttle = Math.min(c.ctl.throttle, 0.2); }
       const prevDist = c.dist;
       const hx = c.x, hy = c.y, hh = c.h;
       Car.step(c, tr, dt);
@@ -1019,7 +1160,9 @@
     if (race.chequered && !race.done) {
       const allDone = race.cars.every(c => c.finished || c.retired);
       const pDone = !race.player || race.player.finished || race.player.retired;
-      if (allDone || (pDone && race.time - race.chequerT > 40)) finish(race);
+      // (a player long finished does not wait for the last car: the rest are classified where
+      // their pace puts them, not as retirements)
+      if (allDone) finish(race); else if (pDone && race.time - race.chequerT > 40) classifyRest(race);
     }
   }
 
@@ -1042,9 +1185,16 @@
     if (c.inPit) return;
     const allOut = c.wheels.every(w => w.outside);
     if (c.limitsT > 0) c.limitsT -= dt;
-    if (allOut && c.limitsT <= 0) {
+    // one strike for one trip off the track: the car has to come back before it can earn another
+    if (!allOut) { c.backT = (c.backT || 0) + dt; if (c.backT > 0.6) c.offLimit = false; return; }
+    c.backT = 0;
+    if (!c.offLimit && c.limitsT <= 0) {
+      c.offLimit = true;
       c.limitsT = 2.5;
-      if (race.sim || race.mode === 'tt') {
+      // (an Arcade weekend session judges laps as Arcade races do, by the time alone: its AI times
+      // come from Arcade laps, and a new driver was left with no time at all)
+      const arcadeSession = race.mode === 'tt' && !race.sim && (race.quali != null || race.practice);
+      if ((race.sim || race.mode === 'tt') && !arcadeSession) {
         c.lapValid = false;
         if (race.mode !== 'tt' && race.mode !== 'arcade') {
           c.warnings++;
@@ -1084,18 +1234,83 @@
 
   // Ends the race at once: every car still running is given the finish it was heading for, from its
   // own average speed, so a player who has finished or retired does not sit through the rest
+  // The rest of the field's finish, once there is nobody left to watch (the player is out, or
+  // home with the others still running): from where each car is now, at its own recent pace,
+  // plus the stops it still has to make. (A race average from the start, with no stops, put
+  // cars that had already stopped behind ones still to: one finished 5th, classified 17th.)
   function classifyRest(race) {
     if (race.done) return;
-    const L = race.track.L, t = race.time - race.startTime, run = race.cars.filter(c => !c.finished && !c.retired);
-    const speed = c => Math.max(5, c.dist / Math.max(1, t));
-    // when the winner gets there, if nobody has yet
-    const flag = race.chequered ? 0 : Math.min(...run.map(c => (race.laps * L - c.dist) / speed(c)), 1e9);
+    const tr = race.track, L = tr.L, t = race.time - race.startTime, run = race.cars.filter(c => !c.finished && !c.retired && !c.incident);
+    const loss = Strategy.pitLoss(tr);
+    // a car's pace: the middle of its last three clean laps (not the standing start, and not a
+    // lap with a stop in it or the one after, which run long), else the field's typical one. (The
+    // quickest of them made every car still running 0.1 to 5.6 s too quick.)
+    const clean = c => {
+      const a = c.lapTimes, out = [];
+      for (let k = 1; k < a.length; k++) {
+        const stop = a[k].comp !== a[k - 1].comp || (k >= 2 && a[k - 1].comp !== a[k - 2].comp);
+        if (!stop && a[k].t > 0 && isFinite(a[k].t)) out.push(a[k].t);
+      }
+      const last = out.slice(-3).sort((x, y) => x - y);
+      return last.length ? last[last.length >> 1] : null;
+    };
+    // A car with no clean lap yet (the player out on lap one or two) runs at its own speed plan's
+    // lap, scaled by how the field's real laps compare with their plans: one typical lap for
+    // everyone kept the order of the moment, and a quick car stuck behind a slow start was
+    // classified as if it would stay there.
+    const planLap = c => {
+      const p = c.brain && c.brain.prof;
+      if (!p) return null;
+      let s = 0;
+      for (let i = 0; i < tr.N; i++) s += tr.line.dsl[i] / Math.max(5, p[i]);
+      return s;
+    };
+    const pl = new Map(run.map(c => [c, planLap(c)]));
+    const ratios = run.map(c => { const a = clean(c), b = pl.get(c); return a && b ? a / b : null; }).filter(x => x != null).sort((a, b) => a - b);
+    const kPlan = ratios.length ? ratios[ratios.length >> 1] : (race.sim ? 1.04 : 1.01);
+    const known = run.map(clean).filter(x => x != null).sort((a, b) => a - b);
+    const typical = known.length ? known[known.length >> 1] : (tr.refLap || 60) * (race.sim ? 1.04 : 1);
     const est = run.map(c => {
-      const lapsDone = Math.min(race.laps, Math.max(c.lapTimes.length, Math.ceil((c.dist + speed(c) * flag) / L)));
-      return { c, lapsDone, at: t + Math.max(0, lapsDone * L - c.dist) / speed(c) };
-    }).sort((a, b) => a.at - b.at);
-    for (const { c, lapsDone, at } of est) {
-      const lt = L / speed(c);
+      const lt = clean(c) || (pl.get(c) ? pl.get(c) * kPlan : typical);
+      const v = L / lt;
+      // stops still to come: the strategy planned afresh from here (the plan a car holds can be
+      // the one that has just brought it in), the mandatory change, one under way. A stop under
+      // way counts as a stop until its tyres are on (then pitStops already has it: counting it
+      // again showed one-stop cars with two), and costs only the part of it still ahead.
+      const left = race.laps - c.lapTimes.length, dry = race.sim && !(race.wet > 0.05 || c.compound.wet);
+      const planned = dry && left >= 1 ? planFor(race, c, left).stops.length : 0;
+      const pb = c.brain && c.brain.pit, served = !!(pb && pb.served), boxing = c.inPit || !!pb;
+      const now = boxing && !served ? 1 : 0;
+      let more = boxing && !served ? Math.max(0, planned - 1) : planned;
+      const owes = race.mandatory && !race.wetRace && new Set(c.tyreHist).size < 2;
+      if (owes && !boxing && more < 1) more = 1;
+      const share = boxing ? (c.inPit ? (served ? 0.25 : 0.6) : 1) : 0;
+      return { c, lt, v, stops: now + more, extra: (share + more) * loss, owes: owes && !boxing };
+    });
+    // when the winner gets there, if nobody has yet
+    const flag = race.chequered ? 0 : Math.min(...est.map(e => (race.laps * L - e.c.dist) / e.v + e.extra), 1e9);
+    // Once the winner is home, the road still ahead of each car has already been timed: the winner
+    // covered it, at the timing points every 25 m. That stretch at the winner's time, scaled by the
+    // two cars' pace, beats any projection (traffic, tyres and the last lap's own pace are in it).
+    const win = race.chequered ? race.finishOrder[0] : null, winPace = win ? clean(win) : null;
+    const passAt = dist => race.firstPass.get(Math.floor(dist / 25));
+    for (const e of est) {
+      const { c, v } = e, now = c.lapTimes.length;
+      const lapsDone = Math.min(race.laps, Math.max(now, Math.ceil((c.dist + v * Math.max(0, flag - e.extra)) / L)));
+      // no lap left to stop in: the mandatory change is missed, and penalised as at the flag
+      const stopIn = lapsDone > now;
+      e.lapsDone = lapsDone;
+      e.at = t + Math.max(0, lapsDone * L - c.dist) / v + (stopIn ? e.extra : 0);
+      if (win && winPace) {
+        const p0 = Math.floor(c.dist / 25) * 25, a = passAt(c.dist), b = passAt(lapsDone * L - 1);
+        if (a != null && b != null && b >= a) e.at = t + Math.max(0, (b - a) * (e.lt / winPace) - (c.dist - p0) / v) + (stopIn ? e.extra : 0);
+      }
+      if (e.owes && !stopIn) { c.penalty += 30; event(race, 'penalty', c, 'MANDATORY STOP NOT SERVED  +30 SEC'); }
+      // (the stops its time allows for show in the results, as stops)
+      if (stopIn && e.stops > 0) c.pitStops += e.stops;
+    }
+    est.sort((a, b) => a.at - b.at);
+    for (const { c, lapsDone, at, lt } of est) {
       while (c.lapTimes.length < lapsDone) c.lapTimes.push({ t: lt, valid: false, secs: [null, null, null], comp: c.compound.id });
       c.finished = true; c.finishTime = at; race.finishOrder.push(c);
     }

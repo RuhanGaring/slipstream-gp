@@ -412,7 +412,11 @@ body.mobile #pitpanel { bottom: auto; top: 22%; max-width: calc(100vw - 16px); }
 .wk-grid b { font-size: 16px; font-weight: 700; text-transform: capitalize; }
 .wk-grid div:last-child:nth-child(odd) { grid-column: 1 / -1; }
 
-#scr-settings .menu-wrap, #scr-controls .menu-wrap, #scr-gfxadv .menu-wrap { width: min(1180px, 88vw); }
+#scr-settings .menu-wrap, #scr-controls .menu-wrap, #scr-gfxadv .menu-wrap, #scr-profile .menu-wrap { width: min(1180px, 88vw); }
+#scr-settings .opts-one { max-width: 860px; }
+.opt.tabrow .on { font-size: 13px; letter-spacing: .14em; color: var(--ink-3, #9a9aa6); }
+.opt.tabrow.f .on { color: #55555f; }
+.opt.f .key { color: #111; border-color: #999; }
 /* circuit generator (list + detail) and the summaries elsewhere share the carbon panels */
 .split { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: stretch; }
 .list { display: flex; flex-direction: column; gap: 3px; }
@@ -707,7 +711,8 @@ body.compact .gx-go { display: none; } /* the action bar races */
 /* race HUD, built on the F1 games' layout: order card top left, timing card top right, the low
    cluster bottom centre, map bottom left, tyres bottom right, pit window on the right. */
 #hud { --h-panel: rgba(7, 8, 12, .84); --h-line: rgba(255, 255, 255, .1); }
-#h-arc, #h-car, #h-flag, #h-pit, #h-rpm { display: none; }
+#h-arc, #h-car, #h-pit, #h-rpm { display: none; }
+#h-flag { display: none; position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 6; white-space: nowrap; }
 #hud-pos, #hud-lap { background: var(--h-panel); border: 0; clip-path: none; }
 #tower { background: var(--h-panel); border: 0; padding: 0 0 3px; }
 .tw-row { grid-template-columns: 26px 3px 46px 1fr 18px; height: 21px; padding-right: 7px; font-size: 12px; font-weight: 600; }
@@ -733,7 +738,6 @@ body:not(.mobile) #hud-lap .lbl { font-size: 13px; font-weight: 700; letter-spac
 body:not(.mobile) #hud-lap b { font-size: 13px; font-weight: 700; }
 body:not(.mobile) #lap-of { font-size: 13px; color: #fff; font-weight: 700; }
 body:not(.mobile) #hud-pos { display: none; }
-#h-flag.on { display: block; padding: 4px 0; text-align: center; font-size: 13px; font-weight: 800; background: #ffd21f; color: #111; letter-spacing: .04em; }
 body:not(.mobile) #tower { left: 20px; top: 44px; width: 226px; }
 body:not(.mobile) #h-flag.on ~ * { margin-top: 0; }
 body:not(.mobile) #hud-mini { left: 20px; right: auto; top: auto; bottom: 16px; width: 170px; }
@@ -792,3 +796,80 @@ body:not(.mobile) #h-pit.on { display: block; position: absolute; right: 20px; t
 }
 body:not(.mobile) #lap-of { margin-left: -2px; }
 body:not(.mobile) .t-sectors i { background: rgba(255,255,255,.22); } body:not(.mobile) .t-sectors i.live { background: #fff; }
+
+/* playability pass: coach tips, spotter, flags, flashback, welcome, profile, debrief */
+#hud { zoom: var(--hud-k, 1); }
+#scr-main .brand { margin-bottom: 18px !important; }
+#scr-main .mi { padding-top: 5px; padding-bottom: 5px; font-size: 25px; }
+#hint { position: absolute; left: 50%; bottom: 176px; transform: translate(-50%, 10px); max-width: min(620px, 86vw); padding: 9px 20px; background: rgba(7, 8, 12, .86); border-left: 3px solid var(--f1, #e10600);
+  color: #f0f1f4; font-size: 16px; font-weight: 600; line-height: 1.3; text-align: center; opacity: 0; transition: opacity .25s ease, transform .25s ease; pointer-events: none; }
+#hint.on { opacity: 1; transform: translate(-50%, 0); }
+#hint b { color: #ffd21f; font-weight: 700; }
+.spot { position: absolute; top: 28%; bottom: 28%; width: 14px; opacity: 0; pointer-events: none; transition: opacity .08s linear; background: #ffb020; box-shadow: 0 0 22px 3px rgba(255, 176, 32, .55); }
+.spot.near { background: #ff3b30; box-shadow: 0 0 26px 5px rgba(255, 59, 48, .6); }
+#spot-l { left: 0; border-radius: 0 6px 6px 0; }
+#spot-r { right: 0; border-radius: 6px 0 0 6px; }
+#h-flag.on { display: block; padding: 6px 22px; background: #ffd21f; color: #111; font-size: 17px; font-weight: 800; letter-spacing: .05em; text-align: center; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
+#keyhint { padding: 8px 10px; background: rgba(7, 8, 12, .62); color: #d7d9df; }
+#keyhint .key { color: #fff; }
+#h-flag.on.blue { background: #1466d8; color: #fff; }
+body.mobile #hint { bottom: 42vh; font-size: 14px; }
+#m-info { display: none; }
+body.mobile.simrace #m-info { display: block; position: absolute; left: 50%; top: 40px; transform: translateX(-50%); padding: 1px 9px; background: rgba(7, 8, 12, .72); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+body.mobile #m-info.bad { background: #d81f16; }
+#touch .t-drs.ready { background: #2bd66b; color: #06240f; border-color: #2bd66b; }
+body.mobile #pitpanel { top: 34px; bottom: auto; left: 50%; right: auto; transform: translateX(-50%); max-width: 62vw; }
+.pf-stats.tt { grid-template-columns: repeat(5, 1fr); }
+#scr-ttend .menu-wrap { width: min(1000px, 88vw); }
+body.mobile #fb { top: 8%; pointer-events: auto; }
+#fb { position: fixed; left: 50%; top: 13%; transform: translateX(-50%); z-index: 30; display: none; flex-direction: column; align-items: center; gap: 6px; color: #fff; text-align: center; pointer-events: none; text-shadow: 0 2px 10px rgba(0, 0, 0, .7); }
+#fb.on { display: flex; }
+#fb span { font-size: 15px; font-weight: 800; letter-spacing: .34em; margin-right: -.34em; }
+#fb b { font-size: 52px; font-weight: 900; font-style: italic; line-height: 1; font-variant-numeric: tabular-nums; }
+#fb .fb-bar { width: min(420px, 70vw); height: 4px; background: rgba(255, 255, 255, .25); overflow: hidden; }
+#fb .fb-bar i { display: block; height: 100%; background: #fff; transform-origin: left; transform: scaleX(0); }
+#fb small { font-size: 13px; font-weight: 600; opacity: .9; } #fb em { font-style: normal; font-weight: 800; }
+body.rewinding #gl { filter: saturate(.25) contrast(1.08); }
+body.rewinding #hud { opacity: 0; }
+.wl { align-items: stretch; }
+.wl .card { min-height: 340px; }
+.wl .card h3 { font-size: 40px; }
+.mi.wl-skip { margin-top: 12px; font-size: 18px; }
+.pf-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin: 6px 0 14px; }
+.pf-stats div { background: var(--carbon, #15161c); padding: 10px 12px; }
+.pf-stats b { display: block; font-size: 30px; font-weight: 900; font-style: italic; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pf-stats span { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3, #9a9aa6); }
+.pf-two { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; align-items: start; margin-bottom: 14px; }
+.pf-tbl { max-height: 54vh; overflow: auto; }
+.pf-tro { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 54vh; overflow: auto; }
+.pf-tro div { padding: 7px 10px; background: var(--carbon, #15161c); opacity: .5; border-left: 3px solid transparent; }
+.pf-tro div.got { opacity: 1; border-left-color: #ffd21f; }
+.pf-tro b { display: block; font-size: 14px; font-weight: 800; }
+.pf-tro span { display: block; font-size: 12px; color: var(--ink-3, #9a9aa6); line-height: 1.3; }
+.debrief { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin: 10px 0 2px; padding: 10px 14px; background: rgba(255, 255, 255, .06); font-size: 15px; }
+.debrief .db-l { display: flex; flex-wrap: wrap; gap: 4px 22px; }
+.debrief b { font-weight: 800; color: #fff; }
+.debrief .db-pb { padding: 2px 9px; background: #7b2cd6; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+.debrief .db-tip { flex-basis: 100%; color: #ffd21f; font-weight: 600; }
+.debrief .db-tro { flex-basis: 100%; display: flex; gap: 10px; align-items: baseline; font-weight: 700; }
+.debrief .db-tro b { padding: 1px 7px; background: #ffd21f; color: #111; font-size: 11px; letter-spacing: .1em; }
+.debrief .db-tro span { font-weight: 500; color: #c9c9d3; font-size: 13px; }
+.km .opt { grid-template-columns: 1fr 200px; min-height: 42px; }
+.km .km-k { text-align: right; font-weight: 700; }
+.km .opt.wait .km-k { color: #ffd21f; }
+#touch .t-back { right: calc(200px + env(safe-area-inset-right)); }
+#touch.sim .t-back { right: calc(262px + env(safe-area-inset-right)); }
+
+/* round 3 polish: table headers stay in view, trophies fit, buttons never wrap, phone welcome */
+table.res th { position: sticky; top: 0; background: #0c0f14; box-shadow: inset 0 -1px 0 var(--line); z-index: 1; }
+.pf-tro div { padding: 5px 9px; }
+.pf-tro b { font-size: 13px; }
+.pf-tro span { font-size: 11.5px; }
+.res-actions .btn span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.compact .wl-skip { display: none; }
+.pf-tro div { opacity: 1; background: #12141a; }
+.pf-tro div:not(.got) b { color: rgba(255,255,255,.5); }
+.pf-tro div:not(.got) span { color: rgba(255,255,255,.34); }
+/* phone: the results, standings and qualifying buttons stay in reach at the foot of the screen
+   (they sat three swipes down, with nothing to say they were there) */
+body.compact .res-actions { position: sticky; bottom: 0; z-index: 3; margin-top: 10px; padding: 14px 0 8px; background: linear-gradient(to bottom, rgba(12, 15, 20, 0), #0c0f14 35%); }

@@ -75,6 +75,16 @@
   // phones and tablets start on the potato preset (a desktop starts on high); the slowest can go to rock
   const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
   if (!Game.settings.gfx && COARSE) Game.settings.gfx = Object.assign({ preset: 'potato', tone: 'aces', ev: 0 }, GFX_PRESETS.potato);
+  // a first start on a computer: built-in graphics begin on Low, not High (the automatic step-down
+  // would get there, but only after a bad first minute)
+  if (!Game.settings.gfx) {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2'), ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+      if (/intel|uhd|iris|radeon\(tm\) graphics|radeon graphics|vega \d|microsoft basic|swiftshader|llvmpipe/i.test(name) && !/arc\b/i.test(name)) Game.settings.gfx = Object.assign({ preset: 'low', tone: 'aces', ev: 0 }, GFX_PRESETS.low);
+      if (gl && gl.getExtension('WEBGL_lose_context')) gl.getExtension('WEBGL_lose_context').loseContext();
+    } catch (e) { /* no WebGL: the 2D renderer takes over */ }
+  }
   // settings saved before an option existed take its value from their preset (a custom setup
   // from the preset it most resembles), so an old save never ends up with missing values
   { const sv = Game.settings.gfx;
@@ -110,6 +120,35 @@
   // ---------- input ----------
   const keys = new Set();
   const inp = { steer: 0, thr: 0, brk: 0 };
+  // Keyboard mapping (Controls > Keyboard). Every action keeps a default key that the game's own
+  // code reads; a key the player has moved is translated to that default as it arrives, during
+  // a race only (menus always use the keys they show). The arrow keys stay as extra driving keys.
+  const ACTIONS = Game.ACTIONS = [['thr', 'Accelerate', 'KeyW'], ['brk', 'Brake and reverse', 'KeyS'], ['left', 'Steer left', 'KeyA'], ['right', 'Steer right', 'KeyD'],
+    ['drs', 'Overtake mode', 'Space'], ['pit', 'Pit strategy', 'KeyP'], ['flash', 'Flashback', 'Backspace'], ['reset', 'Reset car', 'KeyR'], ['cam', 'Camera', 'KeyC'],
+    ['up', 'Shift up', 'KeyE'], ['down', 'Shift down', 'KeyQ']];
+  const binds = Game.binds = Object.assign({}, ...ACTIONS.map(a => ({ [a[0]]: a[2] })), store.get('slip_keys', {}));
+  let remap = {};
+  function buildRemap() {
+    remap = {};
+    for (const [id, , def] of ACTIONS) if (binds[id] !== def) { if (!Object.prototype.hasOwnProperty.call(remap, def)) remap[def] = 'None'; }
+    for (const [id, , def] of ACTIONS) if (binds[id] !== def) remap[binds[id]] = def;
+  }
+  buildRemap();
+  const keyLabel = c => ({ Space: 'SPACE', Backspace: 'BACKSPACE', ArrowUp: '&#8593;', ArrowDown: '&#8595;', ArrowLeft: '&#8592;', ArrowRight: '&#8594;', ShiftLeft: 'L SHIFT', ShiftRight: 'R SHIFT', ControlLeft: 'L CTRL', ControlRight: 'R CTRL', Enter: 'ENTER', Tab: 'TAB' })[c]
+    || c.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'NUM ').toUpperCase();
+  Game.keyName = id => keyLabel(binds[id] || '');
+  Game.keyLabel = keyLabel;
+  // what a prompt in the race should name: the buttons of the device in use
+  const PAD_LABEL = { thr: 'RT', brk: 'LT', left: 'LS', right: 'LS', drs: 'A', pit: 'Y', flash: 'VIEW', reset: 'X', cam: 'B', up: 'RB', down: 'LB' };
+  Game.hintKey = id => (Game.usingPad ? PAD_LABEL[id] : Game.keyName(id));
+  // moving an action onto a key another action holds swaps the two
+  Game.bindKey = (id, code) => {
+    const other = ACTIONS.find(a => a[0] !== id && binds[a[0]] === code);
+    if (other) binds[other[0]] = binds[id];
+    binds[id] = code; store.set('slip_keys', binds); buildRemap();
+  };
+  Game.bindsReset = () => { for (const a of ACTIONS) binds[a[0]] = a[2]; store.set('slip_keys', binds); buildRemap(); };
+  Game.capture = null; // the mapping screen, waiting for the next key
 
   // ---------- touch (mobile mode) ----------
   // Mobile mode (Settings: AUTO follows a touch screen) puts driving controls over the race:
@@ -123,7 +162,7 @@
   tl.id = 'touch';
   tl.innerHTML = '<div class="t-steer"><div class="t-knob"></div></div>' +
     '<div class="t-btn t-pause" data-k="Escape">II</div><div class="t-btn t-cam" data-k="KeyC">CAM</div><div class="t-btn t-drs" data-hold="drs">OVT</div>' +
-    '<div class="t-btn t-pit" data-k="KeyP">PIT</div><div class="t-btn t-gup" data-k="KeyE">+</div><div class="t-btn t-gdn" data-k="KeyQ">&minus;</div>' +
+    '<div class="t-btn t-back" data-k="Backspace">&#8634;</div><div class="t-btn t-pit" data-k="KeyP">PIT</div><div class="t-btn t-gup" data-k="KeyE">+</div><div class="t-btn t-gdn" data-k="KeyQ">&minus;</div>' +
     '<div class="t-pedal t-brk" data-hold="brk">BRAKE</div><div class="t-pedal t-thr" data-hold="thr">GAS</div>';
   document.body.appendChild(tl);
   const knob = tl.querySelector('.t-knob'), steerZone = tl.querySelector('.t-steer');
@@ -156,6 +195,7 @@
     // sim races: the pit-strategy button, and shift buttons when the gears are manual
     const R = Game.race, sim = !!(on && R && R.sim);
     tl.classList.toggle('sim', sim);
+    document.body.classList.toggle('simrace', sim);
     tl.classList.toggle('manual', sim && R.player && R.player.assist && R.player.assist.autoGear === false);
     document.body.classList.toggle('mobile', Game.mobile());
     if (!on) { touch.thr = touch.brk = touch.drs = false; touch.sid = null; touch.steer = 0; touch.pads.clear(); tilt.zero = null; } // tilt re-centres when the race resumes
@@ -194,14 +234,18 @@
   const useTilt = () => Game.settings.touchSteer === 'tilt';
   window.addEventListener('keydown', e => {
     if (e.target && e.target.tagName === 'INPUT' && e.target.type !== 'range') return; // typing a name or a seed
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'Backspace'].includes(e.code)) e.preventDefault();
+    if (Game.capture) { e.preventDefault(); if (!e.repeat) { const f = Game.capture; Game.capture = null; f(e.code); } return; }
+    Game.usingPad = false;
     if (e.repeat && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) return;
-    keys.add(e.code);
-    if (F1.Viewer) F1.Viewer.keyDown(e.code);
+    // (the mapping applies while driving: not in menus, replays or the flashback's own keys)
+    const code = (Game.state === 'race' && !Game.paused && !Game.spectate) || (Game.state === 'rewind' && e.code === binds.flash) ? (Object.prototype.hasOwnProperty.call(remap, e.code) ? remap[e.code] : e.code) : e.code;
+    keys.add(code);
+    if (F1.Viewer) F1.Viewer.keyDown(code);
     Audio.init();
-    onKey(e.code, e.repeat);
+    onKey(code, e.repeat);
   });
-  window.addEventListener('keyup', e => { keys.delete(e.code); if (F1.Viewer) F1.Viewer.keyUp(e.code); if (camSaved && CAM_KEYS.has(e.code)) { camSaved = false; Game.saveSettings(); } });
+  window.addEventListener('keyup', e => { keys.delete(e.code); if (Object.prototype.hasOwnProperty.call(remap, e.code)) keys.delete(remap[e.code]); if (F1.Viewer) F1.Viewer.keyUp(e.code); if (camSaved && CAM_KEYS.has(e.code)) { camSaved = false; Game.saveSettings(); } });
   // the player's own angle for each camera, held keys for a smooth move, kept between races
   const CAM_KEYS = new Set(['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'BracketLeft', 'BracketRight']);
   let camSaved = false, camNow = 'chase';
@@ -328,6 +372,7 @@
       const race = Game.race, p = race.player;
       if (code === 'Escape' || code === 'KeyP' && !race.sim) { pause(); return; }
       if (code === 'KeyT' && !Game.paused) HUD.toggleTower();
+      if (code === 'Backspace') { fbStart(); return; }
       if (code === 'KeyC') {
         const list = R3ok ? CAMS : ['chase', 'fixed'];
         Game.settings.camera = list[(list.indexOf(Game.settings.camera) + 1) % list.length];
@@ -343,7 +388,8 @@
         return;
       }
       if (code === 'KeyH') { Game.hudOn = !Game.hudOn; document.getElementById('hud').classList.toggle('off', !Game.hudOn); return; }
-      if (code === 'KeyR' && race.mode !== 'sim' && race.green && !p.finished && !p.inPit) { race.recover(p); return; }
+      // (a simulation race gives the reset to a car that is stuck; the time it cost is the penalty)
+      if (code === 'KeyR' && (race.mode !== 'sim' || (p.stuckT || 0) > 1.5) && race.green && !p.finished && !p.inPit && !p.retired) { race.recover(p); p.stuckT = 0; return; }
       if (race.sim && !p.assist.autoGear && race.green) {
         if (code === 'KeyE' || code === 'ShiftLeft') Car.shift(p, 1);
         if (code === 'KeyQ' || code === 'ControlLeft') Car.shift(p, -1);
@@ -358,7 +404,7 @@
           const call = race.wet > 0.05 ? Race.tyreFor(race, p) : p.plan && p.plan.seq && p.plan.seq[1];
           pitSel = Math.max(0, PIT_TYRES.indexOf(call || (p.compound.id === 'M' ? 'H' : 'M')));
           pitMark();
-          document.querySelector('#pitpanel .pp-hint').textContent = Game.mobile() ? 'Tap a tyre. PIT again to cancel.' : 'Keys 1 to 5, or arrows and Enter. P to cancel.';
+          document.querySelector('#pitpanel .pp-hint').textContent = Game.mobile() ? 'Tap a tyre. PIT again to cancel.' : Game.usingPad ? 'D-pad left and right, A to pick. Y to cancel.' : `Keys 1 to 5, or arrows and Enter. ${Game.keyName('pit')} to cancel.`;
         }
         document.getElementById('pitpanel').classList.toggle('show', !!Game.pitMenu);
         return;
@@ -371,11 +417,17 @@
     if (Game.state === 'loading') {
       return;
     }
+    if (Game.state === 'rewind') {
+      if (code === 'Escape') fbEnd(false);
+      else if (code === 'Enter' || code === 'NumpadEnter' || code === 'Backspace' || code === 'Space') fbEnd(true);
+      return;
+    }
     if (UIm.UI.cur) UIm.key(code);
   }
 
   // gamepad (a racing wheel is read separately, in pollWheel)
   let padPrev = [];
+  const stick = { dir: null, t: 0 };
   function pollPad() {
     const pads = F1.Wheel ? F1.Wheel.pads() : Array.from(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
     const wheel = F1.Wheel ? F1.Wheel.find(pads) : null;
@@ -386,16 +438,40 @@
     if (!gp) return null;
     const b = i => (gp.buttons[i] ? gp.buttons[i].value : 0);
     const pressed = i => b(i) > 0.5 && !(padPrev[i] > 0.5);
-    const out = { steer: Math.abs(gp.axes[0]) > 0.08 ? gp.axes[0] : 0, thr: b(7), brk: b(6), active: false };
+    // Settings > Gamepad: deadzone, curve (above 1 is gentler round the centre) and sensitivity
+    const S0 = Game.settings, ax = gp.axes[0] || 0, dz = S0.padDead == null ? 0.08 : S0.padDead, mag = Math.abs(ax) > dz ? (Math.abs(ax) - dz) / (1 - dz) : 0;
+    const out = { steer: Math.sign(ax) * Math.min(1, Math.pow(mag, S0.padCurve || 1) * (S0.padSens || 1)), thr: b(7), brk: b(6), active: false };
     out.active = Math.abs(out.steer) > 0 || out.thr > 0.05 || out.brk > 0.05;
-    if (Game.state === 'race' && !Game.paused) {
+    if (out.active || gp.buttons.some(x => x.pressed)) Game.usingPad = true;
+    Game.padBack = b(8) > 0.5;
+    const viewing = Game.state === 'replay' || (Game.state === 'race' && !Game.paused && Game.spectate);
+    // the left stick moves through menus too, with the usual repeat
+    if (Game.state !== 'rewind' && (Game.state !== 'race' || Game.paused)) {
+      const ay = gp.axes[1] || 0, ax0 = gp.axes[0] || 0, dir = ay < -0.6 ? 'ArrowUp' : ay > 0.6 ? 'ArrowDown' : ax0 < -0.6 ? 'ArrowLeft' : ax0 > 0.6 ? 'ArrowRight' : null, now = performance.now();
+      if (dir !== stick.dir) { stick.dir = dir; stick.t = now + 340; if (dir && !viewing) onKey(dir); }
+      else if (dir && now > stick.t && !viewing) { stick.t = now + 120; onKey(dir); }
+    }
+    if (viewing) {
+      // replays and spectating: play or pause, change car, skip, leave
+      if (pressed(0)) onKey('Space'); if (pressed(1)) onKey('Escape');
+      if (pressed(14)) onKey('ArrowLeft'); if (pressed(15)) onKey('ArrowRight');
+      if (pressed(12)) onKey('ArrowUp'); if (pressed(13)) onKey('ArrowDown');
+      if (pressed(4)) onKey('KeyJ'); if (pressed(5)) onKey('KeyL'); if (pressed(3)) onKey('KeyC');
+      if (pressed(9)) onKey('Escape');
+    } else if (Game.state === 'race' && !Game.paused) {
       if (pressed(9)) pause();
       if (pressed(5)) onKey('KeyE');
       if (pressed(4)) onKey('KeyQ');
       if (pressed(3)) onKey('KeyP');
+      if (pressed(8)) onKey('Backspace');
+      if (pressed(2)) onKey('KeyR');
+      if (pressed(1)) onKey('KeyC');
       if (Game.pitMenu) { if (pressed(14)) onKey('ArrowLeft'); if (pressed(15)) onKey('ArrowRight'); if (pressed(0)) onKey('Enter'); }
       out.drs = b(0) > 0.5;
       rumble(gp);
+    } else if (Game.state === 'rewind') {
+      if (pressed(0) || pressed(8)) onKey('Enter');
+      if (pressed(1)) onKey('Escape');
     } else {
       if (pressed(12)) onKey('ArrowUp'); if (pressed(13)) onKey('ArrowDown');
       if (pressed(14)) onKey('ArrowLeft'); if (pressed(15)) onKey('ArrowRight');
@@ -544,7 +620,7 @@
 
   function camMatrix() {
     const ax = W / 2, ay = cam.mode === 'chase' ? H * 0.57 : H / 2;
-    const sx = (Math.random() - 0.5) * cam.shake * 10, sy = (Math.random() - 0.5) * cam.shake * 10;
+    const shk = Game.settings.shake === false ? 0 : cam.shake, sx = (Math.random() - 0.5) * shk * 10, sy = (Math.random() - 0.5) * shk * 10;
     const c = Math.cos(-cam.angle), s = Math.sin(-cam.angle), z = cam.zoom;
     // screen = A + R * z * (world - cam)
     const a = c * z, b = s * z, cc = -s * z, d = c * z;
@@ -759,7 +835,7 @@
     const focus = vw ? vw.focus : mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
     const step = ZOOM_STEPS[Game.settings.zoomStep == null ? 1 : Game.settings.zoomStep] || ZOOM_STEPS[1];
     R3.render({
-      cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: cam.shake, fx: FX,
+      cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: Game.settings.shake === false ? 0 : cam.shake, fx: FX,
       assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
       lightsOn: Game.state === 'replay' ? race.lightsOn : race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
       weather: race, sc: race.sc, free: vw && vw.free, snap: vw && vw.snap,
@@ -1010,9 +1086,53 @@
     for (let k = 0; k < 240 * 6; k++) Race.step(race, DT);
   }
 
+  // the first time the game opens it asks what kind of driver this is, sets everything for that
+  // and goes straight to a race. The welcome never returns once answered.
+  const WELCOME = {
+    new: { mode: 'arcade', race: { difficulty: 5, laps: 3, grid: 10, field: 20, brakeHelp: 2, steerHelp: 1, flashbacks: 'inf', lineArcade: 'full', adaptive: true, damageArcade: 'off' } },
+    fan: { mode: 'arcade', race: { difficulty: 0, laps: 3, grid: 10, field: 20, brakeHelp: 0, steerHelp: 0, flashbacks: 5, lineArcade: 'brake', adaptive: false } },
+    sim: { mode: 'sim', race: { difficulty: 2, laps: 5, grid: 10, field: 20, brakeHelp: 0, steerHelp: 0, flashbacks: 3, lineSim: 'brake', damage: 'full', adaptive: false } },
+  };
+  Game.firstRun = () => !store.get('slip_seen', false);
+  Game.welcome = kind => {
+    store.set('slip_seen', true);
+    if (!kind) return;
+    const w = WELCOME[kind];
+    Object.assign(Game.raceDefaults, w.race);
+    Game.flow = { kind: 'race', mode: w.mode, track: 'kestrel', team: 0, driver: 0 };
+    Game.startFromFlow();
+  };
+  // The daily race: the date picks the circuit, the weather and the grid, so it is a new problem
+  // each day. Nothing the player has set for other races changes.
+  Game.daily = () => {
+    const d = new Date(), key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    let h = 2166136261;
+    for (const ch of key) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    const r = n => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) % n; };
+    const def = Tracks.DEFS[r(Tracks.DEFS.length)], weather = ['dry', 'dry', 'dry', 'light', 'mixed'][r(5)], grid = [20, 16, 12][r(3)], laps = [3, 3, 5][r(3)];
+    const team = 2 + r(6);
+    return { key, track: def.id, name: def.name, weather, grid, laps, team, teamName: F1.Data.TEAMS[team].name };
+  };
+  Game.runDaily = () => {
+    const D = Game.daily(), mode = store.get('slip_mode', null);
+    Game.flow = { kind: 'race', track: D.track, mode: mode === 'sim' ? 'sim' : 'arcade', team: D.team, driver: 0 };
+    launch({ track: D.track, mode: Game.flow.mode, daily: D.key, over: { laps: D.laps, weather: Game.flow.mode === 'sim' ? D.weather : 'dry', grid: D.grid, field: 20 } });
+  };
+
+  // Race again from the main menu: the last race as it was set up, with nothing to pick
+  Game.lastRun = () => { const l = store.get('slip_last', null); return l && Tracks.byId(l.track) && F1.Data.TEAMS[l.team] ? l : null; };
+  Game.runLast = () => {
+    const l = Game.lastRun();
+    if (!l) return;
+    Game.flow = Object.assign({}, Game.flow, l);
+    Game.startFromFlow();
+  };
+
   Game.startFromFlow = () => {
     const f = Game.flow, R = Game.raceDefaults;
     store.set('slip_race', R);
+    if (f.mode === 'sim' || f.mode === 'arcade') store.set('slip_mode', f.mode);
+    if (f.kind === 'race' || f.kind === 'tt') store.set('slip_last', { kind: f.kind, mode: f.mode, track: f.track, team: f.team || 0, driver: f.driver || 0 });
     if (f.kind === 'champ') {
       const table = {};
       for (const t of F1.Data.TEAMS) t.drivers.forEach((d, i) => {
@@ -1020,6 +1140,7 @@
         table[d[2]] = { name: `${d[0]} ${d[1]}`, team: t.name, color: t.base === '#121417' ? t.accent : t.base, pts: 0, wins: 0, pods: 0, player };
       });
       Game.champ = { round: 0, table };
+      if (f.career) Game.champ.career = { season: 1, rep: 0, last: null };
       saveChamp();
       launchRound();
       return;
@@ -1033,8 +1154,8 @@
   // (the slowest five drop out), Q2 (five more), Q3 for the top ten and pole. The player
   // drives each session alone on track for a set number of laps (the first is the out lap)
   // and their best valid lap counts; every other driver's time comes from their own car and
-  // skill: the ideal lap of the speed profile they race to (the same team spec, pace and
-  // learned grip the AI drives, scaled to the laps the AI actually turns), plus driver error, with the track rubbering in
+  // skill: a lap really driven by an AI car alone on the circuit (aiBaseTimes), scaled for each
+  // driver by their own car and pace, plus driver error, with the track rubbering in
   // from session to session. The race then starts from the qualifying order.
   // A full weekend opens with free practice: a longer solo session to learn the circuit and
   // the car, classified against the field's practice times (heavier fuel and long-run
@@ -1043,8 +1164,8 @@
   const QSEG = [{ name: 'Q1', laps: 3 }, { name: 'Q2', laps: 2 }, { name: 'Q3', laps: 2 }];
   const FP = { name: 'PRACTICE', laps: 6 };
   const sessionOf = race => (race.quali != null ? QSEG[race.quali] : race.practice ? FP : null);
-  // the AI's real laps run slower than the ideal of its speed profile (braking points, line
-  // errors, kerbs): measured on Kestrel Park the quickest race laps came out about 13 per cent over
+  // (only if timing a lap fails: the AI's real laps run slower than the ideal of its speed
+  // profile, braking points, line errors, kerbs; on Kestrel Park about 8 per cent over)
   const AI_LAP_K = 1.08;
   function weekendStart(o) {
     const f = Game.flow, R = Game.raceDefaults;
@@ -1066,7 +1187,27 @@
     const W = Game.weekend;
     launch({ track: W.track, mode: 'tt', ttHandling: Game.flow.mode, quali: W.seg, weekend: true, round: W.round });
   }
-  // each AI driver's clean lap on this circuit, from the profile they race to
+  // One AI car alone on the circuit, exactly as it races (same car, difficulty, driving and
+  // tyre the session uses), for an out lap and two flying laps: its best flying lap, or null.
+  // About a second of work, so it runs once a weekend, behind the loading screen.
+  function timeAiLap(trackId, sim, code) {
+    const R = Game.raceDefaults, f = Game.flow;
+    const race = Race.create({ track: trackId, mode: sim ? 'sim' : 'arcade', laps: 30, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0, seed: 11, field: R.field || 20, weather: 'dry', safetyCar: 'off', mandatory: false, assists: { damage: false } });
+    const c = race.cars.find(x => x.driver.code === code);
+    if (!c) return null;
+    race.cars = [c]; race.order = [c]; race.player = c; race.autoPlayer = true;
+    if (sim) { c.fuel = 10; c.compound = F1.Car.COMPOUNDS.S; c.tyreHist = ['S']; c.plan = null; }
+    const DT = 1 / 240, cap = Math.ceil((race.track.refLap || 90) * 6 / DT);
+    for (let n = 0; n < cap && c.lapTimes.length < 3 && !c.retired; n++) { Race.step(race, DT); race.fx.length = 0; }
+    // (a deleted lap still says how fast the car is: better than no timed lap at all)
+    const laps = c.lapTimes.slice(1), ok = laps.filter(l => l.valid !== false), flying = (ok.length ? ok : laps).map(l => l.t);
+    return flying.length ? Math.min(...flying) : null;
+  }
+  // each AI driver's clean lap on this circuit. Timed, not estimated: the driver the speed plan
+  // puts in the middle of the field is timed alone (timeAiLap), and everyone else's lap is that
+  // time scaled by how their own car and pace compare to theirs on the plan they race to. (The
+  // plan's ideal lap alone, scaled by a fixed factor, was out by up to 18 per cent on some
+  // circuits: a whole field 9 s quicker than any car could lap at Varenna.)
   function aiBaseTimes() {
     const W = Game.weekend;
     if (W.ai) return W.ai;
@@ -1074,14 +1215,48 @@
     const diff = F1.Data.DIFFICULTY[R.difficulty == null ? 2 : R.difficulty];
     const gripK = sim ? 1 : 1.12;
     W.ai = {};
-    // from the plan the AI will really race on, set against the lap a lone car really does on it
-    const L = F1.Limits && F1.Limits[tr.id], model1 = sim && L && L.simLap ? F1.Raceline.lapTime(tr, tr.line, F1.Car.SPEC, Object.assign(Race.planOpts(tr, sim, 1), { real: true })) : 0;
-    W.aiK = model1 ? L.simLap[0] / model1 : AI_LAP_K;
     for (const code in W.info) {
       if (code === W.me) continue;
       const I = W.info[code];
       const pace = U.clamp(diff.pace * (0.97 + (I.skill - 0.95) * 0.75) / 0.9875, 0.5, 1) * gripK;
-      W.ai[code] = F1.Raceline.lapTime(tr, tr.line, Object.assign({}, F1.Car.SPEC, Race.teamSpec(I.team)), Object.assign(Race.planOpts(tr, sim, pace), { real: true }));
+      const spec = Object.assign({}, F1.Car.SPEC, Race.teamSpec(I.team));
+      if (diff.power) spec.power *= diff.power;
+      W.ai[code] = F1.Raceline.lapTime(tr, tr.line, spec, Object.assign(Race.planOpts(tr, sim, pace), { real: true }));
+    }
+    let codes = Object.keys(W.ai).sort((a, b) => W.ai[a] - W.ai[b]);
+    {
+      // Where the plan cannot tell cars apart (Varenna's sits at its top speed all lap, so cars got
+      // the same time and that part of the grid was drawn by lot: the whole field in Arcade, the
+      // seven quickest in Simulation, where the best drivers all reach the plan's full pace), the
+      // engines do: a flat-out lap goes about as the cube root of power, and a hair for the
+      // better driver. And no driver strays further from the middle of the field than real
+      // qualifying spreads (the plan put one car 5 per cent off at Varenna), eased in rather than
+      // cut off, so the slowest are not tied at the limit either.
+      const m0 = W.ai[codes[codes.length >> 1]];
+      const powerOf = code => Race.teamSpec(W.info[code].team).power;
+      const r = {};
+      for (const code of codes) r[code] = W.ai[code] / m0;
+      for (let a = 0; a < codes.length;) {
+        let b = a + 1;
+        while (b < codes.length && r[codes[b]] - r[codes[a]] < 0.0004) b++;
+        if (b - a > 1) {
+          const grp = codes.slice(a, b);
+          const pm = grp.reduce((s, c) => s + powerOf(c), 0) / grp.length, sm = grp.reduce((s, c) => s + W.info[c].skill, 0) / grp.length;
+          for (const c of grp) r[c] *= Math.pow(pm / powerOf(c), 1 / 3) * (1 + (sm - W.info[c].skill) * 0.01);
+        }
+        a = b;
+      }
+      for (const code of codes) W.ai[code] = m0 * (1 + 0.025 * Math.tanh((r[code] - 1) / 0.025));
+      codes = Object.keys(W.ai).sort((a, b) => W.ai[a] - W.ai[b]);
+    }
+    const mid = codes[codes.length >> 1];
+    let real = null;
+    try { real = mid ? timeAiLap(W.track, sim, mid) : null; } catch (e) { real = null; }
+    if (real && isFinite(real) && real > 0) W.aiK = real / W.ai[mid];
+    else {
+      // (the old estimate, if the timed lap failed: the plan set against a lone car's lap on it)
+      const L = F1.Limits && F1.Limits[tr.id], model1 = sim && L && L.simLap ? F1.Raceline.lapTime(tr, tr.line, F1.Car.SPEC, Object.assign(Race.planOpts(tr, sim, 1), { real: true })) : 0;
+      W.aiK = model1 ? L.simLap[0] / model1 : AI_LAP_K;
     }
     return W.ai;
   }
@@ -1169,21 +1344,58 @@
     launch({ track: def.id, mode: f.mode, round: ch.round + 1 });
   }
 
+  // Career: a championship that starts in the slowest car. Each team expects a result, every
+  // round beaten raises the driver's reputation, and reputation decides who calls at the end
+  // of the season. Weaker teams ask for less, so a good drive always counts for something.
+  const WEAKEST = 9;
+  const rankOf = t => t; // (the team list runs from the strongest down)
+  Game.careerTarget = team => 2 + Math.round(rankOf(team) * 1.55);
+  Game.careerStart = () => { Game.flow = { kind: 'champ', career: true, team: WEAKEST, driver: 1 }; UIm.go('mode'); };
+  function careerScore(ch, race) {
+    const c = ch.career, p = race.player, pos = race.result.indexOf(p) + 1, target = Game.careerTarget(Game.flow.team);
+    const gain = p.finished ? U.clamp((target - pos) * 2, -6, 12) + (pos === 1 ? 4 : 0) : -6;
+    c.rep = Math.max(0, c.rep + gain);
+    c.last = { target, pos, gain, dnf: !p.finished };
+  }
+  // who calls: the current team always; better ones as reputation allows
+  Game.careerOffers = () => {
+    const ch = Game.champ, now = Game.flow.team, climb = Math.floor(ch.career.rep / 26);
+    const best = Math.max(0, now - climb), list = [now];
+    for (const t of [best, Math.round((best + now) / 2)]) if (!list.includes(t)) list.push(t);
+    return list.sort((a, b) => a - b);
+  };
+  Game.careerSign = team => {
+    const ch = Game.champ;
+    Game.flow.team = team; Game.flow.driver = 1;
+    const table = {};
+    for (const t of F1.Data.TEAMS) t.drivers.forEach((d, i) => {
+      table[d[2]] = { name: `${d[0]} ${d[1]}`, team: t.name, color: t.base === '#121417' ? t.accent : t.base, pts: 0, wins: 0, pods: 0, player: t === F1.Data.TEAMS[team] && i === 1 };
+    });
+    ch.table = table; ch.round = 0; ch.career.season++; ch.career.rep = Math.round(ch.career.rep * 0.4); ch.career.last = null; ch.offers = false;
+    saveChamp();
+    launchRound();
+  };
+
   // Car setups, one per circuit ('*': a championship's, for every round without its own)
   const setups = () => { try { return JSON.parse(localStorage.getItem('slip_setups')) || {}; } catch (e) { return {}; } };
   Game.carSetup = id => { const a = setups(); return F1.Setup.clean(a[id] || a['*'] || F1.Setup.BASE); };
   Game.saveCarSetup = (id, s) => { const a = setups(); a[id] = F1.Setup.clean(s); try { localStorage.setItem('slip_setups', JSON.stringify(a)); } catch (e) { /* private window: this session only */ } };
   function cfgFromFlow(o) {
-    const f = Game.flow, R = Game.raceDefaults;
+    const f = Game.flow, R = Object.assign({}, Game.raceDefaults, o.over || {});
     const sim = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim');
+    const help = { brakeHelp: R.brakeHelp | 0, steerHelp: R.steerHelp | 0 };
     const assists = sim ? { abs: R.abs, tc: R.tc, autoGear: R.autoGear, steerAssist: R.steerAssist ? 1 : 0, stability: 0, damage: R.damage === 'full' ? 'full' : R.damage === false || R.damage === 'off' ? false : true, gripMul: 1 }
       : { abs: true, tc: 2, autoGear: true, steerAssist: 1, stability: 1, gripMul: 1.12, damage: R.damageArcade === 'full' ? 'full' : false };
+    if (!o.spectate) Object.assign(assists, help);
     return {
       mandatory: R.mandatory !== false, weather: sim && o.mode !== 'tt' ? R.weather || 'dry' : 'dry', safetyCar: R.safetyCar || 'on',
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
-      grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists, compound: R.compound,
+      grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists,
+      // qualifying is run on softs, as the AI's timed laps are, unless a tyre was chosen
+      compound: o.quali != null && sim && (!R.compound || R.compound === 'auto') ? 'S' : R.compound,
       ttArcade: o.mode === 'tt' && o.ttHandling !== 'sim', gridOrder: o.gridOrder || null, spectate: !!o.spectate, noGhost: o.quali != null || !!o.practice,
       setup: sim && R.setupOn && !o.spectate && F1.Setup ? Game.carSetup(o.track) : null,
+      adaptive: !!R.adaptive && !o.spectate,
     };
   }
 
@@ -1202,15 +1414,18 @@
       Game.paused = false;
       startLoadScene(def.id, Game.flow.team || 0);
       const tr0 = Race.getTrack(def.id);
-      const R0 = Game.raceDefaults;
+      const R0 = Object.assign({}, Game.raceDefaults, o.over || {});
       UIm.go('loading', {
-        def, tr: tr0, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali, practice: o.practice,
+        def, tr: tr0, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali, practice: o.practice, daily: !!o.daily,
         laps: o.mode === 'tt' ? null : R0.laps, best: Game.bestLap(def.id, o.mode === 'arcade' || (o.mode === 'tt' && o.ttHandling !== 'sim') ? 'arcade' : 'sim'),
         team: F1.Data.TEAMS[Game.flow.team || 0], driver: F1.Data.TEAMS[Game.flow.team || 0].drivers[Game.flow.driver || 0],
       });
       document.getElementById('shade').className = 'load';
       fade.classList.remove('on');
       const build = () => {
+        // a weekend times the AI's laps once, here behind the loading screen (and before the
+        // session's own race resets the track's rubber)
+        if ((o.quali != null || o.practice) && Game.weekend && !Game.weekend.ai) aiBaseTimes();
         const cfg = cfgFromFlow(o);
         const race = newRace(cfg);
         if (cfg.ttArcade) {
@@ -1235,10 +1450,13 @@
             Game.state = 'race'; Game.paused = false; Game.pitMenu = false;
             UIm.hide();
             document.getElementById('shade').className = '';
-            HUD.setup(race, Game.settings);
             // every session is recorded for its replay
             race.rec = F1.Replay ? new F1.Replay.Recorder(race) : null;
             Game.spectate = !!o.spectate;
+            fbSetup(race);
+            HUD.setup(race, Game.settings);
+            if (F1.Hints) F1.Hints.start(race);
+            race.stats = { walls: 0, hits: 0, wallT: -9, hitT: -9 };
             if (Game.spectate) {
               // nobody to drive: the player's car races itself, the director picks the shots
               race.autoPlayer = true;
@@ -1252,6 +1470,7 @@
             Audio.startRace();
             fade.classList.remove('on');
             launching = false;
+            if (Game.flow.career && Game.champ && Game.champ.career && race.quali == null && !race.practice) HUD.message('TEAM TARGET  P' + Game.careerTarget(Game.flow.team), 'blue', 'SEASON ' + Game.champ.career.season + '  /  ROUND ' + (Game.champ.round + 1), 4);
             if (race.quali != null) HUD.message('QUALIFYING  ' + QSEG[race.quali].name, 'blue', QSEG[race.quali].laps + ' LAPS, OUT LAP FIRST', 3.5);
             else if (race.practice) HUD.message('FREE PRACTICE', 'blue', FP.laps + ' LAPS, END IT EARLY FROM PAUSE', 3.5);
             else if (race.mode === 'tt') HUD.message('TIME TRIAL', 'blue', race.ghost ? 'GHOST ' + U.fmtTime(race.ghost.t) : 'SET A BENCHMARK LAP', 3);
@@ -1294,6 +1513,7 @@
 
   Game.quitToMenu = () => {
     setBlur(false);
+    if (F1.Profile && Game.race && Game.race.player && !Game.spectate && !Game.race.autoPlayer && !Game.race.scored) F1.Profile.addSession(Game.race);
     if (F1.Viewer) F1.Viewer.stop();
     Game.spectate = false; Game.replay = null;
     if (mouse.on) setMouseSteer(false, true);
@@ -1353,6 +1573,86 @@
     document.getElementById('shade').className = '';
   };
 
+  // ---------- flashback ----------
+  // Hold the key: the race runs backwards (the replay recording, shown on the live cars) as far as
+  // the snapshots go; let go and the race restarts from there, in slow motion for a moment so the
+  // driver can get hold of it. A tap keeps it rewinding until the key is pressed again. Time
+  // trials and qualifying have none: there the lap is the point. js/flashback.js has the state.
+  const fb = { ring: null, P: null, left: 0, used: 0, slowT: 0, t0: 0, held: false };
+  const FB_RATE = 2.2, FB_SLOW = 1.6, FB_HOLD = 280;
+  Game.fb = fb;
+  const fbEl = () => document.getElementById('fb');
+  function fbSetup(race) {
+    const v = Game.raceDefaults.flashbacks == null ? 5 : Game.raceDefaults.flashbacks;
+    const can = F1.Flashback && !Game.spectate && race.mode !== 'tt' && race.quali == null && v !== 0;
+    fb.ring = can ? new F1.Flashback.Ring(race, { step: 0.25, span: 30 }) : null;
+    fb.left = v === 'inf' ? Infinity : +v; fb.used = 0; fb.slowT = 0; fb.P = null;
+  }
+  Game.fbCan = () => !!(fb.ring && fb.left > 0);
+  function fbStart() {
+    const race = Game.race, r = fb.ring;
+    if (!r || Game.state !== 'race' || Game.paused) return;
+    const p = race.player;
+    if (fb.left <= 0) { HUD.message('NO FLASHBACKS LEFT', 'yellow', '', 1.6); Audio.chime(false); return; }
+    if (p.finished || !race.green || race.time - r.oldest() < 0.8 || !Game.canReplay()) return;
+    Game.pitMenu = false;
+    document.getElementById('pitpanel').classList.remove('show');
+    const P = fb.P = new F1.Replay.Player(race.rec);
+    P.T = P.T1; P.locate(); P.rate = -FB_RATE; P.playing = true;
+    P.minT = Math.max(r.oldest(), P.T0);
+    fb.t0 = performance.now(); fb.held = !Game.mobile();
+    fbEl().querySelector('small').innerHTML = Game.mobile() ? 'Tap to drive from here' : `Let go to drive from here. <em>${Game.usingPad ? 'B' : 'ESC'}</em> cancels`;
+    Game.state = 'rewind';
+    document.body.classList.add('rewinding');
+    fbEl().classList.add('on');
+    Audio.chime(true);
+  }
+  function fbTick(dt) {
+    const P = fb.P, race = Game.race;
+    P.advance(dt);
+    if (P.T <= P.minT) { P.T = P.minT; P.locate(); P.playing = false; }
+    P.apply();
+    const now = P.T1 - P.T, span = Math.max(0.01, P.T1 - P.minT), e = fbEl();
+    e.querySelector('i').style.transform = `scaleX(${U.clamp(now / span, 0, 1).toFixed(3)})`;
+    e.querySelector('b').textContent = '-' + now.toFixed(1) + ' S';
+    updateCamera(dt, race.player, Game.settings.camera);
+    Audio.updateRace(race, race.player, cam, true);
+    if (fb.held && !keys.has('Backspace') && !Game.padBack) {
+      if (performance.now() - fb.t0 > FB_HOLD) fbEnd(true);
+      else { fb.held = false; e.querySelector('small').innerHTML = Game.usingPad ? '<em>A</em> to drive from here. <em>B</em> cancels' : '<em>ENTER</em> to drive from here. <em>ESC</em> cancels'; }
+    }
+  }
+  // on a phone a tap anywhere ends the rewind (not the tap that began it)
+  window.addEventListener('pointerdown', () => { if (Game.state === 'rewind' && Game.mobile() && performance.now() - fb.t0 > 300) fbEnd(true); });
+  // what the 3D model shows of a car's damage, to tell if it went back to before a hit
+  const hurtSig = c => (c.dm ? c.dm.hits.length + '/' + (c.dm.soft ? c.dm.soft.ver : 0) + '/' + Object.keys(c.dm.off).length : (c.wingDmg || 0));
+  function fbEnd(go) {
+    const P = fb.P, race = Game.race, r = fb.ring;
+    P.restore();
+    fb.P = null;
+    Game.state = 'race';
+    document.body.classList.remove('rewinding');
+    fbEl().classList.remove('on');
+    if (!go) return;
+    const was = race.cars.map(hurtSig), lapWas = race.player.lap;
+    const s = r.rollback(P.T);
+    if (!s) return;
+    race.rec.rewind(s.t);
+    let hurt = false;
+    race.cars.forEach((c, k) => { if (hurtSig(c) !== was[k] && R3ok) { R3.dropCar(c); hurt = true; } });
+    if (hurt) R3.clearDebris();
+    const p = race.player;
+    if (lapWas !== p.lap) trace.cur = []; else trace.cur.length = Math.min(trace.cur.length, Math.floor((Math.max(0, p.dist) % race.track.L) / 10) + 1);
+    if (finishT > s.t) finishT = 0;
+    if (retireT > s.t) retireT = 0;
+    evIdx = 0; acc = 0;
+    snapPoses(race);
+    fb.left--; fb.used++;
+    fb.slowT = FB_SLOW;
+    HUD.message('FLASHBACK', 'blue', fb.left === Infinity ? '' : fb.left === 0 ? 'THAT WAS THE LAST ONE' : fb.left + ' LEFT', 1.6);
+    if (F1.Hints) F1.Hints.note('flashback');
+  }
+
   // ---------- replay ----------
   // back: reopens the screen the replay was started from
   Game.canReplay = () => !!(Game.race && Game.race.rec && Game.race.rec.count() > F1.Replay.HZ * 2);
@@ -1395,7 +1695,11 @@
     Audio.musicStart();
     document.getElementById('hud').classList.add('off');
     document.getElementById('shade').className = 'full';
-    UIm.go('results', { race });
+    if (F1.Hints) F1.Hints.hide();
+    const st = race.stats || {};
+    const scored = F1.Profile && !Game.spectate && !race.scored ? F1.Profile.addRace(race, { flashbacks: fb.used, walls: st.walls, hits: st.hits, daily: Game.lastLaunch && Game.lastLaunch.daily }) : null;
+    race.scored = race.scored || scored;
+    UIm.go('results', { race, scored: race.scored, flashbacks: fb.used, stats: st });
   }
 
   Game.champContinue = () => {
@@ -1408,17 +1712,31 @@
       if (k < 3) r.pods++;
     });
     const final = ch.round >= Tracks.DEFS.length - 1;
+    if (ch.career) careerScore(ch, race);
+    // (a title is a title, in a career season too)
+    if (final && F1.Profile) { const top = Object.values(ch.table).sort((a, b) => b.pts - a.pts)[0]; if (top && top.player) ch.titleWon = F1.Profile.champion(); }
+    if (ch.career && final) { ch.offers = true; store.set(SLOT.career, { v: 1, round: ch.round, table: ch.table, quali: !!ch.quali, flow: Game.flow, career: ch.career, offers: true }); UIm.go('standings', { final }); return; }
     // (saved as the round to come, once this one is scored)
-    if (final) store.set('slip_champ', null); else store.set('slip_champ', { v: 1, round: ch.round + 1, table: ch.table, quali: !!ch.quali, flow: Game.flow });
+    const slot = ch.career ? SLOT.career : SLOT.champ;
+    if (final) store.set(slot, null); else store.set(slot, { v: 1, round: ch.round + 1, table: ch.table, quali: !!ch.quali, flow: Game.flow, career: ch.career || null });
     UIm.go('standings', { final });
   };
-  function saveChamp() { const ch = Game.champ; store.set('slip_champ', { v: 1, round: ch.round, table: ch.table, quali: !!ch.quali, flow: Game.flow }); }
-  Game.champSaved = () => { const c = store.get('slip_champ', null); return c && c.v === 1 && c.table && c.round < Tracks.DEFS.length ? c : null; };
-  Game.champResume = () => {
-    const c = Game.champSaved();
+  // A career and a championship are saved apart: starting one never touches the other.
+  // (Saves from before the split kept both in one slot; a career found there moves to its own.)
+  const SLOT = { champ: 'slip_champ', career: 'slip_career' };
+  function saveChamp() { const ch = Game.champ; store.set(ch.career ? SLOT.career : SLOT.champ, { v: 1, round: ch.round, table: ch.table, quali: !!ch.quali, flow: Game.flow, career: ch.career || null, offers: !!ch.offers }); }
+  Game.champSaved = (kind = 'champ') => {
+    const old = store.get(SLOT.champ, null);
+    if (old && old.career) { if (!store.get(SLOT.career, null)) store.set(SLOT.career, old); store.set(SLOT.champ, null); }
+    const c = store.get(SLOT[kind] || SLOT.champ, null);
+    return c && c.v === 1 && c.table && c.round < Tracks.DEFS.length ? c : null;
+  };
+  Game.champResume = (kind = 'champ') => {
+    const c = Game.champSaved(kind);
     if (!c) return;
     Game.flow = Object.assign({}, c.flow, { kind: 'champ' });
-    Game.champ = { round: c.round, table: c.table, quali: c.quali };
+    Game.champ = { round: c.round, table: c.table, quali: c.quali, career: c.career || null, offers: !!c.offers };
+    if (c.offers) { UIm.go('offers'); return; }
     launchRound();
   };
   Game.champNext = () => { if (launching) return; Game.champ.round++; saveChamp(); launchRound(); };
@@ -1449,9 +1767,10 @@
         case 'warn': case 'deleted': if (mine) { HUD.message(e.text, 'yellow'); Audio.chime(false); } break;
         case 'penalty': if (mine) { HUD.message(e.text, 'red'); Audio.chime(false); } break;
         case 'damage': if (mine) HUD.message('FRONT WING DAMAGE', 'red', 'BOX FOR A NEW NOSE'); break;
+        case 'hardhit': if (mine) HUD.message('HARD HIT', 'yellow', 'THE ENGINE CUTS FOR A MOMENT', 1.4); break;
         case 'pitentry': if (mine) HUD.message('PIT LANE', 'blue', 'AUTOPILOT ENGAGED'); break;
         case 'pitdone': if (mine) { HUD.message('PIT STOP COMPLETE', 'green', p.compound.name + ' TYRES FITTED'); Audio.pitGuns(); } break;
-        case 'engineer': if (mine) { HUD.message('ENGINEER: BOX THIS LAP', 'red', Game.mobile() ? `${Car.COMPOUNDS[e.compound].name} TYRES  /  PIT, THEN PICK THEM` : `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS P THEN ${['S', 'M', 'H', 'I', 'W'].indexOf(e.compound) + 1}`, 4); Audio.chime(true); } break;
+        case 'engineer': if (mine) { HUD.message('ENGINEER: BOX THIS LAP', 'red', Game.mobile() ? `${Car.COMPOUNDS[e.compound].name} TYRES  /  PIT, THEN PICK THEM` : Game.usingPad ? `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS Y, THEN PICK THEM` : `${Car.COMPOUNDS[e.compound].name} TYRES  /  PRESS ${Game.keyName('pit')} THEN ${['S', 'M', 'H', 'I', 'W'].indexOf(e.compound) + 1}`, 4); Audio.chime(true); } break;
         case 'strategy': if (mine) HUD.message('STRATEGY', 'blue', planText(e.plan), 5); break;
         case 'pb': HUD.message('NEW PERSONAL BEST', 'purple', U.fmtTime(p.bestLap)); Audio.chime(true); break;
         case 'recover': if (mine) HUD.message('CAR RESET', ''); break;
@@ -1547,7 +1866,10 @@
     const wh = pollWheel(dt);
     const race = Game.race;
     if (race && (Game.state === 'race' && !Game.paused || Game.state === 'menu')) {
-      acc += dt;
+      // (just after a flashback the race eases back up to speed)
+      let flow = 1;
+      if (fb.slowT > 0 && Game.state === 'race') { fb.slowT -= dt; flow = U.lerp(1, 0.3, U.clamp(fb.slowT / FB_SLOW, 0, 1)); }
+      acc += dt * flow;
       let n = 0;
       // the home-screen race is only a backdrop: after a slow frame it does not rush to catch up
       // (that makes the next frame slower still); it runs a little behind real time instead.
@@ -1563,10 +1885,16 @@
       if (n >= maxSteps) acc = Game.state === 'menu' ? acc % DT : 0;
       // the replay recorder: every car, twenty times a second
       if (Game.state === 'race' && race.rec) { race.rec.capture(); for (const f of race.fx) race.rec.contact(f); }
+      if (Game.state === 'race' && fb.ring && race.green && !race.done) fb.ring.capture();
       // effects
       for (const c of race.cars) carEffects(c, dt);
       for (const f of race.fx) {
         impactFx(f);
+        if (Game.state === 'race' && race.stats && (f.car === race.player || f.other === race.player)) {
+          const st = race.stats;
+          if (f.type === 'wall' && f.power > 3 && race.time - st.wallT > 1.5) { st.wallT = race.time; st.walls++; if (F1.Hints) F1.Hints.wall(race, f); }
+          if (f.type === 'car' && f.power > 3 && race.time - st.hitT > 1.5) { st.hitT = race.time; st.hits++; if (F1.Hints) F1.Hints.wall(race, f); }
+        }
         if (Game.state === 'race' && f.type === 'break' && f.car === race.player) Audio.crack(f.power);
         if (Game.state === 'race' && (f.car === race.player || f.other === race.player)) { Audio.impact(f.power); cam.shake = Math.min(1.2, cam.shake + f.power / 20); }
         else if (Game.state === 'race' && f.power > 3 && f.x != null) { const L = race.lodFocus || race.player; if (L) Audio.impactAt(f.x, f.y, L.x, L.y, f.power); }
@@ -1584,6 +1912,8 @@
         if (race.done) showResults();
       }
       Audio.updateRace(race, focus, { mode: F1.Viewer.V.mode }, Game.paused);
+    } else if (race && Game.state === 'rewind') {
+      fbTick(dt);
     } else if (race && Game.state === 'replay' && Game.replay) {
       const P = Game.replay;
       P.advance(dt);
@@ -1597,6 +1927,7 @@
       const p = race.player;
       if (!Game.paused) {
         handleEvents(race);
+        if (R3ok && Game.settings.autoQ !== false && !document.hidden) autoStep(dt);
         // lap delta against the best lap trace (10 m resolution)
         if (race.green && p.dist > 0) {
           const k = Math.floor((p.dist % race.track.L) / 10);
@@ -1611,6 +1942,7 @@
         updateCamera(dt, p, Game.settings.camera);
         cam.mode = Game.settings.camera;
         HUD.update(race, p, dt, Game.settings, { delta });
+        if (F1.Hints && !Game.spectate) F1.Hints.update(race, p, dt);
         drawMouseGauge();
         if ((miniN = (miniN + 1) % 3) === 0) Render.drawMini(miniCtx, Game.world, race, 220, miniCv.width / 220);
         // the flag, or a car that will not go on: a few seconds to take it in, then the results
@@ -1665,12 +1997,49 @@
   }
 
   // ---------- settings ----------
+  // ---------- automatic graphics ----------
+  // Settings > Auto quality. While a race runs the frame rate is measured; when it stays under the
+  // target the game takes the next step down this ladder, on top of whatever preset is chosen, and
+  // says so once. The step is kept for the next session; choosing a preset starts again from 0.
+  const LADDER = [{}, { ssao: false, shafts: false }, { ssao: false, shafts: false, motion: false, msaa: 2, scale: 0.85 },
+    { ssao: false, shafts: false, motion: false, msaa: 0, scale: 0.75, shadows: 'low', grass: false, bloom: false },
+    { ssao: false, shafts: false, motion: false, msaa: 0, scale: 0.65, shadows: 'low', grass: false, bloom: false, post: false, lite: true }];
+  const AQ = { t: 0, n: 0, low: 0, ceil: 9, wait: 12 };
+  const LOW_SCALE = (a, b) => (a < b ? a : b), SHADOW = ['off', 'low', 'medium', 'high', 'ultra'];
+  function autoGfx() {
+    const g = Game.settings.gfx, s = Game.settings.autoQ === false ? 0 : Game.settings.autoStep || 0, m = Object.assign({}, g, LADDER[s] || {});
+    // the ladder never raises anything: a Low preset stays Low
+    if (LADDER[s].scale) m.scale = LOW_SCALE(g.scale, LADDER[s].scale);
+    if (LADDER[s].msaa != null) m.msaa = LOW_SCALE(g.msaa, LADDER[s].msaa);
+    if (LADDER[s].shadows && SHADOW.indexOf(g.shadows) < SHADOW.indexOf(LADDER[s].shadows)) m.shadows = g.shadows;
+    return m;
+  }
+  function autoStep(dt) {
+    AQ.t += dt; AQ.n++;
+    if (AQ.t < 2.5) return;
+    const fps = AQ.n / AQ.t, target = Game.settings.gfx.fpsCap || Game.settings.autoTarget || 60;
+    AQ.t = 0; AQ.n = 0;
+    if (AQ.wait > 0) { AQ.wait -= 2.5; return; } // (new shaders and a race start are not the machine's speed)
+    AQ.low = fps < target * 0.87 ? AQ.low + 1 : 0;
+    const s = Game.settings.autoStep || 0;
+    if (AQ.low >= 2 && s < LADDER.length - 1) {
+      Game.settings.autoStep = s + 1; AQ.low = 0; AQ.wait = 7.5;
+      if (R3ok) R3.setQuality(autoGfx());
+      saveSettings();
+      if (!AQ.told) { AQ.told = true; HUD.message('GRAPHICS LOWERED', 'blue', 'TO KEEP THE FRAME RATE UP', 2.2); }
+    }
+  }
+  Game.autoQ = AQ; Game.autoGfx = autoGfx;
+
   function saveSettings() { store.set('slip_settings', Game.settings); }
   Game.saveSettings = saveSettings;
   Game.applySettings = () => {
     const s = Game.settings;
     Audio.setVolumes({ master: Game.muted ? 0 : s.master, sfx: s.sfx, music: s.music });
-    if (R3ok) R3.setQuality(s.gfx);
+    if (R3ok) R3.setQuality(autoGfx());
+    document.documentElement.style.setProperty('--hud-k', s.hudSize || 1);
+    document.body.classList.toggle('line-safe', s.lineSafe === true);
+    if (R3ok) R3.linePalette(s.lineSafe === true);
     if (Game.race) { Game.race.physLod = !!s.gfx.physLod; Game.race.physLodDist = s.gfx.physLodDist; }
     if (FX.skidN > s.gfx.skids) { FX.skidN = Math.max(0, s.gfx.skids | 0); FX.skidHead = 0; }
     saveSettings();

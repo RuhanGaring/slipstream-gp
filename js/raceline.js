@@ -389,6 +389,11 @@
         if (vn < v[i]) v[i] = vn;
       }
     }
+    // how close the plan runs to its cornering grip at each point, 1 at the limit (the AI reads
+    // it to tell a corner on the limit from a kink taken flat; the plan itself does not use it)
+    const load = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const aG = muAt(i) * (gN(i, v[i]) + kA * v[i] * v[i]); load[i] = aG > 0 ? v[i] * v[i] * Math.abs(line.kap[i]) / aG : 0; }
+    v.load = load;
     return v;
   }
 
@@ -546,10 +551,64 @@
     }
     return off;
   }
+  // Street walls and a car crossing the road at an angle. Square to the road the car reaches
+  // 0.95 m either side of its centre, but crossing at 20 degrees its front wing corner reaches
+  // 2 m out; and a driver looks a dozen metres up the road, so a car is already part way to
+  // where the line is heading. A generated street circuit's line can flick across its 9 m
+  // road right beside a wall, and the AI brushed the same walls every lap on the line itself
+  // (Harbour City: over 100 hits a race, 70 pit stops with damage on, cars out of the race).
+  // So on a generated circuit the line is pulled in wherever the car's corner, on the line or
+  // cutting toward it, would come within a hand's width of a wall. (Hand-made circuits are
+  // left as their coaching drew them.)
+  const WS_FRONT = 3.29, WS_REAR = 2.34, WS_HALF = 0.95, WS_GAP = 0.35, WS_CUT = 0.7;
+  function wallSafe(tr, off0) {
+    if (!tr.barr || !tr.runT || !/^gen/.test(tr.id || '')) return off0;
+    const N = tr.N, ds = tr.ds, w = i => ((i % N) + N) % N, E = lineLimits(tr);
+    const face = (side, i) => tr.barr[side][i] + (tr.runT[side][i] === SURF.GRAVEL ? -0.5 : 0.4); // (as race.js barrierFace)
+    const v = speedProfile(tr, lineFromOffsets(tr, off0), Car.SPEC);
+    const B = Math.max(1, Math.round(10 / ds));
+    let off = off0, changed = false;
+    for (let pass = 0; pass < 4; pass++) {
+      // how far out the line may sit here for the car's corner to clear each wall
+      const hi = new Float64Array(N), lo = new Float64Array(N);
+      for (let i = 0; i < N; i++) {
+        const sl = (off[w(i + 2)] - off[w(i - 2)]) / (4 * ds), c = 1 / Math.sqrt(1 + sl * sl), s = Math.abs(sl) * c;
+        // (heading toward the right-hand wall, offsets rising: the nose leads on that side)
+        hi[i] = face(1, i) - ((sl > 0 ? WS_FRONT : WS_REAR) * s + WS_HALF * c + WS_GAP);
+        lo[i] = -(face(0, i) - ((sl < 0 ? WS_FRONT : WS_REAR) * s + WS_HALF * c + WS_GAP));
+      }
+      // a point of the line the car reaches early must also clear the walls it passes on the
+      // way there; where both walls are too near to clear, the middle of the road
+      const need = new Float64Array(N);
+      let any = false;
+      for (let j = 0; j < N; j++) {
+        const look = Math.round(WS_CUT * (6.36 + 0.2455 * v[j]) / ds);
+        let h = hi[j], l = lo[j];
+        for (let q = 1; q <= look; q++) { const i = w(j - q); if (hi[i] < h) h = hi[i]; if (lo[i] > l) l = lo[i]; }
+        const t = l > h ? (l + h) / 2 : Math.min(h, Math.max(l, off[j]));
+        need[j] = t - off[j];
+        if (Math.abs(need[j]) > 0.01) any = true;
+      }
+      if (!any) break;
+      // each move eased in and out over 10 m either way, so the line stays smooth
+      const shift = new Float64Array(N);
+      for (let k = 0; k < N; k++) {
+        if (Math.abs(need[k]) <= 0.01) continue;
+        for (let q = -B; q <= B; q++) {
+          const j = w(k + q), x = need[k] * 0.5 * (1 + Math.cos(Math.PI * q / (B + 1)));
+          if (Math.abs(x) > Math.abs(shift[j])) shift[j] = x;
+        }
+      }
+      if (!changed) off = Float64Array.from(off0);
+      for (let i = 0; i < N; i++) if (shift[i]) off[i] = Math.max(-E.L[i], Math.min(E.R[i], off[i] + shift[i]));
+      changed = true;
+    }
+    return off;
+  }
   // set a circuit's racing line and everything derived from it
   function applyLine(tr, line0) {
     // (the hand-made circuits have coached lines of their own)
-    const L = G.F1.Limits && G.F1.Limits[tr.id], off = L && L.simB && !L.felt ? line0.off : apexHairpins(tr, line0.off);
+    const L = G.F1.Limits && G.F1.Limits[tr.id], off = L && L.simB && !L.felt ? line0.off : wallSafe(tr, apexHairpins(tr, line0.off));
     const line = off === line0.off ? line0 : lineFromOffsets(tr, off);
     tr.line = line;
     tr.prof = speedProfile(tr, tr.line, Car.SPEC);

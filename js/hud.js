@@ -25,7 +25,8 @@
     H.ag = sharp(arc, A.w, A.h); H.cg = sharp(car, 72, 118);
     const rpm = document.createElement('span'); rpm.id = 'h-rpm'; $('speed-wrap').appendChild(rpm); H.rpmEl = rpm;
     const ersL = document.querySelector('#ers .lbl'); if (ersL) ersL.textContent = 'BATTERY';
-    const flag = document.createElement('div'); flag.id = 'h-flag'; $('hud-top-left').appendChild(flag); H.flagEl = flag;
+    const flag = document.createElement('div'); flag.id = 'h-flag'; hud.appendChild(flag); H.flagEl = flag;
+    H.spotL = $('spot-l'); H.spotR = $('spot-r');
     const pit = document.createElement('div'); pit.id = 'h-pit'; pit.innerHTML = '<b>PIT WINDOW OPEN</b><span></span>'; hud.appendChild(pit); H.pitEl = pit;
     const d = Math.min(2, G.devicePixelRatio || 1), body = document.createElement('canvas'), g = body.getContext('2d');
     body.width = A.w * d; body.height = A.h * d; g.scale(d, d);
@@ -127,12 +128,15 @@
     const kh = [];
     // (what each key really does here: the session and the handling both change it)
     const inRace = race.mode !== 'tt', simCar = race.sim;
-    kh.push(['W A S D', 'drive']);
-    if (!simCar || !inRace) kh.push(['R', 'reset car']);
-    if (inRace && simCar) kh.push(['SPACE', 'overtake'], ['P', 'pit strategy']);
-    if (inRace) kh.push(['T', 'full order']);
-    kh.push(['C', 'camera'], ['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
-    if (race.sim && race.player.assist.autoGear === false) kh.unshift(['E / Q', 'shift up / down']);
+    const K = (a, d) => (F1.Game.hintKey ? F1.Game.hintKey(a) : d), padOn = !!F1.Game.usingPad;
+    kh.push([padOn ? 'LS RT LT' : [K('thr', 'W'), K('left', 'A'), K('brk', 'S'), K('right', 'D')].join(' '), 'drive']);
+    if (F1.Game.fbCan && F1.Game.fbCan()) kh.push([K('flash', 'BACKSPACE'), 'flashback']);
+    if (!simCar || !inRace) kh.push([K('reset', 'R'), 'reset car']);
+    if (inRace && simCar) kh.push([K('drs', 'SPACE'), 'overtake'], [K('pit', 'P'), 'pit strategy']);
+    if (inRace && !padOn) kh.push(['T', 'full order']);
+    kh.push([K('cam', 'C'), 'camera']);
+    if (padOn) kh.push(['START', 'pause']); else kh.push(['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
+    if (race.sim && race.player.assist.autoGear === false) kh.unshift([K('up', 'E') + ' / ' + K('down', 'Q'), 'shift up / down']);
     e.keyhint.innerHTML = kh.map(([k, t]) => `<div><span class="key">${k}</span>${t}</div>`).join('');
     H.keyhintT = 12;
     e.keyhint.style.opacity = 1;
@@ -166,8 +170,45 @@
     return `rgb(${Math.round(c[0] * k)},${Math.round(c[1] * k)},${Math.round(c[2] * k)})`;
   };
 
+  // Yellow: a car stopped on the road ahead. Blue: a leader is about to lap you, let it by.
+  function flagFor(race, p) {
+    if (race.mode === 'tt' || !race.green || p.finished || race.time - race.startTime < 12) return '';
+    const L = race.track.L, hw = race.track.hw;
+    let stop = Infinity, blue = false;
+    for (const c of race.cars) {
+      if (c === p || c.hidden || c.inPit) continue;
+      const ahead = ((c.loc.s - p.loc.s) % L + L) % L, behind = L - ahead;
+      if (c.speed < 12 && !c.finished && ahead < 400 && Math.abs(c.loc.d) < hw + 2.5) stop = Math.min(stop, ahead);
+      if (!c.retired && !c.finished && behind < 90 && c.dist - p.dist > L * 0.5) blue = true;
+    }
+    if (stop < 400) return 'YELLOW FLAG  ' + Math.round(stop / 10) * 10 + ' M';
+    return blue ? 'BLUE FLAG  LET THE LEADER BY' : '';
+  }
+  // The spotter: a bar at the edge of the screen on the side a car is alongside. From the cockpit
+  // and the T-cam that car cannot be seen at all, and it is the one that takes a wing off.
+  function spotter(race, p, settings) {
+    const on = settings.spotter !== false && race.green && race.mode !== 'tt' && !p.inPit;
+    let l = 0, r = 0;
+    if (on) {
+      const ch = Math.cos(p.h), sh = Math.sin(p.h);
+      for (const c of race.cars) {
+        if (c === p || c.retired || c.hidden || c.inPit) continue;
+        const dx = c.x - p.x, dy = c.y - p.y;
+        if (dx * dx + dy * dy > 90) continue;
+        const fwd = dx * ch + dy * sh, lat = -dx * sh + dy * ch;
+        if (Math.abs(fwd) > 6.4 || Math.abs(lat) < 0.6) continue;
+        const k = U.clamp(1.25 - (Math.abs(fwd) / 6.4) * 0.45 - (Math.abs(lat) - 1.8) / 3.4, 0, 1);
+        if (lat > 0) r = Math.max(r, k); else l = Math.max(l, k);
+      }
+    }
+    if (H.spotL._v !== l) { H.spotL.style.opacity = l.toFixed(2); H.spotL.classList.toggle('near', l > 0.75); H.spotL._v = l; }
+    if (H.spotR._v !== r) { H.spotR.style.opacity = r.toFixed(2); H.spotR.classList.toggle('near', r > 0.75); H.spotR._v = r; }
+  }
+
   function update(race, p, dt, settings, extra) {
     const e = H.el;
+    H.spotT = (H.spotT || 0) - dt;
+    if (H.spotT <= 0) { H.spotT = 1 / 15; spotter(race, p, settings); }
     const tr = race.track;
     // dashboard
     const v = p.speed * (settings.units === 'mph' ? 2.23694 : 3.6);
@@ -189,6 +230,10 @@
     e.brk.style.setProperty('--v', p.ctl.brake.toFixed(2));
     e.drs.classList.toggle('show', race.green && (p.drsAvail || p.drsOpen));
     e.drs.classList.toggle('on', p.drsOpen);
+    if (document.body.classList.contains('mobile')) {
+      const t = H.tDrs || (H.tDrs = document.querySelector('#touch .t-drs'));
+      if (t) t.classList.toggle('ready', race.green && !!(p.drsAvail || p.drsOpen));
+    }
     // 2026 power unit: straight-line aero mode and battery state
     e.xm.classList.toggle('show', !!p.aeroX); e.xm.classList.toggle('on', !!p.aeroX);
     if (p.soc != null) {
@@ -205,8 +250,11 @@
     if (H.slowT <= 0) {
       const rt = Math.round(p.rpm / 10) * 10;
       if (H.rpmEl._v !== rt) { H.rpmEl.textContent = rt + ' RPM'; H.rpmEl._v = rt; }
-      const sc = race.sc && race.sc.state !== 'none', fl = sc ? 'SAFETY CAR' : '';
-      if (H.flagEl._v !== fl) { H.flagEl.textContent = fl; H.flagEl.classList.toggle('on', !!fl); H.flagEl._v = fl; }
+      const sc = race.sc && race.sc.state !== 'none' && race.sc.state !== 'pending', fl = sc ? 'SAFETY CAR  HOLD POSITION' : flagFor(race, p);
+      if (H.flagEl._v !== fl) {
+        H.flagEl.textContent = fl; H.flagEl.classList.toggle('on', !!fl);
+        H.flagEl.classList.toggle('blue', fl.startsWith('BLUE')); H.flagEl._v = fl;
+      }
       // the pit window: the next stop is due at the end of this lap
       if (race.sim && race.mode !== 'tt' && p.lap !== H.planLap) {
         H.planLap = p.lap;
@@ -221,6 +269,11 @@
       H.slowT = 0.25;
       p.wheels.forEach((w, k) => { e.tyreEls[k].style.background = tyreColor(w.temp, w.wear, p.compound.topt); });
       if (!document.body.classList.contains('mobile')) drawCar(p, tyreColor);
+      if (document.body.classList.contains('mobile')) {
+        const mi = $('m-info'), worst = Math.round(Math.max(...p.wheels.map(w => w.wear)) * 100), hurt = p.dm ? Object.keys(p.dm.p).filter(k => p.dm.p[k] > 0.25 || p.dm.off[k]).length : p.wingDmg > 0.1 ? 1 : 0;
+        const txt = `${p.compound.id} ${worst}%${hurt ? '  DAMAGE' : ''}`;
+        if (mi._v !== txt) { mi.textContent = txt; mi.classList.toggle('bad', hurt > 0 || worst > 70); mi._v = txt; }
+      }
       e.comp.textContent = p.compound.name;
       e.comp.className = 'c-' + p.compound.id;
       const wr = Math.max(...p.wheels.map(w => w.wear));

@@ -495,6 +495,7 @@
       w.lock = U.clamp((-over - 1.05) * 2, 0, 1);
       w.spin = U.clamp((over - 1.05) * 2, 0, 1);
       w.slide = U.clamp((TF[2] - 1.0) * 1.5, 0, 1);
+      w.use = TF[2]; // (how much of the tyre's grip is in use, 1 at the peak: read by the AI, no effect here)
       w.Fx = fx; w.Fy = fy;
       latSlipSum += Math.abs(vyw);
       longSlipSum += Math.abs(w.kappa) * Math.abs(vxw);

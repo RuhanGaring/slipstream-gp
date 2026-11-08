@@ -94,6 +94,20 @@
     while ((this.chunks.length - 1) * CHUNK > MAX_FRAMES) { this.chunks.shift(); this.rchunks.shift(); this.first += CHUNK; }
   };
   Recorder.prototype.count = function () { return this.frames - this.first; };
+  // a flashback: forget everything after race time t, and record on from there
+  Recorder.prototype.rewind = function (t) {
+    let f = this.frames - 1;
+    while (f > this.first && this.raceAt(f, 0) > t) f--;
+    this.frames = f + 1;
+    const need = Math.ceil((this.frames - this.first) / CHUNK);
+    this.chunks.length = need; this.rchunks.length = need;
+    this.next = t;
+    this.events = this.events.filter(e => e.t <= t);
+    for (const [k, v] of this.dmgT) if (v > t) this.dmgT.delete(k);
+    this.prevPos.clear(); this.prevPit.clear(); this.lastHit.clear();
+    const r = this.race;
+    this.fastest = r.fastest ? r.fastest.t : null; this.scVis = !!(r.sc && r.sc.vis);
+  };
   function writeCar(A, o, c) {
     A[o] = c.x; A[o + 1] = c.y; A[o + 2] = c.h; A[o + 3] = c.speed || 0; A[o + 4] = c.u || 0; A[o + 5] = c.steer || 0;
     A[o + 6] = c.zh || 0; A[o + 7] = c.pitch || 0; A[o + 8] = c.roll || 0; A[o + 9] = c.ax || 0; A[o + 10] = c.ay || 0;

@@ -32,14 +32,27 @@
 
   // pace = fraction of the grip the AI learned each circuit allows (js/limits.js)
   const DIFFICULTY = [
-    { id: 'rookie', name: 'ROOKIE', pace: 0.62, aggr: 0.25 },
-    { id: 'amateur', name: 'AMATEUR', pace: 0.68, aggr: 0.45 },
-    { id: 'pro', name: 'PRO', pace: 0.74, aggr: 0.7 },
-    { id: 'expert', name: 'EXPERT', pace: 0.82, aggr: 0.85 },
-    { id: 'legend', name: 'LEGEND', pace: 1.0, aggr: 1.0 },
+    // (power: an engine ladder under Expert's, so a circuit taken flat out, where corner pace
+    // counts for nothing, still sets the levels apart: at Varenna Rookie to Expert lapped within
+    // 0.4 per cent of each other)
+    { id: 'rookie', name: 'ROOKIE', pace: 0.62, aggr: 0.25, power: 0.93 },
+    { id: 'amateur', name: 'AMATEUR', pace: 0.68, aggr: 0.45, power: 0.95 },
+    { id: 'pro', name: 'PRO', pace: 0.74, aggr: 0.7, power: 0.965 },
+    // (from Expert up the AI already corners as fast as it can drive the car: a higher pace barely
+    // shows on the clock. Engine sets the top two apart, so each step up is a faster field on every
+    // circuit: Expert a touch under the player's car, Legend 5 per cent over it)
+    { id: 'expert', name: 'EXPERT', pace: 0.82, aggr: 0.85, power: 0.98 },
+    { id: 'legend', name: 'LEGEND', pace: 1.0, aggr: 1.0, power: 1.05 },
+    // the gentle end, for a first race. Added after Legend so saves and tools keep their numbers;
+    // ORDER is the order players see. power: cornering speed alone cannot open a real gap, a
+    // field this relaxed also holds back on the straights. Spaced so each step down is a few
+    // seconds a lap (Hakone arcade, median best: 76.4, 71.8, then Rookie 68.4)
+    { id: 'beginner', name: 'BEGINNER', pace: 0.54, aggr: 0.1, power: 0.72 },
+    { id: 'novice', name: 'NOVICE', pace: 0.58, aggr: 0.18, power: 0.86 },
   ];
+  const ORDER = [5, 6, 0, 1, 2, 3, 4];
 
   const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 
-  F1.Data = { TEAMS, DIFFICULTY, POINTS };
+  F1.Data = { TEAMS, DIFFICULTY, ORDER, POINTS };
 })(typeof window !== 'undefined' ? window : globalThis);
