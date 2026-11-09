@@ -7,13 +7,19 @@
 //   motion blur camera reprojection for the static world; cars (and the ground their shadows
 //               fall on) carry their own screen velocity from a velocity pass, so a car running
 //               alongside at your speed stays sharp
+//   TAA         temporal anti-aliasing: the camera is jittered by a fraction of a pixel each
+//               frame and the frames are blended along their motion (camera reprojection for the
+//               world, the velocity pass for cars), with the history clipped to the colours
+//               around each pixel so nothing smears; the composite sharpens it back a little
+//   wet road    screen-space reflections on the road when it is wet (puddles mirror the cars and
+//               the scenery), traced at half size only while the track is wet
 //   composite   AgX or ACES tone mapping, vignette, chromatic aberration, grain dither
 (function (G) {
   'use strict';
   const F1 = G.F1;
 
   let R = null, W = 2, H = 2;
-  const Q = { on: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
+  const Q = { on: true, taa: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
   const RT = {};
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quadGeo = new THREE.BufferGeometry();
@@ -56,7 +62,7 @@
   // (plus the sky the cars hide from the road under them, js/r3-shadow.js, evaluated per pixel)
   const ssaoMat = mk([
     'varying vec2 vUv;', DEPTH,
-    'uniform vec2 uTexel; uniform float uRadius; uniform float uFar; uniform int uSamples; uniform mat4 uInvView;',
+    'uniform vec2 uTexel; uniform float uRadius; uniform float uFar; uniform int uSamples; uniform mat4 uInvView; uniform float uFrame;',
     F1.R3Shadow ? F1.R3Shadow.OCC_PARS : 'uniform int uOccN; float r3CarSky(vec3 p, vec3 n) { return 1.0; }',
     'float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }',
     'void main(){',
@@ -71,7 +77,7 @@
     // with distance under a couple of metres, so close surfaces keep only their own creases
     '  float R = min(uRadius, max(0.1, w * 0.22));',
     '  float rad = R * uProj.y / w * 0.5;', // world radius projected to uv
-    '  float a0 = ign(gl_FragCoord.xy) * 6.2831853, sum = 0.0;',
+    '  float a0 = ign(gl_FragCoord.xy + uFrame * 5.588238) * 6.2831853, sum = 0.0;', // (turns each frame with TAA: the temporal pass averages the pattern away)
     '  for (int i = 0; i < 16; i++) {',
     '    if (i >= uSamples) break;',
     '    float t = (float(i) + 0.5) / float(uSamples);',
@@ -92,7 +98,7 @@
     '  float car = 1.0;',
     '  if (wn.y > 0.3 && uOccN > 0) car = mix(1.0, 0.03 + 0.97 * r3CarSky((uInvView * vec4(p, 1.0)).xyz, wn), smoothstep(0.3, 0.7, wn.y));',
     '  gl_FragColor = vec4(ao, car, 1.0, 1.0);',
-    '}'].join('\n'), Object.assign(depthU(), { uTexel: { value: new THREE.Vector2() }, uRadius: { value: 1.5 }, uFar: { value: 14000 }, uSamples: { value: 12 }, uInvView: { value: new THREE.Matrix4() } },
+    '}'].join('\n'), Object.assign(depthU(), { uTexel: { value: new THREE.Vector2() }, uRadius: { value: 1.5 }, uFar: { value: 14000 }, uSamples: { value: 12 }, uInvView: { value: new THREE.Matrix4() }, uFrame: { value: 0 } },
     F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}));
 
   const blurAOMat = mk([
@@ -107,6 +113,125 @@
     '  }',
     '  gl_FragColor = vec4(s / max(ws, 1e-4), 1.0, 1.0);',
     '}'].join('\n'), Object.assign(depthU(), { tAO: { value: null }, uDir: { value: new THREE.Vector2() } }));
+
+  // AO over time: this frame's (noisy, fewer samples) obscurance blended with last frame's,
+  // reprojected by the camera and clipped to the range around the pixel. Only the screen-space
+  // term (r): the cars' sky occlusion (g) moves with the cars and is exact each frame anyway.
+  const aoTMat = mk([
+    'varying vec2 vUv;', DEPTH, 'uniform sampler2D tAO; uniform sampler2D tHist; uniform mat4 uInvView; uniform mat4 uPrevVP; uniform vec2 uTexel; uniform float uReset;',
+    'void main(){',
+    '  vec2 c = texture2D(tAO, vUv).rg; float mn = c.r, mx = c.r;',
+    '  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { float a = texture2D(tAO, vUv + vec2(float(i), float(j)) * uTexel).r; mn = min(mn, a); mx = max(mx, a); }',
+    '  vec4 pc = uPrevVP * (uInvView * vec4(viewPos(vUv), 1.0)); vec2 pu = pc.xy / pc.w * 0.5 + 0.5;',
+    '  float off = uReset + step(pc.w, 0.0) + step(1.0, max(abs(pu.x - 0.5), abs(pu.y - 0.5)) * 2.0);',
+    '  float h = clamp(texture2D(tHist, pu).r, mn, mx);',
+    '  gl_FragColor = vec4(off > 0.5 ? c.r : mix(h, c.r, 0.3), c.g, 1.0, 1.0);',
+    '}'].join('\n'), Object.assign(depthU(), { tAO: { value: null }, tHist: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() }, uTexel: { value: new THREE.Vector2() }, uReset: { value: 1 } }));
+
+  // ---------- temporal anti-aliasing ----------
+  // Colours are compared in YCoCg after a soft tone curve (so one bright sparkle does not widen
+  // the clip box for everything round it); the history is read with a 5-tap Catmull-Rom filter,
+  // which keeps it sharp under sub-pixel motion. Pixels within uStatic metres of the eye (the
+  // cockpit, the hands) move with the camera and are not reprojected.
+  const taaMat = mk([
+    'varying vec2 vUv;', DEPTH,
+    'uniform sampler2D tCur; uniform sampler2D tHist; uniform sampler2D tVel; uniform mat4 uInvView; uniform mat4 uPrevVP;',
+    'uniform vec2 uTexel; uniform vec2 uJit; uniform float uReset; uniform float uStatic;',
+    'vec3 tm(vec3 c){ return c / (1.0 + max(c.r, max(c.g, c.b))); }',
+    'vec3 itm(vec3 c){ return c / max(1e-4, 1.0 - max(c.r, max(c.g, c.b))); }',
+    'vec3 yc(vec3 c){ return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }',
+    'vec3 rgb(vec3 y){ float t = y.x - y.z; return vec3(t + y.y, y.x + y.z, t - y.y); }',
+    'vec3 cur(vec2 o){ return yc(tm(min(texture2D(tCur, vUv + o * uTexel).rgb, vec3(512.0)))); }',
+    'vec3 hist(vec2 uv){',
+    '  vec2 sz = 1.0 / uTexel, p = uv * sz, t1 = floor(p - 0.5) + 0.5, f = p - t1;',
+    '  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);',
+    '  vec2 w12 = w1 + w2, tc0 = (t1 - 1.0) * uTexel, tc3 = (t1 + 2.0) * uTexel, tc12 = (t1 + w2 / w12) * uTexel;',
+    '  vec3 c = texture2D(tHist, vec2(tc12.x, tc0.y)).rgb * (w12.x * w0.y) + texture2D(tHist, vec2(tc0.x, tc12.y)).rgb * (w0.x * w12.y)',
+    '    + texture2D(tHist, tc12).rgb * (w12.x * w12.y) + texture2D(tHist, vec2(tc3.x, tc12.y)).rgb * (w3.x * w12.y) + texture2D(tHist, vec2(tc12.x, tc3.y)).rgb * (w12.x * w3.y);',
+    '  float ws = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;',
+    '  return max(c / ws, vec3(0.0));',
+    '}',
+    'void main(){',
+    '  vec3 c0 = cur(vec2(0.0));',
+    '  vec3 m1 = c0, m2 = c0 * c0, s;',
+    '  s = cur(vec2(-1.0, 0.0)); m1 += s; m2 += s * s; s = cur(vec2(1.0, 0.0)); m1 += s; m2 += s * s;',
+    '  s = cur(vec2(0.0, -1.0)); m1 += s; m2 += s * s; s = cur(vec2(0.0, 1.0)); m1 += s; m2 += s * s;',
+    '  s = cur(vec2(-1.0, -1.0)); m1 += s; m2 += s * s; s = cur(vec2(1.0, -1.0)); m1 += s; m2 += s * s;',
+    '  s = cur(vec2(-1.0, 1.0)); m1 += s; m2 += s * s; s = cur(vec2(1.0, 1.0)); m1 += s; m2 += s * s;',
+    '  vec3 mu = m1 / 9.0, sg = sqrt(max(m2 / 9.0 - mu * mu, 0.0));',
+    // where this pixel was last frame: its own velocity for a car, else the camera's reprojection
+    '  float w = viewW(vUv); vec2 u0 = vUv - uJit, n = u0 * 2.0 - 1.0;',
+    '  vec3 p = vec3(n.x * w / uProj.x, n.y * w / uProj.y, -w);',
+    '  vec4 pc = uPrevVP * (uInvView * vec4(p, 1.0)); vec2 pu = pc.xy / pc.w * 0.5 + 0.5;',
+    '  vec4 mv = texture2D(tVel, vUv);',
+    '  if (mv.a > 0.5 && abs(mv.b - w) < 0.3 + 0.02 * mv.b) pu = u0 - mv.xy;',
+    '  if (w < uStatic) pu = u0;',
+    '  vec2 dp = (u0 - pu) / uTexel;',
+    '  float off = uReset + step(pc.w, 0.0) + step(1.0, max(abs(pu.x - 0.5), abs(pu.y - 0.5)) * 2.0);',
+    '  vec3 h = yc(tm(min(hist(pu), vec3(512.0))));',
+    // clip toward the middle of the box (variance clipping, a little tighter when it moves)
+    '  float g = mix(1.25, 0.85, clamp(length(dp) / 24.0, 0.0, 1.0));',
+    '  vec3 lo = min(mu - g * sg, c0), hi = max(mu + g * sg, c0);',
+    '  vec3 ctr = 0.5 * (hi + lo), ext = 0.5 * (hi - lo) + 1e-5, d = h - ctr, a = abs(d / ext);',
+    '  float m = max(a.x, max(a.y, a.z)); if (m > 1.0) h = ctr + d / m;',
+    '  float k = off > 0.5 ? 1.0 : mix(0.09, 0.22, clamp(length(dp) / 30.0, 0.0, 1.0));',
+    '  gl_FragColor = vec4(itm(rgb(mix(h, c0, k))), texture2D(tCur, vUv).a);',
+    '}'].join('\n'), Object.assign(depthU(), { tCur: { value: null }, tHist: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() },
+    uTexel: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uReset: { value: 1 }, uStatic: { value: 0 } }));
+  const HALTON = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+
+  // ---------- wet road reflections ----------
+  // A ray from each road pixel, mirrored about the (level) road, marched through the depth
+  // buffer in growing steps and refined where it passes behind something. Only on the road (a
+  // top-down mask of the circuit from js/render3d.js), only on level surfaces, strongest in the
+  // puddles (the same world-space pattern the road material darkens and smooths) and at a
+  // glancing angle (Fresnel). Rays that leave the screen fade out at its edges.
+  const ssrMat = mk([
+    'varying vec2 vUv;', DEPTH,
+    'uniform sampler2D tScene; uniform sampler2D tVel; uniform sampler2D tMask; uniform vec4 uMaskB; uniform mat4 uInvView; uniform mat4 uView; uniform mat4 uProjM; uniform float uWet; uniform float uFrame;',
+    'float wxH(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+    'float wxN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(wxH(i), wxH(i + vec2(1.0, 0.0)), f.x), mix(wxH(i + vec2(0.0, 1.0)), wxH(i + vec2(1.0, 1.0)), f.x), f.y); }',
+    'float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }',
+    'vec2 toUv(vec3 q){ vec4 c = uProjM * vec4(q, 1.0); return c.xy / c.w * 0.5 + 0.5; }',
+    'void main(){',
+    '  float w = viewW(vUv);',
+    '  if (w > 500.0) { gl_FragColor = vec4(0.0); return; }',
+    '  vec3 p = viewPos(vUv), wp = (uInvView * vec4(p, 1.0)).xyz;',
+    '  float road = texture2D(tMask, (wp.xz - uMaskB.xy) / uMaskB.zw).r;',
+    // (a car over the road is not the road: the velocity pass says where the cars are)
+    '  vec4 mv = texture2D(tVel, vUv); if (mv.a > 0.8 && abs(mv.b - w) < 0.3 + 0.02 * mv.b) road = 0.0;',
+    '  vec3 n = normalize(cross(dFdx(p), dFdy(p)));',
+    '  float lev = smoothstep(0.88, 0.97, abs((uInvView * vec4(n, 0.0)).y));',
+    '  float pud = smoothstep(0.5 - 0.14 * uWet, 0.74, wxN(wp.xz * 0.28) * 0.6 + wxN(wp.xz * 1.1) * 0.4);',
+    '  float k = road * lev * uWet * (0.3 + 0.7 * pud);',
+    '  if (k < 0.01) { gl_FragColor = vec4(0.0); return; }',
+    '  vec3 V = normalize(p), Nv = normalize((uView * vec4(0.0, 1.0, 0.0, 0.0)).xyz), Rv = reflect(V, Nv);',
+    '  float t = 0.2 + 0.5 * ign(gl_FragCoord.xy + uFrame * 5.588238), t0 = 0.0;',
+    '  vec2 hit = vec2(-1.0);',
+    '  for (int i = 0; i < 26; i++) {',
+    '    vec3 q = p + Rv * t;',
+    '    if (q.z > -0.05) break;',
+    '    vec2 uv = toUv(q);',
+    '    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;',
+    '    float sw = viewW(uv), qd = -q.z;',
+    '    if (qd > sw + 0.02 && qd < sw + 0.6 + 0.02 * sw + (t - t0) * abs(Rv.z)) {',
+    '      float a = t0, b = t;',
+    '      for (int j = 0; j < 5; j++) { float m = 0.5 * (a + b); vec3 qm = p + Rv * m; if (-qm.z > viewW(toUv(qm))) b = m; else a = m; }',
+    '      hit = toUv(p + Rv * b); break;',
+    '    }',
+    '    t0 = t; t = t * 1.3 + 0.15;',
+    '  }',
+    '  if (hit.x < 0.0) { gl_FragColor = vec4(0.0); return; }',
+    '  vec2 e = smoothstep(vec2(0.0), vec2(0.07), hit) * smoothstep(vec2(0.0), vec2(0.07), 1.0 - hit);',
+    '  float fr = 0.02 + 0.98 * pow(1.0 - clamp(dot(-V, Nv), 0.0, 1.0), 5.0);',
+    '  gl_FragColor = vec4(min(texture2D(tScene, hit).rgb, vec3(16.0)), k * e.x * e.y * mix(0.3, 1.0, fr));',
+    '}'].join('\n'), Object.assign(depthU(), { tScene: { value: null }, tVel: { value: null }, tMask: { value: null }, uMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, uInvView: { value: new THREE.Matrix4() },
+    uView: { value: new THREE.Matrix4() }, uProjM: { value: new THREE.Matrix4() }, uWet: { value: 0 }, uFrame: { value: 0 } }));
+  const wetMixMat = mk([
+    'varying vec2 vUv; uniform sampler2D tScene; uniform sampler2D tSSR; uniform int uDbg;',
+    'void main(){ vec4 c = texture2D(tScene, vUv), r = texture2D(tSSR, vUv); gl_FragColor = uDbg == 1 ? vec4(vec3(r.a * 4.0), c.a) : vec4(mix(c.rgb, r.rgb, clamp(r.a, 0.0, 1.0) * 0.8), c.a); }'].join('\n'),
+    { tScene: { value: null }, tSSR: { value: null }, uDbg: { value: 0 } });
+  const WET = { k: 0, mask: null };
 
   // ---------- bloom ----------
   const preMat = mk([
@@ -186,19 +311,21 @@
   // velocity pass: moving objects only (their own small scene of merged hulls), screen motion since the last frame from
   // each mesh's previous world matrix; b holds the view depth for the occlusion test
   const velMat = new THREE.ShaderMaterial({
-    uniforms: { uPrevMVP: { value: new THREE.Matrix4() } },
+    uniforms: { uPrevMVP: { value: new THREE.Matrix4() }, uA: { value: 1 } },
     vertexShader: [
       'uniform mat4 uPrevMVP; varying vec4 vCur; varying vec4 vPrev; varying float vZ;',
       'void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vCur = projectionMatrix * mv; vPrev = uPrevMVP * vec4(position, 1.0); vZ = -mv.z; gl_Position = vCur; }'].join('\n'),
     fragmentShader: [
-      'varying vec4 vCur; varying vec4 vPrev; varying float vZ;',
-      'void main(){ vec2 a = vCur.xy / vCur.w * 0.5 + 0.5, b = vPrev.xy / vPrev.w * 0.5 + 0.5; gl_FragColor = vec4(a - b, vZ, 1.0); }'].join('\n'),
+      // (alpha: 1 on a car, 0.6 on the patch of road under it, which the wet-road pass must not skip)
+      'varying vec4 vCur; varying vec4 vPrev; varying float vZ; uniform float uA;',
+      'void main(){ vec2 a = vCur.xy / vCur.w * 0.5 + 0.5, b = vPrev.xy / vPrev.w * 0.5 + 0.5; gl_FragColor = vec4(a - b, vZ, uA); }'].join('\n'),
     side: THREE.DoubleSide,
   });
   const CC = new THREE.Color();
   velMat.onBeforeRender = (r, sc, cam, geo, obj) => {
     const pw = obj.userData.prevMW || obj.matrixWorld;
     velMat.uniforms.uPrevMVP.value.multiplyMatrices(prevVP, pw);
+    velMat.uniforms.uA.value = obj.userData.velGround ? 0.6 : 1;
     velMat.uniformsNeedUpdate = true;
   };
   function velocityPass(vel, camera) {
@@ -228,7 +355,9 @@
     // surface's value into the far one's: the road beside a car took the car's own (unoccluded)
     // value, a pale outline round the car against its shadow. Each of the four half-size texels
     // round the pixel is weighted by how near its depth is to the pixel's own.
-    'uniform vec2 uAOSize; uniform float uSunK;',
+    'uniform vec2 uAOSize; uniform float uSunK; uniform float uSharp; uniform vec2 uSrcTexel;',
+    // heat haze over the engines of the nearest cars: (uv, radius in uv, view depth) and strength
+    'uniform vec4 uHz[6]; uniform float uHzK[6]; uniform int uHzN;',
     'vec2 aoUp(vec2 uv) {',
     '  vec2 g = uv * uAOSize - 0.5, b = floor(g), f = g - b; float w0 = viewW(uv), ws = 0.0; vec2 s = vec2(0.0);',
     '  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {',
@@ -273,10 +402,31 @@
     'void main(){',
     '  vec2 d = vUv - 0.5;',
     '  vec3 c;',
+    // the hot air rising off an engine bends what is seen through it: only what lies behind the car
+    '  vec2 suv = vUv;',
+    '  if (uHzN > 0) {',
+    '    vec2 hz = vec2(0.0); float asp = uRes.x / uRes.y, wp = viewW(vUv);',
+    '    for (int i = 0; i < 6; i++) {',
+    '      if (i >= uHzN) break;',
+    '      vec4 H = uHz[i]; vec2 dd = (vUv - H.xy - vec2(0.0, H.z * 0.45)) * vec2(asp, 0.62) / H.z;',
+    '      float r2 = dot(dd, dd);',
+    '      if (r2 < 1.0 && wp > H.w - 0.4) {',
+    '        float f = (1.0 - r2) * (1.0 - r2);',
+    '        vec2 q = vUv * uRes / max(1.0, 900.0 * H.z);',
+    '        hz += vec2(sin(q.y * 9.0 - uTime * 21.0 + q.x * 3.0), cos(q.x * 7.0 + uTime * 17.0 - q.y * 5.0)) * f * uHzK[i] * H.z;',
+    '      }',
+    '    }',
+    '    suv = vUv + hz * 0.035;',
+    '  }',
     '  if (uLens > 0.5) {', // lateral chromatic aberration, strongest toward the corners
     '    vec2 ca = d * dot(d, d) * 0.0045;',
-    '    c = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
-    '  } else c = texture2D(tScene, vUv).rgb;',
+    '    c = vec3(texture2D(tScene, suv - ca).r, texture2D(tScene, suv).g, texture2D(tScene, suv + ca).b);',
+    '  } else c = texture2D(tScene, suv).rgb;',
+    // after TAA: a light unsharp mask, limited so it cannot ring round a bright edge
+    '  if (uSharp > 0.0) {',
+    '    vec3 nb = (texture2D(tScene, vUv + vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv - vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv + vec2(0.0, uSrcTexel.y)).rgb + texture2D(tScene, vUv - vec2(0.0, uSrcTexel.y)).rgb) * 0.25;',
+    '    c = clamp(c + uSharp * (c - nb), c * 0.6, c * 1.6 + 0.02);',
+    '  }',
     // AO is sky light being blocked, so it scales only the share of the light that is not
     // direct sun (the scene alpha, written by the lit materials): full in shade or overcast,
     // faint in bright sun
@@ -295,7 +445,8 @@
     '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a);', // debug views (window.__postDbg)
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
-    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 },
+    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
+    uHz: { value: [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()) }, uHzK: { value: [0, 0, 0, 0, 0, 0] }, uHzN: { value: 0 },
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) },
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
@@ -319,6 +470,8 @@
     RT.bloom = [];
     for (let k = 1; k <= 6; k++) RT.bloom.push(target(w >> k, h >> k));
     RT.shaftA = target(w >> 2, h >> 2); RT.shaftB = target(w >> 2, h >> 2);
+    RT.taa = Q.taa ? [target(w, h), target(w, h)] : [];
+    RT.aoH = Q.taa ? [target(w >> 1, h >> 1, { type: THREE.UnsignedByteType }), target(w >> 1, h >> 1, { type: THREE.UnsignedByteType })] : [];
     RT.w = w; RT.h = h;
   }
 
@@ -326,32 +479,69 @@
   function init(renderer) { R = renderer; }
   function setSize(w, h) { if (w !== W || h !== H) { W = w; H = h; dirty = true; } }
   function setQuality(o) {
-    const need = o.scale !== Q.scale || o.msaa !== Q.msaa;
+    const need = o.scale !== Q.scale || o.msaa !== Q.msaa || (o.taa != null && !!o.taa !== !!Q.taa);
     Object.assign(Q, o);
     if (need) dirty = true;
   }
 
-  const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4(), SUN = new THREE.Vector3();
-  let hadPrev = false, lastCam = null;
+  const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4(), _pvp = new THREE.Matrix4(), SUN = new THREE.Vector3();
+  let hadPrev = false, lastCam = null, frame = 0, hi = 0, histOK = false;
+  const lastPos = new THREE.Vector3(), lastDir = new THREE.Vector3(), _dir = new THREE.Vector3();
 
   // view: { exposure, sunDir (world), sunCol, dt }
   function render(scene, camera, view) {
-    if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; }
+    if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; }
     const w = RT.w, h = RT.h;
     camera.updateMatrixWorld();
-    // 1. scene in linear HDR
+    const taa = Q.taa && RT.taa.length > 0 && !taaMat.userData.broken;
+    frame = (frame + 1) % 4096;
+    // a camera cut (a new TV camera, a replay jump) starts the history again
+    _dir.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const cut = !hadPrev || lastCam !== camera || camera.position.distanceToSquared(lastPos) > 144 || _dir.dot(lastDir) < 0.9;
+    lastPos.copy(camera.position); lastDir.copy(_dir);
+    // 1. scene in linear HDR (with TAA, from a camera moved by a fraction of a pixel: Halton 2,3)
+    let jx = 0, jy = 0;
+    const pe = camera.projectionMatrix.elements;
+    if (taa) { const k = (frame % 8) + 1; jx = HALTON(k, 2) - 0.5; jy = HALTON(k, 3) - 0.5; pe[8] += 2 * jx / w; pe[9] += 2 * jy / h; }
     R.setRenderTarget(RT.scene);
     R.render(scene, camera);
+    if (taa) { pe[8] -= 2 * jx / w; pe[9] -= 2 * jy / h; }
     const logFar = revNear ? -revNear : Math.log2(camera.far + 1), proj = new THREE.Vector2(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
     const setDepth = m => { m.uniforms.tDepth.value = RT.scene.depthTexture; m.uniforms.uLogFar.value = logFar; m.uniforms.uProj.value.copy(proj); };
     let src = RT.scene.texture;
-    // 2. motion blur from camera movement
     curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    if (Q.motion && hadPrev && lastCam === camera && view.dt > 0) {
+    // the cars' screen motion, for TAA and motion blur
+    const moving = hadPrev && lastCam === camera && view.dt > 0;
+    let velTex = black;
+    if (view.vel && (Q.motion && moving || taa && !cut)) { velocityPass(view.vel, camera); velTex = RT.vel.texture; }
+    // wet road: reflections traced at half size, laid over the scene before TAA smooths them
+    if (WET.k > 0.03 && WET.mask && !ssrMat.userData.broken && !wetMixMat.userData.broken) {
+      if (!RT.ssr) { RT.ssr = target(w >> 1, h >> 1); RT.wet = target(w, h); }
+      const u = ssrMat.uniforms;
+      setDepth(ssrMat);
+      u.tScene.value = src; u.tVel.value = velTex; u.tMask.value = WET.mask.tex; u.uMaskB.value.copy(WET.mask.b); u.uWet.value = WET.k; u.uFrame.value = frame % 64;
+      u.uInvView.value.copy(camera.matrixWorld); u.uView.value.copy(camera.matrixWorldInverse); u.uProjM.value.copy(camera.projectionMatrix);
+      pass(ssrMat, RT.ssr);
+      wetMixMat.uniforms.tScene.value = src; wetMixMat.uniforms.tSSR.value = RT.ssr.texture; wetMixMat.uniforms.uDbg.value = G.__ssrDbg || 0;
+      pass(wetMixMat, RT.wet);
+      if (!ssrMat.userData.broken && !wetMixMat.userData.broken) src = RT.wet.texture;
+    }
+    // 2. temporal anti-aliasing
+    if (taa) {
+      const u = taaMat.uniforms, H0 = RT.taa[hi], H1 = RT.taa[1 - hi];
+      setDepth(taaMat);
+      u.tCur.value = src; u.tHist.value = H0.texture; u.tVel.value = velTex;
+      u.uInvView.value.copy(camera.matrixWorld); u.uPrevVP.value.copy(prevVP);
+      u.uTexel.value.set(1 / w, 1 / h); u.uJit.value.set(-jx / w, -jy / h);
+      u.uReset.value = cut || !histOK ? 1 : 0; u.uStatic.value = view.staticNear || 0;
+      pass(taaMat, H1);
+      if (!taaMat.userData.broken) { src = H1.texture; hi = 1 - hi; histOK = true; }
+    } else histOK = false;
+    // 3. motion blur from camera movement
+    if (Q.motion && moving) {
       setDepth(motionMat);
       motionMat.uniforms.tScene.value = src;
-      if (view.vel) { velocityPass(view.vel, camera); motionMat.uniforms.tVel.value = RT.vel.texture; }
-      else motionMat.uniforms.tVel.value = black;
+      motionMat.uniforms.tVel.value = velTex;
       motionMat.uniforms.uInvView.value.copy(camera.matrixWorld);
       motionMat.uniforms.uPrevVP.value.copy(prevVP);
       motionMat.uniforms.uScale.value = Math.min(1, Q.shutter / 360 / 60 / view.dt); // shutter angle, 180 degrees by default
@@ -359,6 +549,7 @@
       pass(motionMat, RT.motion);
       src = RT.motion.texture;
     }
+    const prevForAO = _pvp.copy(prevVP);
     prevVP.copy(curVP); hadPrev = true; lastCam = camera;
     if (view.vel) storeMovers(view.vel.meshes);
     // 3. ambient obscurance
@@ -373,13 +564,23 @@
       setDepth(ssaoMat);
       ssaoMat.uniforms.uTexel.value.set(1 / w, 1 / h);
       ssaoMat.uniforms.uFar.value = camera.far;
-      ssaoMat.uniforms.uSamples.value = Q.ssao ? Q.aoSamples : 0;
+      // with TAA the pattern turns each frame and is blended over time, so fewer samples do
+      ssaoMat.uniforms.uSamples.value = Q.ssao ? (taa ? Math.max(4, Math.round(Q.aoSamples * 0.6)) : Q.aoSamples) : 0;
+      ssaoMat.uniforms.uFrame.value = taa ? frame % 64 : 0;
       ssaoMat.uniforms.uInvView.value.copy(camera.matrixWorld);
       pass(ssaoMat, RT.ao);
       setDepth(blurAOMat);
       blurAOMat.uniforms.tAO.value = RT.ao.texture; blurAOMat.uniforms.uDir.value.set(2 / w, 0); pass(blurAOMat, RT.ao2);
       blurAOMat.uniforms.tAO.value = RT.ao2.texture; blurAOMat.uniforms.uDir.value.set(0, 2 / h); pass(blurAOMat, RT.ao);
       ao = ssaoMat.userData.broken || blurAOMat.userData.broken ? white : RT.ao.texture;
+      if (taa && Q.ssao && ao !== white && !aoTMat.userData.broken) {
+        const A0 = RT.aoH[(frame & 1) ^ 1], A1 = RT.aoH[frame & 1], u = aoTMat.uniforms;
+        setDepth(aoTMat);
+        u.tAO.value = RT.ao.texture; u.tHist.value = A0.texture; u.uInvView.value.copy(camera.matrixWorld); u.uPrevVP.value.copy(prevForAO);
+        u.uTexel.value.set(2 / w, 2 / h); u.uReset.value = cut ? 1 : 0;
+        pass(aoTMat, A1);
+        if (!aoTMat.userData.broken) ao = A1.texture;
+      }
     }
     // 4. bloom
     let bloom = black;
@@ -419,6 +620,11 @@
     setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0;
+    // heat haze (view.haze: [{ x, y, r, w, k }] from js/render3d.js)
+    { const hz = view.haze || [], n = Q.haze === false ? 0 : Math.min(6, hz.length);
+      for (let i = 0; i < n; i++) { u.uHz.value[i].set(hz[i].x, hz[i].y, hz[i].r, hz[i].w); u.uHzK.value[i] = hz[i].k; }
+      u.uHzN.value = n; }
+    u.uSharp.value = taa ? (G.__taaSharp != null ? G.__taaSharp : 0.22) : 0; u.uSrcTexel.value.set(1 / w, 1 / h);
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
     u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
@@ -440,6 +646,8 @@
     return p.catch(() => {}).then(() => { rt.dispose(); g.dispose(); });
   }
   // which passes this GPU could not compile (switched off), for the graphics report
-  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, brokenPasses: b }; }
-  F1.R3Post = { setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
+  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, haze: compMat.uniforms.uHzN.value, wet: WET.k, brokenPasses: b }; }
+  // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
+  function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
+  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
 })(typeof window !== 'undefined' ? window : globalThis);

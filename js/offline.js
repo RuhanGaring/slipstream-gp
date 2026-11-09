@@ -53,10 +53,14 @@
     const m = await manifest();
     if (!m) return { cached: false };
     const c = await cache();
-    const total = m.files.reduce((s, f) => s + f.s, 0);
+    // where the GPU-compressed textures will be used (js/r3-textures.js), their JPEG copies are
+    // not stored (should the compressed path fail after all, those load from the network)
+    const skip = F1.AssetsK && typeof WebAssembly === 'object' && typeof Worker === 'function' ? new Set(F1.AssetsKFallback || []) : null;
+    const files = skip ? m.files.filter(f => !skip.has(f.p)) : m.files;
+    const total = files.reduce((s, f) => s + f.s, 0);
     let done = 0;
     const todo = [], stale = [];
-    await Promise.all(m.files.map(async f => {
+    await Promise.all(files.map(async f => {
       const hit = await c.match(abs(f.p));
       if (hit && hit.headers.get('x-h') === f.h) done += f.s;
       else { todo.push(f); if (hit) stale.push(f.p); }
@@ -75,7 +79,7 @@
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
     // drop files the game no longer uses
-    const keep = new Set(m.files.map(f => abs(f.p)).concat([abs('assets/manifest.json')]));
+    const keep = new Set(files.map(f => abs(f.p)).concat([abs('assets/manifest.json')]));
     for (const req of await c.keys()) if (!keep.has(req.url)) c.delete(req);
     const code = stale.filter(p => /\.(html|js|css)$/.test(p));
     return { cached: true, failed, total, codeChanged: code.length > 0 };

@@ -52,6 +52,7 @@ drivers and circuits in the game are fictional.
 ## Libraries
 
 - three.js r158 (MIT), vendored in `js/vendor/`.
+- three.js r158 KTX2Loader with its ktx-parse (MIT), zstddec (MIT) and Basis Universal transcoder (Apache 2.0), vendored in `js/vendor/ktx2/`. The KTX2 textures in `assets/ktx/` were encoded with the Khronos KTX-Software tools (`tools/ktx_prep.py`).
 
 Titillium Web is licensed under the SIL Open Font License 1.1 (Accademia di Belle Arti di Urbino), bundled in assets/fonts for offline play.
 

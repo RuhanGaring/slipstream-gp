@@ -37,12 +37,12 @@
     // MSAA and a plain depth buffer (see POT in js/render3d.js), so switching to or from it reloads
     // rock: the slowest phones. Potato plus a lower resolution, sparse scenery, a near far plane
     // and simplified cars (each distant car one draw call)
-    rock: { potato: true, rock: true, lite: true, post: false, scale: 0.4, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'minimal' },
-    potato: { potato: true, rock: false, lite: true, post: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'sparse' },
-    low: { potato: false, rock: false, lite: true, post: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
-    medium: { potato: false, rock: false, lite: false, post: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
-    high: { potato: false, rock: false, lite: false, post: true, scale: 1, msaa: 4, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
-    ultra: { potato: false, rock: false, lite: false, post: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    rock: { potato: true, rock: true, lite: true, post: false, taa: false, scale: 0.4, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'minimal' },
+    potato: { potato: true, rock: false, lite: true, post: false, taa: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'sparse' },
+    low: { potato: false, rock: false, lite: true, post: false, taa: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
+    medium: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
+    high: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1, msaa: 2, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    ultra: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
   };
   // Advanced graphics (Settings > Advanced graphics): every other knob that trades speed for
   // looks, with each preset's value. A preset sets all of these; touching one makes it CUSTOM.
@@ -59,9 +59,12 @@
   //   particles, skids, debris, rainK    effects budgets
   //   physLod / physLodDist   distant AI cars step their physics at half rate past this many metres
   //   catchup     most physics steps run in one frame before the game slows instead (8 = 30 fps)
+  //   haze        heat haze over the engines of the nearest cars (post-processing)
+  //   drs         dynamic resolution: the render scale drops a little (to 67% at most) to hold
+  //               the frame rate target before Auto quality turns anything off
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
     trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 34, carFar: 130, carDraw: 0, dispHz: 12,
-    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40 };
+    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, haze: true };
   const ADV_P = {
     ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17 },
     high: {},
@@ -90,6 +93,8 @@
   { const sv = Game.settings.gfx;
     if (sv) {
       const base = GFX_PRESETS[sv.preset] || (sv.potato ? GFX_PRESETS.potato : sv.lite ? GFX_PRESETS.low : GFX_PRESETS.high);
+      // (a named preset saved before temporal AA existed moves to that preset's new MSAA level, which TAA was paired with)
+      if (sv.taa === undefined && GFX_PRESETS[sv.preset]) sv.msaa = GFX_PRESETS[sv.preset].msaa;
       for (const k in base) if (sv[k] === undefined) sv[k] = base[k];
       if (sv.boot === undefined) sv.boot = sv.preset === 'rock' || sv.preset === 'potato' ? sv.preset : '';
     } }
@@ -1928,7 +1933,7 @@
       const p = race.player;
       if (!Game.paused) {
         handleEvents(race);
-        if (R3ok && Game.settings.autoQ !== false && !document.hidden) autoStep(dt);
+        if (R3ok && Game.settings.autoQ !== false && !document.hidden) { drsStep(dt); autoStep(dt); }
         // lap delta against the best lap trace (10 m resolution)
         if (race.green && p.dist > 0) {
           const k = Math.floor((p.dist % race.track.L) / 10);
@@ -2007,10 +2012,36 @@
     { ssao: false, shafts: false, motion: false, msaa: 0, scale: 0.65, shadows: 'low', grass: false, bloom: false, post: false, lite: true }];
   const AQ = { t: 0, n: 0, low: 0, ceil: 9, wait: 12 };
   const LOW_SCALE = (a, b) => (a < b ? a : b), SHADOW = ['off', 'low', 'medium', 'high', 'ultra'];
+  // Dynamic resolution, the first thing given up when the frame rate dips: the render scale moves
+  // in small steps (down to 67% of the chosen scale) once a second, before any effect is turned
+  // off. Going back up is a probe: after a few good seconds it tries a step up, and a probe that
+  // costs the frame rate is undone and the next one waits twice as long (a 60 Hz screen never
+  // shows spare speed, so there is no other way to find it).
+  const DRS = { k: 1, t: 0, n: 0, good: 0, probe: 5, probing: false, skip: 0, MIN: 0.67 };
+  function drsStep(dt) {
+    const g = Game.settings.gfx;
+    if (!g.drs || AQ.wait > 0) { if (!g.drs && DRS.k !== 1) { DRS.k = 1; R3.setQuality(autoGfx()); } DRS.t = 0; DRS.n = 0; return; }
+    DRS.t += dt; DRS.n++;
+    if (DRS.t < 1) return;
+    const fps = DRS.n / DRS.t, target = g.fpsCap || Game.settings.autoTarget || 60;
+    DRS.t = 0; DRS.n = 0;
+    if (DRS.skip > 0) { DRS.skip--; return; } // (the second after a change: new render targets)
+    let k = DRS.k;
+    if (fps < target * 0.93) {
+      k = Math.max(DRS.MIN, k - (fps < target * 0.8 ? 0.1 : 0.05)); DRS.good = 0;
+      if (DRS.probing) { DRS.probe = Math.min(64, DRS.probe * 2); DRS.probing = false; }
+    } else if (fps > target * 0.97 && k < 1) {
+      if (++DRS.good >= DRS.probe) { k = Math.min(1, k + 0.05); DRS.good = 0; DRS.probing = true; }
+    } else { DRS.good = 0; if (DRS.probing && fps >= target * 0.97) DRS.probing = false; }
+    k = Math.round(k * 100) / 100;
+    if (k !== DRS.k) { DRS.k = k; DRS.skip = 1; R3.setQuality(autoGfx()); }
+  }
+  Game.drs = DRS;
   function autoGfx() {
     const g = Game.settings.gfx, s = Game.settings.autoQ === false ? 0 : Game.settings.autoStep || 0, m = Object.assign({}, g, LADDER[s] || {});
     // the ladder never raises anything: a Low preset stays Low
     if (LADDER[s].scale) m.scale = LOW_SCALE(g.scale, LADDER[s].scale);
+    if (g.drs && Game.settings.autoQ !== false) m.scale = Math.round(m.scale * DRS.k * 1000) / 1000;
     if (LADDER[s].msaa != null) m.msaa = LOW_SCALE(g.msaa, LADDER[s].msaa);
     if (LADDER[s].shadows && SHADOW.indexOf(g.shadows) < SHADOW.indexOf(LADDER[s].shadows)) m.shadows = g.shadows;
     return m;
@@ -2021,7 +2052,9 @@
     const fps = AQ.n / AQ.t, target = Game.settings.gfx.fpsCap || Game.settings.autoTarget || 60;
     AQ.t = 0; AQ.n = 0;
     if (AQ.wait > 0) { AQ.wait -= 2.5; return; } // (new shaders and a race start are not the machine's speed)
-    AQ.low = fps < target * 0.87 ? AQ.low + 1 : 0;
+    // dynamic resolution goes first: effects are only turned off once it is at its floor
+    const drsLeft = Game.settings.gfx.drs && DRS.k > DRS.MIN + 1e-3;
+    AQ.low = fps < target * 0.87 && !drsLeft ? AQ.low + 1 : 0;
     const s = Game.settings.autoStep || 0;
     if (AQ.low >= 2 && s < LADDER.length - 1) {
       Game.settings.autoStep = s + 1; AQ.low = 0; AQ.wait = 7.5;
@@ -2070,6 +2103,8 @@
           sessionStorage.removeItem('sgpReloaded');
         } catch (e) { /* no session storage */ }
       }, () => {})],
+      // GPU-compressed photo textures where the browser can take them, else the JPEG copies
+      [0.885, 'Preparing textures', () => (R3ok && F1.R3T && F1.R3T.ready ? F1.R3T.ready(R3.renderer) : null)],
       [0.89, 'Preparing the cars', () => F1.CarModels.loadAll([...new Set(F1.Data.TEAMS.map(t => t.car).filter(Boolean))], (n, of) => boot(0.89, 'Preparing the cars', n + ' / ' + of))],
       [0.9, 'Building the circuit', () => { HUD.init(); UIm.init(); startAttract(); }],
       [0.93, 'Preparing the scene', () => { document.getElementById('shade').className = 'on'; UIm.go('title'); Game.applySettings(); }],

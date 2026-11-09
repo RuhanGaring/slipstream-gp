@@ -664,7 +664,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
     GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
-    F1.R3Post.setQuality({ on: GFX.post, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
+    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
@@ -854,6 +854,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (scene.fog) { scene.fog.density = B.fogD * (1 + 0.9 * k); scene.fog.color.copy(S3.uFogCol.value); }
     if (B.bg != null) scene.backgroundIntensity = B.bg * (1 - 0.35 * k);
     S3.uWet.value = state.wetS;
+    F1.R3Post.setWet(state.wetS, state.wetS > 0.03 ? wetMaskNow() : null);
     state.wxExp = 1 - 0.18 * k;
     if (state.wx) state.wx.update(k, camera, dt, clock, S3.uFogCol.value);
   }
@@ -908,7 +909,43 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   const KEEP_TRACKS = 4;
   // free what a circuit no longer in use holds on the GPU. Materials in MATS are shared by every
   // circuit, and a disposed geometry or texture would simply upload again if something still used it
+  // Where the road is, seen from above (about a metre a texel): the wet-road reflections in the
+  // post stack (js/r3-post.js) show only on it. Made the first time a circuit gets wet.
+  function wetMask(tr) {
+    let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
+    for (let i = 0; i < tr.N; i++) { x0 = Math.min(x0, tr.x[i]); x1 = Math.max(x1, tr.x[i]); z0 = Math.min(z0, tr.y[i]); z1 = Math.max(z1, tr.y[i]); }
+    x0 -= 60; z0 -= 60; x1 += 60; z1 += 60;
+    const k = Math.min(1.5, 2048 / Math.max(x1 - x0, z1 - z0)), cw = Math.ceil((x1 - x0) * k), ch = Math.ceil((z1 - z0) * k);
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch);
+    g.strokeStyle = '#fff'; g.lineJoin = 'round'; g.lineCap = 'round';
+    const stroke = (pts, wid) => { if (pts.length < 2) return; g.lineWidth = Math.max(1, wid * k); g.beginPath(); pts.forEach((p, j) => (j ? g.lineTo((p[0] - x0) * k, (p[1] - z0) * k) : g.moveTo((p[0] - x0) * k, (p[1] - z0) * k))); g.stroke(); };
+    const main = [];
+    for (let i = 0; i <= tr.N; i++) { const q = i % tr.N; main.push([tr.x[q], tr.y[q]]); }
+    stroke(main, 2 * tr.hw + 0.6);
+    if (tr.pit && tr.pit.off) {
+      let run = [];
+      for (let i = 0; i <= tr.N; i++) {
+        const q = i % tr.N, o = tr.pit.off[q];
+        if (isNaN(o)) { stroke(run, tr.pit.lane || 6); run = []; continue; }
+        run.push(Tracks.pointAt(tr, q * tr.ds, o));
+      }
+      stroke(run, tr.pit.lane || 6);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.flipY = false; tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+    return { tex, b: new THREE.Vector4(x0, z0, cw / k, ch / k) };
+  }
+  function wetMaskNow() {
+    const b = state.tr && state.cache.get(state.tr.id);
+    if (!b) return null;
+    if (!b.wetMask) b.wetMask = wetMask(state.tr);
+    return b.wetMask;
+  }
+
   function dropBuilt(b) {
+    if (b.wetMask) { b.wetMask.tex.dispose(); b.wetMask = null; }
     const shared = new Set(Object.values(MATS)), mats = new Set(), texs = new Set();
     b.root.traverse(o => {
       if (o.geometry) o.geometry.dispose();
@@ -3435,6 +3472,7 @@ void main() {
     const sp = new THREE.Mesh(velShadowGeo(), MATS.shadowBlob);
     const hull = new THREE.Mesh(RC.velHull(car.team), MATS.shadowBlob);
     for (const q of [sp, hull]) { q.matrixAutoUpdate = false; q.visible = false; q.frustumCulled = false; velScene.add(q); }
+    sp.userData.velGround = true;
     outer.userData = { body, spin: 0, flap: 0, seen: 0, ground, gy: 0, velOn: false, velParts: [sp, hull] };
     // every part of the car takes shadow, the scanned body and the cockpit included: the halo
     // across the wheel, the cockpit sides over the hands and lap, the car over its own floor
@@ -4233,6 +4271,8 @@ void main() {
         exposure, dt: o.dt || 0, sunDir: state.sunDir, sunCol: sun.color, shaftK: state.look && state.look.shaftK != null ? state.look.shaftK : 1,
         motionNear: ['tv', 'load', 'orbit', 'free', 'top', 'map', 'heli', 'blimp'].includes(mode) ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' || mode === 'nose' || mode === 'side' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
+        staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
+        haze: GFX.haze === false ? null : hazeOf(o.cars || []),
       });
     } else {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -4242,14 +4282,41 @@ void main() {
     }
   }
 
-  // cars for the motion blur's velocity pass: only those within 60 m of the camera (a far car
-  // barely moves on screen relative to the scenery); the rest leave layer 5
+  // Heat haze: the hot air over the engine of the nearest cars, as a point above the gearbox in
+  // screen space (uv, radius, view depth) and a strength, for the composite in js/r3-post.js.
+  // Strongest standing or slow (on the grid, in the pits), fainter at speed, gone by 45 m.
+  const _hz = new THREE.Vector3(), _hzOut = [];
+  function hazeOf(cars) {
+    _hzOut.length = 0;
+    const cp = camera.position, py = camera.projectionMatrix.elements[5];
+    for (const c of cars) {
+      const m = live.get(c);
+      if (!m || m.visible === false || c.retired) continue;
+      const bx = c.x - Math.cos(c.h) * 2.2, bz = c.y - Math.sin(c.h) * 2.2, dd = Math.hypot(bx - cp.x, bz - cp.z);
+      if (dd > 45 || dd < 2.5) continue;
+      _hz.set(bx, (m.userData.gy || 0) + 0.75, bz).applyMatrix4(camera.matrixWorldInverse);
+      const w = -_hz.z;
+      if (w < 1) continue;
+      _hz.applyMatrix4(camera.projectionMatrix);
+      const x = _hz.x * 0.5 + 0.5, y = _hz.y * 0.5 + 0.5, r = 0.75 * py / w * 0.5;
+      if (x < -r || x > 1 + r || y < -r || y > 1 + r) continue;
+      const k = (1 - 0.6 * Math.min(1, (c.speed || 0) / 70)) * (1 - U.smooth((dd - 25) / 20));
+      if (k > 0.02) _hzOut.push({ x, y, r, w, k, dd });
+    }
+    _hzOut.sort((a, b) => a.dd - b.dd);
+    return _hzOut;
+  }
+
+  // cars for the motion blur's and TAA's velocity pass: only those within 60 m of the camera
+  // (80 m with TAA, which would smear a car crossing the view at that range); the rest leave layer 5
   function velMovers(cars) {
     const out = [];
     for (const c of cars) {
       const m = live.get(c); if (!m) continue;
-      const on = m.visible !== false && Math.hypot(c.x - camera.position.x, c.y - camera.position.z) < 60;
-      if (on !== !!m.userData.velOn) { m.userData.velOn = on; for (const q of m.userData.velParts) q.visible = on; }
+      const d = Math.hypot(c.x - camera.position.x, c.y - camera.position.z);
+      // (the patch of road under a car only matters close by: past 40 m the hull alone)
+      const on = m.visible !== false && d < (F1.R3Post.Q.taa ? 80 : 60) ? (d < 40 ? 2 : 1) : 0;
+      if (on !== (m.userData.velOn | 0)) { m.userData.velOn = on; const [sp, hull] = m.userData.velParts; hull.visible = on > 0; sp.visible = on > 1; }
       if (on) out.push(m);
     }
     if (!out.length) return null;

@@ -329,9 +329,46 @@
   });
 
   // ---- photo textures (CC0, embedded as data URIs by tools/assets_prep.py) ----
-  // Each call returns its own texture with its own repeat; all share one decoded image.
-  const imgs = {}, photoCache = {};
-  T.has = key => !!(F1.Assets && F1.Assets[key]);
+  // Each call returns its own texture with its own repeat; all share one image, and one copy of
+  // it on the GPU (one three.js Source: three.js keeps one GL texture per source and settings).
+  //
+  // GPU-compressed copies (KTX2, tools/ktx_prep.py) are used where the page is served over http
+  // and the browser can run the Basis transcoder: a texture takes a quarter to a sixth of the
+  // memory, and the decoding runs in worker threads instead of the main one. Otherwise (file://,
+  // no WebAssembly, a failure) the JPEG bundles js/assets/photos_*.js are loaded instead.
+  // T.ready(renderer) settles which, before any circuit is built.
+  const imgs = {}, photoCache = {}, ktxOf = {};
+  let ktx = null;
+  T.has = key => !!((F1.Assets && F1.Assets[key]) || (ktx && F1.AssetsK && F1.AssetsK[key]));
+  const ver = (() => { const s = document.querySelector('script[src*="js/r3-textures.js"]'), m = s && /[?&]v=(\w+)/.exec(s.src); return m ? '?v=' + m[1] : ''; })();
+  const fallback = () => Promise.all((F1.AssetsKFallback || []).map(src => new Promise(ok => {
+    const s = document.createElement('script'); s.src = src + ver; s.onload = s.onerror = ok; document.head.appendChild(s);
+  })));
+  T.ready = renderer => {
+    if (T.readyP) return T.readyP;
+    const can = F1.AssetsK && /^https?:/.test(location.protocol) && typeof WebAssembly === 'object' && typeof Worker === 'function' && !G.__noKtx;
+    T.readyP = (can ? import('./vendor/ktx2/KTX2Loader.js' + ver).then(m => {
+      const L = new m.KTX2Loader().setTranscoderPath('js/vendor/ktx2/').setWorkerLimit(Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2)));
+      L.detectSupport(renderer);
+      // one tiny file through the whole path first: if anything in it fails, use the JPEGs
+      const k0 = Object.keys(F1.AssetsK).sort((a, b) => F1.AssetsK[a].w - F1.AssetsK[b].w)[0];
+      return L.loadAsync(F1.AssetsK[k0].f + ver).then(t => { ktxOf[k0] = Promise.resolve(t); ktx = L; });
+    }) : Promise.reject(new Error('no KTX2 here'))).catch(e => {
+      if (can) console.warn('Slipstream: compressed textures unavailable, using JPEG', e);
+      ktx = null; return fallback();
+    });
+    return T.readyP;
+  };
+  T.compressed = () => !!ktx;
+  // a KTX2 file's levels, formats and filtering laid onto a texture made earlier (materials keep
+  // the object they were given), so all the textures of one photo share the same mip arrays
+  function takeKtx(t, ct) {
+    t.isCompressedTexture = true;
+    t.source = ct.source; t.mipmaps = ct.mipmaps;
+    t.format = ct.format; t.type = ct.type; t.generateMipmaps = false; t.flipY = false;
+    t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
+    t.needsUpdate = true;
+  }
   T.photo = (key, rep = 1, srgb = true) => {
     const ck = key + '|' + rep + '|' + srgb;
     if (photoCache[ck]) return photoCache[ck];
@@ -339,14 +376,20 @@
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
     if (Array.isArray(rep)) t.repeat.set(rep[0], rep[1]); else t.repeat.set(rep, rep);
+    if (ktx && F1.AssetsK[key]) {
+      const k = F1.AssetsK[key];
+      (ktxOf[key] || (ktxOf[key] = ktx.loadAsync(k.f + ver))).then(ct => takeKtx(t, ct), e => console.warn('Slipstream: texture', key, e));
+      return (photoCache[ck] = t);
+    }
     let im = imgs[key];
     if (!im) {
       im = imgs[key] = new Image();
-      im.waiting = [];
-      im.onload = () => { for (const w of im.waiting) { w.image = im; w.needsUpdate = true; } im.waiting = null; };
+      im.waiting = []; im.source = new THREE.Source(null);
+      im.onload = () => { im.source.data = im; for (const w of im.waiting) w.needsUpdate = true; im.waiting = null; };
       im.src = F1.Assets[key];
     }
-    if (im.waiting) im.waiting.push(t); else { t.image = im; t.needsUpdate = true; }
+    t.source = im.source;
+    if (im.waiting) im.waiting.push(t); else t.needsUpdate = true;
     return (photoCache[ck] = t);
   };
   T.image = key => { if (!imgs[key]) T.photo(key); return imgs[key]; };

@@ -1199,6 +1199,7 @@
       add(optRow('Scenery', 'Tree density, trackside boards and distant hills', ['full', 'reduced', 'sparse', 'minimal'], () => sceneryOf(gx), v => { Object.assign(gx, SCENERY[v], { scenery: v }); gx.preset = 'custom'; touched(); }, v => v.toUpperCase()));
       add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.7, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
       add(optRow('Anti-aliasing', '', [0, 2, 4, 8], () => gx.msaa, v => setG('msaa', v), v => (v ? 'MSAA ' + v + 'X' : 'OFF')));
+      add(optRow('Temporal anti-aliasing', 'Smooths shimmer on fences, grass and kerbs', [true, false], () => gx.taa, v => setG('taa', v), onOff));
       add(optRow('Shadows', '', ['off', 'low', 'medium', 'high', 'ultra'], () => gx.shadows, v => setG('shadows', v), v => v.toUpperCase()));
       add(optRow('Ambient occlusion', 'Contact shadowing in creases', [true, false], () => gx.ssao, v => setG('ssao', v), onOff));
       add(optRow('Bloom', 'Glow from bright highlights', [true, false], () => gx.bloom, v => setG('bloom', v), onOff));
@@ -1236,6 +1237,8 @@
     ['dprCap', 'Pixel density cap', 'Phones have 2 to 3 pixels per point. 1x is far faster', [1, 1.5, 2, 3], v => v + 'X'],
     ['fpsCap', 'Frame rate limit', 'A lower limit saves battery and heat', [0, 30, 45, 60, 90, 120], v => (v ? v + ' FPS' : 'OFF')],
     ['msaa', 'Anti-aliasing', 'Needs post-processing', [0, 2, 4, 8], v => (v ? 'MSAA ' + v + 'X' : 'OFF')],
+    ['taa', 'Temporal anti-aliasing', 'Smooths shimmer on fences, grass and kerbs. Needs post-processing', [true, false], onOffF],
+    ['drs', 'Dynamic resolution', 'Lowers the render scale a little to hold the frame rate target (with Auto quality on)', [true, false], onOffF],
     ['aniso', 'Texture filtering', 'Road and kerb sharpness at a glancing angle', [1, 2, 4, 8, 16], v => (v === 1 ? 'BILINEAR' : v + 'X ANISOTROPIC')],
     ['LIGHTING AND SHADOWS'],
     ['shadows', 'Shadows', 'Number and size of the sun shadow slices', ['off', 'low', 'medium', 'high', 'ultra'], v => v.toUpperCase()],
@@ -1253,6 +1256,7 @@
     ['shaftK', 'Sun shaft strength', '', [0.2, 0.45, 0.7, 1], v => Math.round(v / 0.45 * 100) + '%'],
     ['motion', 'Motion blur', 'Camera motion and moving cars', [true, false], onOffF],
     ['shutter', 'Motion blur amount', 'Shutter angle. 360 blurs the most', [90, 180, 270, 360], v => v + ' DEG'],
+    ['haze', 'Heat haze', 'Shimmer over the engines of nearby cars. Needs post-processing', [true, false], onOffF],
     ['lens', 'Lens effects', 'Vignette, chromatic aberration', [true, false], onOffF],
     ['grain', 'Film grain', 'Needs lens effects', [true, false], onOffF],
     ['tone', 'Tone mapping', 'AgX keeps bright colours natural', ['agx', 'aces'], v => (v === 'agx' ? 'AGX' : 'ACES FILMIC')],
