@@ -91,13 +91,8 @@
     '  float ao = uSamples > 0 ? max(0.0, 1.0 - 3.6 * sum / float(uSamples)) : 1.0;', // strong enough that the shade under a car reads as a contact shadow
     '  ao *= ao;',
     '  ao = mix(1.0, ao, smoothstep(0.3, 2.5, w) * 0.5 + 0.5);',
-    // the cars' sky occlusion, on surfaces that face up, kept in its own channel (g) so it is
-    // not limited like the screen-space term: deep under a floor in the shade only a little
-    // bounce light gets in
-    '  vec3 wn = normalize((uInvView * vec4(n, 0.0)).xyz);',
-    '  float car = 1.0;',
-    '  if (wn.y > 0.3 && uOccN > 0) car = mix(1.0, 0.03 + 0.97 * r3CarSky((uInvView * vec4(p, 1.0)).xyz, wn), smoothstep(0.3, 0.7, wn.y));',
-    '  gl_FragColor = vec4(ao, car, 1.0, 1.0);',
+    // (g, once the cars' sky occlusion, is now worked out at full size in the composite)
+    '  gl_FragColor = vec4(ao, 1.0, 1.0, 1.0);',
     '}'].join('\n'), Object.assign(depthU(), { uTexel: { value: new THREE.Vector2() }, uRadius: { value: 1.5 }, uFar: { value: 14000 }, uSamples: { value: 12 }, uInvView: { value: new THREE.Matrix4() }, uFrame: { value: 0 } },
     F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}));
 
@@ -360,6 +355,31 @@
   const compMat = mk([
     'varying vec2 vUv;', DEPTH,
     'uniform sampler2D tScene; uniform sampler2D tAO; uniform sampler2D tBloom; uniform sampler2D tShaft; uniform sampler2D tSun;',
+    // The shade under and around the cars (the sky their bodies and tyres hide from the road,
+    // js/r3-shadow.js r3CarSky). It is exact and free of noise, so it is evaluated here for every
+    // pixel at full size. It used to ride in the half-size AO target, where the blur and the
+    // upsample mixed the tyre's own unshaded value into the road where the tyre stands: a pale
+    // gap between each tyre and its contact shadow, and a softer, smeared shade under the floor.
+    F1.R3Shadow ? F1.R3Shadow.OCC_PARS : 'uniform int uOccN; float r3CarSky(vec3 p, vec3 n) { return 1.0; }',
+    'uniform mat4 uInvView;',
+    // (the ground beside a car and the car's tyres: r3CarSky decides which points it shades)
+    'float carSky(vec2 uv, vec2 tx) {',
+    '  if (uOccN == 0) return 1.0;',
+    '  float w = viewW(uv);',
+    '  if (w > 150.0) return 1.0;',
+    '  vec3 p = viewPos(uv), wp = (uInvView * vec4(p, 1.0)).xyz;',
+    '  bool near = false;',
+    '  for (int i = 0; i < 8; i++) { if (i < uOccN) { vec2 d = wp.xz - uOccCar[i].xz; if (dot(d, d) < 36.0) near = true; } }',
+    '  if (!near) return 1.0;',
+    // the surface normal from the depth: of the two neighbours each way, the nearer in depth, so
+    // the normal at the foot of a tyre is the road's, not a blend with the tyre's side
+    '  vec3 dx1 = viewPos(uv + vec2(tx.x, 0.0)) - p, dx2 = p - viewPos(uv - vec2(tx.x, 0.0));',
+    '  vec3 dy1 = viewPos(uv + vec2(0.0, tx.y)) - p, dy2 = p - viewPos(uv - vec2(0.0, tx.y));',
+    '  vec3 n = normalize(cross(dot(dx1, dx1) < dot(dx2, dx2) ? dx1 : dx2, dot(dy1, dy1) < dot(dy2, dy2) ? dy1 : dy2));',
+    '  if (dot(n, p) > 0.0) n = -n;',
+    '  vec3 wn = normalize((uInvView * vec4(n, 0.0)).xyz);',
+    '  return 0.03 + 0.97 * r3CarSky(wp, wn);',
+    '}',
     'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain;',
     // The AO target is half size. Read plainly (bilinear), along a silhouette it mixes the near
@@ -425,7 +445,7 @@
     // faint in bright sun
     // (never more than 80% of the sky light: a crease still sees some bounce light)
     // only the light that is not direct sun is occluded: the screen-space term (r, limited) and the cars' sky occlusion (g, full depth)
-    '  { float dirS = clamp(texture2D(tSun, vUv).a, 0.0, 1.0) * uSunK; vec2 o = aoUp(vUv); c *= dirS + (1.0 - dirS) * mix(1.0, max(o.r, 0.2), uAO) * o.g; }',
+    '  { float dirS = clamp(texture2D(tSun, vUv).a, 0.0, 1.0) * uSunK; vec2 o = aoUp(vUv); c *= dirS + (1.0 - dirS) * mix(1.0, max(o.r, 0.2), uAO) * carSky(vUv, uSrcTexel); }',
     '  c += texture2D(tBloom, vUv).rgb * uBloom;',
     '  c += texture2D(tShaft, vUv).rgb * uShaftCol * uShaft;',
     '  c *= uExposure;',
@@ -439,7 +459,8 @@
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
     tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
-    tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) },
+    tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) }, uInvView: { value: new THREE.Matrix4() },
+    ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
   });
@@ -548,8 +569,7 @@
     let ao = white;
     // the pass also carries the cars' sky occlusion, so with screen-space AO off it still runs
     // (no samples) whenever there are cars near the camera
-    const carOcc = F1.R3Shadow && F1.R3Shadow.U.uOccN.value > 0;
-    if ((Q.ssao || carOcc) && !ssaoMat.userData.broken && !blurAOMat.userData.broken) {
+    if (Q.ssao && !ssaoMat.userData.broken && !blurAOMat.userData.broken) {
       // start from "nothing occluded": should the pass not run (a shader this GPU will not
       // compile) the scene keeps its sky light instead of going black
       clearTo(RT.ao, 0xffffff); clearTo(RT.ao2, 0xffffff);
@@ -612,7 +632,7 @@
     const u = compMat.uniforms;
     setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
-    u.uDbg.value = G.__postDbg || 0;
+    u.uDbg.value = G.__postDbg || 0; u.uInvView.value.copy(camera.matrixWorld);
     u.uSharp.value = taa ? (G.__taaSharp != null ? G.__taaSharp : 0.22) : 0; u.uSrcTexel.value.set(1 / w, 1 / h);
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);

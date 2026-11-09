@@ -257,14 +257,23 @@
   U.uOccCar = { value: Array.from({ length: MAXC }, () => new THREE.Vector4()) }; // x, ground y, z, heading
   U.uOccN = { value: 0 };
   // box centre and half size in the car's frame (x forward, y up from the road, z right)
+  // Each tyre (radius 0.36 m, its centre 0.38 m up) is three boxes stepped like its round side
+  // view: a narrow one down to the contact patch, a middle one and a wide one, each reaching only
+  // as low as the tyre does at its ends, so the shade under the tyre rises off the road the way
+  // the tyre does and has no hard edge.
+  // As one square box it shaded the road under the tyre's front and back, which are well off
+  // the ground, as if the tyre stood on it: dark rectangles round each wheel.
+  const TYRES = [[1.964, -0.81, 0.16], [1.964, 0.81, 0.16], [-1.57, -0.80, 0.2], [-1.57, 0.80, 0.2]]; // x, z, half width
   const BOXES = [
     [-0.05, 0.33, 0, 1.55, 0.30, 0.78],   // floor, tub and sidepods
     [2.2, 0.40, 0, 0.75, 0.17, 0.28],     // nose
     [2.9, 0.20, 0, 0.32, 0.12, 0.97],     // front wing
     [-1.95, 0.52, 0, 0.38, 0.45, 0.50],   // gearbox, diffuser, rear wing
-    [1.964, 0.38, -0.81, 0.36, 0.36, 0.16], [1.964, 0.38, 0.81, 0.36, 0.36, 0.16], // front tyres
-    [-1.57, 0.38, -0.80, 0.36, 0.36, 0.2], [-1.57, 0.38, 0.80, 0.36, 0.36, 0.2],  // rear tyres
+    ...TYRES.map(t => [t[0], 0.38, t[1], 0.12, 0.36, t[2]]), // tyres: 0.02 to 0.74 m, through the contact patch
+    ...TYRES.map(t => [t[0], 0.38, t[1], 0.25, 0.30, t[2]]), // 0.08 to 0.68 m
+    ...TYRES.map(t => [t[0], 0.38, t[1], 0.36, 0.18, t[2]]), // 0.20 to 0.56 m, across the middle
   ];
+  const NB = BOXES.length;
   U.uOccBC = { value: BOXES.map(b => new THREE.Vector3(b[0], b[1], b[2])) };
   U.uOccBR = { value: BOXES.map(b => new THREE.Vector3(b[3], b[4], b[5])) };
   const OCC_PARS = [
@@ -291,7 +300,11 @@
     '}',
     // the boxes come in as uniforms and are walked in one plain loop (no constant-array
     // constructors, no continue: the most portable form across GPU shader compilers)
-    'uniform vec3 uOccBC[8]; uniform vec3 uOccBR[8];',
+    'uniform vec3 uOccBC[' + NB + ']; uniform vec3 uOccBR[' + NB + '];',
+    // How much sky reaches a point beside or under the cars (1 all of it). Two kinds of point
+    // take it: the ground round a car (facing up, under 0.2 m), and the car's own tyres, which
+    // sit in the shade of the floor, the bodywork and the wings above them (any facing; a
+    // tyre's own three boxes are left out, as it cannot shade itself).
     'float r3CarSky(vec3 wp, vec3 wn) {',
     '  float vis = 1.0;',
     '  for (int i = 0; i < ' + MAXC + '; i++) {',
@@ -302,10 +315,14 @@
     '        float ch = cos(cr.w), sh = sin(cr.w);',
     '        vec3 lp = vec3(dxz.x * ch + dxz.y * sh, wp.y - cr.y, -dxz.x * sh + dxz.y * ch);',
     '        vec3 ln = vec3(wn.x * ch + wn.z * sh, wn.y, -wn.x * sh + wn.z * ch);',
-    // only the ground (and kerbs) under and round the car: the car's own surfaces are not
-    // shaded by the coarse boxes that stand in for it
-    '        float cv = 1.0, gw = 1.0 - smoothstep(0.06, 0.2, lp.y);',
-    '        if (gw > 0.0) for (int j = 0; j < 8; j++) cv *= 1.0 - clamp(r3Box(lp - uOccBC[j], ln, uOccBR[j]), 0.0, 1.0);',
+    // the ground (and kerbs) under and round the car, facing up; or a point on one of its tyres
+    '        int tyre = -1;',
+    // (on the tyre: above the road, or low down but not facing up; the road under a tyre, facing
+    // up, is ground and shaded by that tyre, while the tyre's own lowest edge must not be lit)
+    '        if (lp.y > 0.04 || ln.y < 0.6) for (int k = 0; k < 4; k++) { vec3 tc = uOccBC[4 + k], tr = vec3(0.37, 0.38, uOccBR[4 + k].z + 0.03); if (all(lessThan(abs(lp - tc), tr))) tyre = k; }',
+    '        float gw = tyre >= 0 ? 1.0 : (1.0 - smoothstep(0.06, 0.2, lp.y)) * smoothstep(0.3, 0.7, ln.y);',
+    '        float cv = 1.0;',
+    '        if (gw > 0.0) for (int j = 0; j < ' + NB + '; j++) { if (tyre < 0 || (j != 4 + tyre && j != 8 + tyre && j != 12 + tyre)) cv *= 1.0 - clamp(r3Box(lp - uOccBC[j], ln, uOccBR[j]), 0.0, 1.0); }',
     '        vis *= mix(1.0, cv, gw);',
     '      }',
     '    }',
