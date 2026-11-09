@@ -256,6 +256,7 @@
   const MAXC = 8;
   U.uOccCar = { value: Array.from({ length: MAXC }, () => new THREE.Vector4()) }; // x, ground y, z, heading
   U.uOccN = { value: 0 };
+  U.uOccSt = { value: new Array(MAXC).fill(0) }; // each car's front-wheel steer angle (rad)
   // box centre and half size in the car's frame (x forward, y up from the road, z right)
   // Each tyre (radius 0.36 m, its centre 0.38 m up) is three boxes stepped like its round side
   // view: a narrow one down to the contact patch, a middle one and a wide one, each reaching only
@@ -277,7 +278,7 @@
   U.uOccBC = { value: BOXES.map(b => new THREE.Vector3(b[0], b[1], b[2])) };
   U.uOccBR = { value: BOXES.map(b => new THREE.Vector3(b[3], b[4], b[5])) };
   const OCC_PARS = [
-    'uniform vec4 uOccCar[' + MAXC + ']; uniform int uOccN;',
+    'uniform vec4 uOccCar[' + MAXC + ']; uniform int uOccN; uniform float uOccSt[' + MAXC + '];',
     // cosine-weighted occlusion of one face (corners a b c d, relative to the point, any winding)
     'float r3Face(vec3 n, vec3 a, vec3 b, vec3 c, vec3 d) {',
     '  a = normalize(a); b = normalize(b); c = normalize(c); d = normalize(d);',
@@ -301,10 +302,11 @@
     // the boxes come in as uniforms and are walked in one plain loop (no constant-array
     // constructors, no continue: the most portable form across GPU shader compilers)
     'uniform vec3 uOccBC[' + NB + ']; uniform vec3 uOccBR[' + NB + '];',
-    // How much sky reaches a point beside or under the cars (1 all of it). Two kinds of point
-    // take it: the ground round a car (facing up, under 0.2 m), and the car's own tyres, which
-    // sit in the shade of the floor, the bodywork and the wings above them (any facing; a
-    // tyre's own three boxes are left out, as it cannot shade itself).
+    // How much sky reaches the ground beside or under the cars (1 all of it): points facing up,
+    // under 0.2 m. The cars' own surfaces, the tyres included, are not shaded by the boxes:
+    // on a tyre, the edges of the boxes showed as hard bands across the rubber.
+    // a vector in the car's frame turned into a steered front wheel's frame
+    'vec3 r3Steer(vec3 v, float c, float s) { return vec3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }',
     'float r3CarSky(vec3 wp, vec3 wn) {',
     '  float vis = 1.0;',
     '  for (int i = 0; i < ' + MAXC + '; i++) {',
@@ -315,25 +317,44 @@
     '        float ch = cos(cr.w), sh = sin(cr.w);',
     '        vec3 lp = vec3(dxz.x * ch + dxz.y * sh, wp.y - cr.y, -dxz.x * sh + dxz.y * ch);',
     '        vec3 ln = vec3(wn.x * ch + wn.z * sh, wn.y, -wn.x * sh + wn.z * ch);',
-    // the ground (and kerbs) under and round the car, facing up; or a point on one of its tyres
-    '        int tyre = -1;',
-    // (on the tyre: above the road, or low down but not facing up; the road under a tyre, facing
-    // up, is ground and shaded by that tyre, while the tyre's own lowest edge must not be lit)
-    '        if (lp.y > 0.04 || ln.y < 0.6) for (int k = 0; k < 4; k++) { vec3 tc = uOccBC[4 + k], tr = vec3(0.37, 0.38, uOccBR[4 + k].z + 0.03); if (all(lessThan(abs(lp - tc), tr))) tyre = k; }',
-    '        float gw = tyre >= 0 ? 1.0 : (1.0 - smoothstep(0.06, 0.2, lp.y)) * smoothstep(0.3, 0.7, ln.y);',
+    // the ground (and kerbs) under and round the car, facing up. The front tyres turn with the
+    // steering, so their boxes are turned with them (in the car's frame, about each tyre's
+    // centre): fixed to the car, a steered tyre's shade on the road pointed straight ahead
+    '        float sc = cos(uOccSt[i]), ss = sin(uOccSt[i]);',
+    '        float gw = (1.0 - smoothstep(0.06, 0.2, lp.y)) * smoothstep(0.3, 0.7, ln.y);',
     '        float cv = 1.0;',
-    '        if (gw > 0.0) for (int j = 0; j < ' + NB + '; j++) { if (tyre < 0 || (j != 4 + tyre && j != 8 + tyre && j != 12 + tyre)) cv *= 1.0 - clamp(r3Box(lp - uOccBC[j], ln, uOccBR[j]), 0.0, 1.0); }',
+    '        if (gw > 0.0) for (int j = 0; j < ' + NB + '; j++) {',
+    '          vec3 q = lp - uOccBC[j], qn = ln;',
+    '          int t = j - 4 - ((j - 4) / 4) * 4;', // which tyre a tyre box belongs to (0 and 1: the front ones)
+    '          if (j >= 4 && t < 2) { q = r3Steer(q, sc, ss); qn = r3Steer(ln, sc, ss); }',
+    '          cv *= 1.0 - clamp(r3Box(q, qn, uOccBR[j]), 0.0, 1.0);',
+    '        }',
     '        vis *= mix(1.0, cv, gw);',
+    // a point just above the road that does not face up (the foot of a tyre, a low endplate)
+    // takes the shade of the road under it, fading out by 0.12 m: at the foot of a tyre the
+    // edge pixels hold both rubber and road, at almost the same depth, and lit as rubber they
+    // drew a faint light line between the wheel and its shadow
+    '        float lw = (1.0 - smoothstep(0.02, 0.12, lp.y)) * (1.0 - smoothstep(0.3, 0.7, ln.y));',
+    '        if (lw > 0.0) {',
+    '          vec3 gp = vec3(lp.x, 0.0, lp.z); float cg = 1.0;',
+    '          for (int j = 0; j < ' + NB + '; j++) {',
+    '            vec3 q = gp - uOccBC[j], qn = vec3(0.0, 1.0, 0.0);',
+    '            int t = j - 4 - ((j - 4) / 4) * 4;',
+    '            if (j >= 4 && t < 2) { q = r3Steer(q, sc, ss); }',
+    '            cg *= 1.0 - clamp(r3Box(q, qn, uOccBR[j]), 0.0, 1.0);',
+    '          }',
+    '          vis *= mix(1.0, cg, lw);',
+    '        }',
     '      }',
     '    }',
     '  }',
     '  return vis;',
     '}',
   ].join('\n');
-  // the cars nearest the camera: [{ x, y (ground), z, h }]
+  // the cars nearest the camera: [{ x, y (ground), z, h, steer }]
   function setCars(list) {
     const n = Math.min(MAXC, list.length);
-    for (let i = 0; i < n; i++) U.uOccCar.value[i].set(list[i].x, list[i].y, list[i].z, list[i].h);
+    for (let i = 0; i < n; i++) { U.uOccCar.value[i].set(list[i].x, list[i].y, list[i].z, list[i].h); U.uOccSt.value[i] = list[i].steer || 0; }
     U.uOccN.value = n;
   }
 

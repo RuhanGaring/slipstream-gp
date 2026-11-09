@@ -664,7 +664,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
     GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
-    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
+    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
@@ -4259,7 +4259,7 @@ void main() {
         if (d < 120 * 120) near.push([d, car, m]);
       }
       near.sort((a, b) => a[0] - b[0]);
-      F1.R3Shadow.setCars(G.__noCarOcc ? [] : near.slice(0, 8).map(([, car, m]) => ({ x: car.x, y: m.userData.gy || 0, z: car.y, h: car.h })));
+      F1.R3Shadow.setCars(G.__noCarOcc ? [] : near.slice(0, 8).map(([, car, m]) => ({ x: car.x, y: m.userData.gy || 0, z: car.y, h: car.h, steer: car.steer || 0 })));
     }
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1);
@@ -4272,6 +4272,7 @@ void main() {
         motionNear: ['tv', 'load', 'orbit', 'free', 'top', 'map', 'heli', 'blimp'].includes(mode) ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' || mode === 'nose' || mode === 'side' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
+        mode, // (a change of camera is a cut for the motion blur and the TAA history)
       });
     } else {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;

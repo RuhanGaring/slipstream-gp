@@ -1200,6 +1200,7 @@
       add(optRow('Render scale', 'Above 100% supersamples', [0.4, 0.5, 0.7, 0.75, 1, 1.25, 1.5], () => gx.scale, v => setG('scale', v), v => Math.round(v * 100) + '%'));
       add(optRow('Anti-aliasing', '', [0, 2, 4, 8], () => gx.msaa, v => setG('msaa', v), v => (v ? 'MSAA ' + v + 'X' : 'OFF')));
       add(optRow('Temporal anti-aliasing', 'Smooths shimmer on fences, grass and kerbs', [true, false], () => gx.taa, v => setG('taa', v), onOff));
+      add(optRow('FXAA', 'Smooths the edges left in the finished picture', [true, false], () => gx.fxaa, v => setG('fxaa', v), onOff));
       add(optRow('Shadows', '', ['off', 'low', 'medium', 'high', 'ultra'], () => gx.shadows, v => setG('shadows', v), v => v.toUpperCase()));
       add(optRow('Ambient occlusion', 'Contact shadowing in creases', [true, false], () => gx.ssao, v => setG('ssao', v), onOff));
       add(optRow('Bloom', 'Glow from bright highlights', [true, false], () => gx.bloom, v => setG('bloom', v), onOff));
@@ -1238,6 +1239,7 @@
     ['fpsCap', 'Frame rate limit', 'A lower limit saves battery and heat', [0, 30, 45, 60, 90, 120], v => (v ? v + ' FPS' : 'OFF')],
     ['msaa', 'Anti-aliasing', 'Needs post-processing', [0, 2, 4, 8], v => (v ? 'MSAA ' + v + 'X' : 'OFF')],
     ['taa', 'Temporal anti-aliasing', 'Smooths shimmer on fences, grass and kerbs. Needs post-processing', [true, false], onOffF],
+    ['fxaa', 'FXAA', 'Smooths the edges left in the finished picture. Needs post-processing', [true, false], onOffF],
     ['drs', 'Dynamic resolution', 'Lowers the render scale a little to hold the frame rate target (with Auto quality on)', [true, false], onOffF],
     ['aniso', 'Texture filtering', 'Road and kerb sharpness at a glancing angle', [1, 2, 4, 8, 16], v => (v === 1 ? 'BILINEAR' : v + 'X ANISOTROPIC')],
     ['LIGHTING AND SHADOWS'],

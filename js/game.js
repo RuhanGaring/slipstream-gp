@@ -37,12 +37,12 @@
     // MSAA and a plain depth buffer (see POT in js/render3d.js), so switching to or from it reloads
     // rock: the slowest phones. Potato plus a lower resolution, sparse scenery, a near far plane
     // and simplified cars (each distant car one draw call)
-    rock: { potato: true, rock: true, lite: true, post: false, taa: false, scale: 0.4, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'minimal' },
-    potato: { potato: true, rock: false, lite: true, post: false, taa: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'sparse' },
-    low: { potato: false, rock: false, lite: true, post: false, taa: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
-    medium: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
-    high: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1, msaa: 2, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
-    ultra: { potato: false, rock: false, lite: false, post: true, taa: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    rock: { potato: true, rock: true, lite: true, post: false, taa: false, fxaa: false, scale: 0.4, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'minimal' },
+    potato: { potato: true, rock: false, lite: true, post: false, taa: false, fxaa: false, scale: 0.5, msaa: 0, shadows: 'off', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'sparse' },
+    low: { potato: false, rock: false, lite: true, post: false, taa: false, fxaa: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
+    medium: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
+    high: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1, msaa: 2, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    ultra: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
   };
   // Advanced graphics (Settings > Advanced graphics): every other knob that trades speed for
   // looks, with each preset's value. A preset sets all of these; touching one makes it CUSTOM.

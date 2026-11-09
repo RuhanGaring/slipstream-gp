@@ -14,12 +14,14 @@
 //   wet road    screen-space reflections on the road when it is wet (puddles mirror the cars and
 //               the scenery), traced at half size only while the track is wet
 //   composite   AgX or ACES tone mapping, vignette, chromatic aberration, grain dither
+//   FXAA        on the finished picture: edges found by their contrast are smoothed along their
+//               direction (the classic FXAA of Timothy Lottes); the grain goes on after it
 (function (G) {
   'use strict';
   const F1 = G.F1;
 
   let R = null, W = 2, H = 2;
-  const Q = { on: true, taa: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
+  const Q = { on: true, taa: true, fxaa: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
   const RT = {};
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quadGeo = new THREE.BufferGeometry();
@@ -184,6 +186,35 @@
     '  gl_FragColor = vec4(itm(rgb(mix(h, c0, k))), w);', // (alpha: this pixel's depth, for the next frame's test)
     '}'].join('\n'), Object.assign(depthU(), { tCur: { value: null }, tHist: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() },
     uTexel: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uReset: { value: 1 }, uStatic: { value: 0 } }));
+  // ---------- FXAA ----------
+  // The tone-mapped picture (sRGB, 8 bit) in, the canvas out. Only pixels on an edge (local
+  // contrast over an eighth of the brightest, and over a small floor) are touched, so textures
+  // stay sharp. Then the grain, which the composite leaves out when this pass runs.
+  const fxaaMat = mk([
+    'varying vec2 vUv; uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uGrain; uniform float uLens; uniform float uTime; uniform vec2 uRes;',
+    'float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }',
+    'float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }',
+    'void main(){',
+    '  vec3 cM = texture2D(tSrc, vUv).rgb;',
+    '  float lM = lum(cM);',
+    '  float lNW = lum(texture2D(tSrc, vUv + vec2(-1.0, -1.0) * uTexel).rgb), lNE = lum(texture2D(tSrc, vUv + vec2(1.0, -1.0) * uTexel).rgb);',
+    '  float lSW = lum(texture2D(tSrc, vUv + vec2(-1.0, 1.0) * uTexel).rgb), lSE = lum(texture2D(tSrc, vUv + vec2(1.0, 1.0) * uTexel).rgb);',
+    '  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));',
+    '  vec3 c = cM;',
+    '  if (lMax - lMin > max(0.0312, lMax * 0.125)) {',
+    // the edge runs across the steepest change; sample along it, at most 8 pixels each way
+    '    vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));',
+    '    float red = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);',
+    '    dir = clamp(dir / (min(abs(dir.x), abs(dir.y)) + red), -8.0, 8.0) * uTexel;',
+    '    vec3 a = 0.5 * (texture2D(tSrc, vUv + dir * (1.0 / 3.0 - 0.5)).rgb + texture2D(tSrc, vUv + dir * (2.0 / 3.0 - 0.5)).rgb);',
+    '    vec3 b = a * 0.5 + 0.25 * (texture2D(tSrc, vUv - dir * 0.5).rgb + texture2D(tSrc, vUv + dir * 0.5).rgb);',
+    '    float lb = lum(b);',
+    '    c = lb < lMin || lb > lMax ? a : b;',
+    '  }',
+    '  c += (hash(vUv * uRes + fract(uTime) * 61.0) - 0.5) * (uLens > 0.5 ? 0.016 : 0.006) * uGrain;',
+    '  gl_FragColor = vec4(c, 1.0);',
+    '}'].join('\n'), { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uGrain: { value: 0 }, uLens: { value: 0 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2() } });
+
   const HALTON = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
 
   // ---------- wet road reflections ----------
@@ -378,7 +409,16 @@
     '  vec3 n = normalize(cross(dot(dx1, dx1) < dot(dx2, dx2) ? dx1 : dx2, dot(dy1, dy1) < dot(dy2, dy2) ? dy1 : dy2));',
     '  if (dot(n, p) > 0.0) n = -n;',
     '  vec3 wn = normalize((uInvView * vec4(n, 0.0)).xyz);',
-    '  return 0.03 + 0.97 * r3CarSky(wp, wn);',
+    '  float k = r3CarSky(wp, wn);',
+    // A pixel on the edge of a tyre (or any car part) against the road behind it holds some of
+    // that road's colour (MSAA and TAA blend across the edge) but only the near surface's depth,
+    // so it would take the near surface's (unshaded) value and its road share stays bright: a
+    // faint light line between the wheel and its shadow. Where a neighbour lies well behind,
+    // that neighbour's road value is worked out too and the darker of the two is used.
+    '  vec3 fx = dot(dx1, dx1) > dot(dx2, dx2) ? p + dx1 : p - dx2, fy = dot(dy1, dy1) > dot(dy2, dy2) ? p + dy1 : p - dy2;',
+    '  vec3 f = -fx.z > -fy.z ? fx : fy;',
+    '  if (-f.z > w + 0.05 + 0.02 * w) k = min(k, r3CarSky((uInvView * vec4(f, 1.0)).xyz, vec3(0.0, 1.0, 0.0)));',
+    '  return 0.03 + 0.97 * k;',
     '}',
     'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain;',
@@ -435,10 +475,14 @@
     '    vec2 ca = d * dot(d, d) * 0.0045;',
     '    c = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
     '  } else c = texture2D(tScene, vUv).rgb;',
-    // after TAA: a light unsharp mask, limited so it cannot ring round a bright edge
+    // after TAA: a light unsharp mask, kept inside the range of the pixel and its four
+    // neighbours, so it never overshoots: at a dark edge (a tyre against the road) an unbounded
+    // one drew a thin light line on the road beside it
     '  if (uSharp > 0.0) {',
-    '    vec3 nb = (texture2D(tScene, vUv + vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv - vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv + vec2(0.0, uSrcTexel.y)).rgb + texture2D(tScene, vUv - vec2(0.0, uSrcTexel.y)).rgb) * 0.25;',
-    '    c = clamp(c + uSharp * (c - nb), c * 0.6, c * 1.6 + 0.02);',
+    '    vec3 s1 = texture2D(tScene, vUv + vec2(uSrcTexel.x, 0.0)).rgb, s2 = texture2D(tScene, vUv - vec2(uSrcTexel.x, 0.0)).rgb;',
+    '    vec3 s3 = texture2D(tScene, vUv + vec2(0.0, uSrcTexel.y)).rgb, s4 = texture2D(tScene, vUv - vec2(0.0, uSrcTexel.y)).rgb;',
+    '    vec3 nb = (s1 + s2 + s3 + s4) * 0.25, lo = min(c, min(min(s1, s2), min(s3, s4))), hi = max(c, max(max(s1, s2), max(s3, s4)));',
+    '    c = clamp(c + uSharp * (c - nb), lo, hi);',
     '  }',
     // AO is sky light being blocked, so it scales only the share of the light that is not
     // direct sun (the scene alpha, written by the lit materials): full in shade or overcast,
@@ -460,7 +504,7 @@
     '}'].join('\n'), {
     tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) }, uInvView: { value: new THREE.Matrix4() },
-    ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
+    ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
   });
@@ -493,12 +537,13 @@
   function setSize(w, h) { if (w !== W || h !== H) { W = w; H = h; dirty = true; } }
   function setQuality(o) {
     const need = o.scale !== Q.scale || o.msaa !== Q.msaa || (o.taa != null && !!o.taa !== !!Q.taa);
+    if (o.fxaa != null) o.fxaa = !!o.fxaa;
     Object.assign(Q, o);
     if (need) dirty = true;
   }
 
   const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4(), _pvp = new THREE.Matrix4(), SUN = new THREE.Vector3();
-  let hadPrev = false, lastCam = null, frame = 0, hi = 0, histOK = false;
+  let hadPrev = false, lastCam = null, lastMode = '', frame = 0, hi = 0, histOK = false;
   const lastPos = new THREE.Vector3(), lastDir = new THREE.Vector3(), _dir = new THREE.Vector3();
 
   // view: { exposure, sunDir (world), sunCol, dt }
@@ -510,8 +555,9 @@
     frame = (frame + 1) % 4096;
     // a camera cut (a new TV camera, a replay jump) starts the history again
     _dir.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    const cut = !hadPrev || lastCam !== camera || camera.position.distanceToSquared(lastPos) > 144 || _dir.dot(lastDir) < 0.9;
-    lastPos.copy(camera.position); lastDir.copy(_dir);
+    // (a change of camera mode is a cut even when the new camera is close by: chase to T camera)
+    const cut = !hadPrev || lastCam !== camera || camera.position.distanceToSquared(lastPos) > 144 || _dir.dot(lastDir) < 0.9 || (view.mode || '') !== lastMode;
+    lastPos.copy(camera.position); lastDir.copy(_dir); lastMode = view.mode || '';
     // 1. scene in linear HDR (with TAA, from a camera moved by a fraction of a pixel: Halton 2,3)
     let jx = 0, jy = 0;
     const pe = camera.projectionMatrix.elements;
@@ -524,7 +570,9 @@
     let src = RT.scene.texture;
     curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     // the cars' screen motion, for TAA and motion blur
-    const moving = hadPrev && lastCam === camera && view.dt > 0;
+    // (not on the frame of a camera cut: the jump from the last camera's place read as a huge
+    // movement and smeared the whole picture, the car's own bodywork included, for a frame)
+    const moving = hadPrev && lastCam === camera && view.dt > 0 && !cut;
     let velTex = black;
     if (view.vel && (Q.motion && moving || taa && !cut)) { velocityPass(view.vel, camera); velTex = RT.vel.texture; }
     // wet road: reflections traced at half size, laid over the scene before TAA smooths them
@@ -639,7 +687,17 @@
     u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
     u.uLens.value = Q.lens ? 1 : 0; u.uTime.value = performance.now() / 1000; u.uTone.value = (view.tone || Q.tone) === 'aces' ? 1 : 0;
     u.uRes.value.set(R.domElement.width, R.domElement.height);
-    pass(compMat, null);
+    // 7. FXAA on the finished picture (the composite then draws into an 8-bit target, without grain)
+    const cw = R.domElement.width, ch = R.domElement.height;
+    if (Q.fxaa && !fxaaMat.userData.broken) {
+      if (!RT.ldr || RT.ldr.width !== cw || RT.ldr.height !== ch) { if (RT.ldr) RT.ldr.dispose(); RT.ldr = target(cw, ch, { type: THREE.UnsignedByteType }); }
+      const grain = u.uGrain.value; u.uGrain.value = 0;
+      pass(compMat, RT.ldr);
+      const f = fxaaMat.uniforms;
+      f.tSrc.value = RT.ldr.texture; f.uTexel.value.set(1 / cw, 1 / ch); f.uGrain.value = grain; f.uLens.value = u.uLens.value; f.uTime.value = u.uTime.value; f.uRes.value.set(cw, ch);
+      pass(fxaaMat, null);
+      if (fxaaMat.userData.broken) { u.uGrain.value = grain; pass(compMat, null); } // (a GPU that cannot compile it: the picture as before)
+    } else pass(compMat, null);
   }
 
   // compile the passes' shaders in the background before the first frame (see R3.precompile)
@@ -655,7 +713,7 @@
     return p.catch(() => {}).then(() => { rt.dispose(); g.dispose(); });
   }
   // which passes this GPU could not compile (switched off), for the graphics report
-  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, wet: WET.k, brokenPasses: b }; }
+  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, fxaa: Q.fxaa && !fxaaMat.userData.broken, wet: WET.k, brokenPasses: b }; }
   // Regression probe for the pale outline round a car against its shadow (tools/halocheck.py):
   // with window.__aoProbe set, each frame compares the occlusion carried over from earlier frames
   // with this frame's own, over the lower part of the screen (the road). A carried-over value far

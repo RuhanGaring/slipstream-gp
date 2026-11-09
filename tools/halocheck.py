@@ -12,13 +12,16 @@ own. It also saves a crop round the player's car for the eye. Run it after any c
 post stack, the car's ground shading or the shadows.
 
 usage: python tools/halocheck.py OUTDIR [track ...]      exit code 1 on a failure
+       PRESET=ultra python tools/halocheck.py ...      on a graphics preset (default: High with
+                                                         post, TAA and AO forced on)
 """
-import sys, time, json, pathlib, threading, functools, http.server, socketserver
+import os, sys, time, json, pathlib, threading, functools, http.server, socketserver
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 out = pathlib.Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
 tracks = sys.argv[2:] or ['kestrel', 'montaurele']
+PRESET = os.environ.get('PRESET', '')
 LIMIT = 0.001  # share of road pixels allowed to carry a ghost value: the bug measured 0.28% in the T camera, the fix 0.05%
 
 
@@ -38,7 +41,7 @@ with sync_playwright() as p:
         pg.on('pageerror', lambda e: logs.append(str(e)))
         pg.goto(f'http://127.0.0.1:{port}/index.html?t={time.time()}', timeout=120000)
         pg.wait_for_function('window.__game && window.__game.ready', timeout=120000)
-        pg.evaluate("t => { localStorage.setItem('slip_seen','true'); const G = __game.Game; G.settings.autoQ = false; Object.assign(G.settings.gfx, { post: true, taa: true, ssao: true }); G.applySettings(); __game.quick({ flow: { track: t }, race: { laps: 8 } }); }", track)
+        pg.evaluate("([t, P]) => { localStorage.setItem('slip_seen','true'); const G = __game.Game; G.settings.autoQ = false; Object.assign(G.settings.gfx, P ? Object.assign({}, G.GFX_PRESETS[P], { preset: P }) : { post: true, taa: true, ssao: true }); G.applySettings(); __game.quick({ flow: { track: t }, race: { laps: 8 } }); }", [track, PRESET])
         pg.wait_for_function("t => { const G = __game.Game; return G.state === 'race' && G.race.track.id === t && G.race.green; }", arg=track, timeout=280000)
         pg.evaluate("() => { const G = __game.Game; G.race.autoPlayer = true; G.hudOn = false; document.getElementById('hud').classList.add('off'); }")
         time.sleep(8)
@@ -51,7 +54,7 @@ with sync_playwright() as p:
             frames, mean, p95, speed, mc, mt = r
             # both buffers must read back real values (a failed read gives zeros and a false pass)
             sane = mc > 0.2 and mt > 0.2 and abs(mt - mc) < 0.15
-            ok = frames > 10 and mean < LIMIT and speed > 15 and sane
+            ok = frames > 10 and mean < LIMIT and speed > 8 and sane  # (moving: 29 km/h and up, a hairpin counts)
             if not sane: print(f'  probe read failed: mean AO this frame {mc:.3f}, carried over {mt:.3f}')
             fails += not ok
             print(f"{'PASS' if ok else 'FAIL'} {track} {cam}: ghost share mean {mean * 100:.3f}%  p95 {p95 * 100:.3f}%  over {frames} frames at {speed * 3.6:.0f} km/h (limit {LIMIT * 100:.1f}%)", flush=True)
