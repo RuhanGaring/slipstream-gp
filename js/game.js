@@ -59,12 +59,11 @@
   //   particles, skids, debris, rainK    effects budgets
   //   physLod / physLodDist   distant AI cars step their physics at half rate past this many metres
   //   catchup     most physics steps run in one frame before the game slows instead (8 = 30 fps)
-  //   haze        heat haze over the engines of the nearest cars (post-processing)
   //   drs         dynamic resolution: the render scale drops a little (to 67% at most) to hold
   //               the frame rate target before Auto quality turns anything off
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
     trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 34, carFar: 130, carDraw: 0, dispHz: 12,
-    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, haze: true };
+    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true };
   const ADV_P = {
     ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17 },
     high: {},

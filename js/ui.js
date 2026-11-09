@@ -1256,7 +1256,6 @@
     ['shaftK', 'Sun shaft strength', '', [0.2, 0.45, 0.7, 1], v => Math.round(v / 0.45 * 100) + '%'],
     ['motion', 'Motion blur', 'Camera motion and moving cars', [true, false], onOffF],
     ['shutter', 'Motion blur amount', 'Shutter angle. 360 blurs the most', [90, 180, 270, 360], v => v + ' DEG'],
-    ['haze', 'Heat haze', 'Shimmer over the engines of nearby cars. Needs post-processing', [true, false], onOffF],
     ['lens', 'Lens effects', 'Vignette, chromatic aberration', [true, false], onOffF],
     ['grain', 'Film grain', 'Needs lens effects', [true, false], onOffF],
     ['tone', 'Tone mapping', 'AgX keeps bright colours natural', ['agx', 'aces'], v => (v === 'agx' ? 'AGX' : 'ACES FILMIC')],

@@ -4272,7 +4272,6 @@ void main() {
         motionNear: ['tv', 'load', 'orbit', 'free', 'top', 'map', 'heli', 'blimp'].includes(mode) ? 1e6 : mode === 'show' ? 9.5 : mode === 'cockpit' || mode === 'helmet' || mode === 'tcam' || mode === 'nose' || mode === 'side' ? 3.5 : 9.5,
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
-        haze: GFX.haze === false ? null : hazeOf(o.cars || []),
       });
     } else {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -4280,31 +4279,6 @@ void main() {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
     }
-  }
-
-  // Heat haze: the hot air over the engine of the nearest cars, as a point above the gearbox in
-  // screen space (uv, radius, view depth) and a strength, for the composite in js/r3-post.js.
-  // Strongest standing or slow (on the grid, in the pits), fainter at speed, gone by 45 m.
-  const _hz = new THREE.Vector3(), _hzOut = [];
-  function hazeOf(cars) {
-    _hzOut.length = 0;
-    const cp = camera.position, py = camera.projectionMatrix.elements[5];
-    for (const c of cars) {
-      const m = live.get(c);
-      if (!m || m.visible === false || c.retired) continue;
-      const bx = c.x - Math.cos(c.h) * 2.2, bz = c.y - Math.sin(c.h) * 2.2, dd = Math.hypot(bx - cp.x, bz - cp.z);
-      if (dd > 45 || dd < 2.5) continue;
-      _hz.set(bx, (m.userData.gy || 0) + 0.75, bz).applyMatrix4(camera.matrixWorldInverse);
-      const w = -_hz.z;
-      if (w < 1) continue;
-      _hz.applyMatrix4(camera.projectionMatrix);
-      const x = _hz.x * 0.5 + 0.5, y = _hz.y * 0.5 + 0.5, r = 0.75 * py / w * 0.5;
-      if (x < -r || x > 1 + r || y < -r || y > 1 + r) continue;
-      const k = (1 - 0.6 * Math.min(1, (c.speed || 0) / 70)) * (1 - U.smooth((dd - 25) / 20));
-      if (k > 0.02) _hzOut.push({ x, y, r, w, k, dd });
-    }
-    _hzOut.sort((a, b) => a.dd - b.dd);
-    return _hzOut;
   }
 
   // cars for the motion blur's and TAA's velocity pass: only those within 60 m of the camera

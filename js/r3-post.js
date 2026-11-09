@@ -117,6 +117,11 @@
   // AO over time: this frame's (noisy, fewer samples) obscurance blended with last frame's,
   // reprojected by the camera and clipped to the range around the pixel. Only the screen-space
   // term (r): the cars' sky occlusion (g) moves with the cars and is exact each frame anyway.
+  // The history keeps each pixel's view depth (b), and a carried-over value whose depth is not
+  // where this surface was last frame came from something else and is dropped. Without that, in
+  // the chase camera (the car still on screen, the road sliding under it) the road beside the car
+  // took the car's own unshadowed value: a pale outline between the car and its shadow
+  // (tools/halocheck.py checks for it).
   const aoTMat = mk([
     'varying vec2 vUv;', DEPTH, 'uniform sampler2D tAO; uniform sampler2D tHist; uniform mat4 uInvView; uniform mat4 uPrevVP; uniform vec2 uTexel; uniform float uReset;',
     'void main(){',
@@ -124,15 +129,19 @@
     '  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { float a = texture2D(tAO, vUv + vec2(float(i), float(j)) * uTexel).r; mn = min(mn, a); mx = max(mx, a); }',
     '  vec4 pc = uPrevVP * (uInvView * vec4(viewPos(vUv), 1.0)); vec2 pu = pc.xy / pc.w * 0.5 + 0.5;',
     '  float off = uReset + step(pc.w, 0.0) + step(1.0, max(abs(pu.x - 0.5), abs(pu.y - 0.5)) * 2.0);',
-    '  float h = clamp(texture2D(tHist, pu).r, mn, mx);',
-    '  gl_FragColor = vec4(off > 0.5 ? c.r : mix(h, c.r, 0.3), c.g, 1.0, 1.0);',
+    '  vec4 hh = texture2D(tHist, pu);',
+    '  off += step(0.04 * pc.w + 0.15, abs(hh.b - pc.w));',
+    '  float h = clamp(hh.r, mn, mx);',
+    '  gl_FragColor = vec4(off > 0.5 ? c.r : mix(h, c.r, 0.3), c.g, viewW(vUv), 1.0);',
     '}'].join('\n'), Object.assign(depthU(), { tAO: { value: null }, tHist: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() }, uTexel: { value: new THREE.Vector2() }, uReset: { value: 1 } }));
 
   // ---------- temporal anti-aliasing ----------
   // Colours are compared in YCoCg after a soft tone curve (so one bright sparkle does not widen
   // the clip box for everything round it); the history is read with a 5-tap Catmull-Rom filter,
   // which keeps it sharp under sub-pixel motion. Pixels within uStatic metres of the eye (the
-  // cockpit, the hands) move with the camera and are not reprojected.
+  // cockpit, the hands) move with the camera and are not reprojected. As with the AO, the history
+  // keeps its view depth (alpha) and a camera-reprojected value from another surface is dropped:
+  // the variance clip alone let a car's colours stay on the road along its outline.
   const taaMat = mk([
     'varying vec2 vUv;', DEPTH,
     'uniform sampler2D tCur; uniform sampler2D tHist; uniform sampler2D tVel; uniform mat4 uInvView; uniform mat4 uPrevVP;',
@@ -164,10 +173,12 @@
     '  vec3 p = vec3(n.x * w / uProj.x, n.y * w / uProj.y, -w);',
     '  vec4 pc = uPrevVP * (uInvView * vec4(p, 1.0)); vec2 pu = pc.xy / pc.w * 0.5 + 0.5;',
     '  vec4 mv = texture2D(tVel, vUv);',
-    '  if (mv.a > 0.5 && abs(mv.b - w) < 0.3 + 0.02 * mv.b) pu = u0 - mv.xy;',
+    '  bool car = mv.a > 0.5 && abs(mv.b - w) < 0.3 + 0.02 * mv.b;',
+    '  if (car) pu = u0 - mv.xy;',
     '  if (w < uStatic) pu = u0;',
     '  vec2 dp = (u0 - pu) / uTexel;',
     '  float off = uReset + step(pc.w, 0.0) + step(1.0, max(abs(pu.x - 0.5), abs(pu.y - 0.5)) * 2.0);',
+    '  if (!car && w >= uStatic) off += step(0.04 * pc.w + 0.15, abs(texture2D(tHist, pu).a - pc.w));',
     '  vec3 h = yc(tm(min(hist(pu), vec3(512.0))));',
     // clip toward the middle of the box (variance clipping, a little tighter when it moves)
     '  float g = mix(1.25, 0.85, clamp(length(dp) / 24.0, 0.0, 1.0));',
@@ -175,7 +186,7 @@
     '  vec3 ctr = 0.5 * (hi + lo), ext = 0.5 * (hi - lo) + 1e-5, d = h - ctr, a = abs(d / ext);',
     '  float m = max(a.x, max(a.y, a.z)); if (m > 1.0) h = ctr + d / m;',
     '  float k = off > 0.5 ? 1.0 : mix(0.09, 0.22, clamp(length(dp) / 30.0, 0.0, 1.0));',
-    '  gl_FragColor = vec4(itm(rgb(mix(h, c0, k))), texture2D(tCur, vUv).a);',
+    '  gl_FragColor = vec4(itm(rgb(mix(h, c0, k))), w);', // (alpha: this pixel's depth, for the next frame's test)
     '}'].join('\n'), Object.assign(depthU(), { tCur: { value: null }, tHist: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() },
     uTexel: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uReset: { value: 1 }, uStatic: { value: 0 } }));
   const HALTON = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
@@ -356,8 +367,6 @@
     // value, a pale outline round the car against its shadow. Each of the four half-size texels
     // round the pixel is weighted by how near its depth is to the pixel's own.
     'uniform vec2 uAOSize; uniform float uSunK; uniform float uSharp; uniform vec2 uSrcTexel;',
-    // heat haze over the engines of the nearest cars: (uv, radius in uv, view depth) and strength
-    'uniform vec4 uHz[6]; uniform float uHzK[6]; uniform int uHzN;',
     'vec2 aoUp(vec2 uv) {',
     '  vec2 g = uv * uAOSize - 0.5, b = floor(g), f = g - b; float w0 = viewW(uv), ws = 0.0; vec2 s = vec2(0.0);',
     '  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {',
@@ -402,26 +411,10 @@
     'void main(){',
     '  vec2 d = vUv - 0.5;',
     '  vec3 c;',
-    // the hot air rising off an engine bends what is seen through it: only what lies behind the car
-    '  vec2 suv = vUv;',
-    '  if (uHzN > 0) {',
-    '    vec2 hz = vec2(0.0); float asp = uRes.x / uRes.y, wp = viewW(vUv);',
-    '    for (int i = 0; i < 6; i++) {',
-    '      if (i >= uHzN) break;',
-    '      vec4 H = uHz[i]; vec2 dd = (vUv - H.xy - vec2(0.0, H.z * 0.45)) * vec2(asp, 0.62) / H.z;',
-    '      float r2 = dot(dd, dd);',
-    '      if (r2 < 1.0 && wp > H.w - 0.4) {',
-    '        float f = (1.0 - r2) * (1.0 - r2);',
-    '        vec2 q = vUv * uRes / max(1.0, 900.0 * H.z);',
-    '        hz += vec2(sin(q.y * 9.0 - uTime * 21.0 + q.x * 3.0), cos(q.x * 7.0 + uTime * 17.0 - q.y * 5.0)) * f * uHzK[i] * H.z;',
-    '      }',
-    '    }',
-    '    suv = vUv + hz * 0.035;',
-    '  }',
     '  if (uLens > 0.5) {', // lateral chromatic aberration, strongest toward the corners
     '    vec2 ca = d * dot(d, d) * 0.0045;',
-    '    c = vec3(texture2D(tScene, suv - ca).r, texture2D(tScene, suv).g, texture2D(tScene, suv + ca).b);',
-    '  } else c = texture2D(tScene, suv).rgb;',
+    '    c = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
+    '  } else c = texture2D(tScene, vUv).rgb;',
     // after TAA: a light unsharp mask, limited so it cannot ring round a bright edge
     '  if (uSharp > 0.0) {',
     '    vec3 nb = (texture2D(tScene, vUv + vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv - vec2(uSrcTexel.x, 0.0)).rgb + texture2D(tScene, vUv + vec2(0.0, uSrcTexel.y)).rgb + texture2D(tScene, vUv - vec2(0.0, uSrcTexel.y)).rgb) * 0.25;',
@@ -446,7 +439,6 @@
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
     tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
-    uHz: { value: [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()) }, uHzK: { value: [0, 0, 0, 0, 0, 0] }, uHzN: { value: 0 },
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) },
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
@@ -471,7 +463,7 @@
     for (let k = 1; k <= 6; k++) RT.bloom.push(target(w >> k, h >> k));
     RT.shaftA = target(w >> 2, h >> 2); RT.shaftB = target(w >> 2, h >> 2);
     RT.taa = Q.taa ? [target(w, h), target(w, h)] : [];
-    RT.aoH = Q.taa ? [target(w >> 1, h >> 1, { type: THREE.UnsignedByteType }), target(w >> 1, h >> 1, { type: THREE.UnsignedByteType })] : [];
+    RT.aoH = Q.taa ? [target(w >> 1, h >> 1), target(w >> 1, h >> 1)] : []; // (half float: b holds the depth)
     RT.w = w; RT.h = h;
   }
 
@@ -580,6 +572,7 @@
         u.uTexel.value.set(2 / w, 2 / h); u.uReset.value = cut ? 1 : 0;
         pass(aoTMat, A1);
         if (!aoTMat.userData.broken) ao = A1.texture;
+        if (G.__aoProbe) aoProbe(RT.ao, A1);
       }
     }
     // 4. bloom
@@ -620,10 +613,6 @@
     setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0;
-    // heat haze (view.haze: [{ x, y, r, w, k }] from js/render3d.js)
-    { const hz = view.haze || [], n = Q.haze === false ? 0 : Math.min(6, hz.length);
-      for (let i = 0; i < n; i++) { u.uHz.value[i].set(hz[i].x, hz[i].y, hz[i].r, hz[i].w); u.uHzK.value[i] = hz[i].k; }
-      u.uHzN.value = n; }
     u.uSharp.value = taa ? (G.__taaSharp != null ? G.__taaSharp : 0.22) : 0; u.uSrcTexel.value.set(1 / w, 1 / h);
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
@@ -646,7 +635,30 @@
     return p.catch(() => {}).then(() => { rt.dispose(); g.dispose(); });
   }
   // which passes this GPU could not compile (switched off), for the graphics report
-  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, haze: compMat.uniforms.uHzN.value, wet: WET.k, brokenPasses: b }; }
+  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, wet: WET.k, brokenPasses: b }; }
+  // Regression probe for the pale outline round a car against its shadow (tools/halocheck.py):
+  // with window.__aoProbe set, each frame compares the occlusion carried over from earlier frames
+  // with this frame's own, over the lower part of the screen (the road). A carried-over value far
+  // brighter than this frame's is a car's unshadowed value left on the road beside it.
+  // window.__aoProbeOut collects [share of such pixels, pixels looked at] per frame.
+  // (half-float targets cannot be read back everywhere: each is copied into an 8-bit one first)
+  const _rd = {}, copyMat = mk('varying vec2 vUv; uniform sampler2D tSrc; void main(){ gl_FragColor = vec4(texture2D(tSrc, vUv).r, 0.0, 0.0, 1.0); }', { tSrc: { value: null } });
+  function readR(rt) {
+    const w = rt.width, h = rt.height, k = w + 'x' + h;
+    const tmp = _rd[k] || (_rd[k] = { t: target(w, h, { type: THREE.UnsignedByteType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }), b: new Uint8Array(w * h * 4) });
+    copyMat.uniforms.tSrc.value = rt.texture; pass(copyMat, tmp.t);
+    R.readRenderTargetPixels(tmp.t, 0, 0, w, h, tmp.b);
+    const out = new Float32Array(w * h);
+    for (let i = 0; i < out.length; i++) out[i] = tmp.b[i * 4] / 255;
+    return out;
+  }
+  function aoProbe(cur, hist) {
+    const c = readR(cur), t = readR(hist), w = cur.width, h = cur.height;
+    let bad = 0, n = 0, sc = 0, st = 0;
+    for (let y = 0; y < Math.floor(h * 0.6); y++) for (let x = 0; x < w; x++) { const i = y * w + x; n++; sc += c[i]; st += t[i]; if (t[i] - c[i] > 0.3) bad++; }
+    // (the mean of each, so the check can tell a failed read, all zeros, from a clean frame)
+    (G.__aoProbeOut || (G.__aoProbeOut = [])).push([bad / n, n, sc / n, st / n]);
+  }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
   F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
