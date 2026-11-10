@@ -202,5 +202,103 @@
     return out;
   }
 
-  F1.R3CarShade = { U, GLSL, init, bake, live, rowOf, ROWS, MODEL_ROWS, NX, NZ, get atlas() { return atlas; }, X0, X1, Z0, Z1 };
+  // ---------- the car's own shade ----------
+  // The same trace over the car itself, once per model: every vertex of the bodywork (all its
+  // detail levels) gets the share of light reaching it past the rest of the car, over the whole
+  // sphere round it weighted by its own facing (the cosine), against the car in full detail. The
+  // result, 0 to 1 per vertex (attribute aSky), dims the sky light and the reflections on the car
+  // (js/r3-shaders.js): inside the sidepod inlets, under the wings, the floor and the cockpit rim.
+  // The wheels are left out: they spin, and a shade baked onto them would turn with them.
+  const SPH = 128, SPHD = [];
+  for (let i = 0; i < SPH; i++) {
+    const y = 1 - 2 * (i + 0.5) / SPH, r = Math.sqrt(1 - y * y), phi = i * 2.399963229728653;
+    SPHD.push(new THREE.Vector3(r * Math.cos(phi), y, r * Math.sin(phi)));
+  }
+  const vtxMat = new THREE.ShaderMaterial({
+    uniforms: { tP: { value: null }, tN: { value: null }, tD: { value: null }, uVP: { value: new THREE.Matrix4() }, uV: { value: new THREE.Matrix4() }, uDir: { value: new THREE.Vector3() } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: [
+      'varying vec2 vUv; uniform sampler2D tP; uniform sampler2D tN; uniform sampler2D tD; uniform mat4 uVP; uniform mat4 uV; uniform vec3 uDir;',
+      'void main(){',
+      '  vec4 P = texture2D(tP, vUv); vec3 N = texture2D(tN, vUv).xyz;',
+      '  float w = max(dot(N, uDir), 0.0);',
+      // (lifted a little off its own surface, so the car's own skin there does not count)
+      '  vec3 Q = P.xyz + N * 0.012 + uDir * 0.004;',
+      '  vec4 c = uVP * vec4(Q, 1.0); vec2 uv = c.xy / c.w * 0.5 + 0.5; float dQ = -(uV * vec4(Q, 1.0)).z;',
+      '  float open = 1.0;',
+      '  if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) { float s = texture2D(tD, uv).r; if (s > 0.0 && s * 64.0 < dQ - 0.02) open = 0.0; }',
+      '  gl_FragColor = vec4(open * w, w, 0.0, 1.0) * P.w;',
+      '}'].join('\n'),
+    blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false,
+  });
+  const ratioMat = new THREE.ShaderMaterial({
+    uniforms: { tA: { value: null } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: 'varying vec2 vUv; uniform sampler2D tA; void main(){ vec4 a = texture2D(tA, vUv); gl_FragColor = vec4(a.g > 1e-4 ? a.r / a.g : 1.0, 0.0, 0.0, 1.0); }',
+    depthTest: false, depthWrite: false,
+  });
+  const selfDone = new Set();
+  // body: the car's body group (js/r3-car.js), at rest. Fills aSky on its bodywork geometries.
+  function bakeSelf(id, body) {
+    if (!R || selfDone.has(id)) return;
+    selfDone.add(id);
+    const bu = body.userData, t0 = performance.now();
+    body.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(body.matrixWorld).invert(), rel = o => new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    // the occluder: every mesh of the full-detail level and the wheels, in the body's frame
+    const occ = new THREE.Scene(); occ.matrixWorldAutoUpdate = false;
+    const addOcc = o => o.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.position) { const q = new THREE.Mesh(m.geometry, depthMat); q.matrixAutoUpdate = false; q.matrix.copy(rel(m)); q.matrixWorld.copy(q.matrix); q.frustumCulled = false; occ.add(q); } });
+    if (bu.lodGroups && bu.lodGroups[0]) { const g = bu.lodGroups[0], was = g.visible; addOcc(g); g.visible = was; }
+    for (const w of bu.wheels || []) addOcc(w);
+    // the receivers: each distinct geometry of the bodywork levels (not the wheels)
+    const geos = new Map();
+    for (const g of bu.lodGroups || []) g.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.normal && !geos.has(m.geometry)) geos.set(m.geometry, rel(m)); });
+    if (bu.farG) bu.farG.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.normal && !geos.has(m.geometry)) geos.set(m.geometry, rel(m)); });
+    let V = 0;
+    for (const g of geos.keys()) V += g.attributes.position.count;
+    if (!V) return;
+    const W = 1024, H = Math.ceil(V / W), P = new Float32Array(W * H * 4), N = new Float32Array(W * H * 4);
+    const v = new THREE.Vector3(), n = new THREE.Vector3(), nm = new THREE.Matrix3();
+    let o = 0;
+    const spans = [];
+    for (const [g, m] of geos) {
+      const A = g.attributes.position, B = g.attributes.normal; nm.getNormalMatrix(m);
+      spans.push([g, o, A.count]);
+      for (let i = 0; i < A.count; i++, o++) {
+        v.fromBufferAttribute(A, i).applyMatrix4(m); n.fromBufferAttribute(B, i).applyMatrix3(nm).normalize();
+        P[o * 4] = v.x; P[o * 4 + 1] = v.y; P[o * 4 + 2] = v.z; P[o * 4 + 3] = 1;
+        N[o * 4] = n.x; N[o * 4 + 1] = n.y; N[o * 4 + 2] = n.z;
+      }
+    }
+    const tex = a => { const t = new THREE.DataTexture(a, W, H, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t; };
+    const tP = tex(P), tN = tex(N);
+    const acc = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    const out8 = new THREE.WebGLRenderTarget(W, H, { type: THREE.UnsignedByteType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    const bytes = new Uint8Array(W * H * 4);
+    withState(() => {
+      R.setRenderTarget(acc); R.setClearColor(BLACK, 1); R.clear(true, false, false);
+      for (const d of SPHD) {
+        dcam.position.copy(d).multiplyScalar(CAM); if (Math.abs(d.y) > 0.99) dcam.up.set(1, 0, 0); else dcam.up.set(0, 1, 0);
+        dcam.lookAt(0, 0.4, 0.4 * 0); dcam.updateMatrixWorld();
+        R.setRenderTarget(depthRT); R.setClearColor(BLACK, 1); R.clear(true, true, false);
+        R.render(occ, dcam);
+        const u = vtxMat.uniforms;
+        u.tP.value = tP; u.tN.value = tN; u.tD.value = depthRT.texture; u.uDir.value.copy(d);
+        u.uVP.value.multiplyMatrices(dcam.projectionMatrix, dcam.matrixWorldInverse); u.uV.value.copy(dcam.matrixWorldInverse);
+        quad.material = vtxMat; R.setRenderTarget(acc); R.render(qScene, quadCam);
+      }
+      ratioMat.uniforms.tA.value = acc.texture; quad.material = ratioMat; R.setRenderTarget(out8); R.render(qScene, quadCam);
+      R.readRenderTargetPixels(out8, 0, 0, W, H, bytes);
+      quad.material = accMat;
+    });
+    for (const [g, o0, cnt] of spans) {
+      const a = new Uint8Array(cnt);
+      for (let i = 0; i < cnt; i++) a[i] = bytes[(o0 + i) * 4];
+      g.setAttribute('aSky', new THREE.BufferAttribute(a, 1, true));
+    }
+    tP.dispose(); tN.dispose(); acc.dispose(); out8.dispose();
+    (G.__selfAOMs || (G.__selfAOMs = {}))[id] = Math.round(performance.now() - t0);
+  }
+
+  F1.R3CarShade = { U, GLSL, init, bake, bakeSelf, live, rowOf, ROWS, MODEL_ROWS, NX, NZ, get atlas() { return atlas; }, X0, X1, Z0, Z1 };
 })(typeof window !== 'undefined' ? window : globalThis);

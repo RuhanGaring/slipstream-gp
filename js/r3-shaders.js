@@ -241,14 +241,19 @@
     if (ao) {
       // skylight occlusion near the road: height above the car's own ground (the mesh's origin
       // sits at the car's ground, or at the wheel centre for tyres, hence ao.lift)
-      sh.vertexShader = 'varying float vAOh;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vAOh = (modelMatrix * vec4(transformed, 1.0)).y - modelMatrix[3].y + ' + ao.lift.toFixed(3) + ';');
-      sh.fragmentShader = 'varying float vAOh;\n' + sh.fragmentShader.replace('#include <aomap_fragment>', [
+      // (plus the car's own shade, traced once per model: aSky, js/r3-carshade.js; 1 where a mesh has none)
+      sh.vertexShader = 'varying float vAOh; attribute float aSky; varying float vSky;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSky = aSky;\n  vAOh = (modelMatrix * vec4(transformed, 1.0)).y - modelMatrix[3].y + ' + ao.lift.toFixed(3) + ';');
+      sh.fragmentShader = 'varying float vAOh; varying float vSky;\n' + sh.fragmentShader.replace('#include <aomap_fragment>', [
         '#include <aomap_fragment>',
         '  {',
         '    float aoUp = dot(normalize(normal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));',
         '    float aoAmt = 0.6 + 0.4 * (1.0 - clamp(aoUp, 0.0, 1.0));', // surfaces that face up still see the sky
         '    float aoG = 1.0 - aoAmt * ' + ao.k.toFixed(2) + ' * (1.0 - smoothstep(0.0, 0.8, vAOh));',
         '    reflectedLight.indirectDiffuse *= aoG; reflectedLight.indirectSpecular *= aoG;',
+        // the car's own shade: the sky light, and the sky's reflection a little more (a reflection
+        // comes from one direction, more often a hidden one where the surface is shut in)
+        '    float sk = clamp(vSky, 0.0, 1.0);',
+        '    reflectedLight.indirectDiffuse *= sk; reflectedLight.indirectSpecular *= sk * sqrt(sk);',
         '  }'].join('\n'));
     }
     if (mac) {
@@ -299,6 +304,8 @@
   function patch(m) {
     if (!m || m.userData.r3s || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return m;
     m.userData.r3s = true;
+    // (a mesh without the car's traced shade reads it as 1: three feeds a missing attribute this)
+    if (m.userData.carAO) m.defaultAttributeValues = Object.assign({}, m.defaultAttributeValues, { aSky: [1] });
     const mac = m.userData.macro || null, liv = m.userData.livery || null, gr = m.userData.grass || null, ao = m.userData.carAO || null, wk = m.userData.wetK || null;
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
@@ -483,7 +490,7 @@
         const ud = m.userData; m.userData = {};
         const back = m.clone(), front = m.clone();
         m.userData = ud;
-        for (const x of [back, front]) { x.userData = ud; x.onBeforeRender = m.onBeforeRender; x.onBeforeCompile = m.onBeforeCompile; if (m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) x.customProgramCacheKey = m.customProgramCacheKey; }
+        for (const x of [back, front]) { x.userData = ud; x.defaultAttributeValues = m.defaultAttributeValues; x.onBeforeRender = m.onBeforeRender; x.onBeforeCompile = m.onBeforeCompile; if (m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) x.customProgramCacheKey = m.customProgramCacheKey; }
         back.side = THREE.BackSide; front.side = THREE.FrontSide;
         pair = { back, front };
         splitOf.set(m, pair); splitOf.set(back, pair); splitOf.set(front, pair);

@@ -3545,6 +3545,7 @@ void main() {
     scene.add(outer);
     live.set(car, outer);
     if (F1.R3CarShade && body.userData.shadowGeo) F1.R3CarShade.bake(body.userData.carId, body.userData.shadowGeo);
+    if (F1.R3CarShade && GFX.carSelfShade !== false && body.userData.carId) F1.R3CarShade.bakeSelf(body.userData.carId, body);
     holdCar(outer);
     return outer;
   }
