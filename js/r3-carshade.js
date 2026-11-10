@@ -300,5 +300,92 @@
     (G.__selfAOMs || (G.__selfAOMs = {}))[id] = Math.round(performance.now() - t0);
   }
 
-  F1.R3CarShade = { U, GLSL, init, bake, bakeSelf, live, rowOf, ROWS, MODEL_ROWS, NX, NZ, get atlas() { return atlas; }, X0, X1, Z0, Z1 };
+  // ---------- the circuit's own shade on the road ----------
+  // The same physical trace for the road itself, once per circuit while it loads: a grid along
+  // the lap (every 0.5 m) and across the road and its kerbs, each point's share of open sky past
+  // the circuit's solid scenery (walls, barriers, stands, pit building, buildings, bridges; not
+  // the trees), 48 cosine-weighted sky directions, the lap taken in 600 m sections each with its
+  // own depth maps (about 0.3 m a texel). The road's material reads it (js/r3-shaders.js
+  // asphaltWear) and dims its sky light and reflections: the shade at the foot of a wall, under
+  // a bridge, between city buildings.
+  const ROAD_DIRS = (() => { const n = 48, o = []; for (let i = 0; i < n; i++) { const u = (i + 0.5) / n, phi = i * 2.399963229728653, r = Math.sqrt(u); o.push(new THREE.Vector3(r * Math.cos(phi), Math.sqrt(Math.max(0, 1 - u)), r * Math.sin(phi))); } return o; })();
+  const roadAcc = new THREE.ShaderMaterial({
+    uniforms: { tP: { value: null }, tD: { value: null }, uVP: { value: new THREE.Matrix4() }, uV: { value: new THREE.Matrix4() }, uU: { value: new THREE.Vector2() }, uW: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: [
+      'varying vec2 vUv; uniform sampler2D tP; uniform sampler2D tD; uniform mat4 uVP; uniform mat4 uV; uniform vec2 uU; uniform float uW;',
+      'void main(){',
+      '  vec3 Q = texture2D(tP, vec2(uU.x + vUv.x * uU.y, vUv.y)).xyz + vec3(0.0, 0.06, 0.0);',
+      '  vec4 c = uVP * vec4(Q, 1.0); vec2 uv = c.xy / c.w * 0.5 + 0.5; float dQ = -(uV * vec4(Q, 1.0)).z;',
+      '  float open = 1.0;',
+      '  if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) { float s = texture2D(tD, uv).r; if (s > 0.0 && s < dQ - 0.15) open = 0.0; }',
+      '  gl_FragColor = vec4(open * uW, 0.0, 0.0, 1.0);',
+      '}'].join('\n'),
+    blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false,
+  });
+  const roadDepthMat = new THREE.ShaderMaterial({
+    vertexShader: 'varying float vD; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'varying float vD; void main(){ gl_FragColor = vec4(vD, 0.0, 0.0, 1.0); }',
+    side: THREE.DoubleSide,
+  });
+  // tr: the circuit; root: its scenery. Returns { tex, L, d0, dw } or null.
+  function bakeRoad(tr, root) {
+    if (!R || !R.capabilities.isWebGL2 || !R.extensions.get('EXT_color_buffer_float')) return null;
+    const t0 = performance.now(), L = tr.L, NS = Math.min(8192, Math.ceil(L / 0.5)), ND = 48, half = tr.hw + 1.2, d0 = -half, dw = half * 2;
+    // the grid's points on the road surface
+    const P = new Float32Array(NS * ND * 4);
+    for (let i = 0; i < NS; i++) {
+      const s = (i + 0.5) / NS * L;
+      for (let j = 0; j < ND; j++) {
+        const d = d0 + (j + 0.5) / ND * dw, xz = F1.Tracks.pointAt(tr, s, d), y = F1.Tracks.surfS(tr, s, d), o = (j * NS + i) * 4;
+        P[o] = xz[0]; P[o + 1] = y; P[o + 2] = xz[1]; P[o + 3] = 1;
+      }
+    }
+    const tP = new THREE.DataTexture(P, NS, ND, THREE.RGBAFormat, THREE.FloatType); tP.minFilter = tP.magFilter = THREE.NearestFilter; tP.needsUpdate = true;
+    // the occluders: the scenery's solid shadow casters (the merged copies included), not the trees
+    const occ = new THREE.Scene(); occ.matrixWorldAutoUpdate = false;
+    root.traverse(m => {
+      if (!m.isMesh || !m.castShadow || m.isInstancedMesh || !m.geometry || m.geometry.isInstancedBufferGeometry) return;
+      const mt = Array.isArray(m.material) ? m.material[0] : m.material;
+      if (mt && (mt.transparent || mt.alphaTest > 0)) return;
+      const q = new THREE.Mesh(m.geometry, roadDepthMat); q.matrixAutoUpdate = false; q.matrix.copy(m.matrixWorld); q.matrixWorld.copy(m.matrixWorld); q.layers.enableAll(); occ.add(q);
+    });
+    if (!occ.children.length) { tP.dispose(); return null; }
+    const acc = new THREE.WebGLRenderTarget(NS, ND, { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    acc.texture.wrapS = THREE.RepeatWrapping;
+    const DM = 2048, dRT = new THREE.WebGLRenderTarget(DM, DM, { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2000); cam.layers.enableAll();
+    const SEC = Math.max(1, Math.round(L / 600)), per = Math.ceil(NS / SEC), ctr = new THREE.Vector3(), q = new THREE.Vector3();
+    withState(() => {
+      R.setRenderTarget(acc); R.setClearColor(BLACK, 1); R.clear(true, false, false);
+      for (let sec = 0; sec < SEC; sec++) {
+        const i0 = sec * per, i1 = Math.min(NS, i0 + per);
+        if (i0 >= i1) break;
+        // the section's middle and reach
+        ctr.set(0, 0, 0); let n = 0, rad = 0;
+        for (let i = i0; i < i1; i += 4) for (const j of [0, ND - 1]) { const o = (j * NS + i) * 4; ctr.x += P[o]; ctr.y += P[o + 1]; ctr.z += P[o + 2]; n++; }
+        ctr.multiplyScalar(1 / n);
+        for (let i = i0; i < i1; i += 4) for (const j of [0, ND - 1]) { const o = (j * NS + i) * 4; rad = Math.max(rad, q.set(P[o], P[o + 1], P[o + 2]).distanceTo(ctr)); }
+        rad += 40;
+        cam.left = cam.bottom = -rad; cam.right = cam.top = rad; cam.near = 1; cam.far = rad * 2 + 600; cam.updateProjectionMatrix();
+        const u = roadAcc.uniforms;
+        u.uU.value.set(i0 / NS, (i1 - i0) / NS); u.uW.value = 1 / ROAD_DIRS.length;
+        for (const d of ROAD_DIRS) {
+          cam.position.copy(ctr).addScaledVector(d, rad + 300); cam.up.set(d.y > 0.99 ? 1 : 0, d.y > 0.99 ? 0 : 1, 0); cam.lookAt(ctr); cam.updateMatrixWorld();
+          R.setRenderTarget(dRT); R.setClearColor(BLACK, 1); R.clear(true, true, false);
+          R.render(occ, cam);
+          u.tP.value = tP; u.tD.value = dRT.texture; u.uVP.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); u.uV.value.copy(cam.matrixWorldInverse);
+          acc.viewport.set(i0, 0, i1 - i0, ND); acc.scissor.set(i0, 0, i1 - i0, ND); acc.scissorTest = true;
+          quad.material = roadAcc; R.setRenderTarget(acc); R.render(qScene, quadCam);
+        }
+      }
+      acc.scissorTest = false; acc.viewport.set(0, 0, NS, ND); acc.scissor.set(0, 0, NS, ND);
+      quad.material = accMat;
+    });
+    tP.dispose(); dRT.dispose();
+    G.__roadSkyMs = Math.round(performance.now() - t0);
+    return { tex: acc.texture, rt: acc, L, d0, dw };
+  }
+
+  F1.R3CarShade = { U, GLSL, init, bake, bakeSelf, bakeRoad, live, rowOf, ROWS, MODEL_ROWS, NX, NZ, get atlas() { return atlas; }, X0, X1, Z0, Z1 };
 })(typeof window !== 'undefined' ? window : globalThis);

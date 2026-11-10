@@ -1248,6 +1248,8 @@
     ['shadowDist', 'Shadow distance', 'How far from the camera shadows reach', [0.5, 0.75, 1, 1.5, 2], pctF],
     ['shadowSoft', 'Shadow softness', '', [0.5, 1, 1.5, 2, 3], pctF],
     ['ssao', 'Ambient occlusion', 'Contact shadow in creases. Needs post-processing', [true, false], onOffF],
+    ['carSelfShade', 'Car self-shade', 'The car’s own shade in its recesses, traced once while loading. Applies on the next circuit', [true, false], onOffF],
+    ['roadShade', 'Road shade', 'Shade on the road from walls, stands and buildings, traced while the circuit loads. Applies on the next circuit', [true, false], onOffF],
     ['carShade', 'Car shade', 'The shade under the cars. Traced works it out live from the car\u2019s shape; Baked uses the same trace made once while loading', ['traced', 'baked', 'boxes'], v => v.toUpperCase()],
     ['aoSamples', 'Occlusion quality', 'Samples per pixel', [6, 8, 10, 16, 24], v => v + ' SAMPLES'],
     ['aoStrength', 'Occlusion strength', '', [0.5, 0.7, 0.85, 1, 1.2], pctF],

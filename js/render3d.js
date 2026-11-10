@@ -997,6 +997,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
   function dropBuilt(b) {
     if (b.wetMask) { b.wetMask.tex.dispose(); b.wetMask = null; }
+    if (b.roadSky) { b.roadSky.rt.dispose(); b.roadSky = null; }
     const shared = new Set(Object.values(MATS)), mats = new Set(), texs = new Set();
     b.root.traverse(o => {
       if (o.geometry) o.geometry.dispose();
@@ -1019,6 +1020,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // a long session (the home screen shows a new circuit each visit) would otherwise fill the tab
     state.cache.delete(tr.id); state.cache.set(tr.id, built);
     while (state.cache.size > KEEP_TRACKS) { const k = state.cache.keys().next().value; dropBuilt(state.cache.get(k)); state.cache.delete(k); }
+    // the circuit's traced sky shade on the road, made once per built circuit (not on the
+    // phone presets, which have no post-processing and little time to spare while loading)
+    if (built.roadSky === undefined) built.roadSky = F1.R3CarShade && !POT && GFX.post !== false && GFX.roadShade !== false ? F1.R3CarShade.bakeRoad(tr, built.root) : null;
+    { const RS = built.roadSky, S3 = F1.R3S.U; S3.uRoadShadeOn.value = RS ? 1 : 0; if (RS) { S3.uRoadShade.value = RS.tex; S3.uRoadShadeP.value.set(RS.L, RS.d0, RS.dw); } }
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }

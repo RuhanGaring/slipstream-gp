@@ -8,6 +8,9 @@
 
   // shared uniform objects: the same {value} is referenced by every patched program
   const U = {
+    // the circuit's traced sky shade on the road (js/r3-carshade.js bakeRoad): lap length, the
+    // grid's first lateral offset and width; off until a circuit has one
+    uRoadShade: { value: null }, uRoadShadeP: { value: new THREE.Vector3(1, -8, 16) }, uRoadShadeOn: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
@@ -356,7 +359,16 @@
     if (!U.uRubber) U.uRubber = { value: F1.R3T.photo('rubber', 1, false) };
     return ext(m, 'asph', sh => {
       sh.vertexShader = 'attribute vec4 trk; varying vec4 vTrk;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTrk = trk;');
-      sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber;\n' + NOISE + '\n' + sh.fragmentShader
+      // (the circuit's traced sky shade on the racing road, js/r3-carshade.js bakeRoad: the sky
+      // light and its reflection dimmed at the foot of walls, under bridges, between buildings;
+      // side streets carry a lateral 11 m, outside the grid, and are left alone)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', [
+        '#include <aomap_fragment>',
+        '  if (uRoadShadeOn > 0.5 && abs(vTrk.y - uRoadShadeP.y - uRoadShadeP.z * 0.5) < uRoadShadeP.z * 0.5) {',
+        '    float rsk = texture2D(uRoadShade, vec2(vTrk.x / uRoadShadeP.x, (vTrk.y - uRoadShadeP.y) / uRoadShadeP.z)).r;',
+        '    reflectedLight.indirectDiffuse *= rsk; reflectedLight.indirectSpecular *= rsk;',
+        '  }'].join('\n'));
+      sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber; uniform sampler2D uRoadShade; uniform vec3 uRoadShadeP; uniform float uRoadShadeOn;\n' + NOISE + '\n' + sh.fragmentShader
         .replace('#include <map_fragment>', [
           '#include <map_fragment>',
           '  float aLum = dot(diffuseColor.rgb, ' + LUM + ');',
