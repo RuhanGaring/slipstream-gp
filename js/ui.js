@@ -1258,6 +1258,7 @@
     ['shafts', 'Sun shafts', '', [true, false], onOffF],
     ['shaftK', 'Sun shaft strength', '', [0.2, 0.45, 0.7, 1], v => Math.round(v / 0.45 * 100) + '%'],
     ['motion', 'Motion blur', 'Camera motion and moving cars', [true, false], onOffF],
+    ['wheelBlur', 'Spinning wheel blur', 'The wheels blur round as they turn. Needs motion blur', [true, false], onOffF],
     ['shutter', 'Motion blur amount', 'Shutter angle. 360 blurs the most', [90, 180, 270, 360], v => v + ' DEG'],
     ['lens', 'Lens effects', 'Vignette, chromatic aberration', [true, false], onOffF],
     ['lensRain', 'Rain on the lens', 'Drops on onboard and chase cameras in the wet. Needs post-processing', [true, false], onOffF],

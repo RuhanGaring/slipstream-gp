@@ -330,10 +330,29 @@
   // ---------- motion blur ----------
   const motionMat = mk([
     'varying vec2 vUv;', DEPTH, 'uniform sampler2D tScene; uniform sampler2D tVel; uniform mat4 uInvView; uniform mat4 uPrevVP; uniform float uScale; uniform float uNear;',
+    // spinning wheels: centre (world) and radius, axle (world, unit) and the angle turned while
+    // the shutter is open, for the wheels of the nearest cars
+    'uniform vec4 uWh[8]; uniform vec4 uWa[8]; uniform int uWn; uniform mat4 uVP;',
     'float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }',
     'void main(){',
     '  vec3 p = viewPos(vUv);',
     '  vec4 wp = uInvView * vec4(p, 1.0);',
+    // a pixel on a spinning wheel is blurred along its own circle round the axle: the point is
+    // turned about the axle in eight steps over the shutter's angle and each step is looked up
+    // where it falls on the screen (an arc, not a straight smear)
+    '  for (int i = 0; i < 8; i++) {',
+    '    if (i >= uWn) break;',
+    '    vec3 d = wp.xyz - uWh[i].xyz, ax = uWa[i].xyz; float al = dot(d, ax); vec3 rd = d - ax * al;',
+    '    if (abs(al) < 0.26 && dot(rd, rd) < uWh[i].w * uWh[i].w) {',
+    '      float ang = uWa[i].w, j0 = ign(gl_FragCoord.xy) - 0.5; vec3 c = vec3(0.0), cr = cross(ax, rd), base = uWh[i].xyz + ax * al;',
+    // (a step that turns the point round to the hidden side lands on whatever is in front there:
+    // only the steps where the depth there is the wheel's own are used, so no road shows through)
+    '      float nn = 0.0;',
+    '      for (int k = 0; k < 8; k++) { float a = ((float(k) + j0) / 7.0 - 0.5) * ang; vec4 cp = uVP * vec4(base + rd * cos(a) + cr * sin(a), 1.0); vec2 u2 = cp.xy / cp.w * 0.5 + 0.5;',
+    '        if (u2.x > 0.0 && u2.x < 1.0 && u2.y > 0.0 && u2.y < 1.0 && abs(viewW(u2) - cp.w) < 0.05 + 0.01 * cp.w) { c += texture2D(tScene, u2).rgb; nn += 1.0; } }',
+    '      gl_FragColor = vec4(nn > 0.0 ? c / nn : texture2D(tScene, vUv).rgb, 1.0); return;',
+    '    }',
+    '  }',
     '  vec4 pc = uPrevVP * wp;',
     '  vec2 prev = pc.xy / pc.w * 0.5 + 0.5;',
     '  vec2 vel = (vUv - prev) * uScale;',
@@ -345,7 +364,8 @@
     '  vec3 c = vec3(0.0); float j = ign(gl_FragCoord.xy) - 0.5;',
     '  for (int i = 0; i < 8; i++) { float t = (float(i) + j) / 7.0 - 0.5; c += texture2D(tScene, vUv - vel * t).rgb; }',
     '  gl_FragColor = vec4(c / 8.0, 1.0);',
-    '}'].join('\n'), Object.assign(depthU(), { tScene: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() }, uScale: { value: 0.5 }, uNear: { value: 9 } }));
+    '}'].join('\n'), Object.assign(depthU(), { tScene: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() }, uScale: { value: 0.5 }, uNear: { value: 9 },
+    uWh: { value: [0, 1, 2, 3, 4, 5, 6, 7].map(() => new THREE.Vector4()) }, uWa: { value: [0, 1, 2, 3, 4, 5, 6, 7].map(() => new THREE.Vector4()) }, uWn: { value: 0 }, uVP: { value: new THREE.Matrix4() } }));
 
   // velocity pass: moving objects only (their own small scene of merged hulls), screen motion since the last frame from
   // each mesh's previous world matrix; b holds the view depth for the occlusion test
@@ -643,6 +663,10 @@
       motionMat.uniforms.uPrevVP.value.copy(prevVP);
       motionMat.uniforms.uScale.value = Math.min(1, Q.shutter / 360 / 60 / view.dt); // shutter angle, 180 degrees by default
       motionMat.uniforms.uNear.value = view.motionNear || 9;
+      // the wheels: the angle each turns while the shutter is open (shutter angle of a 60 Hz frame)
+      { const W = view.wheels || [], u = motionMat.uniforms, n = Q.wheelBlur === false ? 0 : Math.min(8, W.length), open = Q.shutter / 360 / 60;
+        for (let i = 0; i < n; i++) { const w = W[i]; u.uWh.value[i].set(w.c.x, w.c.y, w.c.z, w.r); u.uWa.value[i].set(w.ax.x, w.ax.y, w.ax.z, Math.max(-3, Math.min(3, w.w * open))); }
+        u.uWn.value = n; u.uVP.value.copy(curVP); }
       pass(motionMat, RT.motion);
       src = RT.motion.texture;
     }

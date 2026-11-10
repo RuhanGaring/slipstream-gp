@@ -715,7 +715,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
     GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
-    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, lensRain: GFX.lensRain !== false, carShade: GFX.carShade, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
+    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, wheelBlur: GFX.wheelBlur !== false, lensRain: GFX.lensRain !== false, carShade: GFX.carShade, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
@@ -4329,6 +4329,7 @@ void main() {
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
         mode, // (a change of camera is a cut for the motion blur and the TAA history)
+        wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || []),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),
       });
@@ -4339,6 +4340,31 @@ void main() {
       renderer.render(scene, camera);
     }
   }
+
+  // Spinning wheels for the motion blur (js/r3-post.js): the wheels of the two cars nearest the
+  // camera within 40 m, each its centre, its axle and how fast it turns (from the physics, or the
+  // car's speed over the wheel's radius). Last frame's matrices: a frame behind is no matter here.
+  const _whs = Array.from({ length: 8 }, () => ({ c: new THREE.Vector3(), ax: new THREE.Vector3(), r: 0.37, w: 0 })), _whOut = [], _wq = new THREE.Vector3();
+  function wheelsOf(cars) {
+    _whOut.length = 0;
+    const cp = camera.position, list = [];
+    for (const c of cars) { const m = live.get(c); if (!m || m.visible === false) continue; const d = (c.x - cp.x) ** 2 + (c.y - cp.z) ** 2; if (d < 1600) list.push([d, c, m]); }
+    list.sort((a, b) => a[0] - b[0]);
+    for (const [, c, m] of list.slice(0, 2)) {
+      const bu = m.userData.body.userData;
+      (bu.wheels || []).forEach((w, k) => {
+        const wd = w.userData, sp = wd.spin, e = _whs[_whOut.length];
+        if (!sp || !e) return;
+        sp.matrixWorld.decompose(e.c, _wQ, _wq);
+        e.ax.set(sp.matrixWorld.elements[8], sp.matrixWorld.elements[9], sp.matrixWorld.elements[10]).normalize();
+        const pw = c.wheels && c.wheels[k];
+        e.w = pw && pw.omega != null ? pw.omega : (c.speed || 0) / 0.36;
+        _whOut.push(e);
+      });
+    }
+    return _whOut;
+  }
+  const _wQ = new THREE.Quaternion();
 
   // The shade each car near the camera casts from the sky (js/r3-carshade.js): its baked
   // picture, or, on Traced, the nearest one traced live from its pose on the suspension.
