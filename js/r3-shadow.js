@@ -266,13 +266,17 @@
   // the ground, as if the tyre stood on it: dark rectangles round each wheel.
   const TYRES = [[1.964, -0.81, 0.16], [1.964, 0.81, 0.16], [-1.57, -0.80, 0.2], [-1.57, 0.80, 0.2]]; // x, z, half width
   const BOXES = [
-    [-0.05, 0.33, 0, 1.55, 0.30, 0.78],   // floor, tub and sidepods
+    [-0.05, 0.365, 0, 1.55, 0.265, 0.78], // floor, tub and sidepods (from 0.10 m: the floor's edge is
+                                          // thin and the body rises off it, so its shade fades out)
     [2.2, 0.40, 0, 0.75, 0.17, 0.28],     // nose
     [2.9, 0.20, 0, 0.32, 0.12, 0.97],     // front wing
-    [-1.95, 0.52, 0, 0.38, 0.45, 0.50],   // gearbox, diffuser, rear wing
+    [-1.95, 0.30, 0, 0.36, 0.18, 0.32],   // gearbox and diffuser, 0.12 to 0.48 m (the rear wing is its own
+                                          // box at the end: as one block down to the road, the open
+                                          // space under the wing threw a hard dark rectangle behind the car)
     ...TYRES.map(t => [t[0], 0.38, t[1], 0.12, 0.36, t[2]]), // tyres: 0.02 to 0.74 m, through the contact patch
     ...TYRES.map(t => [t[0], 0.38, t[1], 0.25, 0.30, t[2]]), // 0.08 to 0.68 m
     ...TYRES.map(t => [t[0], 0.38, t[1], 0.36, 0.18, t[2]]), // 0.20 to 0.56 m, across the middle
+    [-2.15, 0.86, 0, 0.22, 0.11, 0.50],   // rear wing, 0.75 to 0.97 m
   ];
   const NB = BOXES.length;
   U.uOccBC = { value: BOXES.map(b => new THREE.Vector3(b[0], b[1], b[2])) };
@@ -326,7 +330,7 @@
     '        if (gw > 0.0) for (int j = 0; j < ' + NB + '; j++) {',
     '          vec3 q = lp - uOccBC[j], qn = ln;',
     '          int t = j - 4 - ((j - 4) / 4) * 4;', // which tyre a tyre box belongs to (0 and 1: the front ones)
-    '          if (j >= 4 && t < 2) { q = r3Steer(q, sc, ss); qn = r3Steer(ln, sc, ss); }',
+    '          if (j >= 4 && j < 16 && t < 2) { q = r3Steer(q, sc, ss); qn = r3Steer(ln, sc, ss); }',
     '          cv *= 1.0 - clamp(r3Box(q, qn, uOccBR[j]), 0.0, 1.0);',
     '        }',
     '        vis *= mix(1.0, cv, gw);',
@@ -340,7 +344,7 @@
     '          for (int j = 0; j < ' + NB + '; j++) {',
     '            vec3 q = gp - uOccBC[j], qn = vec3(0.0, 1.0, 0.0);',
     '            int t = j - 4 - ((j - 4) / 4) * 4;',
-    '            if (j >= 4 && t < 2) { q = r3Steer(q, sc, ss); }',
+    '            if (j >= 4 && j < 16 && t < 2) { q = r3Steer(q, sc, ss); }',
     '            cg *= 1.0 - clamp(r3Box(q, qn, uOccBR[j]), 0.0, 1.0);',
     '          }',
     '          vis *= mix(1.0, cg, lw);',
