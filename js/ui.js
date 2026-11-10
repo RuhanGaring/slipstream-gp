@@ -1260,6 +1260,7 @@
     ['motion', 'Motion blur', 'Camera motion and moving cars', [true, false], onOffF],
     ['shutter', 'Motion blur amount', 'Shutter angle. 360 blurs the most', [90, 180, 270, 360], v => v + ' DEG'],
     ['lens', 'Lens effects', 'Vignette, chromatic aberration', [true, false], onOffF],
+    ['lensRain', 'Rain on the lens', 'Drops on onboard and chase cameras in the wet. Needs post-processing', [true, false], onOffF],
     ['grain', 'Film grain', 'Needs lens effects', [true, false], onOffF],
     ['tone', 'Tone mapping', 'AgX keeps bright colours natural', ['agx', 'aces'], v => (v === 'agx' ? 'AGX' : 'ACES FILMIC')],
     ['ev', 'Exposure', '', [-1, -0.5, 0, 0.5, 1], v => (v > 0 ? '+' : '') + v.toFixed(1) + ' EV', true],

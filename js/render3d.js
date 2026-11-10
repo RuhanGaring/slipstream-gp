@@ -715,7 +715,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
     GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
-    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, carShade: GFX.carShade, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
+    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, lensRain: GFX.lensRain !== false, carShade: GFX.carShade, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
@@ -4329,6 +4329,8 @@ void main() {
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
         mode, // (a change of camera is a cut for the motion blur and the TAA history)
+        lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
+        speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),
       });
     } else {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;

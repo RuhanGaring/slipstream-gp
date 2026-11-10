@@ -13,6 +13,8 @@
 //               around each pixel so nothing smears; the composite sharpens it back a little
 //   wet road    screen-space reflections on the road when it is wet (puddles mirror the cars and
 //               the scenery), traced at half size only while the track is wet
+//   lens rain   in a wet race, drops on the lens of an onboard or chase camera, bending what is
+//               behind them, blown back into streaks at speed
 //   composite   AgX or ACES tone mapping, vignette, chromatic aberration, grain dither
 //   FXAA        on the finished picture: edges found by their contrast are smoothed along their
 //               direction (the classic FXAA of Timothy Lottes); the grain goes on after it
@@ -429,6 +431,32 @@
     // value, a pale outline round the car against its shadow. Each of the four half-size texels
     // round the pixel is weighted by how near its depth is to the pixel's own.
     'uniform vec2 uAOSize; uniform float uSunK; uniform float uSharp; uniform vec2 uSrcTexel;',
+    // lens rain: how much (0 none), the car's speed (m/s), the time
+    'uniform float uRain; uniform float uRainV;',
+    'float rh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+    // the drops over this pixel: the offset they bend the view by (xy) and how much drop is here (z).
+    // Three layers of cells; each cell may hold a drop that lands, sits and fades, sliding down,
+    // and at speed is stretched along the wind (out from the middle of the picture) into a streak.
+    'vec3 lensDrops(vec2 uv, float t) {',
+    '  vec3 acc = vec3(0.0); float asp = uRes.x / uRes.y, wind = clamp(uRainV / 60.0, 0.0, 1.0);',
+    '  vec2 dirW = normalize(vec2((uv.x - 0.5) * asp, uv.y - 0.42) + 1e-4);',
+    '  t = mod(t, 977.0);',
+    '  for (int L = 0; L < 3; L++) {',
+    '    float fl = float(L), n = 5.0 + fl * 4.0;',
+    '    vec2 q = vec2(uv.x * asp, uv.y) * n, id = floor(q), f = fract(q) - 0.5;',
+    '    float r = rh(id + fl * 17.0);',
+    '    if (r > uRain * (0.24 - fl * 0.05)) continue;',
+    '    float life = fract(t * (0.12 + 0.25 * rh(id + 3.1)) + r * 7.0);',
+    '    float fade = smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.5, 1.0, life));',
+    // a drop lands, then slides: down when slow, out from the middle with the airflow when fast
+    '    vec2 c = (vec2(rh(id + 1.7), rh(id + 5.3)) - 0.5) * 0.5 + dirW * wind * life * 0.45 - vec2(0.0, (1.0 - wind) * life * 0.15);',
+    '    vec2 dd = f - c;',
+    '    float along = dot(dd, dirW), across = dd.x * dirW.y - dd.y * dirW.x;',
+    '    float rad = 0.07 + 0.09 * rh(id + 9.2), d = length(vec2(along / (1.0 + wind * 1.5), across)) / rad;',
+    '    if (d < 1.0) { float h = sqrt(1.0 - d * d); acc.xy += dd / rad * h * 0.018 * fade; acc.z = max(acc.z, (1.0 - d * d) * fade); }',
+    '  }',
+    '  return acc;',
+    '}',
     'vec2 aoUp(vec2 uv) {',
     '  vec2 g = uv * uAOSize - 0.5, b = floor(g), f = g - b; float w0 = viewW(uv), ws = 0.0; vec2 s = vec2(0.0);',
     '  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {',
@@ -473,19 +501,23 @@
     'void main(){',
     '  vec2 d = vUv - 0.5;',
     '  vec3 c;',
+    '  vec2 suv = vUv; float drop = 0.0;',
+    '  if (uRain > 0.01) { vec3 ld = lensDrops(vUv, uTime); suv = clamp(vUv - ld.xy, vec2(0.001), vec2(0.999)); drop = ld.z; }',
     '  if (uLens > 0.5) {', // lateral chromatic aberration, strongest toward the corners
     '    vec2 ca = d * dot(d, d) * 0.0045;',
-    '    c = vec3(texture2D(tScene, vUv - ca).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv + ca).b);',
-    '  } else c = texture2D(tScene, vUv).rgb;',
+    '    c = vec3(texture2D(tScene, suv - ca).r, texture2D(tScene, suv).g, texture2D(tScene, suv + ca).b);',
+    '  } else c = texture2D(tScene, suv).rgb;',
     // after TAA: a light unsharp mask, kept inside the range of the pixel and its four
     // neighbours, so it never overshoots: at a dark edge (a tyre against the road) an unbounded
     // one drew a thin light line on the road beside it
     '  if (uSharp > 0.0) {',
-    '    vec3 s1 = texture2D(tScene, vUv + vec2(uSrcTexel.x, 0.0)).rgb, s2 = texture2D(tScene, vUv - vec2(uSrcTexel.x, 0.0)).rgb;',
-    '    vec3 s3 = texture2D(tScene, vUv + vec2(0.0, uSrcTexel.y)).rgb, s4 = texture2D(tScene, vUv - vec2(0.0, uSrcTexel.y)).rgb;',
+    '    vec3 s1 = texture2D(tScene, suv + vec2(uSrcTexel.x, 0.0)).rgb, s2 = texture2D(tScene, suv - vec2(uSrcTexel.x, 0.0)).rgb;',
+    '    vec3 s3 = texture2D(tScene, suv + vec2(0.0, uSrcTexel.y)).rgb, s4 = texture2D(tScene, suv - vec2(0.0, uSrcTexel.y)).rgb;',
     '    vec3 nb = (s1 + s2 + s3 + s4) * 0.25, lo = min(c, min(min(s1, s2), min(s3, s4))), hi = max(c, max(max(s1, s2), max(s3, s4)));',
     '    c = clamp(c + uSharp * (c - nb), lo, hi);',
     '  }',
+    // (a drop also gathers a little light: brighter through its middle, a darker rim)
+    '  c *= 1.0 + drop * 0.1 - smoothstep(0.0, 0.15, drop) * (1.0 - smoothstep(0.15, 0.4, drop)) * 0.1;',
     // AO is sky light being blocked, so it scales only the share of the light that is not
     // direct sun (the scene alpha, written by the lit materials): full in shade or overcast,
     // faint in bright sun
@@ -501,10 +533,10 @@
     // grain doubles as dither, which also hides 8-bit banding in skies and fog
     '  float g = hash(vUv * uRes + fract(uTime) * 61.0) - 0.5;',
     '  c += g * (uLens > 0.5 ? 0.016 : 0.006) * uGrain;',
-    '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a); else if (uDbg == 3) c = vec3(carSky(vUv, uSrcTexel));', // debug views (window.__postDbg)
+    '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a); else if (uDbg == 3) c = vec3(carSky(vUv, uSrcTexel)); else if (uDbg == 4) c = vec3(drop, abs(suv - vUv) * 20.0);', // debug views (window.__postDbg)
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
-    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
+    tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0 }, uRainV: { value: 0 },
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) }, uInvView: { value: new THREE.Matrix4() },
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
@@ -685,6 +717,8 @@
     setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0; u.uInvView.value.copy(camera.matrixWorld);
+    // lens rain: only cameras on or behind a car get drops on their lens (not the TV cameras)
+    u.uRain.value = Q.lensRain === false ? 0 : (view.lensRain || 0); u.uRainV.value = view.speed || 0;
     u.uSharp.value = taa ? (G.__taaSharp != null ? G.__taaSharp : 0.22) : 0; u.uSrcTexel.value.set(1 / w, 1 / h);
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
@@ -717,7 +751,7 @@
     return p.catch(() => {}).then(() => { rt.dispose(); g.dispose(); });
   }
   // which passes this GPU could not compile (switched off), for the graphics report
-  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, fxaa: Q.fxaa && !fxaaMat.userData.broken, wet: WET.k, brokenPasses: b }; }
+  function status() { const b = ALL.filter(m => m.userData.broken).length; return { on: Q.on, ssao: Q.ssao && !ssaoMat.userData.broken, taa: Q.taa && !taaMat.userData.broken, fxaa: Q.fxaa && !fxaaMat.userData.broken, wet: WET.k, lensRain: +compMat.uniforms.uRain.value.toFixed(2), brokenPasses: b }; }
   // Regression probe for the pale outline round a car against its shadow (tools/halocheck.py):
   // with window.__aoProbe set, each frame compares the occlusion carried over from earlier frames
   // with this frame's own, over the lower part of the screen (the road). A carried-over value far
