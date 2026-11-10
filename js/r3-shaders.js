@@ -303,12 +303,24 @@
     sh.fragmentShader = 'varying float vLodF; uniform float uLodJit;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT);
   }
 
+  // The car's shaders read per-vertex attributes some meshes do not carry: aSky (the car's traced
+  // shade, js/r3-carshade.js; not on the wheels) and, on the tyres, aWc (the wheel centre in a
+  // merged set of wheels). WebGL gives a missing attribute whatever value the last draw left in
+  // its slot, not one of its own (three sets a material's defaults only when a mesh's vertex
+  // setup is first made), so a tyre read the shade of whatever was drawn before it and flickered
+  // between bright and dark. Each car mesh gets the real attributes when its tree is patched:
+  // aSky 1 (open sky; the bake replaces it where it runs) and aWc 0 (a single wheel's centre).
+  // Debris pieces copy their part's attributes, so they carry them too.
+  function fillCarAttrs(geo, tyre) {
+    const P = geo.attributes.position;
+    if (!P) return;
+    if (!geo.attributes.aSky) geo.setAttribute('aSky', new THREE.BufferAttribute(new Uint8Array(P.count).fill(255), 1, true));
+    if (tyre && !geo.attributes.aWc) geo.setAttribute('aWc', new THREE.BufferAttribute(new Float32Array(P.count * 3), 3));
+  }
   // Patch a lit material once. Basic/shader materials (sky, particles, UI decals) keep theirs.
   function patch(m) {
     if (!m || m.userData.r3s || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return m;
     m.userData.r3s = true;
-    // (a mesh without the car's traced shade reads it as 1: three feeds a missing attribute this)
-    if (m.userData.carAO) m.defaultAttributeValues = Object.assign({}, m.defaultAttributeValues, { aSky: [1] });
     const mac = m.userData.macro || null, liv = m.userData.livery || null, gr = m.userData.grass || null, ao = m.userData.carAO || null, wk = m.userData.wetK || null;
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
@@ -319,7 +331,12 @@
     return m;
   }
   function patchTree(obj) {
-    obj.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(patch); });
+    obj.traverse(o => {
+      if (!o.material) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      ms.forEach(patch);
+      if (o.isMesh && o.geometry) for (const m of ms) if (m.userData.carAO) fillCarAttrs(o.geometry, /^wtyre/.test(m.userData.patchKey || ''));
+    });
   }
 
   // Radiance RGBE bytes (from tools/hdr_prep.py) to a half-float equirectangular texture

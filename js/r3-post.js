@@ -343,7 +343,10 @@
     '  for (int i = 0; i < 8; i++) {',
     '    if (i >= uWn) break;',
     '    vec3 d = wp.xyz - uWh[i].xyz, ax = uWa[i].xyz; float al = dot(d, ax); vec3 rd = d - ax * al;',
-    '    if (abs(al) < 0.26 && dot(rd, rd) < uWh[i].w * uWh[i].w) {',
+    // (the sidewall and the rim only, inside the tread's radius: the tread is plain rubber, and
+    // the light on it stays where it is while the wheel turns, so turning the lit picture of it
+    // smeared its shading into one flat grey block with a stepped edge)
+    '    if (abs(al) < 0.26 && dot(rd, rd) < uWh[i].w * uWh[i].w * 0.81) {',
     '      float ang = uWa[i].w, j0 = ign(gl_FragCoord.xy) - 0.5; vec3 c = vec3(0.0), cr = cross(ax, rd), base = uWh[i].xyz + ax * al;',
     // (a step that turns the point round to the hidden side lands on whatever is in front there:
     // only the steps where the depth there is the wheel's own are used, so no road shows through)
