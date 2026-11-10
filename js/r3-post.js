@@ -548,6 +548,7 @@
   const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4(), _pvp = new THREE.Matrix4(), SUN = new THREE.Vector3();
   let hadPrev = false, lastCam = null, lastMode = '', frame = 0, hi = 0, histOK = false;
   const lastPos = new THREE.Vector3(), lastDir = new THREE.Vector3(), _dir = new THREE.Vector3();
+  const _proj = new THREE.Vector2(), _fw = new THREE.Vector3(), _su = new THREE.Vector2(); // (reused each frame: no garbage)
 
   // view: { exposure, sunDir (world), sunCol, dt }
   function render(scene, camera, view) {
@@ -568,7 +569,7 @@
     R.setRenderTarget(RT.scene);
     R.render(scene, camera);
     if (taa) { pe[8] -= 2 * jx / w; pe[9] -= 2 * jy / h; }
-    const logFar = revNear ? -revNear : Math.log2(camera.far + 1), proj = new THREE.Vector2(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
+    const logFar = revNear ? -revNear : Math.log2(camera.far + 1), proj = _proj.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
     const setDepth = m => { m.uniforms.tDepth.value = RT.scene.depthTexture; m.uniforms.uLogFar.value = logFar; m.uniforms.uProj.value.copy(proj); };
     let src = RT.scene.texture;
     curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -663,9 +664,9 @@
     let shaft = black, shaftK = 0;
     if (Q.shafts && view.sunDir) {
       SUN.copy(view.sunDir).multiplyScalar(5000).add(camera.position).project(camera);
-      const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(view.sunDir);
+      const facing = _fw.set(0, 0, -1).applyQuaternion(camera.quaternion).dot(view.sunDir);
       if (SUN.z < 1 && facing > 0.1) {
-        const su = new THREE.Vector2(SUN.x * 0.5 + 0.5, SUN.y * 0.5 + 0.5);
+        const su = _su.set(SUN.x * 0.5 + 0.5, SUN.y * 0.5 + 0.5);
         shaftK = Math.min(1, (facing - 0.1) * 2) * (1 - Math.min(1, Math.max(0, Math.max(Math.abs(SUN.x), Math.abs(SUN.y)) - 1) * 2));
         if (shaftK > 0.01) {
           setDepth(shaftMaskMat);

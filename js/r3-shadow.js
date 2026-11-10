@@ -61,11 +61,14 @@
   let frame = 0, force = true;
   const lastPos = [new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0), new THREE.Vector3(1e9, 0, 0)];
   const lastSun = new THREE.Vector3();
+  // a layer drawn only into the shadow maps (js/render3d.js shadowProxies)
+  const SHADOW_ONLY = 2;
   function init(scene) {
     for (let i = 0; i < N; i++) {
       const l = new THREE.DirectionalLight(0xffffff, 0);
       l.castShadow = true;
       l.shadow.autoUpdate = false;
+      l.shadow.camera.layers.enable(SHADOW_ONLY); // (the scenery's merged shadow casters live on that layer)
       scene.add(l, l.target);
       S.lights.push(l);
     }
@@ -364,5 +367,5 @@
 
   // shadow-casting lights in use; their count is baked into every lit shader
   function casters() { return S.on ? S.q.n + (S.q.n > 1 ? S.q.n - 1 : 0) : 0; }
-  F1.R3Shadow = { CAR_FN, setSoften, casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
+  F1.R3Shadow = { SHADOW_ONLY, CAR_FN, setSoften, casters, init, setQuality, update, lightsChunk, PARS, U, S, OCC_PARS, setCars };
 })(typeof window !== 'undefined' ? window : globalThis);

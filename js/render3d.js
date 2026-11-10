@@ -146,6 +146,56 @@
     return new THREE.Matrix4().compose(PV, Q, SC);
   }
 
+  // Shadow casters merged. The scenery casts its shadows mesh by mesh, a draw per material per
+  // tile in every shadow slice. Its plain solid casters (opaque, no cut-out, no vertex effects)
+  // are copied here, positions only, into one mesh per 200 m cell and face side, on a layer only
+  // the shadow cameras draw (R3Shadow.SHADOW_ONLY), and the originals stop casting. The same
+  // triangles reach the shadow maps, in fewer draws.
+  function shadowProxies(root) {
+    if (G.__noShadowProxy) return; // (debug: the casters as they were)
+    const cells = new Map(), M = new THREE.Matrix4(), v = new THREE.Vector3(), c = new THREE.Vector3();
+    for (const m of root.children.slice()) {
+      const mt = m.material;
+      if (!m.isMesh || !m.castShadow || m.isInstancedMesh || !m.geometry || m.geometry.isInstancedBufferGeometry || Array.isArray(mt)) continue;
+      if (mt.transparent || mt.alphaTest > 0 || mt.alphaMap || m.customDepthMaterial || mt.userData.patchExtra || mt.userData.grass || m.geometry.morphAttributes.position) continue;
+      const g = m.geometry, P = g.attributes.position;
+      if (!P) continue;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      c.copy(g.boundingSphere.center).applyMatrix4(m.matrixWorld);
+      const side = mt.shadowSide != null ? 's' + mt.shadowSide : mt.side, key = side + ':' + Math.floor(c.x / 200) + ',' + Math.floor(c.z / 200);
+      if (!cells.has(key)) cells.set(key, { side: mt.side, shadowSide: mt.shadowSide, meshes: [] });
+      cells.get(key).meshes.push(m);
+    }
+    const LAYER = F1.R3Shadow.SHADOW_ONLY;
+    for (const cell of cells.values()) {
+      if (cell.meshes.length < 2) continue;
+      const pos = [], idx = [];
+      for (const m of cell.meshes) {
+        const g = m.geometry, P = g.attributes.position, I = g.index, r = g.drawRange;
+        const a = r.start, b = Math.min(I ? I.count : P.count, r.start + r.count);
+        const remap = new Map(), base = pos.length / 3;
+        M.copy(m.matrixWorld);
+        for (let k = a; k < b; k++) {
+          const i = I ? I.getX(k) : k;
+          let j = remap.get(i);
+          if (j === undefined) { j = remap.size; remap.set(i, j); v.fromBufferAttribute(P, i).applyMatrix4(M); pos.push(v.x, v.y, v.z); }
+          idx.push(base + j);
+        }
+        m.castShadow = false;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      const mat = new THREE.MeshBasicMaterial({ side: cell.side, colorWrite: false, depthWrite: false });
+      mat.shadowSide = cell.shadowSide != null ? cell.shadowSide : null;
+      const q = new THREE.Mesh(geo, mat);
+      q.castShadow = true; q.receiveShadow = false; q.layers.set(LAYER); q.userData.noSplit = true; q.userData.shadowProxy = true;
+      q.updateMatrixWorld(true);
+      root.add(q);
+    }
+  }
+
   // contiguous runs of samples where cond(i) holds, around the closed loop: [i0, iEnd) in unwrapped indices
   function runs(N, cond) {
     let start = -1;
@@ -1883,8 +1933,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const tvCams = buildTvCams(tr);
     if (water) water.userData.noSplit = true;
     partition(root);
+    F1.R3S.splitTwoSided(root);
     // the scenery never moves: its matrices are made once, and the frame's walk skips it
     root.updateMatrixWorld(true);
+    shadowProxies(root);
     root.traverse(o => { o.matrixAutoUpdate = false; });
     root.matrixWorldAutoUpdate = false;
     root.userData.farList = root.children.filter(o => o.userData.far && o.geometry);
@@ -3489,6 +3541,7 @@ void main() {
       body.userData.shadowProxy = proxy;
     }
     F1.R3S.patchTree(outer);
+    F1.R3S.splitTwoSided(outer);
     scene.add(outer);
     live.set(car, outer);
     if (F1.R3CarShade && body.userData.shadowGeo) F1.R3CarShade.bake(body.userData.carId, body.userData.shadowGeo);
@@ -4310,8 +4363,10 @@ void main() {
 
   // cars for the motion blur's and TAA's velocity pass: only those within 60 m of the camera
   // (80 m with TAA, which would smear a car crossing the view at that range); the rest leave layer 5
+  const _vOut = [], _vMeshes = [], _vRes = { scene: null, sync: null, meshes: null }; // (reused each frame)
   function velMovers(cars) {
-    const out = [];
+    _vRes.scene = velScene;
+    const out = _vOut; out.length = 0; _vMeshes.length = 0;
     for (const c of cars) {
       const m = live.get(c); if (!m) continue;
       const d = Math.hypot(c.x - camera.position.x, c.y - camera.position.z);
@@ -4323,7 +4378,9 @@ void main() {
     if (!out.length) return null;
     // called by the post pass after the main render has updated the world matrices
     const sync = () => { for (const m of out) { const [sp, hull] = m.userData.velParts; sp.matrix.copy(m.userData.ground.matrixWorld); hull.matrix.copy(m.userData.body.matrixWorld); } };
-    return { scene: velScene, sync, meshes: out.flatMap(m => m.userData.velParts) };
+    for (const m of out) _vMeshes.push(m.userData.velParts[0], m.userData.velParts[1]);
+    _vRes.sync = sync; _vRes.meshes = _vMeshes;
+    return _vRes;
   }
 
   // world point -> CSS pixels (null when behind the camera)

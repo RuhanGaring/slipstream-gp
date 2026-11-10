@@ -459,5 +459,45 @@
     return m;
   }
 
-  F1.R3S = { U, patch, patchTree, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
+  // three draws a transparent double-sided material in two passes (back faces, then front), and
+  // switches the material's side between them with needsUpdate, which makes it look the shader up
+  // again, twice per mesh per frame (the car decals, glass and lights: about fifty a frame, 4% of
+  // the main thread). Each such mesh is split instead into a back-side mesh (the original, so it
+  // keeps its place in the draw order) and a front-side copy as its child (same place, same depth
+  // in the sort, a later id, so it draws right after): the same two passes in the same order,
+  // and no material ever changes side. The copy casts no shadow (the original still does).
+  const splitOf = new WeakMap();
+  function splitTwoSided(root) {
+    const todo = [];
+    root.traverse(o => {
+      if (!o.isMesh || o.userData.twoSidedCopy || Array.isArray(o.material)) return;
+      const m = o.material;
+      if ((m.transparent && m.side === THREE.DoubleSide && !m.forceSinglePass) || splitOf.has(m)) todo.push(o);
+    });
+    for (const o of todo) {
+      const m = o.material;
+      let pair = splitOf.get(m);
+      if (!pair) {
+        // (userData is shared, not copied: three's clone copies it through JSON, and ours holds
+        // shader uniforms and textures)
+        const ud = m.userData; m.userData = {};
+        const back = m.clone(), front = m.clone();
+        m.userData = ud;
+        for (const x of [back, front]) { x.userData = ud; x.onBeforeRender = m.onBeforeRender; x.onBeforeCompile = m.onBeforeCompile; if (m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) x.customProgramCacheKey = m.customProgramCacheKey; }
+        back.side = THREE.BackSide; front.side = THREE.FrontSide;
+        pair = { back, front };
+        splitOf.set(m, pair); splitOf.set(back, pair); splitOf.set(front, pair);
+      }
+      o.material = pair.back;
+      const c = new THREE.Mesh(o.geometry, pair.front);
+      c.userData.twoSidedCopy = true; c.castShadow = false; c.receiveShadow = o.receiveShadow;
+      c.renderOrder = o.renderOrder; c.frustumCulled = o.frustumCulled; c.layers.mask = o.layers.mask;
+      if (o.lodS) c.lodS = o.lodS;
+      if (!o.matrixAutoUpdate) { c.matrixAutoUpdate = false; c.updateMatrix(); }
+      o.add(c);
+    }
+    return todo.length;
+  }
+
+  F1.R3S = { U, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
 })(typeof window !== 'undefined' ? window : globalThis);

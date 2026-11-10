@@ -809,6 +809,41 @@
     return out;
   }
 
+  // A model level's body parts, merged: one geometry per (material, casts a shadow, vertex format),
+  // the parts concatenated in their original order (so transparent ones keep their draw order).
+  function castsShadow(G2, mat) { return !mat.transparent && (G2.boundingSphere.radius > 0.3 || G2.index.count > 1500); }
+  function mergedBody(MD, L) {
+    if (L.merged) return L.merged;
+    const groups = new Map();
+    for (const p of L.body) {
+      const mat = MD.mats[p.m], cast = castsShadow(p.G, mat), A = p.G.attributes;
+      const sig = Object.keys(A).sort().map(k => k + A[k].itemSize + A[k].array.constructor.name + (A[k].normalized ? 'n' : '')).join(',');
+      const key = p.m + '|' + cast + '|' + sig + '|' + !!p.G.index;
+      if (!groups.has(key)) groups.set(key, { m: p.m, cast, parts: [] });
+      groups.get(key).parts.push(p.G);
+    }
+    L.merged = [];
+    for (const { m, cast, parts } of groups.values()) {
+      if (parts.length === 1) { L.merged.push({ G: parts[0], m, cast }); continue; }
+      const out = new THREE.BufferGeometry(), A0 = parts[0].attributes;
+      let nv = 0, ni = 0;
+      for (const G2 of parts) { nv += G2.attributes.position.count; ni += G2.index.count; }
+      for (const k of Object.keys(A0)) {
+        const a0 = A0[k], arr = new a0.array.constructor(nv * a0.itemSize);
+        let o = 0;
+        for (const G2 of parts) { const a = G2.attributes[k]; arr.set(a.array.subarray(0, a.count * a.itemSize), o); o += a.count * a.itemSize; }
+        out.setAttribute(k, new THREE.BufferAttribute(arr, a0.itemSize, a0.normalized));
+      }
+      const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      let io = 0, vo = 0;
+      for (const G2 of parts) { const I = G2.index.array; for (let i = 0; i < G2.index.count; i++) idx[io++] = I[i] + vo; vo += G2.attributes.position.count; }
+      out.setIndex(new THREE.BufferAttribute(idx, 1));
+      out.computeBoundingSphere(); out.computeBoundingBox();
+      L.merged.push({ G: out, m, cast });
+    }
+    return L.merged;
+  }
+
   function makeModelCar(team, num, comp) {
     const MD = modelFor(team);
     const root = new THREE.Group();
@@ -828,7 +863,10 @@
     const wheelPart = p => p.G.index.count >= 150;
     MD.lods.forEach((L, lod) => {
       const g = new THREE.Group();
-      for (const p of L.body) g.add(meshOf(p.G, p.m));
+      // (the body's parts merged by material, once per model: a draw per material instead of one
+      // per part. Parts that cast shadows and parts that do not stay apart, as do parts whose
+      // vertex formats differ, so the picture and the shadows are the same as before)
+      for (const p of mergedBody(MD, L)) { const q = meshOf(p.G, p.m); q.castShadow = p.cast; g.add(q); }
       g.visible = lod === 0;
       root.add(g);
       lodGroups.push(g);
