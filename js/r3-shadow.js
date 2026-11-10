@@ -39,6 +39,8 @@
   const U = {
     r3Casc: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] },
     r3ShadowEnd: { value: 260 },
+    // the near slice for the contact-hardening search: its depth range (m) and texel size (m)
+    r3Pcss: { value: new THREE.Vector2(100, 0.01) },
     // 1 while the scene is drawn into the post stack's HDR target (alpha carries the direct-sun
     // share there); 0 when drawing straight to the screen, where alpha is left alone (Edge
     // composites a WebGL canvas with the alpha written into it, and the page behind is black)
@@ -113,6 +115,7 @@
   // fit the slices to the camera; sunDir points toward the sun
   function update(camera, sunDir) {
     if (!S.on || !camera.isPerspectiveCamera) return;
+    { const l0 = S.lights[0], sc = l0.shadow.camera; U.r3Pcss.value.set(Math.max(1, sc.far - sc.near), Math.max(1e-4, (sc.right - sc.left) / l0.shadow.mapSize.x)); }
     const ends = S.q.ends;
     const ty = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), tx = ty * camera.aspect;
     // light space: looking along -sunDir
@@ -182,7 +185,11 @@
     '      #if ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )',
     '      if ( r3D >= r3Casc[ i ].x && r3D < r3Casc[ i ].z ) {',
     '        r3Sh = directionalLightShadows[ i ];',
+    '        #if ( UNROLLED_LOOP_INDEX == 0 )',
+    '        r3s = r3PCSS( directionalShadowMap[ i ], r3Sh.shadowMapSize, r3Sh.shadowBias, r3Sh.shadowRadius, vDirectionalShadowCoord[ i ] );',
+    '        #else',
     '        r3s = getShadow( directionalShadowMap[ i ], r3Sh.shadowMapSize, r3Sh.shadowBias, r3Sh.shadowRadius, vDirectionalShadowCoord[ i ] );',
+    '        #endif',
     '        r3w = r3Casc[ i ].x < r3Casc[ i ].y ? smoothstep( r3Casc[ i ].x, r3Casc[ i ].y, r3D ) : 1.0;',
     '        r3SunVis = mix( r3SunVis, r3s, r3w );',
     '      }',
@@ -233,6 +240,26 @@
   // filter: five probes over the filter's square (its corners and centre) that find no car mean
   // the pixel is lit. (Cleared texels unpack to depth 1; a car is never near the far plane.)
   const CAR_FN = [
+    // Contact-hardening sun shadow for the near slice (PCSS): the sun is half a degree across, so
+    // a shadow blurs by about 9 mm for every metre between the thing casting it and the surface
+    // it falls on. Nine taps find the depth of what stands in front of this point; the filter is
+    // then as wide as that gap makes the sun's blur (in texels): sharp where a tyre meets the
+    // road, softer under a high wing or a roof. Never sharper than a third of the slice's own
+    // filter, so an overcast day (a wide filter) stays soft.
+    '#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0',
+    'float r3PCSS( sampler2D m, vec2 size, float bias, float radius, vec4 sc ) {',
+    '  vec3 c = sc.xyz / sc.w; float zr = c.z + bias, sum = 0.0, n = 0.0; vec2 o = 3.0 / size;',
+    '  for ( int k = 0; k < 9; k ++ ) {',
+    '    vec2 off = vec2( float( k - ( k / 3 ) * 3 ) - 1.0, float( k / 3 ) - 1.0 ) * o;',
+    '    float z = unpackRGBAToDepth( texture2D( m, c.xy + off ) );',
+    '    if ( z < zr ) { sum += z; n += 1.0; }',
+    '  }',
+    '  if ( n < 0.5 ) return 1.0;',
+    '  float gap = ( zr - sum / n ) * r3Pcss.x;',
+    '  float rad = clamp( gap * 0.0093 / r3Pcss.y, radius * 0.35, radius * 2.5 );',
+    '  return getShadow( m, size, bias, rad, sc );',
+    '}',
+    '#endif',
     '#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 4',
     'float r3CarShadow( sampler2D m, vec2 size, float bias, float radius, vec4 sc ) {',
     '  vec3 c = sc.xyz / sc.w; vec2 o = radius / size;',
@@ -243,7 +270,7 @@
     '}',
     '#endif',
   ].join('\n');
-  const PARS = 'uniform vec3 r3Casc[3]; uniform float r3ShadowEnd; uniform float r3SunA;\n';
+  const PARS = 'uniform vec3 r3Casc[3]; uniform float r3ShadowEnd; uniform float r3SunA; uniform vec2 r3Pcss;\n';
 
   // ---------- sky occlusion under the cars ----------
   // The road under a car is in deep shade: the car hides most of the sky above it. Screen-space
