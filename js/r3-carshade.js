@@ -1,0 +1,206 @@
+// The shade a car casts on the road from the sky, traced from the car's real shape.
+//
+// Physically, the light a patch of road gets from the sky is the sky's light over the half of
+// all directions above it, each weighted by how steeply it comes down (the cosine). Under and
+// round a car, part of that sky is hidden by the car. This module measures how much, for a grid
+// of road points round the car, by Monte Carlo over the sky: for each of N directions spread over
+// the sky in proportion to that cosine weight, the car's merged shadow mesh (its real shape,
+// js/r3-car.js meta.shadow) is drawn from that direction into a small depth map, and every road
+// point of the grid checks whether the car stands between it and that part of the sky. The share
+// of directions left open is the point's sky visibility: 0 all hidden, 1 open sky.
+//
+// Two ways to use it (Settings > Advanced graphics > Car shade):
+//   traced  the reference: the nearest car traced live from its pose on its suspension (heave,
+//           pitch and roll over the road under it). Each trace is complete (all directions) and
+//           built in the background, a few directions a frame, while the last finished one is
+//           shown: a part-done trace is never seen, so the shade has no noise
+//   baked   the fast one, built from the reference: the same trace run once per car model while
+//           the circuit loads (the car at rest, all directions), kept as a texture, so a pixel
+//           reads one value
+// Both write into one atlas (a row per car model, two per live slot: shown and being built). The composite
+// (js/r3-post.js carSky) reads it for the road round each car near the camera. The sun's own
+// shadow is the cascaded shadow map (js/r3-shadow.js): this is the sky's share of the light.
+(function (G) {
+  'use strict';
+  const F1 = G.F1, THREE = G.THREE;
+
+  // the grid round a car, in the frame of the road under it (x forward, y up, z right), metres
+  const X0 = -4.4, X1 = 4.4, Z0 = -2.2, Z1 = 2.2, NX = 256, NZ = 128;
+  const BAKE_N = 256, LIVE_N = 8; // directions: a full trace; added to the live one each frame
+  const LIVE = 1, ROWS = 16, MODEL_ROWS = ROWS - LIVE * 2;
+  const DEPTH = 256, REACH = 4.8, CAM = 8; // depth map size, its half width and its distance (m)
+
+  let R = null, atlas = null, depthRT = null;
+  const rowOf = new Map(); // car model id -> atlas row
+  const U = {
+    uShadeMap: { value: null }, uShadeOn: { value: 0 },
+    uShadeExt: { value: new THREE.Vector4(X0, Z0, X1 - X0, Z1 - Z0) }, uShadeRows: { value: ROWS },
+    // per car near the camera (the same order as js/r3-shadow.js uOccCar): the inverse of the
+    // road frame under it, and its atlas row (-1: none)
+    uShadeInv: { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, uShadeRow: { value: new Array(8).fill(-1) },
+  };
+  // for the composite: the sky left to a road point near the cars, from the atlas
+  const GLSL = [
+    'uniform sampler2D uShadeMap; uniform vec4 uShadeExt; uniform float uShadeRows; uniform mat4 uShadeInv[8]; uniform float uShadeRow[8];',
+    'float r3CarShade(vec3 wp, vec3 wn) {',
+    '  float vis = 1.0;',
+    '  for (int i = 0; i < 8; i++) {',
+    '    if (i < uOccN && uShadeRow[i] >= 0.0) {',
+    '      vec3 lp = (uShadeInv[i] * vec4(wp, 1.0)).xyz;',
+    '      vec2 f = (lp.xz - uShadeExt.xy) / uShadeExt.zw;',
+    '      if (all(greaterThan(f, vec2(0.0))) && all(lessThan(f, vec2(1.0)))) {',
+    '        vec3 ln = normalize(mat3(uShadeInv[i]) * wn);',
+    // the road (facing up, under 0.2 m), or a point just above it that does not face up (the
+    // foot of a tyre: its anti-aliased edge pixels hold road colour), which takes the road's value
+    '        float g = (1.0 - smoothstep(0.06, 0.2, lp.y)) * smoothstep(0.3, 0.7, ln.y);',
+    '        float lw = (1.0 - smoothstep(0.02, 0.12, lp.y)) * (1.0 - smoothstep(0.3, 0.7, ln.y));',
+    '        float w = max(g, lw);',
+    '        if (w > 0.0) {',
+    // (one level, read with textureLod: an ordinary read inside a loop gives the GPU's derivative
+    // based level choice nothing to go on)
+    '          float v = textureLod(uShadeMap, vec2(f.x, (uShadeRow[i] + f.y) / uShadeRows), 0.0).r;',
+    // (to open sky over the last 0.3 m of the grid, so its edge never shows)
+    '          vec2 e = min(f, 1.0 - f) * uShadeExt.zw;',
+    '          v = mix(1.0, v, smoothstep(0.0, 0.3, min(e.x, e.y)));',
+    '          vis *= mix(1.0, v, w);',
+    '        }',
+    '      }',
+    '    }',
+    '  }',
+    '  return vis;',
+    '}'].join('\n');
+
+  // cosine-weighted directions over the sky (a Fibonacci spiral: even cover, no clumps)
+  const SKY = [];
+  for (let i = 0; i < BAKE_N; i++) {
+    const u = (i + 0.5) / BAKE_N, phi = i * 2.399963229728653, r = Math.sqrt(u);
+    SKY.push(new THREE.Vector3(r * Math.cos(phi), Math.sqrt(Math.max(0, 1 - u)), r * Math.sin(phi)));
+  }
+
+  // the car seen from one sky direction: its distance from that side (/64), nearest kept;
+  // an empty texel (0) means no car there
+  const depthMat = new THREE.ShaderMaterial({
+    vertexShader: 'varying float vD; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'varying float vD; void main(){ gl_FragColor = vec4(vD / 64.0, 0.0, 0.0, 1.0); }',
+    side: THREE.DoubleSide,
+  });
+  // each road point of the grid: is the sky in this direction open? (adds its weight where it is)
+  const accMat = new THREE.ShaderMaterial({
+    uniforms: { tD: { value: null }, uVP: { value: new THREE.Matrix4() }, uV: { value: new THREE.Matrix4() }, uW: { value: 0 }, uExt: U.uShadeExt },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: [
+      'varying vec2 vUv; uniform sampler2D tD; uniform mat4 uVP; uniform mat4 uV; uniform float uW; uniform vec4 uExt;',
+      'void main(){',
+      '  vec3 P = vec3(uExt.x + vUv.x * uExt.z, 0.004, uExt.y + vUv.y * uExt.w);',
+      '  vec4 c = uVP * vec4(P, 1.0); vec2 uv = c.xy / c.w * 0.5 + 0.5;',
+      '  float dP = -(uV * vec4(P, 1.0)).z;',
+      '  float open = 1.0;',
+      // (blocked where the car is nearer that side of the sky than the point is)
+      '  if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) { float s = texture2D(tD, uv).r; if (s > 0.0 && s * 64.0 < dP - 0.03) open = 0.0; }',
+      '  gl_FragColor = vec4(open * uW, 0.0, 0.0, 1.0);',
+      '}'].join('\n'),
+    blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false,
+  });
+  const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const tri = new THREE.BufferGeometry();
+  tri.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  tri.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
+  const quad = new THREE.Mesh(tri, accMat); quad.frustumCulled = false;
+  const qScene = new THREE.Scene(); qScene.add(quad);
+  const carScene = new THREE.Scene(), carMesh = new THREE.Mesh(new THREE.BufferGeometry(), depthMat);
+  carMesh.matrixAutoUpdate = false; carMesh.frustumCulled = false; carScene.add(carMesh);
+  carScene.matrixWorldAutoUpdate = false;
+  const dcam = new THREE.OrthographicCamera(-REACH, REACH, REACH, -REACH, 0.1, CAM * 2.5);
+  const _vp = new THREE.Matrix4(), _c = new THREE.Color(), BLACK = new THREE.Color(0, 0, 0);
+
+  function init(renderer) {
+    R = renderer;
+    const o = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false };
+    atlas = new THREE.WebGLRenderTarget(NX, NZ * ROWS, o);
+    depthRT = new THREE.WebGLRenderTarget(DEPTH, DEPTH, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
+    U.uShadeMap.value = atlas.texture;
+    // every row starts as open sky, so a row read before it is filled shades nothing
+    withState(() => { for (let r = 0; r < ROWS; r++) { into(atlas, r); R.setClearColor(new THREE.Color(1, 1, 1), 1); R.clear(true, false, false); } });
+  }
+  function withState(fn) {
+    const prev = R.getRenderTarget(), au = R.shadowMap.autoUpdate, ac = R.autoClear, cc = R.getClearColor(_c).clone(), ca = R.getClearAlpha();
+    R.shadowMap.autoUpdate = false; R.autoClear = false;
+    try { fn(); } finally {
+      atlas.scissorTest = false; atlas.viewport.set(0, 0, NX, NZ * ROWS); atlas.scissor.set(0, 0, NX, NZ * ROWS);
+      R.setRenderTarget(prev); R.shadowMap.autoUpdate = au; R.autoClear = ac; R.setClearColor(cc, ca);
+    }
+  }
+  // draw into one row of the atlas, or into the slice target (row < 0)
+  function into(rt, row) {
+    if (rt === atlas) { atlas.viewport.set(0, row * NZ, NX, NZ); atlas.scissor.set(0, row * NZ, NX, NZ); atlas.scissorTest = true; }
+    R.setRenderTarget(rt);
+  }
+
+  // add the open share of n sky directions (each weighing w) into rt (an atlas row, or the
+  // slice), for the car geometry geo placed by matrix m in the road's frame
+  function trace(rt, row, geo, m, dirOf, n, w) {
+    carMesh.geometry = geo; carMesh.matrix.copy(m); carMesh.matrixWorld.copy(m);
+    quad.material = accMat;
+    for (let k = 0; k < n; k++) {
+      const d = dirOf(k);
+      dcam.position.copy(d).multiplyScalar(CAM);
+      if (d.y > 0.99) dcam.up.set(1, 0, 0); else dcam.up.set(0, 1, 0);
+      dcam.lookAt(0, 0, 0); dcam.updateMatrixWorld();
+      R.setRenderTarget(depthRT); R.setClearColor(BLACK, 1); R.clear(true, true, false);
+      R.render(carScene, dcam);
+      _vp.multiplyMatrices(dcam.projectionMatrix, dcam.matrixWorldInverse);
+      const u = accMat.uniforms;
+      u.tD.value = depthRT.texture; u.uVP.value.copy(_vp); u.uV.value.copy(dcam.matrixWorldInverse); u.uW.value = w;
+      into(rt, row);
+      R.render(qScene, quadCam);
+    }
+  }
+
+  // the fast setting, built from the reference: all directions, once per car model, at rest
+  const _I = new THREE.Matrix4();
+  function bake(id, geo) {
+    if (!atlas || !geo) return -1;
+    if (rowOf.has(id)) return rowOf.get(id);
+    if (rowOf.size >= MODEL_ROWS) return -1;
+    const row = rowOf.size;
+    rowOf.set(id, row);
+    const t0 = performance.now();
+    withState(() => {
+      into(atlas, row); R.setClearColor(BLACK, 1); R.clear(true, false, false);
+      trace(atlas, row, geo, _I, k => SKY[k], BAKE_N, 1 / BAKE_N);
+    });
+    (G.__shadeBakeMs || (G.__shadeBakeMs = {}))[id] = Math.round(performance.now() - t0);
+    return row;
+  }
+
+  // the reference, live: [{ key, geo, rel }] for the nearest car (rel: the car body's matrix in
+  // the frame of the road under it). Returns the atlas row its finished trace is in.
+  const slots = Array.from({ length: LIVE }, () => ({ key: null, show: 0, done: 0 }));
+  function live(list) {
+    if (!atlas) return [];
+    const out = [];
+    withState(() => {
+      list.slice(0, LIVE).forEach((it, s) => {
+        const sl = slots[s], base = MODEL_ROWS + s * 2;
+        if (sl.key !== it.key) {
+          // a car new to the slot: one full trace now to show, then the background ones
+          sl.key = it.key; sl.show = 0; sl.done = 0;
+          into(atlas, base); R.setClearColor(BLACK, 1); R.clear(true, false, false);
+          trace(atlas, base, it.geo, it.rel, k => SKY[k], BAKE_N, 1 / BAKE_N);
+        }
+        // the next few directions of the trace being built, from the car's pose this frame
+        const back = base + 1 - sl.show;
+        if (sl.done === 0) { into(atlas, back); R.setClearColor(BLACK, 1); R.clear(true, false, false); }
+        const n = Math.min(LIVE_N, BAKE_N - sl.done), d0 = sl.done;
+        trace(atlas, back, it.geo, it.rel, k => SKY[d0 + k], n, 1 / BAKE_N);
+        sl.done += n;
+        if (sl.done >= BAKE_N) { sl.show = 1 - sl.show; sl.done = 0; } // finished: show it
+        out.push(base + sl.show);
+      });
+    });
+    for (let s = list.length; s < LIVE; s++) slots[s].key = null;
+    return out;
+  }
+
+  F1.R3CarShade = { U, GLSL, init, bake, live, rowOf, ROWS, MODEL_ROWS, NX, NZ, get atlas() { return atlas; }, X0, X1, Z0, Z1 };
+})(typeof window !== 'undefined' ? window : globalThis);

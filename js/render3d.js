@@ -612,6 +612,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
     scene.add(hemi);
     if (hasClip) reverseDepth(renderer);
+    if (F1.R3CarShade) F1.R3CarShade.init(renderer);
     // the sun lights the scene; its shadow comes from the cascades (js/r3-shadow.js)
     sun = new THREE.DirectionalLight('#ffffff', 2.5);
     sun.castShadow = false;
@@ -664,7 +665,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
     GFX.potato = GFX.potato || POT; GFX.rock = ROCK;
-    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
+    F1.R3Post.setQuality({ on: GFX.post, taa: !!GFX.taa, fxaa: !!GFX.fxaa, carShade: GFX.carShade, scale: GFX.scale, msaa: GFX.msaa, ssao: GFX.ssao, aoSamples: GFX.aoSamples || 10, aoK: GFX.aoStrength != null ? GFX.aoStrength : 0.85, bloom: GFX.bloom, bloomK: GFX.bloomK || 0.06, shafts: GFX.shafts, shaftK: GFX.shaftK != null ? GFX.shaftK : 0.45, motion: GFX.motion, shutter: GFX.shutter || 180, lens: GFX.lens, grain: GFX.grain !== false, tone: GFX.tone });
     if (!renderer) return;
     renderer.shadowMap.enabled = GFX.shadows !== 'off';
     F1.R3Shadow.setQuality(GFX.shadows, { res: GFX.shadowRes, dist: GFX.shadowDist, soft: GFX.shadowSoft });
@@ -3490,6 +3491,7 @@ void main() {
     F1.R3S.patchTree(outer);
     scene.add(outer);
     live.set(car, outer);
+    if (F1.R3CarShade && body.userData.shadowGeo) F1.R3CarShade.bake(body.userData.carId, body.userData.shadowGeo);
     holdCar(outer);
     return outer;
   }
@@ -4260,6 +4262,7 @@ void main() {
       }
       near.sort((a, b) => a[0] - b[0]);
       F1.R3Shadow.setCars(G.__noCarOcc ? [] : near.slice(0, 8).map(([, car, m]) => ({ x: car.x, y: m.userData.gy || 0, z: car.y, h: car.h, steer: car.steer || 0 })));
+      carShade(G.__noCarOcc ? [] : near.slice(0, 8));
     }
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1);
@@ -4280,6 +4283,29 @@ void main() {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
     }
+  }
+
+  // The shade each car near the camera casts from the sky (js/r3-carshade.js): its baked
+  // picture, or, on Traced, the nearest one traced live from its pose on the suspension.
+  // (Matrices are composed here from the cars' local transforms: their world matrices are only
+  // brought up to date by the render that follows.)
+  const _gm = new THREE.Matrix4(), _rel = new THREE.Matrix4();
+  function carShade(sel) {
+    const CS = F1.R3CarShade;
+    if (!CS || !CS.atlas || !F1.R3Post.Q.on || GFX.carShade === 'boxes') { if (CS) CS.U.uShadeOn.value = 0; return; }
+    const U = CS.U, traced = GFX.carShade === 'traced';
+    const roadOf = m => { const ud = m.userData; m.updateMatrix(); ud.ground.updateMatrix(); return _gm.multiplyMatrices(m.matrix, ud.ground.matrix); };
+    let rows = [];
+    if (traced) rows = CS.live(sel.slice(0, 1).map(([, car, m]) => {
+      const ud = m.userData; ud.body.updateMatrix(); ud.ground.updateMatrix();
+      return { key: car, geo: ud.body.userData.shadowGeo, rel: _rel.copy(ud.ground.matrix).invert().multiply(ud.body.matrix).clone() };
+    }).filter(it => it.geo));
+    sel.forEach(([, car, m], i) => {
+      U.uShadeInv.value[i].copy(roadOf(m)).invert();
+      const bu = m.userData.body.userData;
+      U.uShadeRow.value[i] = i < rows.length ? rows[i] : bu.shadowGeo ? CS.bake(bu.carId, bu.shadowGeo) : -1;
+    });
+    U.uShadeOn.value = 1;
   }
 
   // cars for the motion blur's and TAA's velocity pass: only those within 60 m of the camera

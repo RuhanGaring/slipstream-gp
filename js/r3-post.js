@@ -393,7 +393,9 @@
     // gap between each tyre and its contact shadow, and a softer, smeared shade under the floor.
     F1.R3Shadow ? F1.R3Shadow.OCC_PARS : 'uniform int uOccN; float r3CarSky(vec3 p, vec3 n) { return 1.0; }',
     'uniform mat4 uInvView;',
-    // (the ground beside a car and the car's tyres: r3CarSky decides which points it shades)
+    F1.R3CarShade ? F1.R3CarShade.GLSL : 'float r3CarShade(vec3 p, vec3 n) { return 1.0; }',
+    'uniform float uShadeOn;',
+    // (the traced or baked shade of js/r3-carshade.js; the boxes of js/r3-shadow.js where there is none)
     'float carSky(vec2 uv, vec2 tx) {',
     '  if (uOccN == 0) return 1.0;',
     '  float w = viewW(uv);',
@@ -409,7 +411,7 @@
     '  vec3 n = normalize(cross(dot(dx1, dx1) < dot(dx2, dx2) ? dx1 : dx2, dot(dy1, dy1) < dot(dy2, dy2) ? dy1 : dy2));',
     '  if (dot(n, p) > 0.0) n = -n;',
     '  vec3 wn = normalize((uInvView * vec4(n, 0.0)).xyz);',
-    '  float k = r3CarSky(wp, wn);',
+    '  float k = uShadeOn > 0.5 ? r3CarShade(wp, wn) : r3CarSky(wp, wn);',
     // A pixel on the edge of a tyre (or any car part) against the road behind it holds some of
     // that road's colour (MSAA and TAA blend across the edge) but only the near surface's depth,
     // so it would take the near surface's (unshaded) value and its road share stays bright: a
@@ -417,7 +419,7 @@
     // that neighbour's road value is worked out too and the darker of the two is used.
     '  vec3 fx = dot(dx1, dx1) > dot(dx2, dx2) ? p + dx1 : p - dx2, fy = dot(dy1, dy1) > dot(dy2, dy2) ? p + dy1 : p - dy2;',
     '  vec3 f = -fx.z > -fy.z ? fx : fy;',
-    '  if (-f.z > w + 0.05 + 0.02 * w) k = min(k, r3CarSky((uInvView * vec4(f, 1.0)).xyz, vec3(0.0, 1.0, 0.0)));',
+    '  if (-f.z > w + 0.05 + 0.02 * w) { vec3 fw = (uInvView * vec4(f, 1.0)).xyz; k = min(k, uShadeOn > 0.5 ? r3CarShade(fw, vec3(0.0, 1.0, 0.0)) : r3CarSky(fw, vec3(0.0, 1.0, 0.0))); }',
     '  return 0.03 + 0.97 * k;',
     '}',
     'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
@@ -499,12 +501,13 @@
     // grain doubles as dither, which also hides 8-bit banding in skies and fog
     '  float g = hash(vUv * uRes + fract(uTime) * 61.0) - 0.5;',
     '  c += g * (uLens > 0.5 ? 0.016 : 0.006) * uGrain;',
-    '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a);', // debug views (window.__postDbg)
+    '  if (uDbg == 1) c = vec3(texture2D(tAO, vUv).r); else if (uDbg == 2) c = vec3(texture2D(tSun, vUv).a); else if (uDbg == 3) c = vec3(carSky(vUv, uSrcTexel));', // debug views (window.__postDbg)
     '  gl_FragColor = vec4(c, 1.0);',
     '}'].join('\n'), {
     tScene: { value: null }, tAO: { value: null }, tBloom: { value: null }, tShaft: { value: null }, tSun: { value: null }, uDbg: { value: 0 }, uAOSize: { value: new THREE.Vector2(1, 1) }, uSunK: { value: 1 }, uSharp: { value: 0 }, uSrcTexel: { value: new THREE.Vector2(1, 1) },
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) }, uInvView: { value: new THREE.Matrix4() },
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
+    ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
   });
@@ -624,8 +627,8 @@
       setDepth(ssaoMat);
       ssaoMat.uniforms.uTexel.value.set(1 / w, 1 / h);
       ssaoMat.uniforms.uFar.value = camera.far;
-      // with TAA the pattern turns each frame and is blended over time, so fewer samples do
-      ssaoMat.uniforms.uSamples.value = Q.ssao ? (taa ? Math.max(4, Math.round(Q.aoSamples * 0.6)) : Q.aoSamples) : 0;
+      // (all the samples, TAA or not: 60% of them, blended over time, left visible grain on the road)
+      ssaoMat.uniforms.uSamples.value = Q.ssao ? Q.aoSamples : 0;
       ssaoMat.uniforms.uFrame.value = taa ? frame % 64 : 0;
       ssaoMat.uniforms.uInvView.value.copy(camera.matrixWorld);
       pass(ssaoMat, RT.ao);
