@@ -996,10 +996,13 @@
   // The per-draw fade value (r3-shaders, lodFade). three calls this after it has worked out the
   // mesh's normal matrix and before it uploads it, and the shader normalises its normals anyway, so
   // the matrix's scale is a free per-draw number that needs no uniform and no copy of the material.
+  // (the shader reads the fade as the length of the normal matrix's first column, less 1, so the
+  // matrix is first brought to unit length: a mesh placed with a scale, as two of the cockpit's
+  // are, otherwise read as part faded for good and was drawn as a stipple that moved every frame)
   function lodHook(rn, sc, cam, g, o) {
-    const S = o.lodS;
-    if (!S || !S.v) return;
-    const e = o.normalMatrix.elements, k = 1 + S.v;
+    const S = o.lodS, e = o.normalMatrix.elements;
+    const L = Math.hypot(e[0], e[1], e[2]) || 1, k = (1 + (S && S.v ? S.v : 0)) / L;
+    if (Math.abs(k - 1) < 1e-6) return;
     for (let i = 0; i < 9; i++) e[i] *= k;
   }
   // Which parts stand in the scene for the levels in mask (bit 0 full, bit 1 low, bit 2 far).
