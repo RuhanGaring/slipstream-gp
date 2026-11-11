@@ -222,6 +222,24 @@
         '  { vec3 r3L = vec3(0.2126, 0.7152, 0.0722); float r3Dir = dot(reflectedLight.directDiffuse + reflectedLight.directSpecular, r3L), r3Ind = dot(reflectedLight.indirectDiffuse + reflectedLight.indirectSpecular, r3L);\n' +
         '    gl_FragColor.a = mix(gl_FragColor.a, r3Dir / max(r3Dir + r3Ind, 1e-5), r3SunA); }');
     }
+    // Specular anti-aliasing: where the shading normal (the normal maps included) turns faster
+    // than a pixel can show, as on asphalt and kerbs far ahead or a distant car's wheel rim, the
+    // gloss is widened by the normal's spread over the pixel (Kaplanyan's filtered roughness), so a
+    // sub-pixel bump no longer flashes a highlight on one frame and not the next (the shimmer on
+    // the road ahead). Close up, where the normal changes slowly, nothing changes.
+    if (sh.fragmentShader.includes('#include <lights_physical_fragment>')) {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>', [
+        '#include <lights_physical_fragment>',
+        '  { vec3 r3dx = dFdx(normal), r3dy = dFdy(normal);',
+        '    float r3k = min(0.5 * (dot(r3dx, r3dx) + dot(r3dy, r3dy)), 0.18), r3a = material.roughness * material.roughness;',
+        '    material.roughness = min(1.0, sqrt(sqrt(r3a * r3a + r3k)));',
+        '#ifdef USE_CLEARCOAT',
+        '    vec3 r3cx = dFdx(clearcoatNormal), r3cy = dFdy(clearcoatNormal);',
+        '    float r3ck = min(0.5 * (dot(r3cx, r3cx) + dot(r3cy, r3cy)), 0.18), r3ca = material.clearcoatRoughness * material.clearcoatRoughness;',
+        '    material.clearcoatRoughness = min(1.0, sqrt(sqrt(r3ca * r3ca + r3ck)));',
+        '#endif',
+        '  }'].join('\n'));
+    }
     if (liv) {
       Object.assign(sh.uniforms, liv);
       sh.vertexShader = LIVERY_VERT + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLivP = position; vLivN = normal;');
@@ -326,7 +344,7 @@
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
     const opaque = !m.transparent;
     m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); };
-    m.customProgramCacheKey = () => 'r3s2' + (opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
+    m.customProgramCacheKey = () => 'r3s3' + (opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
     m.needsUpdate = true;
     return m;
   }
@@ -365,6 +383,19 @@
   // (value noise read from a tiling texture: the road shaders ask for it many times a pixel)
   const NOISE = 'uniform sampler2D uTfTex;\nfloat wNoise(vec2 p) { return texture2D(uTfTex, p / 256.0).r; }';
   const LUM = 'vec3(0.2126, 0.7152, 0.0722)';
+  // Far ahead the ground is seen so edge-on that a pixel covers a strip of a photo many times
+  // longer than it is wide, beyond what anisotropic filtering samples (16 taps): the asphalt's
+  // light stones and the kerbs' paint edges were caught on one frame and missed on the next, a
+  // shimmer over the road ahead. There the photo is read once more, averaged over the strip's
+  // full length, and blended in as the stretch grows.
+  const FAR_AVG = [
+    '#ifdef USE_MAP',
+    '  { vec2 aDx = dFdx(vMapUv), aDy = dFdy(vMapUv); float aLx = length(aDx), aLy = length(aDy);',
+    '    float aSt = smoothstep(6.0, 20.0, max(aLx, aLy) / max(min(aLx, aLy), 1e-7));',
+    '    if (aSt > 0.0) { vec2 aM = aLx > aLy ? aDx : aDy, aN = vec2(-aM.y, aM.x);',
+    '      vec3 aNear = texture2D(map, vMapUv).rgb, aFar = textureGrad(map, vMapUv, aM, aN).rgb;',
+    '      diffuseColor.rgb *= mix(vec3(1.0), aFar / max(aNear, vec3(1e-3)), aSt); } }',
+    '#endif'].join('\n');
   const ext = (m, key, fn) => { m.userData.patchExtra = fn; m.userData.patchKey = key; return m; };
 
   // Track asphalt. The geometry carries trk = (distance along the lap, lateral offset, the
@@ -388,6 +419,7 @@
       sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber; uniform sampler2D uRoadShade; uniform vec3 uRoadShadeP; uniform float uRoadShadeOn;\n' + NOISE + '\n' + sh.fragmentShader
         .replace('#include <map_fragment>', [
           '#include <map_fragment>',
+          FAR_AVG,
           '  float aLum = dot(diffuseColor.rgb, ' + LUM + ');',
           '  diffuseColor.rgb = mix(vec3(aLum), diffuseColor.rgb, 0.3) * ' + gain.toFixed(2) + ';',
           '  float aL = vTrk.y - vTrk.z, aW = vTrk.w;',
@@ -417,6 +449,7 @@
     return ext(m, 'kerb', sh => {
       sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <color_fragment>', [
         '#include <color_fragment>',
+        FAR_AVG,
         '  vec2 kW = vFogWorld.xz;',
         '  float kN = wNoise(kW * 1.4) * 0.6 + wNoise(kW * 6.0) * 0.4;',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.29, 0.27), smoothstep(0.64, 0.8, kN) * 0.75);',
