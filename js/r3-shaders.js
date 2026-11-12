@@ -281,7 +281,7 @@
       sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vMacroW = (modelMatrix * vec4(transformed, 1.0)).xz;');
       const f = n => n.toFixed(3);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <map_fragment>', '#include <map_fragment>\n' +
+        .replace('#include <map_fragment>', '#include <map_fragment>\n' + FAR_AVG + '\n' +
           `  float mcr = texture2D(macroMap, vMacroW / ${f(mac.scale)}).r * 0.6 + texture2D(macroMap, vMacroW / ${f(mac.scale * 0.21)}).g * 0.4;\n` +
           `  diffuseColor.rgb *= mix(${f(1 - mac.amt)}, ${f(1 + mac.amt)}, mcr);` +
           (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW) * lawnFar(vMacroW, vFogWorld, cameraPosition, uSunDir);\n'
@@ -388,8 +388,10 @@
   // light stones and the kerbs' paint edges were caught on one frame and missed on the next, a
   // shimmer over the road ahead. There the photo is read once more, averaged over the strip's
   // full length, and blended in as the stretch grows.
+  // (on every ground photo with macro variation, and on the asphalt and kerbs; once per shader)
   const FAR_AVG = [
-    '#ifdef USE_MAP',
+    '#if defined( USE_MAP ) && !defined( R3_FARAVG )',
+    '#define R3_FARAVG',
     '  { vec2 aDx = dFdx(vMapUv), aDy = dFdy(vMapUv); float aLx = length(aDx), aLy = length(aDy);',
     '    float aSt = smoothstep(6.0, 20.0, max(aLx, aLy) / max(min(aLx, aLy), 1e-7));',
     '    if (aSt > 0.0) { vec2 aM = aLx > aLy ? aDx : aDy, aN = vec2(-aM.y, aM.x);',
@@ -471,11 +473,18 @@
       sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <logdepthbuf_fragment>', '#include <logdepthbuf_fragment>\n#if defined( USE_LOGDEPTHBUF ) && defined( USE_LOGDEPTHBUF_EXT )\n  gl_FragDepthEXT -= 0.0012;\n#endif').replace('#include <color_fragment>', [
         '#include <color_fragment>',
         '  vec2 pW = vFogWorld.xz;',
+        // how much ground one pixel covers here (m): far ahead a line is only a pixel or two across
+        '  vec2 pFw = fwidth(pW); float pFp = max(pFw.x, pFw.y);',
         // fine pitting, thin in places, a little dirt: paint stays paint, it does not go patchy
         '  float pN = wNoise(pW * 9.0) * 0.5 + wNoise(pW * 31.0) * 0.5;',
-        '  if (wNoise(pW * 53.0) * 0.6 + wNoise(pW * 17.0) * 0.4 > 0.9 - 0.16 * wNoise(pW * 1.1 + 9.0)) discard;',
+        // (the pits are a few centimetres: only cut where a pixel can hold one, or far ahead they
+        // flickered as holes caught on one frame and missed on the next)
+        '  if (pFp < 0.025 && wNoise(pW * 53.0) * 0.6 + wNoise(pW * 17.0) * 0.4 > 0.9 - 0.16 * wNoise(pW * 1.1 + 9.0)) discard;',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14), smoothstep(0.62, 0.86, pN) * 0.4);',
         '  diffuseColor.rgb *= (1.0 - smoothstep(0.5, 0.9, wNoise(pW * 0.5 + 5.0)) * 0.14) * 0.9;',
+        // a line thinner than a few pixels shows mostly its edges, and they crawl as the car moves:
+        // there the paint is toned toward the asphalt it lies on, as the eye sees a far line anyway
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2), smoothstep(0.03, 0.3, pFp) * 0.5);',
       ].join('\n'));
     });
   }
