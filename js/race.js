@@ -388,6 +388,26 @@
     if (!inv) return 0;
     return Math.sign(rel) * Math.min(mu * j * Math.abs(rel) / s, Math.abs(rel) / inv);
   }
+  // A wheel forced against a wall. The structure's contact planes (js/softbody.js) only see each
+  // step's bump, not a car steering into the wall and holding its wheel there: the wall then carries
+  // the car's cornering load through that wheel, sideways into its suspension. How hard the wall
+  // pushes on the tyre (its normal impulses) is added up per wheel over the last WALL_FADE s; a
+  // wheel pressed hard enough (WALL_TEAR, N s over that time: a mean push of WALL_TEAR / WALL_FADE)
+  // has its corner torn out. Only the press counts, not the speed: a car can press as hard as its
+  // tyres grip, which a gentle graze or a crawl along the wall does not come near.
+  // Measured (N s over 0.15 s): grazing a wall straight 300 to 490 at any speed; steering into it
+  // 875 to 1300 at any speed; a crawl into it at 25 km/h 400 to 830.
+  const WALL_FADE = 0.15, WALL_TEAR = 800;
+  function wallLoad(race, c, k, J) {
+    const w = TYRE_OF[k];
+    if (w < 0 || !c.dm || !c.dm.soft || c.dm.wheelOff[w]) return;
+    const r = c.wallJ || (c.wallJ = [0, 0, 0, 0, 0]), t = race.time;
+    const f = Math.exp(-Math.max(0, t - (r[4] || t)) / WALL_FADE);
+    for (let i = 0; i < 4; i++) r[i] *= f;
+    r[4] = t; r[w] += J;
+    if (G.__wallMax != null) G.__wallMax = Math.max(G.__wallMax, r[w]); // (test tools read the largest load)
+    if (r[w] > (G.__wallTear || WALL_TEAR) && F1.Soft.tear(c.dm.soft, w)) F1.Damage.update(race, c, true);
+  }
   const NC = CC.length, _cx = new Float64Array(NC), _cy = new Float64Array(NC), _cx2 = new Float64Array(NC), _cy2 = new Float64Array(NC);
   const _cr = new Float64Array(NC), _cr2 = new Float64Array(NC);
   // world circles of a car (and their radii): a damaged car's circles follow its structure
@@ -486,6 +506,7 @@
     jt = U.clamp(jt, -mu * j * Math.abs(vt) / sl, mu * j * Math.abs(vt) / sl);
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
     if (g && wi) { const jz = treadRub(g, wi.omega, Iw, 0, 0, 1, vt, j, mu); if (jz) liftAt(c, bk, g, jz, bx, by); }
+    if (wk >= 0) wallLoad(race, c, bk, j);
     c.r = U.clamp(c.r, -7, 7); // (the part that hits would snap off, not turn the whole car)
     const power = -vn;
     // With no damage model (Arcade, or damage off) the bounce alone cost less than braking: a
