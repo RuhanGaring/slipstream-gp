@@ -686,9 +686,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   let DPR = 1;
+  // (while new shaders compile nothing is drawn and the canvas shows its last frame; resizing it
+  // then would wipe that frame and leave the screen black for as long as the compile takes, so
+  // a size or scale change waits for the compile to finish)
+  let heldSize = null;
   function resize(w, h, dpr) {
     if (!renderer) return;
-    W = w; H = h; DPR = Math.min(GFX.dprCap || (GFX.lite ? 1 : 2), dpr || 1);
+    if (compiling) { heldSize = [w, h, dpr]; return; }
+    W = w; H = h; rawDpr = dpr; DPR = Math.min(GFX.dprCap || (GFX.lite ? 1 : 2), dpr || 1);
     // a pixel budget: a 4K screen at 200 per cent is 8 million pixels through everything. Render
     // scale above 1 is the player asking for more, and gets it
     if (GFX.scale <= 1) DPR = Math.min(DPR, Math.max(0.5, Math.sqrt(2.6e6 / Math.max(1, w * h))));
@@ -700,6 +705,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // Without post-processing, render scale is the canvas pixel ratio; with it, the canvas
   // stays at native resolution and the post stack renders the scene at the scaled size.
   function applyScale() {
+    if (compiling) { if (!heldSize) heldSize = [W, H, rawDpr]; return; }
     const P = F1.R3Post.Q;
     renderer.setPixelRatio(P.on ? DPR : DPR * GFX.scale);
   }
@@ -710,7 +716,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // other setting is a uniform or a render target size. When the programs do change they are
   // built with compileAsync (parallel, off the main thread where the driver allows) while the
   // canvas holds its last frame, instead of all compiling inside the next render call.
-  let progKey = '', compiling = null;
+  let progKey = '', compiling = null, rawDpr = 1;
   function setQuality(g) {
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
@@ -731,8 +737,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       progKey = key;
       scene.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
       if (!first && state.tr) {
-        const t0 = performance.now(), job = compiling = precompile().then(() => {
-          if (compiling === job) compiling = null;
+        const t0 = performance.now(), job = compiling = precompile().catch(() => {}).then(() => { // (a failed compile must not leave the screen frozen)
+          if (compiling === job) {
+            compiling = null;
+            if (heldSize) { const z = heldSize; heldSize = null; resize(z[0], z[1], z[2]); }
+          }
           G.__gfxSwitchMs = Math.round(performance.now() - t0);
         });
       }
