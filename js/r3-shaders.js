@@ -229,7 +229,10 @@
     // yellow or white with a purple fringe, on the road ahead.
     if (sh.fragmentShader.includes('#include <dithering_fragment>'))
       sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n' +
-        '  gl_FragColor.rgb = (gl_FragColor.r == gl_FragColor.r && gl_FragColor.g == gl_FragColor.g && gl_FragColor.b == gl_FragColor.b) ? clamp(gl_FragColor.rgb, 0.0, 32.0) : vec3(0.0);');
+        '  gl_FragColor.rgb = (gl_FragColor.r == gl_FragColor.r && gl_FragColor.g == gl_FragColor.g && gl_FragColor.b == gl_FragColor.b) ? clamp(gl_FragColor.rgb, 0.0, 32.0) : vec3(0.0);\n' +
+        // (and an alpha outside 0..1 blends as an amplifier: the road under a tyre mark came out
+        // five times too bright where the mark's alpha went negative)
+        '  gl_FragColor.a = gl_FragColor.a == gl_FragColor.a ? clamp(gl_FragColor.a, 0.0, 1.0) : 0.0;');
     // Specular anti-aliasing: where the shading normal (the normal maps included) turns faster
     // than a pixel can show, as on asphalt and kerbs far ahead or a distant car's wheel rim, the
     // gloss is widened by the normal's spread over the pixel (Kaplanyan's filtered roughness), so a

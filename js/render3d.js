@@ -1442,7 +1442,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         M.tyreMarks = std({ color: '#070708', roughness: 0.85, metalness: 0, envMapIntensity: 0.25, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
         M.tyreMarks.onBeforeCompile = sh => {
           sh.vertexShader = 'attribute float acr; varying float vAcr;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vAcr = acr;');
-          sh.fragmentShader = 'varying float vAcr;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= 1.0 - pow(abs(vAcr), 6.0);');
+          // (vAcr runs -1 to 1 across the mark, but with multisampling a sample at the edge of a
+          // triangle can sit just outside it, where it extrapolates past 1: 1.3^6 made the alpha
+          // -3.8, and blending with a negative alpha multiplied the road beneath about five times,
+          // the white dots over the road ahead and, larger, the coloured flashes. Kept in 0..1)
+          sh.fragmentShader = 'varying float vAcr;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= clamp(1.0 - pow(min(abs(vAcr), 1.0), 6.0), 0.0, 1.0);');
         };
         M.tyreMarks.customProgramCacheKey = () => 'tyreMarks';
       }
@@ -3725,7 +3729,13 @@ void main() {
     '#include <common>', '#include <logdepthbuf_pars_vertex>',
     'void main(){ vC = rgba; vec4 mv = modelViewMatrix * vec4(position, 1.0);',
     '  vC.a *= smoothstep(size * 0.6, size * 0.6 + 6.0, -mv.z);', // fade puffs that would fill the lens
-    '  gl_PointSize = max(2.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv;', '#include <logdepthbuf_vertex>', '}'].join('\n');
+    // A point is drawn at least 2 pixels across. One smaller than that on screen (a 5 cm spark a
+    // hundred metres off covers a twentieth of a pixel) keeps its true light by fading in
+    // proportion to the area it was enlarged by: drawn at full strength, the hundreds of sparks
+    // from a car ahead scraping its floor piled onto the same few pixels, summed to some ten
+    // thousand times white, and the motion blur and bloom turned them into a one-frame flash.
+    '  float ps = size * scale / -mv.z, pd = max(2.0, ps); vC.a *= min(1.0, ps * ps / (pd * pd));',
+    '  gl_PointSize = pd; gl_Position = projectionMatrix * mv;', '#include <logdepthbuf_vertex>', '}'].join('\n');
   const PT_FS = [
     'uniform sampler2D map; varying vec4 vC;', '#include <common>', '#include <logdepthbuf_pars_fragment>',
     // (colour and alpha kept in range: a spark past its life once came in with a negative colour,
