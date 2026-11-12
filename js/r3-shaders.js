@@ -49,6 +49,16 @@
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
     U.uTfTex = { value: t };
   }
+  // The crashed cars' structures (js/softbody.js, js/r3-damage.js): one texel per node, row 0 the
+  // rest shape, each further row one damaged car's present shape (xyz in the model's frame) and,
+  // in w, how damaged the bodywork round that node is (0..1). A car's row reaches its draws
+  // through the normal matrix (F1.R3Car lodHook), so the materials stay shared.
+  const SOFT_W = 128, SOFT_H = 33;
+  {
+    const t = new THREE.DataTexture(new Float32Array(SOFT_W * SOFT_H * 4), SOFT_W, SOFT_H, THREE.RGBAFormat, THREE.FloatType);
+    t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+    U.uSoftTex = { value: t };
+  }
   if (F1.R3Shadow) Object.assign(U, F1.R3Shadow.U); // the cascaded sun shadow (js/r3-shadow.js)
 
   // Lawn shading shared by the park ground and the grass blades, so the two always agree.
@@ -326,10 +336,91 @@
     '    float lodN = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit, vec2(0.06711056, 0.00583715))));',
     '    if (vLodF <= 1.002 ? lodN > vLodF : lodN < vLodF - 1.0) discard;',
     '  }'].join('\n');
+  // (the scale also carries the car's row in the soft-body texture, three per row: fade + 3 x row)
   function patchLodFade(sh) {
     sh.uniforms.uLodJit = U.uLodJit;
-    sh.vertexShader = 'varying float vLodF;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLodF = length(normalMatrix[0]) - 1.0;');
+    sh.vertexShader = 'varying float vLodF;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  { float lodS = length(normalMatrix[0]) - 1.0; vLodF = lodS - 3.0 * floor(lodS / 3.0 + 0.25); }');
     sh.fragmentShader = 'varying float vLodF; uniform float uLodJit;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT);
+  }
+
+  // Crash damage on the GPU. Every body vertex is tied to the two nearest pieces of the car's
+  // structure (aSkI: node pairs, aSkT: the place along each beam and its weight; js/r3-damage.js
+  // bindGeo) and moves with them; its normal turns as its beam turned, so a bent panel shades as
+  // bent. Where the structure was strained the panel crumples (a small ripple along the normal,
+  // with the normal tilted to match, sharpened to facets per pixel), and the paint is scraped
+  // through to the carbon under it, ragged at the edge. A car with no row (every undamaged car)
+  // skips all of it on one test per draw; the CPU no longer reshapes or re-uploads the model.
+  const SOFT_NOISE = [
+    'float sfH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }',
+    'float sfN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+    '  return mix(mix(mix(sfH(i), sfH(i + vec3(1, 0, 0)), f.x), mix(sfH(i + vec3(0, 1, 0)), sfH(i + vec3(1, 1, 0)), f.x), f.y),',
+    '             mix(mix(sfH(i + vec3(0, 0, 1)), sfH(i + vec3(1, 0, 1)), f.x), mix(sfH(i + vec3(0, 1, 1)), sfH(i + vec3(1, 1, 1)), f.x), f.y), f.z); }'].join('\n');
+  const SOFT_VERT_PARS = [
+    'uniform highp sampler2D uSoftTex;',
+    'attribute vec4 aSkI; attribute vec4 aSkT;',
+    'varying float vSoftD; varying vec3 vSoftP;',
+    SOFT_NOISE,
+    // turn n by the rotation that takes unit vector r to unit vector c
+    'vec3 sfRot(vec3 n, vec3 r, vec3 c) { vec3 k = cross(r, c); float d = dot(r, c); return n * d + cross(k, n) + k * (dot(k, n) / max(1.0 + d, 1e-3)); }',
+    'void sfBeam(int a, int b, float t, float w, int row, vec3 n0, inout vec3 off, inout float dm, inout vec3 ns) {',
+    '  vec4 Ra = texelFetch(uSoftTex, ivec2(a, 0), 0), Rb = texelFetch(uSoftTex, ivec2(b, 0), 0);',
+    '  vec4 Pa = texelFetch(uSoftTex, ivec2(a, row), 0), Pb = texelFetch(uSoftTex, ivec2(b, row), 0);',
+    '  off += w * mix(Pa.xyz - Ra.xyz, Pb.xyz - Rb.xyz, t); dm += w * mix(Pa.w, Pb.w, t);',
+    '  vec3 r = Rb.xyz - Ra.xyz, c = Pb.xyz - Pa.xyz; float rl = length(r), cl = length(c);',
+    '  ns += w * (rl > 1e-4 && cl > 1e-4 ? sfRot(n0, r / rl, c / cl) : n0); }'].join('\n');
+  const SOFT_VERT = [
+    '#include <beginnormal_vertex>',
+    '  vec3 sfOff = vec3(0.0); vSoftD = 0.0; vSoftP = position;',
+    '  { float sfS = length(normalMatrix[0]) - 1.0; int sfRow = int(floor(sfS / 3.0 + 0.25));',
+    '    if (sfRow > 0 && aSkT.y + aSkT.w > 0.0) {',
+    '      vec3 sfN0 = objectNormal, sfNs = vec3(0.0);',
+    '      if (aSkT.y > 0.0) sfBeam(int(aSkI.x), int(aSkI.y), aSkT.x, aSkT.y, sfRow, sfN0, sfOff, vSoftD, sfNs);',
+    '      if (aSkT.w > 0.0) sfBeam(int(aSkI.z), int(aSkI.w), aSkT.z, aSkT.w, sfRow, sfN0, sfOff, vSoftD, sfNs);',
+    '      objectNormal = dot(sfNs, sfNs) > 1e-8 ? normalize(sfNs) : sfN0;',
+    '      float sfC = smoothstep(0.15, 0.85, vSoftD);',
+    '      if (sfC > 0.0) {',
+    '        vec3 q = position * 15.0; float e = 0.3, n0 = sfN(q);',
+    '        vec3 g = vec3(sfN(q + vec3(e, 0.0, 0.0)), sfN(q + vec3(0.0, e, 0.0)), sfN(q + vec3(0.0, 0.0, e))) - n0;',
+    '        g *= 15.0 / e; float amp = 0.02 * sfC;',
+    '        sfOff += objectNormal * (n0 - 0.5) * amp;',
+    '        objectNormal = normalize(objectNormal - (g - objectNormal * dot(g, objectNormal)) * amp);',
+    '      }',
+    '    }',
+    '  }'].join('\n');
+  const SOFT_FRAG_PARS = 'varying float vSoftD; varying vec3 vSoftP; float sfScr = 0.0;\n' + SOFT_NOISE;
+  // (derivatives are taken outside any branch: inside one that differs pixel to pixel they are undefined)
+  const SOFT_SURF = [
+    '#include <metalnessmap_fragment>',
+    '  float sfDmg = vSoftD; vec2 sfW = vec2(vSoftP.x + vSoftP.y, vSoftP.z - vSoftP.y) * 140.0; float sfWf = max(fwidth(sfW.x), fwidth(sfW.y));',
+    '  if (sfDmg > 0.02) {',
+    '    float sfA = sfN(vSoftP * 11.0) * 0.6 + sfN(vSoftP * 41.0) * 0.4;',
+    '    roughnessFactor = mix(roughnessFactor, max(roughnessFactor, 0.55), smoothstep(0.03, 0.4, sfDmg) * 0.6);',
+    '    sfScr = smoothstep(0.0, 0.06, sfDmg * 1.25 - 0.42 - sfA * 0.5);',
+    '    float sfEdge = sfScr * (1.0 - sfScr) * 4.0;',
+    // a 2/2 twill of 3 mm tows, faded to its average where a pixel holds several
+    '    float sfTw = mod(floor(sfW.x) + floor(sfW.y), 4.0) < 2.0 ? 1.0 : 0.0;',
+    '    vec3 sfCf = vec3(0.028) * (1.0 + (sfTw - 0.5) * 0.55 * (1.0 - smoothstep(0.35, 1.0, sfWf)));',
+    '    diffuseColor.rgb = mix(diffuseColor.rgb, sfCf, sfScr);',
+    '    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32), sfEdge * 0.4);',
+    '    roughnessFactor = mix(roughnessFactor, 0.45, sfScr);',
+    '    metalnessFactor = mix(metalnessFactor, 0.0, sfScr);',
+    '  }'].join('\n');
+  const SOFT_NORMAL = [
+    '#include <normal_fragment_maps>',
+    '  { vec3 sfF = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))); sfF *= dot(sfF, normal) < 0.0 ? -1.0 : 1.0;',
+    '    float sfK = smoothstep(0.2, 0.9, vSoftD) * 0.5;',
+    '    if (sfK > 0.0) normal = normalize(mix(normal, sfF, sfK)); }'].join('\n');
+  function patchSoft(sh) {
+    if (!sh.vertexShader.includes('#include <beginnormal_vertex>')) return;
+    sh.uniforms.uSoftTex = U.uSoftTex;
+    sh.vertexShader = SOFT_VERT_PARS + '\n' + sh.vertexShader
+      .replace('#include <beginnormal_vertex>', SOFT_VERT)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed += sfOff;');
+    let f = SOFT_FRAG_PARS + '\n' + sh.fragmentShader;
+    if (f.includes('#include <metalnessmap_fragment>')) f = f.replace('#include <metalnessmap_fragment>', SOFT_SURF);
+    if (f.includes('#include <normal_fragment_maps>')) f = f.replace('#include <normal_fragment_maps>', SOFT_NORMAL);
+    f = f.replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= 1.0 - sfScr;\n#endif');
+    sh.fragmentShader = f;
   }
 
   // The car's shaders read per-vertex attributes some meshes do not carry: aSky (the car's traced
@@ -340,10 +431,13 @@
   // between bright and dark. Each car mesh gets the real attributes when its tree is patched:
   // aSky 1 (open sky; the bake replaces it where it runs) and aWc 0 (a single wheel's centre).
   // Debris pieces copy their part's attributes, so they carry them too.
+  // (and the soft-body binding, js/r3-damage.js: none until the body is bound, weight 0 moves nothing)
   function fillCarAttrs(geo, tyre) {
     const P = geo.attributes.position;
     if (!P) return;
     if (!geo.attributes.aSky) geo.setAttribute('aSky', new THREE.BufferAttribute(new Uint8Array(P.count).fill(255), 1, true));
+    if (!geo.attributes.aSkI) geo.setAttribute('aSkI', new THREE.BufferAttribute(new Uint16Array(P.count * 4), 4));
+    if (!geo.attributes.aSkT) geo.setAttribute('aSkT', new THREE.BufferAttribute(new Uint8Array(P.count * 4), 4, true));
     if (tyre && !geo.attributes.aWc) geo.setAttribute('aWc', new THREE.BufferAttribute(new Float32Array(P.count * 3), 3));
   }
   // Patch a lit material once. Basic/shader materials (sky, particles, UI decals) keep theirs.
@@ -353,9 +447,9 @@
     const mac = m.userData.macro || null, liv = m.userData.livery || null, gr = m.userData.grass || null, ao = m.userData.carAO || null, wk = m.userData.wetK || null;
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
-    const opaque = !m.transparent;
-    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); };
-    m.customProgramCacheKey = () => 'r3s3' + (opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
+    const opaque = !m.transparent, sf = lf && !!ao;
+    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); if (sf) patchSoft(sh); };
+    m.customProgramCacheKey = () => 'r3s4' + (sf ? 's' : '') +(opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
     m.needsUpdate = true;
     return m;
   }
@@ -590,5 +684,5 @@
     return todo.length;
   }
 
-  F1.R3S = { U, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
+  F1.R3S = { U, SOFT_W, SOFT_H, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -999,9 +999,10 @@
   // (the shader reads the fade as the length of the normal matrix's first column, less 1, so the
   // matrix is first brought to unit length: a mesh placed with a scale, as two of the cockpit's
   // are, otherwise read as part faded for good and was drawn as a stipple that moved every frame)
+  // (a crashed car's body adds three times its row in the soft-body texture, js/r3-damage.js)
   function lodHook(rn, sc, cam, g, o) {
-    const S = o.lodS, e = o.normalMatrix.elements;
-    const L = Math.hypot(e[0], e[1], e[2]) || 1, k = (1 + (S && S.v ? S.v : 0)) / L;
+    const S = o.lodS, e = o.normalMatrix.elements, R = o.softRow;
+    const L = Math.hypot(e[0], e[1], e[2]) || 1, k = (1 + (S && S.v ? S.v : 0) + (R && R.v ? 3 * R.v : 0)) / L;
     if (Math.abs(k - 1) < 1e-6) return;
     for (let i = 0; i < 9; i++) e[i] *= k;
   }

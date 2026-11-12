@@ -32,6 +32,12 @@
 
   const RHO = 1.225, GRAV = 9.81;
 
+  // Broken corners (full damage): with a wheel gone, the corner rests on its upright and the floor's
+  // edge once it has dropped STUB_DROP (m) from its static height, on a stiff contact (N/m, N s/m)
+  // that drags with carbon-and-titanium-on-asphalt friction. A flat tyre's carcass is a soft spring
+  // (FLAT_KT, N/m: about 3.5 cm more under a corner's static load) and rolls with about four
+  // times a racing tyre's resistance.
+  const STUB_DROP = 0.07, STUB_K = 4e5, STUB_C = 6e3, STUB_MU = 0.5, FLAT_KT = 7e4, FLAT_ROLL = 0.05;
   const SPEC = {
     mass: 768, fuelMax: 40, wb: 3.6, cgFront: 0.455, cgH: 0.30, trackF: 1.62, trackR: 1.56,
     Iz: 1000, Iyy: 1050, Ixx: 260, R: 0.36, len: 5.6, wid: 2.0,
@@ -281,6 +287,9 @@
     const wingK = D ? 0 : c.wingDmg;
     const downF = down * balF * (1 - dirty * 1.5) * (1 - wingK * 0.4) * (D ? D.kDownF : 1), downR = down * Math.min(1 - balF, balR0 + (xm ? 0.03 : 0)) * (1 - dirty * 0.55) * (D ? D.kDownR : 1);
     const drag = sp.CdA * (xm ? sp.xModeCd : 1) * (1 + wingK * 0.07) * c.dragMul * q * (D ? D.kDrag : 1);
+    // a bent corner moves its wheel: the hub stands where the damaged structure has put it
+    // (js/damage.js D.hub, x forward and y right in metres; all zero on a car that has not been hit)
+    if (D && D.hub) for (let k = 0; k < 4; k++) { const w = W[k]; if (w.x0 == null) { w.x0 = w.x; w.y0 = w.y; } w.x = w.x0 + D.hub[k * 2]; w.y = w.y0 + D.hub[k * 2 + 1]; }
 
     // --- suspension: loads from springs, dampers and bars over the road surface ---
     const cs = Math.cos(c.steer), ss = Math.sin(c.steer);
@@ -316,15 +325,22 @@
     for (let k = 0; k < 4; k++) {
       const w = W[k];
       const bent = D ? D.p[F1.Damage.CORNER[k]] : 0;
-      const kS = (w.front ? sp.kF : sp.kR) * (1 - 0.45 * bent), cD = (w.front ? sp.cF : sp.cR) * (1 - 0.5 * bent);
+      let kS = (w.front ? sp.kF : sp.kR) * (1 - 0.45 * bent), cD = (w.front ? sp.cF : sp.cR) * (1 - 0.5 * bent);
+      // a deflated tyre is a soft spring under the corner, in series with the suspension: the
+      // corner settles a few centimetres lower, more so under downforce
+      if (D && D.puncture[k]) { kS = kS * FLAT_KT / (kS + FLAT_KT); cD *= 0.6; }
       const rate = (comp[k] - w.comp) / dt;
       const o = k ^ 1; // the other wheel on this axle
       const arb = (w.front ? sp.arbF : sp.arbR) * (comp[k] - comp[o]);
       let F = kS * comp[k] + cD * U.clamp(rate, -3, 3) + arb;
       w.comp = comp[k];
       w.Fz = D && D.wheelOff[k] ? 0 : Math.max(0, F);
+      // with the wheel gone the corner sinks until the upright and the floor's edge reach the road,
+      // which then carry that corner (and drag along it, below)
+      w.Fst = 0;
+      if (D && D.wheelOff[k]) { const pen = comp[k] - w.s0 - STUB_DROP; if (pen > 0) w.Fst = Math.max(0, STUB_K * pen + STUB_C * U.clamp(rate, -3, 3)); }
       w.zw = w.road; // wheel follows the road (for the renderer)
-      if (w.front) FzF += w.Fz; else FzR += w.Fz;
+      if (w.front) FzF += w.Fz + w.Fst; else FzR += w.Fz + w.Fst;
     }
     // ride heights and the plank
     c.rhF = sp.rh0F + c.zh + c.pitch * c.lf;
@@ -389,7 +405,16 @@
     const Tlock = sp.diffPre + (Tengine >= 0 ? sp.diffPower : sp.diffCoast) * Math.abs(Tengine);
     const Tbias = U.clamp(sp.diffK * (W[2].omega - W[3].omega), -Tlock, Tlock);
     const Tdrive = [0, 0, Tengine / 2 - Tbias, Tengine / 2 + Tbias];
-    const Ieng = sp.Ie * ratio * ratio * 0.5 * (c.shiftT > 0 ? 0 : 1);
+    // A rear wheel gone leaves its driveshaft turning nothing. The clutch pack can then pass the
+    // wheel still on the road only the torque it holds across the two sides (pre + k T, the input
+    // all going that way: at most pre / (1 - k), a few hundred newtons at the tyre); the rest just
+    // spins the free side up, and the engine with it. So the car barely creeps, as a real one does.
+    if (D && D.wheelOff[2] !== D.wheelOff[3]) {
+      const g = D.wheelOff[2] ? 3 : 2, cap = sp.diffPre / (1 - (Tengine >= 0 ? sp.diffPower : sp.diffCoast));
+      const Tg = U.clamp(Tengine, -cap, cap);
+      Tdrive[g] = Tg; Tdrive[5 - g] = Tengine - Tg;
+    }
+    const Ieng =sp.Ie * ratio * ratio * 0.5 * (c.shiftT > 0 ? 0 : 1);
     c.rpm = U.expDamp(c.rpm, Math.min(sp.rpmLimit + 80, rpm), 25, dt);
     c.throttleOut = throttle;
 
@@ -482,6 +507,7 @@
       let fx = TF[0], fy = TF[1];
       // rolling resistance and dirt drag
       fx -= S.roll * Fz * 0.7 * Math.sign(vxw) * Math.min(1, Math.abs(vxw));
+      if (D && D.puncture[k]) fx -= FLAT_ROLL * Fz * Math.sign(vxw) * Math.min(1, Math.abs(vxw)); // a flat tyre's carcass flexing
       // ABS and TC controllers act on slip, like the real systems
       const over = w.kappa / sp.kappaPk;
       // ABS as a slip controller: pressure eases off in proportion as the slip approaches the
@@ -549,7 +575,8 @@
         if (!D.wheelOff[k]) continue;
         const w = W[k], vxb = c.u - c.r * w.y, vyb = c.v + c.r * w.x, vv = Math.hypot(vxb, vyb);
         if (vv < 0.05) continue;
-        const f = 0.55 * m * GRAV * 0.28 * Math.min(1, vv / 2); // the suspension and floor scraping
+        // the upright and the floor scraping on the road: friction on the load that corner rests on
+        const f = STUB_MU * w.Fst * Math.min(1, vv / 2);
         const bx = -vxb / vv * f, by = -vyb / vv * f;
         Fx += bx; Fy += by; Mz += w.x * by - w.y * bx;
       }
@@ -573,7 +600,7 @@
     const aRoad = uT * uT * tr.ddz[i0]; // the road curving up (compression) or away (crest)
     c.zhv += ((Fs - m * GRAV - downF - downR - m * aRoad) / m) * dt;
     let pm = 0, rm = 0;
-    for (let k = 0; k < 4; k++) { const w = W[k]; pm += w.Fz * w.x; rm -= w.Fz * w.y; }
+    for (let k = 0; k < 4; k++) { const w = W[k], Fv = w.Fz + w.Fst; pm += Fv * w.x; rm -= Fv * w.y; }
     pm += floorF * 0.2 + FxT * sp.cgH - downF * c.lf + downR * c.lr;
     rm += -FyT * sp.cgH;
     c.pitchv += (pm / sp.Iyy) * dt;
