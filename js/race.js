@@ -374,27 +374,6 @@
     if (!inv) return 0;
     return Math.sign(rel) * Math.min(mu * j * Math.abs(rel) / s, Math.abs(rel) / inv);
   }
-  // What rubbing does to the wheel. A tyre ground against a wall or another car's tyre carries the
-  // rub's friction (along and up the surface) into its suspension; the contact planes of the
-  // structure (js/softbody.js) only see each step's small bump, not this running load. It is
-  // added up per wheel as the energy the rub takes (friction impulse times the slip speed: a scrape
-  // at 250 km/h does far more than one at 120; the up-and-down rub of tread on tread counts a
-  // quarter, as the springs carry it: it throws a car, it does not tear its wheel off at once), fading over about a sixth of a second: past RUB_TOE
-  // (J) the track rod or toe link goes and the wheel swivels free, past RUB_TEAR the corner tears and
-  // the wheel is off.
-  const RUB_FADE = 0.15, RUB_TOE = 45e3, RUB_TEAR = 80e3;
-  function rubLoad(race, c, k, E) {
-    const w = TYRE_OF[k];
-    if (w < 0 || !c.dm || !c.dm.soft || !F1.Soft.tear || c.dm.wheelOff[w]) return;
-    const r = c.rub || (c.rub = [0, 0, 0, 0, 0]), t = race.time;
-    const f = Math.exp(-Math.max(0, t - (r[4] || t)) / RUB_FADE);
-    for (let i = 0; i < 4; i++) r[i] *= f;
-    r[4] = t; r[w] += E;
-    G.__rubMax = Math.max(G.__rubMax || 0, r[w]); // (debug: the largest load seen)
-    const S = c.dm.soft;
-    if (r[w] > RUB_TEAR) { if (F1.Soft.tear(S, w, false)) F1.Damage.update(race, c, true); }
-    else if (r[w] > RUB_TOE && !S.noSteer[w]) { if (F1.Soft.tear(S, w, true)) F1.Damage.update(race, c, true); }
-  }
   const NC = CC.length, _cx = new Float64Array(NC), _cy = new Float64Array(NC), _cx2 = new Float64Array(NC), _cy2 = new Float64Array(NC);
   const _cr = new Float64Array(NC), _cr2 = new Float64Array(NC);
   // world circles of a car (and their radii): a damaged car's circles follow its structure
@@ -491,9 +470,7 @@
     let jt = -vt / (1 / m + rt * rt / I);
     jt = U.clamp(jt, -mu * j * Math.abs(vt) / sl, mu * j * Math.abs(vt) / sl);
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
-    let jzW = 0;
-    if (g && wi) { jzW = treadRub(g, wi.omega, Iw, 0, 0, 1, vt, j, mu); if (jzW) liftAt(c, bk, g, jzW, bx, by); }
-    if (wk >= 0) rubLoad(race, c, bk, Math.abs(jt * vt) + 0.25 * Math.abs(jzW * vz));
+    if (g && wi) { const jz = treadRub(g, wi.omega, Iw, 0, 0, 1, vt, j, mu); if (jz) liftAt(c, bk, g, jz, bx, by); }
     c.r = U.clamp(c.r, -7, 7); // (the part that hits would snap off, not turn the whole car)
     const power = -vn;
     // With no damage model (Arcade, or damage off) the bounce alone cost less than braking: a
@@ -570,14 +547,10 @@
       jt = U.clamp(jt, -lim, lim);
       applyImpulse(a, -tx * jt, -ty * jt, rax, ray);
       applyImpulse(b, tx * jt, ty * jt, rbx, rby);
-      let jz = 0;
       if ((gA && WA) || (gB && WB)) {
-        jz = treadRub(WA ? gA : 0, WA ? WA.omega : 0, IA, WB ? gB : 0, WB ? WB.omega : 0, IB, vt, j, mu);
+        const jz = treadRub(WA ? gA : 0, WA ? WA.omega : 0, IA, WB ? gB : 0, WB ? WB.omega : 0, IB, vt, j, mu);
         if (jz) { liftAt(a, ka, WA ? gA : 0, jz, best.x, best.y); liftAt(b, kb, WB ? gB : 0, -jz, best.x, best.y); }
       }
-      const E = Math.abs(jt * vt) + 0.25 * Math.abs(jz * (vzB - vzA));
-      if (ta >= 0) rubLoad(race, a, ka, E);
-      if (tb >= 0) rubLoad(race, b, kb, E);
     }
     a.r = U.clamp(a.r, -7, 7); b.r = U.clamp(b.r, -7, 7);
     const power = -vn;

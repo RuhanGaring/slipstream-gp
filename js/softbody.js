@@ -479,17 +479,5 @@
     s.awake = 1; s.idle = 0;
   }
 
-  // a corner torn by a load the contact planes do not carry (a tyre ground along a wall or another
-  // car's tyre: js/race.js rubLoad): its toe link alone, or every link, and the wheel comes away
-  function tear(s, k, toeOnly) {
-    const T = template();
-    let any = false;
-    for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k && !s.broken[e] && (!toeOnly || e === T.toeLink[k])) { s.broken[e] = 1; any = true; }
-    if (!any) return false;
-    s.awake = 1; s.idle = 0; s.age = 0; s.ver++;
-    connectivity(s); measure(s);
-    return true;
-  }
-
-  F1.Soft = { MAT, LABEL, CORNER, template, init, impact, step, measure, lost, repair, tear, get gid() { return template().gid; } };
+  F1.Soft = { MAT, LABEL, CORNER, template, init, impact, step, measure, lost, repair, get gid() { return template().gid; } };
 })(typeof window !== 'undefined' ? window : globalThis);
