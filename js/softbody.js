@@ -149,6 +149,15 @@
       if (ga === gb) T.gbeams[ga].push(i);
       else { if (isCorner(ga)) T.gbeams[ga].push(i); if (isCorner(gb)) T.gbeams[gb].push(i); }
     }
+    // each corner's links to the car (the beams with one end on its upright): once half of them have
+    // failed, the rest carry the whole wheel in bending, which a wishbone is not made for (see step)
+    T.linkCorner = new Int8Array(nb).fill(-1); T.nLinks = [0, 0, 0, 0];
+    corners.forEach((c, k) => {
+      const up = new Set([c.H, c.U, c.L, c.S]);
+      for (let i = 0; i < nb; i++) if (up.has(T.a[i]) !== up.has(T.b[i])) { T.linkCorner[i] = k; T.nLinks[k]++; }
+    });
+    // the survival cell's outline (x stations, half width, top): nothing passes through it
+    T.tub = TUB.map(([x, w, z0, z1]) => [x, w, z0, z1]);
     // rest axle directions of the four corners (for toe and camber)
     T.axle0 = corners.map((c, k) => axle(T.rest, c, k));
     TPL = T;
@@ -224,6 +233,9 @@
   }
 
   const SUB = 2, ITER = 6, DAMP = 0.9, MU = 0.6;
+  // how far a suspension link may turn at its mounts before they tear out (cosines): 45 degrees
+  // while its corner is whole, 20 once half its corner's links have gone
+  const LINK_TURN = Math.cos(45 * Math.PI / 180), LINK_TURN_ALONE = Math.cos(20 * Math.PI / 180);
   // one race step for the car's structure; returns true when something broke off
   function step(s, dt) {
     if (!s.awake) return false;
@@ -284,9 +296,25 @@
           }
         }
       }
+      // nothing passes through the survival cell: a node pushed into it stops at its side
+      keepOut(p, off);
       // plasticity and fracture
+      // (a corner that has lost half its links: the rest snap at a small further strain)
+      const lost = [0, 0, 0, 0];
+      for (let e = 0; e < T.nb; e++) if (br[e] && T.linkCorner[e] >= 0) lost[T.linkCorner[e]]++;
       for (let e = 0; e < T.nb; e++) {
         if (br[e]) continue;
+        const lc = T.linkCorner[e];
+        if (lc >= 0) {
+          // a link is pinned at its ends, so it can swing without stretching; its mounts cannot. Turned
+          // further than its mounts allow from where it was made, it tears out: far less once half
+          // its corner's links have gone and it carries the wheel alone
+          const a3 = T.a[e] * 3, b3 = T.b[e] * 3, R = T.rest;
+          const dx = p[b3] - p[a3], dy = p[b3 + 1] - p[a3 + 1], dz = p[b3 + 2] - p[a3 + 2];
+          const rx = R[b3] - R[a3], ry = R[b3 + 1] - R[a3 + 1], rz = R[b3 + 2] - R[a3 + 2];
+          const cs = (dx * rx + dy * ry + dz * rz) / (Math.hypot(dx, dy, dz) * Math.hypot(rx, ry, rz) || 1);
+          if (cs < (lost[lc] * 2 >= T.nLinks[lc] ? LINK_TURN_ALONE : LINK_TURN)) { br[e] = 1; snapped = true; lost[lc]++; work += T.F[e] * T.L0[e] * 0.25; continue; }
+        }
         const a3 = T.a[e] * 3, b3 = T.b[e] * 3;
         const L = Math.hypot(p[b3] - p[a3], p[b3 + 1] - p[a3 + 1], p[b3 + 2] - p[a3 + 2]);
         // it snaps past its breaking strain (counted from its original length) and bends for
@@ -309,6 +337,22 @@
     s.age = (s.age || 0) + dt;
     if (!s.planes.length && (moved < 1e-4 || s.age > 1.5)) { s.idle += dt; if (s.idle > 0.08) s.awake = 0; } else s.idle = 0;
     return detached;
+  }
+
+  // the survival cell is solid: a loose node inside its outline goes back out the side it belongs to
+  function keepOut(p, off) {
+    const T = template(), tb = T.tub, x0 = tb[0][0], x1 = tb[tb.length - 1][0];
+    for (let i = 0; i < T.n; i++) {
+      if (T.fixed[i] || off[i]) continue;
+      const i3 = i * 3, x = p[i3];
+      if (x <= x0 || x >= x1) continue;
+      let k = 0; while (k < tb.length - 2 && x > tb[k + 1][0]) k++;
+      const f = (x - tb[k][0]) / (tb[k + 1][0] - tb[k][0]), w = tb[k][1] + (tb[k + 1][1] - tb[k][1]) * f;
+      const zl = tb[k][2] + (tb[k + 1][2] - tb[k][2]) * f, zh = tb[k][3] + (tb[k + 1][3] - tb[k][3]) * f, z = p[i3 + 2];
+      if (z <= zl || z >= zh || Math.abs(p[i3 + 1]) >= w) continue;
+      const side = T.rest[i3 + 1] >= 0 ? 1 : -1;
+      p[i3 + 1] = side * w;
+    }
   }
 
   // nodes no longer joined (through unbroken beams) to the survival cell come off
