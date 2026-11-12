@@ -344,16 +344,25 @@
     if (w < 0 || !c.wheels[w] || (c.dm && c.dm.wheelOff && c.dm.wheelOff[w])) return 0;
     return -(nx * Math.cos(c.h) + ny * Math.sin(c.h)) * c.spec.R;
   }
-  // an up (+) or down impulse jz at a car's contact point: the wheel's spin and the body's heave,
-  // pitch and roll take it
+  // A tyre on the road is held at road speed by its grip and the car behind it, so a brief touch
+  // cannot stop its tread: its inertia here counts the share of the car's mass it carries.
+  function wheelI(c, W) { return (W.front ? c.spec.IwF : c.spec.IwR) + Math.max(0, W.Fz) / 9.81 * c.spec.R * c.spec.R; }
+  // an up (+) or down impulse jz at a car's contact point: the wheel's spin and the body take it. A
+  // push down goes into the suspension; a kick up that the suspension cannot hold (more than
+  // AIR_KICK m/s) throws the car into the air (js/car.js c.air): a wheel-to-wheel launch
+  const AIR_KICK = 0.6;
   function liftAt(c, k, g, jz, px, py) {
     const w = TYRE_OF[k];
     // (the rub only ever slows a wheel, to a stop at most: touching treads would otherwise mesh like
     // gears and turn one tyre backwards, against the road it is rolling on)
-    if (w >= 0 && g) { const W = c.wheels[w], I = W.front ? c.spec.IwF : c.spec.IwR, d = jz * g / I; if (d * W.omega < 0) W.omega = Math.abs(d) >= Math.abs(W.omega) ? 0 : W.omega + d; }
+    if (w >= 0 && g) { const W = c.wheels[w], d = jz * g / wheelI(c, W); if (d * W.omega < 0) W.omega = Math.abs(d) >= Math.abs(W.omega) ? 0 : W.omega + d; }
     const m = c.spec.mass + c.fuel, ch = Math.cos(c.h), sh = Math.sin(c.h);
     const lx = (px - c.x) * ch + (py - c.y) * sh, ly = -(px - c.x) * sh + (py - c.y) * ch;
-    c.zhv += jz / m; c.pitchv += jz * lx / c.spec.Iyy; c.rollv -= jz * ly / c.spec.Ixx;
+    if (jz > 0 && (c.air > 0 || jz / m > AIR_KICK)) {
+      c.air = Math.max(c.air || 0, 1e-3); c.airV = (c.airV || 0) + jz / m;
+      // (a body in the air turns about its centre: the kick at the nose pitches it up, one side rolls it)
+      c.airPV = (c.airPV || 0) + jz * lx / c.spec.Iyy; c.airRV = (c.airRV || 0) - jz * ly / c.spec.Ixx;
+    } else { c.zhv += jz / m; c.pitchv += jz * lx / c.spec.Iyy; c.rollv -= jz * ly / c.spec.Ixx; }
   }
   // the vertical part of a rubbing contact between surface A (tread gain gA, spin wA) and surface
   // B; returns the impulse that pushes A's surface up (B gets the opposite), at most mu x the
@@ -456,7 +465,7 @@
     const vt = vcx * tx + vcy * ty;
     const rt = rx * ty - ry * tx;
     const wk = TYRE_OF[bk], g = treadGain(c, bk, -bnx, -bny), mu = wk >= 0 ? MU_RUBBER : MU_WALL;
-    const wi = wk >= 0 ? c.wheels[wk] : null, Iw = wi ? (wi.front ? c.spec.IwF : c.spec.IwR) : 1;
+    const wi = wk >= 0 ? c.wheels[wk] : null, Iw = wi ? wheelI(c, wi) : 1;
     const vz = g && wi ? g * wi.omega : 0, sl = Math.hypot(vt, vz) || 1;
     let jt = -vt / (1 / m + rt * rt / I);
     jt = U.clamp(jt, -mu * j * Math.abs(vt) / sl, mu * j * Math.abs(vt) / sl);
@@ -527,7 +536,7 @@
       const mu = ta >= 0 && tb >= 0 ? MU_RUBBER : ta >= 0 || tb >= 0 ? 0.7 : MU_BODY;
       const gA = treadGain(a, ka, nx, ny), gB = treadGain(b, kb, -nx, -ny);
       const WA = ta >= 0 ? a.wheels[ta] : null, WB = tb >= 0 ? b.wheels[tb] : null;
-      const IA = WA ? (WA.front ? a.spec.IwF : a.spec.IwR) : 1, IB = WB ? (WB.front ? b.spec.IwF : b.spec.IwR) : 1;
+      const IA = WA ? wheelI(a, WA) : 1, IB = WB ? wheelI(b, WB) : 1;
       const tx = -ny, ty = nx;
       const vax2 = a.vx - a.r * ray, vay2 = a.vy + a.r * rax, vbx2 = b.vx - b.r * rby, vby2 = b.vy + b.r * rbx;
       const vt = (vbx2 - vax2) * tx + (vby2 - vay2) * ty;

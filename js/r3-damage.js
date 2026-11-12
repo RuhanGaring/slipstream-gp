@@ -523,7 +523,8 @@
       w.position.x = wd.baseX + P[H * 3] - R[H * 3];
       w.position.z = wd.baseZ + P[H * 3 + 1] - R[H * 3 + 1];
       w.position.y += P[H * 3 + 2] - R[H * 3 + 2];
-      w.rotation.y = -((wd.front ? c.steer || 0 : 0) + Math.max(-0.6, Math.min(0.6, s.toe[k])));
+      // (a wheel that has lost its track rod trails the way it is rolling: js/car.js w.flop)
+      w.rotation.y = s.noSteer && s.noSteer[k] && c.wheels && c.wheels[k] ? -(c.wheels[k].flop || 0) : -((wd.front ? c.steer || 0 : 0) + Math.max(-0.6, Math.min(0.6, s.toe[k])));
       w.rotation.x = (k % 2 ? 1 : -1) * Math.max(-0.5, Math.min(0.5, s.camber[k] / 57.3));
     });
   }

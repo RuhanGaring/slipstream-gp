@@ -37,6 +37,7 @@
   // that drags with carbon-and-titanium-on-asphalt friction. A flat tyre's carcass is a soft spring
   // (FLAT_KT, N/m: about 3.5 cm more under a corner's static load) and rolls with about four
   // times a racing tyre's resistance.
+  const AIR_OFF = 0.02; // (m: higher than this the tyres no longer touch the road)
   const STUB_DROP = 0.07, STUB_K = 4e5, STUB_C = 6e3, STUB_MU = 0.5, FLAT_KT = 7e4, FLAT_ROLL = 0.05;
   const SPEC = {
     mass: 768, fuelMax: 40, wb: 3.6, cgFront: 0.455, cgH: 0.30, trackF: 1.62, trackR: 1.56,
@@ -334,7 +335,7 @@
       const arb = (w.front ? sp.arbF : sp.arbR) * (comp[k] - comp[o]);
       let F = kS * comp[k] + cD * U.clamp(rate, -3, 3) + arb;
       w.comp = comp[k];
-      w.Fz = D && D.wheelOff[k] ? 0 : Math.max(0, F);
+      w.Fz = (D && D.wheelOff[k]) || c.air > AIR_OFF ? 0 : Math.max(0, F); // (no load on a wheel in the air)
       // with the wheel gone the corner sinks until the upright and the floor's edge reach the road,
       // which then carry that corner (and drag along it, below)
       w.Fst = 0;
@@ -473,8 +474,13 @@
       let vxw = vxb, vyw = vyb;
       const toe = (D ? (D.toe ? D.toe[k] : D.p[F1.Damage.CORNER[k]] * 0.07 * D.toeSign[k]) : 0) + (w.front ? sp.toeF : -sp.toeR) * Math.sign(w.y) + (w.front && sp.toeGain ? sp.toeGain * c.steer * Math.max(0, 1 - Math.abs(c.steer) / 0.15) : 0);
       let cw = cs, sw = ss;
-      if (toe) { const ang = (w.front ? c.steer : 0) + toe; cw = Math.cos(ang); sw = Math.sin(ang); }
-      if (w.front || toe) { vxw = vxb * cw + vyb * sw; vyw = -vxb * sw + vyb * cw; }
+      // a wheel whose track rod (or toe link) has broken is no longer held: it swivels freely on its
+      // upright and trails the way that corner is going, so it takes no side load and no steering;
+      // the other front wheel still steers through the rack
+      const flop = !!(D && D.noSteer && D.noSteer[k]);
+      if (flop) { const ang = U.clamp(Math.atan2(vyb, Math.max(Math.abs(vxb), 1)) * Math.sign(vxb || 1), -0.6, 0.6); w.flop = ang; cw = Math.cos(ang); sw = Math.sin(ang); }
+      else if (toe) { const ang = (w.front ? c.steer : 0) + toe; cw = Math.cos(ang); sw = Math.sin(ang); }
+      if (w.front || toe || flop) { vxw = vxb * cw + vyb * sw; vyw = -vxb * sw + vyb * cw; }
       // slip angle with relaxation length
       const alphaKin = Math.atan2(vyw, Math.max(Math.abs(vxw), 2.5));
       w.alpha += (alphaKin - w.alpha) * Math.min(1, (Math.abs(vxw) + 3) * dt / sp.relax);
@@ -528,7 +534,7 @@
 
       // back to the body frame
       let bx = fx, by = fy;
-      if (w.front || toe) { bx = fx * cw - fy * sw; by = fx * sw + fy * cw; }
+      if (w.front || toe || flop) { bx = fx * cw - fy * sw; by = fx * sw + fy * cw; }
       Fx += bx; Fy += by;
       FxT += bx; FyT += by;
       Mz += w.x * by - w.y * bx;
@@ -607,6 +613,26 @@
     c.rollv += (rm / sp.Ixx) * dt;
     c.zh += c.zhv * dt; c.pitch += c.pitchv * dt; c.roll += c.rollv * dt;
     c.zh = U.clamp(c.zh, -0.12, 0.3); c.pitch = U.clamp(c.pitch, -0.08, 0.08); c.roll = U.clamp(c.roll, -0.08, 0.08);
+    // In the air (thrown up by a wheel-to-wheel touch, js/race.js liftAt): the car flies its arc
+    // under gravity and its own downforce, turning in pitch and roll as it was kicked, with no grip
+    // at any tyre, and lands; the suspension takes the landing, and a hard one breaks things.
+    if (c.air > 0) {
+      c.zh = Math.min(c.zh, 0.05); c.zhv = 0; // (the wheels hang on full droop)
+      c.airV -= (GRAV + (downF + downR) / m) * dt;
+      c.air += c.airV * dt; c.airP = (c.airP || 0) + (c.airPV || 0) * dt; c.airR = (c.airR || 0) + (c.airRV || 0) * dt;
+      c.airPV *= 1 - 0.4 * dt; c.airRV *= 1 - 0.4 * dt;
+      c.airP = U.clamp(c.airP, -0.9, 0.9); c.airR = U.clamp(c.airR, -0.9, 0.9);
+      if (c.air <= 0) {
+        c.landV = -c.airV;
+        c.zhv = -Math.min(3, -c.airV) * 0.5;
+        c.air = 0; c.airV = 0; c.airPV = c.airRV = 0;
+      }
+    } else if (c.airP || c.airR) {
+      // (down again: the body drops back level on its wheels over a few tenths of a second)
+      const k = Math.exp(-14 * dt);
+      c.airP *= k; c.airR *= k;
+      if (Math.abs(c.airP) + Math.abs(c.airR) < 1e-3) c.airP = c.airR = 0;
+    }
 
     // --- integrate the plane motion ---
     const axb = Fx / m, ayb = Fy / m;

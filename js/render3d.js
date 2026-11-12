@@ -3648,9 +3648,10 @@ void main() {
       ud.gy = gy;
       o.position.set(c.x, gy, c.y);
       o.rotation.y = -c.h;
-      body.position.y = c.zh || 0;
-      body.rotation.z = pr + (c.pitch || 0);
-      body.rotation.x = rr + (c.roll || 0);
+      // (c.air, airP, airR: a car thrown up by a wheel-to-wheel touch, in flight; js/car.js)
+      body.position.y = (c.zh || 0) + (c.air || 0);
+      body.rotation.z = pr + (c.pitch || 0) + (c.airP || 0);
+      body.rotation.x = rr + (c.roll || 0) + (c.airR || 0);
       ud.ground.rotation.set(rr, 0, pr);
       roadFeel(c, ud, body, dt);
       const PW = c.wheels && c.wheels.length === 4 ? c.wheels : null;

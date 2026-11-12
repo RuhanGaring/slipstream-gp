@@ -156,6 +156,9 @@
       const up = new Set([c.H, c.U, c.L, c.S]);
       for (let i = 0; i < nb; i++) if (up.has(T.a[i]) !== up.has(T.b[i])) { T.linkCorner[i] = k; T.nLinks[k]++; }
     });
+    // the link that holds each wheel's toe (the track rod at the front, the toe link at the back):
+    // the one from the steering arm to the car. Broken, that wheel is no longer steered
+    T.toeLink = corners.map(c => { for (let i = 0; i < nb; i++) if ((T.a[i] === c.S) !== (T.b[i] === c.S) && T.linkCorner[i] >= 0) return i; return -1; });
     // how hard a contact drags each node along (Coulomb): rubber at the hubs (the tyres), carbon elsewhere
     T.mu = new Float32Array(n).fill(MU);
     for (const c of corners) T.mu[c.H] = MU_TYRE;
@@ -183,7 +186,7 @@
     const s = {
       p: Float32Array.from(T.rest), q: Float32Array.from(T.rest), L0: Float32Array.from(T.L0),
       broken: new Uint8Array(T.nb), off: new Uint8Array(T.n), planes: [], awake: 0, idle: 0,
-      ver: 0, offVer: 0, gp: new Float32Array(T.gname.length), toe: [0, 0, 0, 0], camber: [0, 0, 0, 0], hubOff: [false, false, false, false],
+      ver: 0, offVer: 0, gp: new Float32Array(T.gname.length), toe: [0, 0, 0, 0], camber: [0, 0, 0, 0], hubOff: [false, false, false, false], noSteer: [false, false, false, false],
       events: [], cc: null, energy: 0,
     };
     return s;
@@ -239,6 +242,9 @@
   // how far a suspension link may turn at its mounts before they tear out (cosines): 45 degrees
   // while its corner is whole, 20 once half its corner's links have gone
   const LINK_TURN = Math.cos(45 * Math.PI / 180), LINK_TURN_ALONE = Math.cos(20 * Math.PI / 180);
+  // a corner with a broken link lets its wheel go once the hub has been knocked this far (m); a hub
+  // shoved this far in toward the car goes whatever broke
+  const HUB_LOOSE = 0.12, HUB_SHOVED = 0.18;
   // one race step for the car's structure; returns true when something broke off
   function step(s, dt) {
     if (!s.awake) return false;
@@ -329,6 +335,19 @@
       // the energy the structure soaked up comes off the planes driving into it
       if (work > 0 && s.planes.length) { const share = work / s.planes.length; for (const P of s.planes) P.E -= share; }
       s.energy += work;
+      // A wheel knocked out of place does not stay there: once a hit has broken any link at its
+      // corner and moved the hub more than a few centimetres (or shoved it into the car's side
+      // at all), the corner's mounts are gone and the rest of its links let go
+      for (let k = 0; k < 4; k++) {
+        const c = T.corners[k], H3 = c.H * 3;
+        if (off[c.H]) continue;
+        const dx = p[H3] - T.rest[H3], dy = p[H3 + 1] - T.rest[H3 + 1], dz = p[H3 + 2] - T.rest[H3 + 2];
+        const moved = Math.hypot(dx, dy, dz), inward = -dy * Math.sign(T.rest[H3 + 1]);
+        let any = false, all = true;
+        for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k) { if (br[e]) any = true; else all = false; }
+        if (all || !((any && moved > HUB_LOOSE) || inward > HUB_SHOVED)) continue;
+        for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k && !br[e]) { br[e] = 1; snapped = true; }
+      }
     }
     for (let i = 0; i < T.n; i++) { if (T.fixed[i] || off[i]) continue; const i3 = i * 3; moved = Math.max(moved, Math.abs(p[i3] - q[i3]) + Math.abs(p[i3 + 1] - q[i3 + 1]) + Math.abs(p[i3 + 2] - q[i3 + 2])); }
     s.ver++;
@@ -402,6 +421,7 @@
       s.toe[k] = a[0] - a0[0];
       s.camber[k] = -(a[1] - a0[1]) * 57.3; // degrees, as js/car.js counts camber
       s.hubOff[k] = !!s.off[c.H];
+      s.noSteer[k] = T.toeLink[k] >= 0 && !!s.broken[T.toeLink[k]];
       const gi = T.gid[CORNER[k]];
       let nb = 0; for (const e of T.gbeams[gi]) nb += s.broken[e];
       s.gp[gi] = s.hubOff[k] ? 1 : Math.min(1, Math.max(Math.abs(s.toe[k]) / 0.06, Math.abs(s.camber[k]) / 4, nb / T.gbeams[gi].length * 2.5));
