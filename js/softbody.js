@@ -156,6 +156,9 @@
       const up = new Set([c.H, c.U, c.L, c.S]);
       for (let i = 0; i < nb; i++) if (up.has(T.a[i]) !== up.has(T.b[i])) { T.linkCorner[i] = k; T.nLinks[k]++; }
     });
+    // how hard a contact drags each node along (Coulomb): rubber at the hubs (the tyres), carbon elsewhere
+    T.mu = new Float32Array(n).fill(MU);
+    for (const c of corners) T.mu[c.H] = MU_TYRE;
     // the survival cell's outline (x stations, half width, top): nothing passes through it
     T.tub = TUB.map(([x, w, z0, z1]) => [x, w, z0, z1]);
     // rest axle directions of the four corners (for toe and camber)
@@ -232,7 +235,7 @@
     return E;
   }
 
-  const SUB = 2, ITER = 6, DAMP = 0.9, MU = 0.6;
+  const SUB = 2, ITER = 6, DAMP = 0.9, MU = 0.6, MU_TYRE = 1.0;
   // how far a suspension link may turn at its mounts before they tear out (cosines): 45 degrees
   // while its corner is whole, 20 once half its corner's links have gone
   const LINK_TURN = Math.cos(45 * Math.PI / 180), LINK_TURN_ALONE = Math.cos(20 * Math.PI / 180);
@@ -291,7 +294,7 @@
               if (P.seen[i] !== P.tick) { P.seen[i] = P.tick; work += T.crush[i] * P.adv; } // crushing it as the plane drives on
               // friction: dragged along by the sliding surface while the plane drives in, at most
               // mu times as far as it pushes (once per substep)
-              if (it === 0 && P.vt > 0.1 && P.adv > 0) { const f = Math.min(P.vt * h, MU * P.adv) / P.vt; p[i3] += P.tx * f; p[i3 + 1] += P.ty * f; work += T.crush[i] * f * P.vt; }
+              if (it === 0 && P.vt > 0.1 && P.adv > 0) { const f = Math.min(P.vt * h, T.mu[i] * P.adv) / P.vt; p[i3] += P.tx * f; p[i3 + 1] += P.ty * f; work += T.crush[i] * f * P.vt; }
             }
           }
         }

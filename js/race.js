@@ -328,6 +328,43 @@
     [-1.45, -0.75, 0.23], [-1.62, -0.75, 0.23], [-1.8, -0.75, 0.23], [-1.45, 0.75, 0.23], [-1.62, 0.75, 0.23], [-1.8, 0.75, 0.23], // rear tyres
     [-1.3, 0, 0.45], [-1.95, 0, 0.35], [-2.2, -0.42, 0.14], [-2.2, 0, 0.14], [-2.2, 0.42, 0.14], // engine cover, diffuser, rear wing
   ];
+  // Rubbing contact. A tyre grips what it touches as rubber does (MU_RUBBER), bodywork slides
+  // (MU_BODY), and a turning tyre's tread is itself moving: where the tread faces the other surface
+  // (the front or back of the tyre) it runs up or down at the wheel's surface speed. Friction acts
+  // against the whole slip, along the surface and up and down, so a tread rubbing a wall or another
+  // tyre is braked (the wheel slows, the tyre then drags on the road and the car turns) and lifted:
+  // the rear tyre of a car ahead runs up while the front tyre of the car behind runs down, which is
+  // how touching wheels throw a car into the air. Up and down here: the car's heave, pitch and roll.
+  const TYRE_OF = CC.map((q, k) => (k >= 8 && k <= 13 ? (q[1] < 0 ? 0 : 1) : k >= 20 && k <= 25 ? (q[1] < 0 ? 2 : 3) : -1));
+  const MU_BODY = 0.3, MU_WALL = 0.35, MU_RUBBER = 0.9;
+  // how fast the tread at a contact moves up per rad/s of wheel spin (n: from this car toward the
+  // other surface; the front of a tyre rolling forward runs down)
+  function treadGain(c, k, nx, ny) {
+    const w = TYRE_OF[k];
+    if (w < 0 || !c.wheels[w] || (c.dm && c.dm.wheelOff && c.dm.wheelOff[w])) return 0;
+    return -(nx * Math.cos(c.h) + ny * Math.sin(c.h)) * c.spec.R;
+  }
+  // an up (+) or down impulse jz at a car's contact point: the wheel's spin and the body's heave,
+  // pitch and roll take it
+  function liftAt(c, k, g, jz, px, py) {
+    const w = TYRE_OF[k];
+    // (the rub only ever slows a wheel, to a stop at most: touching treads would otherwise mesh like
+    // gears and turn one tyre backwards, against the road it is rolling on)
+    if (w >= 0 && g) { const W = c.wheels[w], I = W.front ? c.spec.IwF : c.spec.IwR, d = jz * g / I; if (d * W.omega < 0) W.omega = Math.abs(d) >= Math.abs(W.omega) ? 0 : W.omega + d; }
+    const m = c.spec.mass + c.fuel, ch = Math.cos(c.h), sh = Math.sin(c.h);
+    const lx = (px - c.x) * ch + (py - c.y) * sh, ly = -(px - c.x) * sh + (py - c.y) * ch;
+    c.zhv += jz / m; c.pitchv += jz * lx / c.spec.Iyy; c.rollv -= jz * ly / c.spec.Ixx;
+  }
+  // the vertical part of a rubbing contact between surface A (tread gain gA, spin wA) and surface
+  // B; returns the impulse that pushes A's surface up (B gets the opposite), at most mu x the
+  // normal impulse in share with the sliding along the surface (vt)
+  function treadRub(gA, wA, IA, gB, wB, IB, vt, j, mu) {
+    const rel = gB * wB - gA * wA, s = Math.hypot(vt, rel);
+    if (Math.abs(rel) < 1e-3 || s < 1e-6) return 0;
+    const inv = (gA ? gA * gA / IA : 0) + (gB ? gB * gB / IB : 0);
+    if (!inv) return 0;
+    return Math.sign(rel) * Math.min(mu * j * Math.abs(rel) / s, Math.abs(rel) / inv);
+  }
   const NC = CC.length, _cx = new Float64Array(NC), _cy = new Float64Array(NC), _cx2 = new Float64Array(NC), _cy2 = new Float64Array(NC);
   const _cr = new Float64Array(NC), _cr2 = new Float64Array(NC);
   // world circles of a car (and their radii): a damaged car's circles follow its structure
@@ -379,7 +416,7 @@
       if (f1 - c.loc.d > 3.6 && f0 + c.loc.d > 3.6) return;
     }
     circles(c, _cx, _cy, _cr);
-    let best = 0, bx = 0, by = 0, bnx = 0, bny = 0;
+    let best = 0, bx = 0, by = 0, bnx = 0, bny = 0, bk = -1;
     for (let k = 0; k < NC; k++) {
       const px = _cx[k], py = _cy[k], rad = _cr[k];
       if (!rad) continue;
@@ -399,7 +436,7 @@
           if (p2 > pen) { pen = p2; nx = -nx; ny = -ny; }
         }
       }
-      if (pen > best) { best = pen; bx = px - nx * rad; by = py - ny * rad; bnx = nx; bny = ny; }
+      if (pen > best) { best = pen; bx = px - nx * rad; by = py - ny * rad; bnx = nx; bny = ny; bk = k; }
     }
     if (best <= 0) return;
     c.x += bnx * best; c.y += bny * best;
@@ -413,13 +450,18 @@
     const j = -(1 + 0.25) * vn / (1 / m + rn * rn / I);
     applyImpulse(c, bnx * j, bny * j, rx, ry);
     c.rubT = 0.1; // touching: js/audio.js holds the grind while this runs
-    // scrape friction
+    // scrape friction: bodywork slides along the wall; a tyre grips it, and its tread, turning,
+    // rubs up or down the wall face as well (rubbing contact, above)
     const tx = -bny, ty = bnx;
     const vt = vcx * tx + vcy * ty;
     const rt = rx * ty - ry * tx;
+    const wk = TYRE_OF[bk], g = treadGain(c, bk, -bnx, -bny), mu = wk >= 0 ? MU_RUBBER : MU_WALL;
+    const wi = wk >= 0 ? c.wheels[wk] : null, Iw = wi ? (wi.front ? c.spec.IwF : c.spec.IwR) : 1;
+    const vz = g && wi ? g * wi.omega : 0, sl = Math.hypot(vt, vz) || 1;
     let jt = -vt / (1 / m + rt * rt / I);
-    jt = U.clamp(jt, -0.35 * j, 0.35 * j);
+    jt = U.clamp(jt, -mu * j * Math.abs(vt) / sl, mu * j * Math.abs(vt) / sl);
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
+    if (g && wi) { const jz = treadRub(g, wi.omega, Iw, 0, 0, 1, vt, j, mu); if (jz) liftAt(c, bk, g, jz, bx, by); }
     c.r = U.clamp(c.r, -7, 7); // (the part that hits would snap off, not turn the whole car)
     const power = -vn;
     // With no damage model (Arcade, or damage off) the bounce alone cost less than braking: a
@@ -477,6 +519,30 @@
     const j = -(1 + 0.15) * vn / (1 / ma + 1 / mb + ran * ran / a.spec.Iz + rbn * rbn / b.spec.Iz);
     applyImpulse(a, -nx * j, -ny * j, rax, ray);
     applyImpulse(b, nx * j, ny * j, rbx, rby);
+    // rubbing: there was none between cars before. Along the surface, rubber grips (a tyre
+    // against bodywork or another tyre), carbon slides; and a tread that faces the other car rubs
+    // up or down it (rubbing contact, above)
+    {
+      const ka = ix, kb = jx, ta = TYRE_OF[ka], tb = TYRE_OF[kb];
+      const mu = ta >= 0 && tb >= 0 ? MU_RUBBER : ta >= 0 || tb >= 0 ? 0.7 : MU_BODY;
+      const gA = treadGain(a, ka, nx, ny), gB = treadGain(b, kb, -nx, -ny);
+      const WA = ta >= 0 ? a.wheels[ta] : null, WB = tb >= 0 ? b.wheels[tb] : null;
+      const IA = WA ? (WA.front ? a.spec.IwF : a.spec.IwR) : 1, IB = WB ? (WB.front ? b.spec.IwF : b.spec.IwR) : 1;
+      const tx = -ny, ty = nx;
+      const vax2 = a.vx - a.r * ray, vay2 = a.vy + a.r * rax, vbx2 = b.vx - b.r * rby, vby2 = b.vy + b.r * rbx;
+      const vt = (vbx2 - vax2) * tx + (vby2 - vay2) * ty;
+      const vzA = gA && WA ? gA * WA.omega : 0, vzB = gB && WB ? gB * WB.omega : 0, sl = Math.hypot(vt, vzB - vzA) || 1;
+      const rat = rax * ty - ray * tx, rbt = rbx * ty - rby * tx;
+      let jt = -vt / (1 / ma + 1 / mb + rat * rat / a.spec.Iz + rbt * rbt / b.spec.Iz);
+      const lim = mu * j * Math.abs(vt) / sl;
+      jt = U.clamp(jt, -lim, lim);
+      applyImpulse(a, -tx * jt, -ty * jt, rax, ray);
+      applyImpulse(b, tx * jt, ty * jt, rbx, rby);
+      if ((gA && WA) || (gB && WB)) {
+        const jz = treadRub(WA ? gA : 0, WA ? WA.omega : 0, IA, WB ? gB : 0, WB ? WB.omega : 0, IB, vt, j, mu);
+        if (jz) { liftAt(a, ka, WA ? gA : 0, jz, best.x, best.y); liftAt(b, kb, WB ? gB : 0, -jz, best.x, best.y); }
+      }
+    }
     a.r = U.clamp(a.r, -7, 7); b.r = U.clamp(b.r, -7, 7);
     const power = -vn;
     // each car takes the hit on its own side of the contact (normal into it)
