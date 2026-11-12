@@ -3728,7 +3728,11 @@ void main() {
     '  gl_PointSize = max(2.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv;', '#include <logdepthbuf_vertex>', '}'].join('\n');
   const PT_FS = [
     'uniform sampler2D map; varying vec4 vC;', '#include <common>', '#include <logdepthbuf_pars_fragment>',
-    'void main(){', '#include <logdepthbuf_fragment>', '  float a = texture2D(map, gl_PointCoord).a; gl_FragColor = vec4(pow(vC.rgb, vec3(2.2)), vC.a * a);',
+    // (colour and alpha kept in range: a spark past its life once came in with a negative colour,
+    // which pow() turned into NaN, and a negative alpha, and the additive draw wrote a pixel
+    // hundreds of times too bright, or below zero, onto the road; the bloom spread it into a
+    // one-frame flash, yellow, white or green)
+    'void main(){', '#include <logdepthbuf_fragment>', '  float a = texture2D(map, gl_PointCoord).a; gl_FragColor = vec4(pow(clamp(vC.rgb, 0.0, 4.0), vec3(2.2)), clamp(vC.a * a, 0.0, 1.0));',
     '#include <colorspace_fragment>', '}'].join('\n');
   function pointsLayer(n, additive) {
     const g = new THREE.BufferGeometry();
@@ -3793,7 +3797,7 @@ void main() {
     const sm = fx.smoke.geometry.attributes, sp = fx.sparks.geometry.attributes;
     let ns = 0, nk = 0;
     for (const p of F.parts) {
-      const f = p.t / p.life;
+      const f = Math.min(1, p.t / p.life); // (a particle can outlive its life by a step before it is removed)
       if (p.kind === 0 && ns < 1000) {
         const r = U.lerp(p.r0, p.r1, Math.sqrt(f));
         sm.position.setXYZ(ns, p.x, (p.z || 0) + 0.25 + r * 0.45 + f * 1.4, p.y);

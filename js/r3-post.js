@@ -185,7 +185,16 @@
     '  vec3 ctr = 0.5 * (hi + lo), ext = 0.5 * (hi - lo) + 1e-5, d = h - ctr, a = abs(d / ext);',
     '  float m = max(a.x, max(a.y, a.z)); if (m > 1.0) h = ctr + d / m;',
     '  float k = off > 0.5 ? 1.0 : mix(0.09, 0.22, clamp(length(dp) / 30.0, 0.0, 1.0));',
-    '  gl_FragColor = vec4(itm(rgb(mix(h, c0, k))), w);', // (alpha: this pixel's depth, for the next frame's test)
+    // Back out of the compressed space, safely. The blend is done on colours squeezed below 1
+    // (tm) and expanded again by c / (1 - max): the clip toward the box, made in YCoCg, could
+    // hand back a channel at or past 1 (or below 0) for a bright pixel, a glint of sun on a car
+    // or on the road far ahead, and the expansion then made it thousands of times too bright for
+    // a frame (or negative), which the bloom spread into a green and purple blob and, smaller,
+    // into the sparkle over the road ahead. So the result is kept inside the space it lives in
+    // (at most 99 times white, as tm(99) = 0.99), and a NaN falls back to this frame's colour.
+    '  vec3 o = rgb(mix(h, c0, k));',
+    '  if (!(o.r == o.r && o.g == o.g && o.b == o.b)) o = rgb(c0);',
+    '  gl_FragColor = vec4(itm(clamp(o, 0.0, 0.99)), w);', // (alpha: this pixel's depth, for the next frame's test)
     '}'].join('\n'), Object.assign(depthU(), { tCur: { value: null }, tHist: { value: null }, tVel: { value: null }, uInvView: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() },
     uTexel: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uReset: { value: 1 }, uStatic: { value: 0 } }));
   // ---------- FXAA ----------
@@ -275,7 +284,8 @@
   // ---------- bloom ----------
   const preMat = mk([
     'varying vec2 vUv; uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThresh;',
-    'vec3 tap(vec2 o){ return min(texture2D(tSrc, vUv + o * uTexel).rgb, vec3(64.0)); }',
+    // (a texel that is not a number, or below zero, would bloom into a coloured blob: dropped)
+    'vec3 tap(vec2 o){ vec3 c = texture2D(tSrc, vUv + o * uTexel).rgb; if (!(c.r == c.r && c.g == c.g && c.b == c.b)) c = vec3(0.0); return clamp(c, 0.0, 64.0); }',
     'void main(){',
     // 4-tap Karis-weighted average suppresses fireflies from specular sparkles
     '  vec3 a = tap(vec2(-1, -1)), b = tap(vec2(1, -1)), c = tap(vec2(-1, 1)), d = tap(vec2(1, 1));',
@@ -530,6 +540,8 @@
     '    vec2 ca = d * dot(d, d) * 0.0045;',
     '    c = vec3(texture2D(tScene, suv - ca).r, texture2D(tScene, suv).g, texture2D(tScene, suv + ca).b);',
     '  } else c = texture2D(tScene, suv).rgb;',
+    // (no pixel below zero or not a number reaches the tone curve, whatever drew it)
+    '  c = (c.r == c.r && c.g == c.g && c.b == c.b) ? max(c, vec3(0.0)) : vec3(0.0);',
     // after TAA: a light unsharp mask, kept inside the range of the pixel and its four
     // neighbours, so it never overshoots: at a dark edge (a tyre against the road) an unbounded
     // one drew a thin light line on the road beside it

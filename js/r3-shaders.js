@@ -222,6 +222,14 @@
         '  { vec3 r3L = vec3(0.2126, 0.7152, 0.0722); float r3Dir = dot(reflectedLight.directDiffuse + reflectedLight.directSpecular, r3L), r3Ind = dot(reflectedLight.indirectDiffuse + reflectedLight.indirectSpecular, r3L);\n' +
         '    gl_FragColor.a = mix(gl_FragColor.a, r3Dir / max(r3Dir + r3Ind, 1e-5), r3SunA); }');
     }
+    // Every lit surface hands the post stack a sane colour: never NaN, never below zero, never
+    // past 32 times white. Measured in a race: a few hundred pixels a frame came out of the scene
+    // negative (down to -22 on the asphalt) or blown (a sun glint on car paint or a fence wire up
+    // to 30000), single pixels that tone mapping and bloom turned into one-frame flashes, green,
+    // yellow or white with a purple fringe, on the road ahead.
+    if (sh.fragmentShader.includes('#include <dithering_fragment>'))
+      sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n' +
+        '  gl_FragColor.rgb = (gl_FragColor.r == gl_FragColor.r && gl_FragColor.g == gl_FragColor.g && gl_FragColor.b == gl_FragColor.b) ? clamp(gl_FragColor.rgb, 0.0, 32.0) : vec3(0.0);');
     // Specular anti-aliasing: where the shading normal (the normal maps included) turns faster
     // than a pixel can show, as on asphalt and kerbs far ahead or a distant car's wheel rim, the
     // gloss is widened by the normal's spread over the pixel (Kaplanyan's filtered roughness), so a
@@ -388,15 +396,18 @@
   // light stones and the kerbs' paint edges were caught on one frame and missed on the next, a
   // shimmer over the road ahead. There the photo is read once more, averaged over the strip's
   // full length, and blended in as the stretch grows.
-  // (on every ground photo with macro variation, and on the asphalt and kerbs; once per shader)
+  // (on every ground photo with macro variation, and on the asphalt and kerbs; once per shader,
+  // always straight after three's map_fragment, where diffuseColor is still the material colour
+  // times the photo: the averaged read replaces the photo there. The first version swapped them
+  // by dividing by the photo, and a near-black texel made a pixel hundreds of times too bright
+  // for a frame, which the bloom spread into a green, yellow or white flash on the road ahead)
   const FAR_AVG = [
     '#if defined( USE_MAP ) && !defined( R3_FARAVG )',
     '#define R3_FARAVG',
     '  { vec2 aDx = dFdx(vMapUv), aDy = dFdy(vMapUv); float aLx = length(aDx), aLy = length(aDy);',
     '    float aSt = smoothstep(6.0, 20.0, max(aLx, aLy) / max(min(aLx, aLy), 1e-7));',
     '    if (aSt > 0.0) { vec2 aM = aLx > aLy ? aDx : aDy, aN = vec2(-aM.y, aM.x);',
-    '      vec3 aNear = texture2D(map, vMapUv).rgb, aFar = textureGrad(map, vMapUv, aM, aN).rgb;',
-    '      diffuseColor.rgb *= mix(vec3(1.0), aFar / max(aNear, vec3(1e-3)), aSt); } }',
+    '      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * textureGrad(map, vMapUv, aM, aN).rgb, aSt); } }',
     '#endif'].join('\n');
   const ext = (m, key, fn) => { m.userData.patchExtra = fn; m.userData.patchKey = key; return m; };
 
@@ -449,9 +460,8 @@
   // kerb (uv.x runs along it), and grime.
   function kerbWear(m) {
     return ext(m, 'kerb', sh => {
-      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <color_fragment>', [
+      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n' + FAR_AVG).replace('#include <color_fragment>', [
         '#include <color_fragment>',
-        FAR_AVG,
         '  vec2 kW = vFogWorld.xz;',
         '  float kN = wNoise(kW * 1.4) * 0.6 + wNoise(kW * 6.0) * 0.4;',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.29, 0.27), smoothstep(0.64, 0.8, kN) * 0.75);',
