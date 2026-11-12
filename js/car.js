@@ -37,7 +37,7 @@
   // that drags with carbon-and-titanium-on-asphalt friction. A flat tyre's carcass is a soft spring
   // (FLAT_KT, N/m: about 3.5 cm more under a corner's static load) and rolls with about four
   // times a racing tyre's resistance.
-  const AIR_OFF = 0.02; // (m: higher than this the tyres no longer touch the road)
+  const BODY_TILT = 0.6, BUMP = 0.075; // (rad, m: see the vertical model)
   const STUB_DROP = 0.07, STUB_K = 4e5, STUB_C = 6e3, STUB_MU = 0.5, FLAT_KT = 7e4, FLAT_ROLL = 0.05;
   const SPEC = {
     mass: 768, fuelMax: 40, wb: 3.6, cgFront: 0.455, cgH: 0.30, trackF: 1.62, trackR: 1.56,
@@ -335,7 +335,7 @@
       const arb = (w.front ? sp.arbF : sp.arbR) * (comp[k] - comp[o]);
       let F = kS * comp[k] + cD * U.clamp(rate, -3, 3) + arb;
       w.comp = comp[k];
-      w.Fz = (D && D.wheelOff[k]) || c.air > AIR_OFF ? 0 : Math.max(0, F); // (no load on a wheel in the air)
+      w.Fz = D && D.wheelOff[k] ? 0 : Math.max(0, F);
       // with the wheel gone the corner sinks until the upright and the floor's edge reach the road,
       // which then carry that corner (and drag along it, below)
       w.Fst = 0;
@@ -612,27 +612,33 @@
     c.pitchv += (pm / sp.Iyy) * dt;
     c.rollv += (rm / sp.Ixx) * dt;
     c.zh += c.zhv * dt; c.pitch += c.pitchv * dt; c.roll += c.rollv * dt;
-    c.zh = U.clamp(c.zh, -0.12, 0.3); c.pitch = U.clamp(c.pitch, -0.08, 0.08); c.roll = U.clamp(c.roll, -0.08, 0.08);
-    // In the air (thrown up by a wheel-to-wheel touch, js/race.js liftAt): the car flies its arc
-    // under gravity and its own downforce, turning in pitch and roll as it was kicked, with no grip
-    // at any tyre, and lands; the suspension takes the landing, and a hard one breaks things.
-    if (c.air > 0) {
-      c.zh = Math.min(c.zh, 0.05); c.zhv = 0; // (the wheels hang on full droop)
-      c.airV -= (GRAV + (downF + downR) / m) * dt;
-      c.air += c.airV * dt; c.airP = (c.airP || 0) + (c.airPV || 0) * dt; c.airR = (c.airR || 0) + (c.airRV || 0) * dt;
-      c.airPV *= 1 - 0.4 * dt; c.airRV *= 1 - 0.4 * dt;
-      c.airP = U.clamp(c.airP, -0.9, 0.9); c.airR = U.clamp(c.airR, -0.9, 0.9);
-      if (c.air <= 0) {
-        c.landV = -c.airV;
-        c.zhv = -Math.min(3, -c.airV) * 0.5;
-        c.air = 0; c.airV = 0; c.airPV = c.airRV = 0;
-      }
-    } else if (c.airP || c.airR) {
-      // (down again: the body drops back level on its wheels over a few tenths of a second)
-      const k = Math.exp(-14 * dt);
-      c.airP *= k; c.airR *= k;
-      if (Math.abs(c.airP) + Math.abs(c.airR) < 1e-3) c.airP = c.airR = 0;
+    // The body is a rigid mass on four springs that can only push (a tyre that rises off the road
+    // carries nothing). The limits here are for a car standing on its nose or tail, which the plane
+    // simulation cannot follow; they are far outside anything a race reaches, and a car thrown up
+    // by a hit (js/race.js liftAt) flies, turns and lands on its own springs well within them.
+    // (A smaller cap here once held the body inside its normal travel: a kick that should have
+    // lifted a corner was simply lost.)
+    // Bump stops: a corner pressed BUMP past its static compression is solid (spring coil-bound, tyre
+    // flat on its rim, floor on the road). There the ground simply stops it: a contact solved as an
+    // impulse on the rigid body at that corner, which takes away the corner's downward speed and can
+    // add no energy. (Without it the springs were linear to any depth: a car tipped back by a kick at
+    // its nose drove its rear corners most of a metre into the road in one step, and the springs
+    // fired it tens of metres up.) Clean driving never comes near: 46 mm at most, measured.
+    for (let it = 0; it < 2; it++) for (let k = 0; k < 4; k++) {
+      const w = W[k];
+      if (D && D.wheelOff[k]) continue;
+      const over = w.s0 - (c.zh + c.pitch * w.x - c.roll * w.y) + w.roadF - (w.s0 + BUMP);
+      if (over <= 0) continue;
+      const K = 1 / m + w.x * w.x / sp.Iyy + w.y * w.y / sp.Ixx;
+      // (eased out of the ground over a few steps; its downward speed stopped at once)
+      const fix = over * 0.5 / K;
+      c.zh += fix / m; c.pitch += fix * w.x / sp.Iyy; c.roll -= fix * w.y / sp.Ixx;
+      const vk = c.zhv + c.pitchv * w.x - c.rollv * w.y;
+      if (vk < 0) { const J = -vk / K; c.zhv += J / m; c.pitchv += J * w.x / sp.Iyy; c.rollv -= J * w.y / sp.Ixx; }
     }
+    if (c.zh < -0.12) { c.zh = -0.12; if (c.zhv < 0) c.zhv = 0; }
+    if (c.pitch > BODY_TILT) { c.pitch = BODY_TILT; if (c.pitchv > 0) c.pitchv = 0; } else if (c.pitch < -BODY_TILT) { c.pitch = -BODY_TILT; if (c.pitchv < 0) c.pitchv = 0; }
+    if (c.roll > BODY_TILT) { c.roll = BODY_TILT; if (c.rollv > 0) c.rollv = 0; } else if (c.roll < -BODY_TILT) { c.roll = -BODY_TILT; if (c.rollv < 0) c.rollv = 0; }
 
     // --- integrate the plane motion ---
     const axb = Fx / m, ayb = Fy / m;

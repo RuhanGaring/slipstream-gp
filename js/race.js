@@ -337,6 +337,24 @@
   // how touching wheels throw a car into the air. Up and down here: the car's heave, pitch and roll.
   const TYRE_OF = CC.map((q, k) => (k >= 8 && k <= 13 ? (q[1] < 0 ? 0 : 1) : k >= 20 && k <= 25 ? (q[1] < 0 ? 2 : 3) : -1));
   const MU_BODY = 0.3, MU_WALL = 0.35, MU_RUBBER = 0.9;
+  // Rubber's grip falls as it slides faster (the surface heats and melts): about 0.9 at walking
+  // pace, a quarter at 70 m/s (a tyre along a wall at 250 km/h), a sixth at the 120 m/s two treads
+  // turning against each other slide at. The tread-on-tread rub that lifts a car is this grip, not 0.9.
+  const RUB_V = 25;
+  const rubberMu = (mu, slip) => mu / (1 + Math.abs(slip) / RUB_V);
+  // How high each contact circle's part stands above the road at rest (bottom, top; m): the front
+  // wing low, the nose rising to the cockpit, the tyres their full height, the sidepods and floor,
+  // the engine cover, the diffuser low at the back and the rear wing high above it. Two cars touch
+  // only where their parts overlap in height (moved with each car's heave, pitch and roll there): a
+  // front wing passes under the rear wing of the car ahead, and a wheel that has climbed onto
+  // another's is above it and passes over.
+  const PART_Z = CC.map((q, k) => (TYRE_OF[k] >= 0 ? [0, 0.72] : k <= 4 ? [0.05, 0.32] : k === 5 ? [0.15, 0.5] : k === 6 ? [0.12, 0.62] : k === 7 ? [0.1, 0.75]
+    : k <= 19 ? [0.03, 0.7] : k === 26 ? [0.1, 0.95] : k === 27 ? [0.05, 0.6] : [0.5, 1.0]));
+  // the height of a car's body at a world point (its heave, pitch and roll there)
+  function bodyZ(c, px, py) {
+    const ch = Math.cos(c.h), sh = Math.sin(c.h), lx = (px - c.x) * ch + (py - c.y) * sh, ly = -(px - c.x) * sh + (py - c.y) * ch;
+    return c.zh + c.pitch * lx - c.roll * ly;
+  }
   // how fast the tread at a contact moves up per rad/s of wheel spin (n: from this car toward the
   // other surface; the front of a tyre rolling forward runs down)
   function treadGain(c, k, nx, ny) {
@@ -347,10 +365,10 @@
   // A tyre on the road is held at road speed by its grip and the car behind it, so a brief touch
   // cannot stop its tread: its inertia here counts the share of the car's mass it carries.
   function wheelI(c, W) { return (W.front ? c.spec.IwF : c.spec.IwR) + Math.max(0, W.Fz) / 9.81 * c.spec.R * c.spec.R; }
-  // an up (+) or down impulse jz at a car's contact point: the wheel's spin and the body take it. A
-  // push down goes into the suspension; a kick up that the suspension cannot hold (more than
-  // AIR_KICK m/s) throws the car into the air (js/car.js c.air): a wheel-to-wheel launch
-  const AIR_KICK = 0.6;
+  // an up (+) or down impulse jz at a car's contact point: the wheel's spin and the body take it.
+  // The body is a rigid mass on its springs (js/car.js): the impulse changes its heave, pitch and
+  // roll by its mass and inertias about the centre of mass, and what follows (a corner lifting
+  // off and dropping back, or the whole car leaving the ground) is its own motion
   function liftAt(c, k, g, jz, px, py) {
     const w = TYRE_OF[k];
     // (the rub only ever slows a wheel, to a stop at most: touching treads would otherwise mesh like
@@ -358,11 +376,7 @@
     if (w >= 0 && g) { const W = c.wheels[w], d = jz * g / wheelI(c, W); if (d * W.omega < 0) W.omega = Math.abs(d) >= Math.abs(W.omega) ? 0 : W.omega + d; }
     const m = c.spec.mass + c.fuel, ch = Math.cos(c.h), sh = Math.sin(c.h);
     const lx = (px - c.x) * ch + (py - c.y) * sh, ly = -(px - c.x) * sh + (py - c.y) * ch;
-    if (jz > 0 && (c.air > 0 || jz / m > AIR_KICK)) {
-      c.air = Math.max(c.air || 0, 1e-3); c.airV = (c.airV || 0) + jz / m;
-      // (a body in the air turns about its centre: the kick at the nose pitches it up, one side rolls it)
-      c.airPV = (c.airPV || 0) + jz * lx / c.spec.Iyy; c.airRV = (c.airRV || 0) - jz * ly / c.spec.Ixx;
-    } else { c.zhv += jz / m; c.pitchv += jz * lx / c.spec.Iyy; c.rollv -= jz * ly / c.spec.Ixx; }
+    c.zhv += jz / m; c.pitchv += jz * lx / c.spec.Iyy; c.rollv -= jz * ly / c.spec.Ixx;
   }
   // the vertical part of a rubbing contact between surface A (tread gain gA, spin wA) and surface
   // B; returns the impulse that pushes A's surface up (B gets the opposite), at most mu x the
@@ -464,9 +478,10 @@
     const tx = -bny, ty = bnx;
     const vt = vcx * tx + vcy * ty;
     const rt = rx * ty - ry * tx;
-    const wk = TYRE_OF[bk], g = treadGain(c, bk, -bnx, -bny), mu = wk >= 0 ? MU_RUBBER : MU_WALL;
+    const wk = TYRE_OF[bk], g = treadGain(c, bk, -bnx, -bny);
     const wi = wk >= 0 ? c.wheels[wk] : null, Iw = wi ? wheelI(c, wi) : 1;
     const vz = g && wi ? g * wi.omega : 0, sl = Math.hypot(vt, vz) || 1;
+    const mu = wk >= 0 ? rubberMu(MU_RUBBER, sl) : MU_WALL;
     let jt = -vt / (1 / m + rt * rt / I);
     jt = U.clamp(jt, -mu * j * Math.abs(vt) / sl, mu * j * Math.abs(vt) / sl);
     applyImpulse(c, tx * jt, ty * jt, rx, ry);
@@ -515,6 +530,12 @@
     let nx = _cx2[jx] - _cx[ix], ny = _cy2[jx] - _cy[ix];
     const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
     const best = { pen, x: _cx[ix] + nx * (_cr[ix] - pen * 0.5), y: _cy[ix] + ny * (_cr[ix] - pen * 0.5) };
+    // in height: the two parts must overlap (see PART_Z). Two tyres are round: one partly above the
+    // other meets it on a slope, and the contact leans like a ramp (dzS: its slope, from their
+    // centres); the rest of the car meets with near-upright faces
+    const zA = bodyZ(A, _cx[ix], _cy[ix]), zB = bodyZ(B, _cx2[jx], _cy2[jx]), PA = PART_Z[ix], PB = PART_Z[jx];
+    if (Math.min(PA[1] + zA, PB[1] + zB) - Math.max(PA[0] + zA, PB[0] + zB) <= 0) return;
+    const dzS = TYRE_OF[ix] >= 0 && TYRE_OF[jx] >= 0 ? (zA - zB) / 0.72 : 0;
     const a = A, b = B;
     const ma = a.spec.mass + a.fuel, mb = b.spec.mass + b.fuel;
     a.x -= nx * best.pen * 0.5; a.y -= ny * best.pen * 0.5;
@@ -528,12 +549,13 @@
     const j = -(1 + 0.15) * vn / (1 / ma + 1 / mb + ran * ran / a.spec.Iz + rbn * rbn / b.spec.Iz);
     applyImpulse(a, -nx * j, -ny * j, rax, ray);
     applyImpulse(b, nx * j, ny * j, rbx, rby);
+    // (the ramp: the higher part is pushed up the lower one, the lower one down)
+    if (dzS) { const jv = j * dzS / Math.sqrt(Math.max(0.5, 1 - dzS * dzS)); liftAt(a, ix, 0, jv, best.x, best.y); liftAt(b, jx, 0, -jv, best.x, best.y); }
     // rubbing: there was none between cars before. Along the surface, rubber grips (a tyre
     // against bodywork or another tyre), carbon slides; and a tread that faces the other car rubs
     // up or down it (rubbing contact, above)
     {
       const ka = ix, kb = jx, ta = TYRE_OF[ka], tb = TYRE_OF[kb];
-      const mu = ta >= 0 && tb >= 0 ? MU_RUBBER : ta >= 0 || tb >= 0 ? 0.7 : MU_BODY;
       const gA = treadGain(a, ka, nx, ny), gB = treadGain(b, kb, -nx, -ny);
       const WA = ta >= 0 ? a.wheels[ta] : null, WB = tb >= 0 ? b.wheels[tb] : null;
       const IA = WA ? wheelI(a, WA) : 1, IB = WB ? wheelI(b, WB) : 1;
@@ -541,6 +563,7 @@
       const vax2 = a.vx - a.r * ray, vay2 = a.vy + a.r * rax, vbx2 = b.vx - b.r * rby, vby2 = b.vy + b.r * rbx;
       const vt = (vbx2 - vax2) * tx + (vby2 - vay2) * ty;
       const vzA = gA && WA ? gA * WA.omega : 0, vzB = gB && WB ? gB * WB.omega : 0, sl = Math.hypot(vt, vzB - vzA) || 1;
+      const mu = ta >= 0 && tb >= 0 ? rubberMu(MU_RUBBER, sl) : ta >= 0 || tb >= 0 ? rubberMu(0.7, sl) : MU_BODY;
       const rat = rax * ty - ray * tx, rbt = rbx * ty - rby * tx;
       let jt = -vt / (1 / ma + 1 / mb + rat * rat / a.spec.Iz + rbt * rbt / b.spec.Iz);
       const lim = mu * j * Math.abs(vt) / sl;
