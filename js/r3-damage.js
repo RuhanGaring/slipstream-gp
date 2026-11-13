@@ -240,7 +240,19 @@
         G.ok = true;
       };
       const gh = (px, pz) => G.y + G.sx * (px - G.x) + G.sz * (pz - G.z);
-      ground();
+      // (read again only once it has moved a metre: a piece lying or sliding keeps its plane)
+      if (!G.ok || (x.x - G.x) ** 2 + (x.z - G.z) ** 2 > 1) ground();
+      // In free flight, well clear of the ground, nothing can touch it this frame: one step for the
+      // whole frame (gravity exactly, drag and spin as below), not a substep per 240th of a second.
+      const reach0 = d.wheel ? d.rad + d.hw : d.half.length();
+      if (x.y - gh(x.x, x.z) > reach0 + 0.3 + Math.max(0, -d.v.y) * dt + 4.9 * dt * dt) {
+        const sp = d.v.length();
+        if (sp > 0) d.v.multiplyScalar(Math.max(0, 1 - 0.6 * d.cda / d.m * sp * dt));
+        x.addScaledVector(d.v, dt); x.y -= 4.905 * dt * dt; d.v.y -= 9.81 * dt;
+        turn(d, dt);
+        d.still = 0;
+        continue;
+      }
       for (let sub = 0; sub < nSub; sub++) {
         // flight: gravity and air drag
         d.v.y -= 9.81 * h;
@@ -504,25 +516,41 @@
   const rowOf = (c, s) => (!G.__softCPU && F1.R3S && F1.R3S.SOFT_W >= F1.Soft.template(s && s.kind).n && c.id >= 0 && c.id + 1 < F1.R3S.SOFT_H ? c.id + 1 : 0);
   function writeRow(r, s) {
     const T = F1.Soft.template(s.kind), tex = F1.R3S.U.uSoftTex.value, d = tex.image.data, W = F1.R3S.SOFT_W, R = T.rest, P = s.p;
-    if (restDone !== T.kind) { for (let i = 0; i < T.n; i++) { d[i * 4] = R[i * 3]; d[i * 4 + 1] = R[i * 3 + 2]; d[i * 4 + 2] = R[i * 3 + 1]; d[i * 4 + 3] = 0; } restDone = T.kind; }
+    const restNew = restDone !== T.kind;
+    if (restNew) { for (let i = 0; i < T.n; i++) { d[i * 4] = R[i * 3]; d[i * 4 + 1] = R[i * 3 + 2]; d[i * 4 + 2] = R[i * 3 + 1]; d[i * 4 + 3] = 0; } restDone = T.kind; }
     // how far each node's beams were pushed or pulled from their made length (a snapped one counts in full)
     const st = _str && _str.length >= T.n ? _str : (_str = new Float32Array(T.n));
     st.fill(0);
     for (let e = 0; e < T.nb; e++) {
       const a = T.a[e], b = T.b[e];
       let v = 1;
-      if (!s.broken[e]) { const a3 = a * 3, b3 = b * 3; v = Math.abs(Math.hypot(P[b3] - P[a3], P[b3 + 1] - P[a3 + 1], P[b3 + 2] - P[a3 + 2]) / T.L0[e] - 1); }
+      if (!s.broken[e]) { const a3 = a * 3, b3 = b * 3, ex = P[b3] - P[a3], ey = P[b3 + 1] - P[a3 + 1], ez = P[b3 + 2] - P[a3 + 2]; v = Math.abs(Math.sqrt(ex * ex + ey * ey + ez * ez) / T.L0[e] - 1); }
       if (v > st[a]) st[a] = v;
       if (v > st[b]) st[b] = v;
     }
     for (let i = 0; i < T.n; i++) {
       const o = (r * W + i) * 4, i3 = i * 3;
       d[o] = P[i3]; d[o + 1] = P[i3 + 2]; d[o + 2] = P[i3 + 1];
-      const disp = Math.hypot(P[i3] - R[i3], P[i3 + 1] - R[i3 + 1], P[i3 + 2] - R[i3 + 2]);
+      const ex = P[i3] - R[i3], ey = P[i3 + 1] - R[i3 + 1], ez = P[i3 + 2] - R[i3 + 2], disp = Math.sqrt(ex * ex + ey * ey + ez * ez);
       d[o + 3] = T.fixed[i] ? 0 : Math.min(1, Math.max(disp / 0.18, st[i] / 0.08));
     }
-    tex.needsUpdate = true;
+    // To the GPU: just this car's row (and the rest shape when it changed), not the whole texture
+    // (512 x 33 texels, 270 kB) every frame a car is crumpling; the whole of it the first time.
+    if (!uploadRows(tex, T.n, restNew ? [0, r] : [r])) tex.needsUpdate = true;
     rowOwner[r] = s; rowVer[r] = s.ver;
+  }
+  // Rows of the node texture straight to the GPU, once three has made the texture and uploaded its
+  // current version (otherwise false, and the caller asks for a whole upload).
+  function uploadRows(tex, n, rows) {
+    const rn = F1.R3 && F1.R3.renderer;
+    if (!rn || !rn.properties || !rn.getContext) return false;
+    const tp = rn.properties.get(tex), gl = rn.getContext();
+    if (!tp || !tp.__webglTexture || tp.__version !== tex.version || !gl.texSubImage2D) return false;
+    const W = tex.image.width, d = tex.image.data;
+    rn.state.bindTexture(gl.TEXTURE_2D, tp.__webglTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    for (const r of rows) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, r, n, 1, gl.RGBA, gl.FLOAT, d.subarray(r * W * 4, r * W * 4 + n * 4));
+    return true;
   }
   // the driver's number rides the tip of the nose
   function nosePose(bu, s, st) {

@@ -480,7 +480,9 @@
     // asleep once it has stopped moving and nothing is pushing
     // (a part left dangling by broken links can keep swinging: it is put to sleep after a while)
     s.age = (s.age || 0) + dt;
-    if (!s.planes.length && (moved < 1e-4 || s.age > 1.5)) { s.idle += dt; if (s.idle > 0.08) s.awake = 0; } else s.idle = 0;
+    // (the dense structure rings on in motion too small to see: it rests once nothing moves faster
+    // than about a tenth of a metre a second, or after a second)
+    if (!s.planes.length && (moved < (T.inertia ? 4e-4 : 1e-4) || s.age > (T.inertia ? 1.0 : 1.5))) { s.idle += dt; if (s.idle > 0.08) s.awake = 0; } else s.idle = 0;
     return detached;
   }
 

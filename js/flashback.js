@@ -90,6 +90,9 @@
     for (const k in race) if (!(k in snap.top) && !DROP.has(k) && !SHARED.has(k)) delete race[k];
     for (const k in snap.top) if (!SHARED.has(k)) race[k] = snap.top[k];
     race.fx.length = 0; race.events.length = 0;
+    // (crash structures solved on worker threads: the copies here are back to the snapshot, so the
+    // workers are sent them whole again, js/softworker.js)
+    if (F1.SoftAsync) F1.SoftAsync.restored();
   }
 
   // the ring of snapshots a race keeps: `span` seconds at one every `step` seconds
