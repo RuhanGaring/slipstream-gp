@@ -4467,5 +4467,7 @@ void main() {
     freeCar(o);
   }
   function clearDebris() { if (F1.R3D) F1.R3D.clearDebris(scene); }
-  F1.R3 = { carModels: live, linePalette, dropCar, clearDebris, HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
+  // (a flashback that took effect at race time t: what broke after it goes, js/r3-damage.js)
+  function trimDebris(t) { if (F1.R3D && F1.R3D.trimDebris) F1.R3D.trimDebris(scene, t); }
+  F1.R3 = { carModels: live, linePalette, dropCar, clearDebris, trimDebris, HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

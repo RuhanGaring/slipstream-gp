@@ -842,6 +842,9 @@
     camKeys(camMode, dt);
     const focus = vw ? vw.focus : mode === 'tv' || mode === 'show' ? cam.tvTarget || race.cars[0] : p;
     const step = ZOOM_STEPS[Game.settings.zoomStep == null ? 1 : Game.settings.zoomStep] || ZOOM_STEPS[1];
+    // (crashes kept and played back in a flashback, js/r3-damage.js: the race clock while racing,
+    // and the moment on show while rewinding)
+    if (F1.R3D) { F1.R3D.clock = Game.state === 'race' || Game.state === 'rewind' ? race.time : null; F1.R3D.rewindT = Game.state === 'rewind' && fb.P ? fb.P.T : null; }
     R3.render({
       cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: Game.settings.shake === false ? 0 : cam.shake, fx: FX,
       assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
@@ -1650,7 +1653,7 @@
     race.rec.rewind(s.t);
     let hurt = false;
     race.cars.forEach((c, k) => { if (hurtSig(c) !== was[k] && R3ok) { R3.dropCar(c); hurt = true; } });
-    if (hurt) R3.clearDebris();
+    if (R3ok) R3.trimDebris(s.t); // (what broke after the moment it went back to is gone; earlier pieces go on from where they were)
     const p = race.player;
     if (lapWas !== p.lap) trace.cur = []; else trace.cur.length = Math.min(trace.cur.length, Math.floor((Math.max(0, p.dist) % race.track.L) / 10) + 1);
     if (finishT > s.t) finishT = 0;

@@ -144,7 +144,12 @@
       const aw = axle.clone().applyQuaternion(holder.quaternion), roll = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(c.vx, 0, c.vy)).dot(aw) / rad;
       L.copy(aw).multiplyScalar(roll * I.y).add(new THREE.Vector3(R() * 3, R() * 3, R() * 3).multiplyScalar(I.x));
     } else L.set(R() * 14 * I.x, R() * 14 * I.y, R() * 14 * I.z).applyQuaternion(holder.quaternion);
-    debris.push({ o: holder, wheel: isWheel, life: 0, v, L, m: mass, I, axle, rad, hw, half, cda, still: 0, h: 1 / 240, loc: { i: -1 } });
+    // (for a flashback: the car it came off, when, and where on the car it sat; then its path)
+    outer.updateMatrixWorld(true); holder.updateMatrixWorld(true);
+    const local = new THREE.Matrix4().copy(outer.matrixWorld).invert().multiply(holder.matrixWorld);
+    const d = { o: holder, wheel: isWheel, life: 0, v, L, m: mass, I, axle, rad, hw, half, cda, still: 0, h: 1 / 240, loc: { i: -1 }, car: c, t0: R3D.clock, local, path: [] };
+    note(d, R3D.clock);
+    debris.push(d);
     while (debris.length > Math.max(0, F1.R3 && F1.R3.GFX.debris != null ? F1.R3.GFX.debris : 40)) { const d = debris.shift(); scene.remove(d.o); }
   }
 
@@ -219,6 +224,8 @@
   const barrierFace = (tr, side, i) => tr.barr[side][i] + (tr.runT[side][i] === SURF.GRAVEL ? -0.5 : 0.4);
   const _c8 = Array.from({ length: 8 }, () => new THREE.Vector3());
   function stepDebris(dt, tr) {
+    if (R3D.rewindT != null) { rewindDebris(R3D.rewindT); return; }
+    if (rewound) unwind();
     if (!tr || !dt) return;
     dt = Math.min(dt, 1 / 20);
     const nSub = Math.ceil(dt / (1 / 240) - 1e-6), h = dt / nSub;
@@ -251,6 +258,7 @@
         x.addScaledVector(d.v, dt); x.y -= 4.905 * dt * dt; d.v.y -= 9.81 * dt;
         turn(d, dt);
         d.still = 0;
+        if (R3D.clock != null && R3D.clock - d.path[d.path.length - 1][0] >= 1 / 30) note(d, R3D.clock);
         continue;
       }
       for (let sub = 0; sub < nSub; sub++) {
@@ -314,9 +322,113 @@
         if (touched && d.v.lengthSq() < 0.02 && _w.lengthSq() < 0.1) d.still += h; else d.still = 0;
         if (d.still > 0.6 || d.life > 40) { d.rest = true; break; }
       }
+      if (R3D.clock != null && (d.rest || R3D.clock - d.path[d.path.length - 1][0] >= 1 / 30)) note(d, R3D.clock);
     }
   }
-  function clearDebris(scene) { for (const d of debris) scene.remove(d.o); debris.length = 0; rowOwner.length = 0; rowVer.length = 0; }
+  function clearDebris(scene) { for (const d of debris) scene.remove(d.o); debris.length = 0; rowOwner.length = 0; rowVer.length = 0; hist.clear(); rewound = false; }
+
+  // ---- crashes played backwards in a flashback ----
+  // While a car's structure moves, its shape is kept every 1/30 s (and its shape at rest just
+  // before, so a rewind can go back to it), and each loose piece keeps its path. Rewinding (the
+  // game sets R3D.rewindT to the moment on show), a car is drawn in the shape it had then, and a
+  // piece either where it was then or, before it broke away, back on its car where it came from.
+  // A flashback that takes effect drops whatever broke after the moment it went back to; one that
+  // is cancelled puts everything back as it is.
+  const R3D = { clock: null, rewindT: null };
+  const hist = new Map(); // car -> { s: [{ t, p, off, toe, camber, hubOff, noSteer }], quiet, quietVer }
+  let rewound = false;
+  const HIST_S = 35;
+  function snapOf(s, t) { return { t, p: s.p.slice(), off: s.off.slice(), toe: s.toe.slice(), camber: s.camber.slice(), hubOff: s.hubOff.slice(), noSteer: (s.noSteer || [false, false, false, false]).slice() }; }
+  function record(c, s) {
+    const now = R3D.clock;
+    if (now == null || (s.ver === 0 && !hist.has(c))) return; // (nothing to keep for a car never hit)
+    let H = hist.get(c);
+    if (!H) { H = { s: [], quiet: null, quietVer: -1, lastVer: -1 }; hist.set(c, H); }
+    // (the shape it rests in between crashes: where a rewind to before the next one goes back to)
+    if (!s.awake && s.ver !== H.quietVer) { H.quiet = snapOf(s, now); H.quietVer = s.ver; }
+    if (s.ver === H.lastVer) return;
+    const last = H.s[H.s.length - 1];
+    if (last && now - last.t < 1 / 30 && s.awake) return;
+    if (!last || now - last.t > 0.5) H.s.push(H.quiet ? Object.assign({}, H.quiet, { t: now - 1 / 60 }) : { t: now - 1 / 60, rest: true });
+    H.s.push(snapOf(s, now)); H.lastVer = s.ver;
+    while (H.s.length && H.s[0].t < now - HIST_S) H.s.shift();
+  }
+  function note(d, t) {
+    if (t == null) return;
+    const o = d.o;
+    d.path.push([t, o.position.x, o.position.y, o.position.z, o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w, d.v.x, d.v.y, d.v.z, d.L.x, d.L.y, d.L.z, d.rest ? 1 : 0]);
+    while (d.path.length > 2 && d.path[0][0] < t - HIST_S) d.path.shift();
+  }
+  // a car's shape at time t: between the two kept shapes either side (none kept: as it is)
+  function shapeAt(c, s, t) {
+    const H = hist.get(c);
+    if (!H || !H.s.length || t >= H.s[H.s.length - 1].t) return null;
+    // (before the first kept shape: the shape it rested in before that crash, or none)
+    if (t < H.s[0].t) return H.s[0].rest ? { rest: true } : H.s[0];
+    let i = 0;
+    while (i < H.s.length - 1 && H.s[i + 1].t <= t) i++;
+    const a = H.s[i], b = H.s[Math.min(i + 1, H.s.length - 1)];
+    if (a.rest) return { rest: true };
+    if (b.rest || b === a) return a;
+    const f = Math.max(0, Math.min(1, (t - a.t) / Math.max(1e-6, b.t - a.t))), p = a.p.slice();
+    for (let k = 0; k < p.length; k++) p[k] += (b.p[k] - p[k]) * f;
+    return { p, off: f < 0.5 ? a.off : b.off, toe: a.toe, camber: a.camber, hubOff: a.hubOff, noSteer: a.noSteer };
+  }
+  // a car during a rewind
+  function rewindCar(outer, c, s, t) {
+    const body = outer.userData.body, bu = body.userData, st = outer.userData.softState;
+    if (!st || !st.bound) return;
+    const v = shapeAt(c, s, t);
+    if (!v) return;
+    const r = rowOf(c, s), T = F1.Soft.template(s.kind);
+    const view = v.rest ? { kind: s.kind, p: T.rest, broken: s.broken, off: new Uint8Array(T.n), toe: [0, 0, 0, 0], camber: [0, 0, 0, 0], hubOff: [false, false, false, false], noSteer: [false, false, false, false], ver: -1 }
+      : { kind: s.kind, p: v.p, broken: s.broken, off: v.off, toe: v.toe, camber: v.camber, hubOff: v.hubOff, noSteer: v.noSteer, ver: -1 };
+    if (r) { if (v.rest) st.row.v = 0; else { writeRow(r, view); st.row.v = r; } }
+    wheelPose(bu, c, view); nosePose(bu, view, st);
+  }
+  const _m4 = new THREE.Matrix4(), _sc = new THREE.Vector3();
+  function poseAt(d, t, set) {
+    const P = d.path;
+    let i = 0;
+    while (i < P.length - 1 && P[i + 1][0] <= t) i++;
+    const a = P[i], b = P[Math.min(i + 1, P.length - 1)], f = b === a ? 0 : Math.max(0, Math.min(1, (t - a[0]) / Math.max(1e-6, b[0] - a[0])));
+    const o = d.o;
+    o.position.set(a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f);
+    o.quaternion.set(a[4], a[5], a[6], a[7]).slerp(_qi.set(b[4], b[5], b[6], b[7]), f);
+    if (set) { d.v.set(a[8], a[9], a[10]); d.L.set(a[11], a[12], a[13]); d.rest = !!a[14]; d.still = 0; }
+  }
+  function rewindDebris(t) {
+    rewound = true;
+    const models = F1.R3 && F1.R3.carModels;
+    for (const d of debris) {
+      if (!d.path.length) continue;
+      if (t < d.t0) {
+        // not yet broken away: on its car, where it came from
+        const outer = models && models.get(d.car);
+        if (!outer) { d.o.visible = false; continue; }
+        outer.updateMatrixWorld(true);
+        _m4.multiplyMatrices(outer.matrixWorld, d.local).decompose(d.o.position, d.o.quaternion, _sc);
+        d.o.visible = true;
+      } else { poseAt(d, t, false); d.o.visible = true; }
+    }
+  }
+  // a cancelled flashback: every piece back where it is now
+  function unwind() {
+    rewound = false;
+    for (const d of debris) if (d.path.length) { const a = d.path[d.path.length - 1]; d.o.position.set(a[1], a[2], a[3]); d.o.quaternion.set(a[4], a[5], a[6], a[7]); d.o.visible = true; }
+  }
+  // a flashback that took effect at time t: what broke after it is gone, the rest is where it was
+  // then and goes on from there; the shapes kept after it are dropped
+  function trimDebris(scene, t) {
+    rewound = false;
+    for (let i = debris.length - 1; i >= 0; i--) {
+      const d = debris[i];
+      if (d.t0 != null && d.t0 > t) { scene.remove(d.o); debris.splice(i, 1); continue; }
+      if (d.path.length) { poseAt(d, t, true); d.path = d.path.filter(e => e[0] <= t); d.o.visible = true; }
+    }
+    for (const H of hist.values()) { H.s = H.s.filter(e => e.t <= t); H.lastVer = -1; }
+    rowVer.length = 0;
+  }
 
   // ---- node-and-beam skinning (js/softbody.js) ----
   // Every vertex of the bodywork is tied to the two nearest pieces of the structure (a beam, at
@@ -484,6 +596,13 @@
       pg.computeVertexNormals();
     }
     pg.computeBoundingSphere();
+    // (its nodes already flew, before a flashback that rebuilt this car's model: cut, not thrown again)
+    const T0 = F1.Soft.template(s.kind), flown = c.dm && (c.dm.flownNodes || (c.dm.flownNodes = new Uint8Array(T0.n)));
+    if (flown) {
+      let fresh = false;
+      for (const v of take) { const n = B.prim[v]; if (s.off[n] && !flown[n]) { fresh = true; flown[n] = 1; } }
+      if (!fresh) return;
+    }
     const piece = new THREE.Mesh(pg, m.material); piece.castShadow = true;
     const holder = new THREE.Group(); holder.add(piece);
     outer.userData.body.add(holder); holder.updateMatrixWorld(true);
@@ -637,7 +756,8 @@
   function sync(scene, outer, c, dt) {
     const dm = c.dm, body = outer.userData.body, bu = body.userData;
     if (!dm || !bu.lodGroups) return;
-    if (dm.soft && F1.Soft) syncSoft(scene, outer, c, dm.soft);
+    if (R3D.rewindT != null) { if (dm.soft) rewindCar(outer, c, dm.soft, R3D.rewindT); return; }
+    if (dm.soft && F1.Soft) { syncSoft(scene, outer, c, dm.soft); record(c, dm.soft); }
     if (dm.hits.length || (dm.soft && dm.soft.ver > 0)) bu.hurt = true; // the far level has no dents to show
     const st = outer.userData.dmgState || (outer.userData.dmgState = { hits: 0, off: {} });
     // new dents (dm.hits is a rolling list; the count says how many we have applied)
@@ -670,5 +790,6 @@
     }
   }
 
-  F1.R3D = { sync, stepDebris, clearDebris, dent, dbgLaunch: launch, get debris() { return debris; } };
+  Object.assign(R3D, { sync, stepDebris, clearDebris, trimDebris, dent, dbgLaunch: launch, get debris() { return debris; } });
+  F1.R3D = R3D;
 })(typeof window !== 'undefined' ? window : globalThis);
