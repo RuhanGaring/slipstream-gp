@@ -313,32 +313,59 @@
   // them. The binding is made once per model geometry and shared by every car.
   const binds = new Map();
   const mx = (p, i) => p[i * 3], my = (p, i) => p[i * 3 + 2], mz = (p, i) => p[i * 3 + 1]; // structure (x fwd, y right, z up) -> model (x, y up, z right)
-  function bindGeo(g) {
-    let B = binds.get(g.uuid);
+  // (the search goes through a grid: each piece is listed in every cell within BIND_R of it, so the
+  // pieces within BIND_R of a vertex are all in that vertex's own cell; the nearest two are taken
+  // from there when both lie that close, and from the whole structure otherwise. The dense
+  // structure's two thousand beams made the plain search take tens of seconds per model)
+  const BIND_C = 0.3, BIND_R = 0.3;
+  function bindGeo(g, kind) {
+    const key = g.uuid + (kind === 'beam' ? ':beam' : '');
+    let B = binds.get(key);
     if (B) return B;
-    const T = F1.Soft.template(), R = T.rest, pos = g.attributes.position, nv = pos.count;
+    const T = F1.Soft.template(kind), R = T.rest, pos = g.attributes.position, nv = pos.count;
     // candidate pieces: beams, and the anchored nodes (which have no beams among themselves)
     const ca = [], cb = [];
     for (let e = 0; e < T.nb; e++) { ca.push(T.a[e]); cb.push(T.b[e]); }
     for (let i = 0; i < T.n; i++) if (T.fixed[i]) { ca.push(i); cb.push(i); }
     const nc = ca.length;
     const ax = new Float32Array(nc), ay = new Float32Array(nc), az = new Float32Array(nc), dx = new Float32Array(nc), dy = new Float32Array(nc), dz = new Float32Array(nc), ll = new Float32Array(nc);
+    let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9;
     for (let k = 0; k < nc; k++) {
       ax[k] = mx(R, ca[k]); ay[k] = my(R, ca[k]); az[k] = mz(R, ca[k]);
       dx[k] = mx(R, cb[k]) - ax[k]; dy[k] = my(R, cb[k]) - ay[k]; dz[k] = mz(R, cb[k]) - az[k];
       ll[k] = dx[k] * dx[k] + dy[k] * dy[k] + dz[k] * dz[k];
+      x0 = Math.min(x0, ax[k], ax[k] + dx[k]); x1 = Math.max(x1, ax[k], ax[k] + dx[k]);
+      y0 = Math.min(y0, ay[k], ay[k] + dy[k]); y1 = Math.max(y1, ay[k], ay[k] + dy[k]);
+      z0 = Math.min(z0, az[k], az[k] + dz[k]); z1 = Math.max(z1, az[k], az[k] + dz[k]);
+    }
+    x0 -= BIND_R; y0 -= BIND_R; z0 -= BIND_R;
+    const gx = Math.ceil((x1 + BIND_R - x0) / BIND_C) + 1, gy = Math.ceil((y1 + BIND_R - y0) / BIND_C) + 1, gz = Math.ceil((z1 + BIND_R - z0) / BIND_C) + 1;
+    const cells = new Array(gx * gy * gz);
+    const cl = (v, o, n) => Math.max(0, Math.min(n - 1, Math.floor((v - o) / BIND_C)));
+    for (let k = 0; k < nc; k++) {
+      const ex = [Math.min(ax[k], ax[k] + dx[k]) - BIND_R, Math.max(ax[k], ax[k] + dx[k]) + BIND_R];
+      const ey = [Math.min(ay[k], ay[k] + dy[k]) - BIND_R, Math.max(ay[k], ay[k] + dy[k]) + BIND_R];
+      const ez = [Math.min(az[k], az[k] + dz[k]) - BIND_R, Math.max(az[k], az[k] + dz[k]) + BIND_R];
+      for (let i = cl(ex[0], x0, gx); i <= cl(ex[1], x0, gx); i++) for (let j = cl(ey[0], y0, gy); j <= cl(ey[1], y0, gy); j++) for (let l = cl(ez[0], z0, gz); l <= cl(ez[1], z0, gz); l++) {
+        const c = (i * gy + j) * gz + l; (cells[c] || (cells[c] = [])).push(k);
+      }
     }
     const ia = new Uint16Array(nv * 2), ib = new Uint16Array(nv * 2), tt = new Float32Array(nv * 2), ww = new Float32Array(nv * 2), prim = new Uint16Array(nv);
+    let b1, b2, k1, k2, t1, t2;
+    const test = (k, x, y, z) => {
+      let t = ll[k] > 0 ? ((x - ax[k]) * dx[k] + (y - ay[k]) * dy[k] + (z - az[k]) * dz[k]) / ll[k] : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = ax[k] + dx[k] * t - x, ey = ay[k] + dy[k] * t - y, ez = az[k] + dz[k] * t - z;
+      const d = ex * ex + ey * ey + ez * ez;
+      if (d < b1) { b2 = b1; k2 = k1; t2 = t1; b1 = d; k1 = k; t1 = t; } else if (d < b2) { b2 = d; k2 = k; t2 = t; }
+    };
     for (let v = 0; v < nv; v++) {
       const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
-      let b1 = 1e9, b2 = 1e9, k1 = 0, k2 = 0, t1 = 0, t2 = 0;
-      for (let k = 0; k < nc; k++) {
-        let t = ll[k] > 0 ? ((x - ax[k]) * dx[k] + (y - ay[k]) * dy[k] + (z - az[k]) * dz[k]) / ll[k] : 0;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const ex = ax[k] + dx[k] * t - x, ey = ay[k] + dy[k] * t - y, ez = az[k] + dz[k] * t - z;
-        const d = ex * ex + ey * ey + ez * ez;
-        if (d < b1) { b2 = b1; k2 = k1; t2 = t1; b1 = d; k1 = k; t1 = t; } else if (d < b2) { b2 = d; k2 = k; t2 = t; }
-      }
+      b1 = 1e9; b2 = 1e9; k1 = 0; k2 = 0; t1 = 0; t2 = 0;
+      const ci = Math.floor((x - x0) / BIND_C), cj = Math.floor((y - y0) / BIND_C), ck = Math.floor((z - z0) / BIND_C);
+      const list = ci >= 0 && ci < gx && cj >= 0 && cj < gy && ck >= 0 && ck < gz ? cells[(ci * gy + cj) * gz + ck] : null;
+      if (list) for (const k of list) test(k, x, y, z);
+      if (!list || b2 > BIND_R * BIND_R) { b1 = 1e9; b2 = 1e9; for (let k = 0; k < nc; k++) test(k, x, y, z); }
       // blend only within one part: a vertex shared out between, say, the rear wing and the
       // chassis would be stretched between them; this way parts move whole and tear at seams
       const g1 = T.grp[t1 < 0.5 ? ca[k1] : cb[k1]], g2 = T.grp[t2 < 0.5 ? ca[k2] : cb[k2]];
@@ -348,15 +375,15 @@
       prim[v] = t1 < 0.5 ? ca[k1] : cb[k1]; // the node the vertex belongs to (for parts coming off)
     }
     B = { ia, ib, tt, ww, prim, src: Float32Array.from(pos.array) };
-    binds.set(g.uuid, B);
+    binds.set(key, B);
     return B;
   }
 
   // bring one mesh to the structure's present shape
   function skin(m, s) {
-    const T = F1.Soft.template(), R = T.rest, P = s.p;
+    const T = F1.Soft.template(s.kind), R = T.rest, P = s.p;
     if (!m.userData.bindSrc) m.userData.bindSrc = m.geometry; // the shared model geometry
-    const B = bindGeo(m.userData.bindSrc);
+    const B = bindGeo(m.userData.bindSrc, s.kind);
     const g = own(m), pa = g.attributes.position, arr = pa.array;
     const { ia, ib, tt, ww, src } = B, nv = pa.count;
     for (let v = 0; v < nv; v++) {
@@ -412,7 +439,7 @@
     if (!m.userData.bindSrc) m.userData.bindSrc = m.geometry;
     const g = gpu ? ownIndex(m) : own(m), ix = g.index;
     if (!ix) return;
-    const B = bindGeo(m.userData.bindSrc || m.geometry);
+    const B = bindGeo(m.userData.bindSrc || m.geometry, s.kind);
     const base = m.userData.baseIndex || (m.userData.baseIndex = Uint32Array.from(ix.array));
     const was = m.userData.triOff || (m.userData.triOff = new Uint8Array(base.length / 3));
     const keep = new Uint32Array(base.length), take = [];
@@ -430,7 +457,7 @@
     // the piece keeps its present (deformed) shape
     const { pg, used } = compact(g, take);
     if (gpu) {
-      const T = F1.Soft.template(), R = T.rest, P = s.p, arr = pg.attributes.position.array, { ia, ib, tt, ww, src } = B;
+      const T = F1.Soft.template(s.kind), R = T.rest, P = s.p, arr = pg.attributes.position.array, { ia, ib, tt, ww, src } = B;
       for (let i = 0; i < used.length; i++) {
         const v = used[i];
         let ox = 0, oy = 0, oz = 0;
@@ -473,13 +500,13 @@
     bound.set(g, B);
   }
   const rowOwner = [], rowVer = [];
-  let restDone = false, _str = null;
-  const rowOf = c => (!G.__softCPU && F1.R3S && F1.R3S.SOFT_W >= F1.Soft.template().n && c.id >= 0 && c.id + 1 < F1.R3S.SOFT_H ? c.id + 1 : 0);
+  let restDone = null, _str = null; // (restDone: which structure's rest shape row 0 holds)
+  const rowOf = (c, s) => (!G.__softCPU && F1.R3S && F1.R3S.SOFT_W >= F1.Soft.template(s && s.kind).n && c.id >= 0 && c.id + 1 < F1.R3S.SOFT_H ? c.id + 1 : 0);
   function writeRow(r, s) {
-    const T = F1.Soft.template(), tex = F1.R3S.U.uSoftTex.value, d = tex.image.data, W = F1.R3S.SOFT_W, R = T.rest, P = s.p;
-    if (!restDone) { for (let i = 0; i < T.n; i++) { d[i * 4] = R[i * 3]; d[i * 4 + 1] = R[i * 3 + 2]; d[i * 4 + 2] = R[i * 3 + 1]; d[i * 4 + 3] = 0; } restDone = true; }
+    const T = F1.Soft.template(s.kind), tex = F1.R3S.U.uSoftTex.value, d = tex.image.data, W = F1.R3S.SOFT_W, R = T.rest, P = s.p;
+    if (restDone !== T.kind) { for (let i = 0; i < T.n; i++) { d[i * 4] = R[i * 3]; d[i * 4 + 1] = R[i * 3 + 2]; d[i * 4 + 2] = R[i * 3 + 1]; d[i * 4 + 3] = 0; } restDone = T.kind; }
     // how far each node's beams were pushed or pulled from their made length (a snapped one counts in full)
-    const st = _str || (_str = new Float32Array(T.n));
+    const st = _str && _str.length >= T.n ? _str : (_str = new Float32Array(T.n));
     st.fill(0);
     for (let e = 0; e < T.nb; e++) {
       const a = T.a[e], b = T.b[e];
@@ -501,7 +528,7 @@
   function nosePose(bu, s, st) {
     const n = bu.nose;
     if (!n) return;
-    const T = F1.Soft.template(), R = T.rest, P = s.p;
+    const T = F1.Soft.template(s.kind), R = T.rest, P = s.p;
     if (st.noseNode == null) {
       let best = -1, bd = 1e9;
       for (let i = 0; i < T.n; i++) { const d = (R[i * 3] - n.position.x) ** 2 + (R[i * 3 + 2] - n.position.y) ** 2 + (R[i * 3 + 1] - n.position.z) ** 2; if (d < bd) { bd = d; best = i; } }
@@ -514,7 +541,7 @@
 
   // wheels follow their hubs: position, toe and camber from the bent suspension
   function wheelPose(bu, c, s) {
-    const T = F1.Soft.template(), R = T.rest, P = s.p;
+    const T = F1.Soft.template(s.kind), R = T.rest, P = s.p;
     T.corners.forEach((cn, k) => {
       const w = bu.wheels[k];
       if (!w || !w.parent || s.hubOff[k]) return;
@@ -532,13 +559,13 @@
   function syncSoft(scene, outer, c, s) {
     const body = outer.userData.body, bu = body.userData;
     const st = outer.userData.softState || (outer.userData.softState = { ver: -1, offVer: 0, n: 0, row: { v: 0 } });
-    const r = rowOf(c);
+    const r = rowOf(c, s);
     // bind the model to the structure up front (once per model, at the start of the race),
     // not in the middle of the first crash
     if (!st.bound) {
       for (const m of bodyMeshes(body)) {
         if (!m.userData.bindSrc) m.userData.bindSrc = m.geometry;
-        const B = bindGeo(m.userData.bindSrc);
+        const B = bindGeo(m.userData.bindSrc, s.kind);
         if (r) { bindAttrs(m.userData.bindSrc, B); if (m.geometry !== m.userData.bindSrc) bindAttrs(m.geometry, B); m.softRow = st.row; }
       }
       st.bound = true;
@@ -547,7 +574,20 @@
       // on the GPU: the car's row, written whenever the structure has moved
       if (s.ver > 0 && (rowOwner[r] !== s || rowVer[r] !== s.ver)) writeRow(r, s);
       st.row.v = s.ver > 0 ? r : 0;
-      if (st.offVer !== s.offVer) { for (const m of bodyMeshes(body)) cutOff(scene, outer, c, m, s, true); st.offVer = s.offVer; }
+      // (pieces come away at most ten times a second: the dense structure sheds small pieces many
+      // times in a crash, and each time every body mesh's triangles are sorted again)
+      if (st.offVer !== s.offVer && !(performance.now() - (st.cutT || 0) < 100)) {
+        st.cutT = performance.now();
+        // (and only the meshes that use a node that has come off, or been put back, since)
+        const T = F1.Soft.template(s.kind), was = st.offSnap || (st.offSnap = new Uint8Array(T.n)), chg = [];
+        for (let i = 0; i < T.n; i++) if (was[i] !== s.off[i]) { chg.push(i); was[i] = s.off[i]; }
+        for (const m of bodyMeshes(body)) {
+          const B = bindGeo(m.userData.bindSrc || m.geometry, s.kind);
+          const used = B.used || (B.used = (() => { const u = new Uint8Array(T.n); for (let v = 0; v < B.prim.length; v++) u[B.prim[v]] = 1; return u; })());
+          if (chg.some(i => used[i])) cutOff(scene, outer, c, m, s, true);
+        }
+        st.offVer = s.offVer;
+      }
       st.ver = s.ver;
     } else {
       // (a car with no row is reshaped on the CPU, as before)

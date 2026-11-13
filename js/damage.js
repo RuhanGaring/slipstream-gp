@@ -43,7 +43,7 @@
       kDownF: 1, kDownR: 1, kDrag: 1, pull: 0, power: 1, shiftK: 1, stuck: false, paceK: 1, needsPit: false,
       toe: null, camber: null, soft: null,
     };
-    if (F1.Soft) { c.dm.soft = F1.Soft.init(c); c.dm.toe = [0, 0, 0, 0]; c.dm.camber = [0, 0, 0, 0]; c.dm.hub = new Float32Array(8); c.dm.noSteer = [false, false, false, false]; } // (hub, noSteer: there from the start, so a flashback snapshot holds them)
+    if (F1.Soft) { c.dm.soft = F1.Soft.init(c, c.assist && c.assist.crash); c.dm.toe = [0, 0, 0, 0]; c.dm.camber = [0, 0, 0, 0]; c.dm.hub = new Float32Array(8); c.dm.noSteer = [false, false, false, false]; } // (hub, noSteer: there from the start, so a flashback snapshot holds them)
     return c.dm;
   }
   // mulberry32: fine-grained enough for per-step failure chances of one in millions
@@ -114,13 +114,13 @@
     };
     if (S) {
       // read everything off the structure
-      const gid = F1.Soft.gid;
+      const gid = F1.Soft.template(S.kind).gid;
       for (const k of KEYS) p[k] = S.gp[gid[k]] || 0;
       // (a corner bent further than this is broken: its wheel just flops, see the corner figure)
       for (let k = 0; k < 4; k++) { dm.toe[k] = Math.max(-0.2, Math.min(0.2, S.toe[k])); dm.camber[k] = Math.max(-10, Math.min(10, S.camber[k])); }
       dm.noSteer = S.noSteer.slice(); // (wheels whose track rod or toe link has gone: they swivel freely, js/car.js)
       // where each hub now stands (car frame, m): a corner pushed back shortens that side's wheelbase
-      { const T = F1.Soft.template(), hub = dm.hub || (dm.hub = new Float32Array(8));
+      { const T = F1.Soft.template(S.kind), hub = dm.hub || (dm.hub = new Float32Array(8));
         T.corners.forEach((cn, k) => { const H = cn.H * 3; hub[k * 2] = Math.max(-0.25, Math.min(0.25, S.p[H] - T.rest[H])); hub[k * 2 + 1] = Math.max(-0.25, Math.min(0.25, S.p[H + 1] - T.rest[H + 1])); }); }
       const gone = F1.Soft.lost(S);
       for (const g of gone) breakOff(g, true, F1.Soft.LABEL[g] || g.toUpperCase());

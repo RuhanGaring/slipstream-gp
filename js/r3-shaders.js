@@ -53,7 +53,7 @@
   // rest shape, each further row one damaged car's present shape (xyz in the model's frame) and,
   // in w, how damaged the bodywork round that node is (0..1). A car's row reaches its draws
   // through the normal matrix (F1.R3Car lodHook), so the materials stay shared.
-  const SOFT_W = 128, SOFT_H = 33;
+  const SOFT_W = 512, SOFT_H = 33; // (512 nodes: the dense crash structure has about 400)
   {
     const t = new THREE.DataTexture(new Float32Array(SOFT_W * SOFT_H * 4), SOFT_W, SOFT_H, THREE.RGBAFormat, THREE.FloatType);
     t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;

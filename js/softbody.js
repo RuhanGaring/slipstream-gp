@@ -40,10 +40,22 @@
   const CRUSH = { gbox: 150e3, rcs: 45e3, nose: 28e3, fwL: 3e3, fwR: 3e3, rw: 3e3, sFL: 15e3, sFR: 15e3, sRL: 15e3, sRR: 15e3, podL: 9e3, podR: 9e3, floor: 10e3 };
   const LABEL = { fwL: 'FRONT WING', fwR: 'FRONT WING', rw: 'REAR WING', nose: 'NOSE', podL: 'SIDEPOD', podR: 'SIDEPOD', floor: 'FLOOR', gbox: 'GEARBOX' };
 
-  // ---------------- the structure (built once, shared by every car) ----------------
-  let TPL = null;
-  function template() {
-    if (TPL) return TPL;
+  // ---------------- the structure (built once per kind, shared by every car) ----------------
+  // Two kinds, the race setting Crash physics: 'std', the original network (about a hundred
+  // nodes: each part a few nodes, crumpling as a few large pieces), and 'beam', a dense one in the
+  // manner of BeamNG (about four hundred: the nose, wings, sidepods, floor, engine cover and rear
+  // wing as fine meshes that fold and crumple in their own shape), solved with the parts' momentum
+  // and little damping, so a hit flings, flexes and folds them. The survival cell, the gearbox and
+  // the suspension are the same in both, as are the part names, so everything that reads the
+  // structure (damage figures, wheels, steering, colliders) works the same on either.
+  const TPLS = {};
+  function template(kind) {
+    kind = kind === 'beam' ? 'beam' : 'std';
+    return TPLS[kind] || (TPLS[kind] = build(kind));
+  }
+  const tpl = s => template(s.kind);
+  function build(kind) {
+    const dense = kind === 'beam';
     const N = [], B = [], groups = {}, keys = new Set();
     const node = (g, x, y, z, o) => {
       N.push({ g, x, y, z, fixed: !!(o && o.fixed), mass: (o && o.mass) || 1, rad: (o && o.rad) || 0.02, skin: (o && o.skin) || [1e6, 0.015], crush: (o && o.crush) || CRUSH[g] || 1e4 });
@@ -75,19 +87,43 @@
     for (const s of [-1, 1]) for (const z of [0.26, 0.44]) rcs.push(node('rcs', -2.28, s * 0.08, z));
     mesh(rcs, rcs.concat(at('gbox', n => n.x < -2)), 0.5, 'rcs');
 
-    // nose cone: rings tapering to the tip
-    for (const [x, w, z0, z1] of [[2.45, 0.14, 0.3, 0.6], [2.8, 0.1, 0.27, 0.47]]) for (const s of [-1, 1]) for (const z of [z0, z1]) node('nose', x, s * w, z);
-    for (const s of [-1, 1]) node('nose', 3.15, s * 0.05, 0.31);
-    mesh(groups.nose, groups.nose.concat(at('tub', n => n.x > 2)), 0.62, 'nose');
+    if (!dense) {
+      // nose cone: rings tapering to the tip
+      for (const [x, w, z0, z1] of [[2.45, 0.14, 0.3, 0.6], [2.8, 0.1, 0.27, 0.47]]) for (const s of [-1, 1]) for (const z of [z0, z1]) node('nose', x, s * w, z);
+      for (const s of [-1, 1]) node('nose', 3.15, s * 0.05, 0.31);
+      mesh(groups.nose, groups.nose.concat(at('tub', n => n.x > 2)), 0.62, 'nose');
 
-    // front wing: two halves, leading and trailing edge nodes across the span, endplate tops
-    for (const [g, s] of [['fwL', -1], ['fwR', 1]]) {
-      for (const y of [0.15, 0.45, 0.75, 0.97]) { node(g, 3.1 - (y > 0.7 ? 0.08 : 0), s * y, 0.14); node(g, 2.6, s * y, 0.3); }
-      node(g, 2.78, s * 0.97, 0.42);
-      mesh(groups[g], groups[g], 0.72, 'wing');
+      // front wing: two halves, leading and trailing edge nodes across the span, endplate tops
+      for (const [g, s] of [['fwL', -1], ['fwR', 1]]) {
+        for (const y of [0.15, 0.45, 0.75, 0.97]) { node(g, 3.1 - (y > 0.7 ? 0.08 : 0), s * y, 0.14); node(g, 2.6, s * y, 0.3); }
+        node(g, 2.78, s * 0.97, 0.42);
+        mesh(groups[g], groups[g], 0.72, 'wing');
+      }
+      mesh(at('fwL', n => Math.abs(n.y) < 0.2), at('fwR', n => Math.abs(n.y) < 0.2), 0.6, 'wing');
+      mesh(at('nose', n => n.x > 2.7), at('fwL', n => Math.abs(n.y) < 0.2).concat(at('fwR', n => Math.abs(n.y) < 0.2)), 0.5, 'pylon');
+    } else {
+      // nose cone: a tube of ten stations from the bulkhead to the tip, each a box section
+      // (four corners and the top centre), tapering and dropping toward the tip
+      for (let k = 0; k <= 9; k++) {
+        const f = k / 9, x = 2.2 + f * 0.95, w = 0.16 - 0.11 * f, z0 = 0.28 + 0.01 * f, z1 = 0.62 - 0.29 * f;
+        for (const s of [-1, 1]) { node('nose', x, s * w, z0); node('nose', x, s * w, z1); }
+        node('nose', x, 0, z1 + 0.02);
+      }
+      mesh(groups.nose, groups.nose, 0.36, 'nose');
+      mesh(at('nose', n => n.x < 2.35), at('tub', n => n.x > 2), 0.62, 'nose');
+      // front wing: per half, eight span stations of a three-element section rising to the back,
+      // and an endplate at the tip
+      for (const [g, s] of [['fwL', -1], ['fwR', 1]]) {
+        for (let k = 0; k < 8; k++) {
+          const y = 0.12 + k * 0.12, sweep = y > 0.7 ? 0.08 : 0;
+          node(g, 3.12 - sweep, s * y, 0.12); node(g, 2.9 - sweep * 0.5, s * y, 0.2); node(g, 2.62, s * y, 0.3);
+        }
+        for (const [x, z] of [[2.95, 0.32], [2.78, 0.42]]) node(g, x, s * 0.97, z);
+        mesh(groups[g], groups[g], 0.3, 'wing');
+      }
+      mesh(at('fwL', n => Math.abs(n.y) < 0.2), at('fwR', n => Math.abs(n.y) < 0.2), 0.3, 'wing');
+      mesh(at('nose', n => n.x > 2.7), at('fwL', n => Math.abs(n.y) < 0.28).concat(at('fwR', n => Math.abs(n.y) < 0.28)), 0.45, 'pylon');
     }
-    mesh(at('fwL', n => Math.abs(n.y) < 0.2), at('fwR', n => Math.abs(n.y) < 0.2), 0.6, 'wing');
-    mesh(at('nose', n => n.x > 2.7), at('fwL', n => Math.abs(n.y) < 0.2).concat(at('fwR', n => Math.abs(n.y) < 0.2)), 0.5, 'pylon');
 
     // suspension: each corner an upright (hub, top and bottom ball joints, steering arm),
     // joined to the chassis by six links (two wishbones, push rod, track rod)
@@ -109,24 +145,59 @@
     };
     const corners = [corner('sFL', 1.964, -1, true), corner('sFR', 1.964, 1, true), corner('sRL', -1.57, -1, false), corner('sRR', -1.57, 1, false)];
 
-    // sidepods
-    for (const [g, s] of [['podL', -1], ['podR', 1]]) {
-      for (const [x, w, z0, z1] of [[-1.0, 0.56, 0.2, 0.6], [-0.2, 0.72, 0.18, 0.64], [0.6, 0.78, 0.18, 0.62], [1.2, 0.7, 0.24, 0.58]]) { node(g, x, s * w, z0); node(g, x, s * w, z1); }
-      mesh(groups[g], groups[g].concat(at('tub', n => Math.sign(n.y) === s && n.x < 1.5)), 0.98, 'pod', sameSide);
-    }
-    // floor edges and the diffuser
-    for (const s of [-1, 1]) {
-      for (const x of [-1.3, -0.4, 0.5, 1.3]) node('floor', x, s * 0.82, 0.08);
-      node('floor', -2.0, s * 0.48, 0.14);
-    }
     const podLow = i => (N[i].g === 'podL' || N[i].g === 'podR') && N[i].z < 0.3;
-    mesh(groups.floor, groups.floor.concat(groups.podL, groups.podR, groups.tub.filter(i => N[i].z < 0.4), groups.gbox.filter(i => N[i].z < 0.4)), 0.98, 'floor', (a, b) => sameSide(a, b) && (N[b].g === 'floor' || podLow(b) || N[b].g === 'tub' || N[b].g === 'gbox'));
+    if (!dense) {
+      // sidepods
+      for (const [g, s] of [['podL', -1], ['podR', 1]]) {
+        for (const [x, w, z0, z1] of [[-1.0, 0.56, 0.2, 0.6], [-0.2, 0.72, 0.18, 0.64], [0.6, 0.78, 0.18, 0.62], [1.2, 0.7, 0.24, 0.58]]) { node(g, x, s * w, z0); node(g, x, s * w, z1); }
+        mesh(groups[g], groups[g].concat(at('tub', n => Math.sign(n.y) === s && n.x < 1.5)), 0.98, 'pod', sameSide);
+      }
+      // floor edges and the diffuser
+      for (const s of [-1, 1]) {
+        for (const x of [-1.3, -0.4, 0.5, 1.3]) node('floor', x, s * 0.82, 0.08);
+        node('floor', -2.0, s * 0.48, 0.14);
+      }
+      mesh(groups.floor, groups.floor.concat(groups.podL, groups.podR, groups.tub.filter(i => N[i].z < 0.4), groups.gbox.filter(i => N[i].z < 0.4)), 0.98, 'floor', (a, b) => sameSide(a, b) && (N[b].g === 'floor' || podLow(b) || N[b].g === 'tub' || N[b].g === 'gbox'));
 
-    // rear wing on its pylon
-    for (const x of [-1.95, -2.25]) for (const y of [-0.62, -0.2, 0.2, 0.62]) node('rw', x, y, 0.95);
-    for (const s of [-1, 1]) node('rw', -2.1, s * 0.62, 0.55);
-    mesh(groups.rw, groups.rw, 0.72, 'wing');
-    mesh(at('rw', n => Math.abs(n.y) < 0.3), at('gbox', n => n.x < -2 && n.z > 0.4), 0.6, 'pylon');
+      // rear wing on its pylon
+      for (const x of [-1.95, -2.25]) for (const y of [-0.62, -0.2, 0.2, 0.62]) node('rw', x, y, 0.95);
+      for (const s of [-1, 1]) node('rw', -2.1, s * 0.62, 0.55);
+      mesh(groups.rw, groups.rw, 0.72, 'wing');
+      mesh(at('rw', n => Math.abs(n.y) < 0.3), at('gbox', n => n.x < -2 && n.z > 0.4), 0.6, 'pylon');
+    } else {
+      // sidepods: twelve stations from the cooling inlet back to the coke bottle, each the outer
+      // wall at three heights and the top's inner edge
+      const POD = [[-1.0, 0.56, 0.2, 0.6], [-0.2, 0.72, 0.18, 0.64], [0.6, 0.78, 0.18, 0.62], [1.2, 0.7, 0.24, 0.58]];
+      const podAt = x => { let k = 0; while (k < POD.length - 2 && x > POD[k + 1][0]) k++; const a = POD[k], b = POD[k + 1], f = Math.max(0, Math.min(1, (x - a[0]) / (b[0] - a[0]))); return a.map((v, i) => v + (b[i] - v) * f); };
+      for (const [g, s] of [['podL', -1], ['podR', 1]]) {
+        for (let k = 0; k < 12; k++) {
+          const [x, w, z0, z1] = podAt(-1.0 + k * 0.2);
+          node(g, x, s * w, z0); node(g, x, s * w, (z0 + z1) / 2); node(g, x, s * w, z1); node(g, x, s * 0.45, z1 + 0.03);
+        }
+        mesh(groups[g], groups[g], 0.33, 'pod', sameSide);
+        mesh(at(g, n => Math.abs(n.y) < 0.5), at('tub', n => Math.sign(n.y) === s && n.x < 1.5), 0.98, 'pod', sameSide);
+      }
+      // floor: its outer edge and an inner line, fourteen stations, and the diffuser behind
+      for (const s of [-1, 1]) {
+        for (let k = 0; k < 14; k++) { const x = -1.3 + k * 0.2; node('floor', x, s * 0.82, 0.08); node('floor', x, s * 0.55, 0.06); }
+        for (const x of [-1.6, -1.85, -2.1]) { node('floor', x, s * 0.48, 0.14); node('floor', x, s * 0.2, 0.12); }
+      }
+      mesh(groups.floor, groups.floor, 0.33, 'floor', sameSide);
+      mesh(at('floor', n => Math.abs(n.y) < 0.6), groups.tub.filter(i => N[i].z < 0.4).concat(groups.gbox.filter(i => N[i].z < 0.4)), 0.98, 'floor', sameSide);
+      mesh(groups.floor, groups.podL.concat(groups.podR).filter(podLow), 0.35, 'floor', sameSide);
+      // engine cover: the spine and its shoulders from the airbox back to the gearbox
+      for (let k = 0; k < 10; k++) { const x = -1.9 + k * 0.2; node('cover', x, 0, 0.95 - 0.02 * Math.abs(k - 5)); for (const s of [-1, 1]) node('cover', x, s * 0.25, 0.62); }
+      mesh(groups.cover, groups.cover, 0.36, 'pod');
+      mesh(groups.cover, at('tub', n => n.z > 0.4 && n.x < 0).concat(at('gbox', n => n.z > 0.4)), 0.9, 'pod');
+      // rear wing: eleven span stations of a three-node chord, endplates down to the beam wing
+      for (let k = 0; k <= 10; k++) { const y = -0.62 + k * 0.124; for (const x of [-1.95, -2.1, -2.25]) node('rw', x, y, 0.95); }
+      for (const s of [-1, 1]) for (const z of [0.6, 0.75]) node('rw', -2.1, s * 0.62, z);
+      mesh(groups.rw, groups.rw, 0.3, 'wing');
+      // (the pylon braced to the whole gearbox, top and bottom, fore and aft: mounted to its two top
+      // corners alone, the wing hung from a hinge and flopped forward in any frontal hit)
+      mesh(at('rw', n => Math.abs(n.y) < 0.25 && n.z > 0.9), groups.gbox.concat(groups.rcs), 0.95, 'pylon');
+      mesh(at('rw', n => Math.abs(n.y) > 0.5 && n.z < 0.8), at('gbox', n => n.x < -2), 0.75, 'pylon');
+    }
 
     // flatten into typed arrays
     const n = N.length, nb = B.length;
@@ -156,6 +227,7 @@
       const up = new Set([c.H, c.U, c.L, c.S]);
       for (let i = 0; i < nb; i++) if (up.has(T.a[i]) !== up.has(T.b[i])) { T.linkCorner[i] = k; T.nLinks[k]++; }
     });
+    T.cornerLinks = [0, 1, 2, 3].map(k => { const l = []; for (let i = 0; i < nb; i++) if (T.linkCorner[i] === k) l.push(i); return l; });
     // the link that holds each wheel's toe (the track rod at the front, the toe link at the back):
     // the one from the steering arm to the car. Broken, that wheel is no longer steered
     T.toeLink = corners.map(c => { for (let i = 0; i < nb; i++) if ((T.a[i] === c.S) !== (T.b[i] === c.S) && T.linkCorner[i] >= 0) return i; return -1; });
@@ -166,7 +238,24 @@
     T.tub = TUB.map(([x, w, z0, z1]) => [x, w, z0, z1]);
     // rest axle directions of the four corners (for toe and camber)
     T.axle0 = corners.map((c, k) => axle(T.rest, c, k));
-    TPL = T;
+    T.kind = kind;
+    // how it is solved: the original holds its parts still between hits; the dense one keeps
+    // their momentum (a substep keeps 98.5% of a node's speed: a struck wing rings for a twentieth
+    // of a second or so) and flings the free parts with the car's change of speed
+    T.damp = dense ? 0.985 : DAMP; T.iter = dense ? +(G.__softIter || 6) : ITER; T.sub = dense ? +(G.__softSub || 2) : SUB; T.inertia = dense;
+    if (dense) {
+      // The same energy to crush a part as in the original, spread over its finer mesh: each beam's
+      // yield force and each node's crush force are scaled by how much more of them the part has.
+      const S = template('std'), cap = (TT, gi) => { let e = 0; for (let i = 0; i < TT.nb; i++) if (TT.grp[TT.a[i]] === gi || TT.grp[TT.b[i]] === gi) e += TT.F[i] * TT.L0[i]; return e; };
+      for (const g of T.gname) {
+        const gi = T.gid[g], si = S.gid[g];
+        if (si == null || g === 'tub' || CORNER.includes(g) || g === 'gbox') continue;
+        const kE = cap(S, si) / Math.max(1e-6, cap(T, gi));
+        for (let i = 0; i < nb; i++) if (T.grp[T.a[i]] === gi || T.grp[T.b[i]] === gi) T.F[i] *= kE;
+        const kN = S.groups[g].length / T.groups[g].length;
+        for (const i of T.groups[g]) T.crush[i] *= kN;
+      }
+    }
     return T;
   }
 
@@ -181,9 +270,10 @@
   }
 
   // ---------------- per car ----------------
-  function init(c) {
-    const T = template();
+  function init(c, kind) {
+    const T = template(kind);
     const s = {
+      kind: T.kind,
       p: Float32Array.from(T.rest), q: Float32Array.from(T.rest), L0: Float32Array.from(T.L0),
       broken: new Uint8Array(T.nb), off: new Uint8Array(T.n), planes: [], awake: 0, idle: 0,
       ver: 0, offVer: 0, gp: new Float32Array(T.gname.length), toe: [0, 0, 0, 0], camber: [0, 0, 0, 0], hubOff: [false, false, false, false], noSteer: [false, false, false, false],
@@ -203,7 +293,7 @@
   // contact drags what it presses on with it (Coulomb friction), which is what tears wings
   // and wheels off in a glancing hit
   function impact(s, lx, ly, nx, ny, vn, patch, tx, ty) {
-    const T = template();
+    const T = tpl(s);
     if (vn < 1.6) return null;
     const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
     const R = patch || 2.2;
@@ -233,12 +323,15 @@
     }
     // keep only the sliding part along the plane
     let vt = (tx || 0) * -ny + (ty || 0) * nx;
-    s.planes.push({ x: lx, y: ly, nx, ny, R, Dmax, d: d0, v: vn, E, E0: E, hold: 0, tx: -ny * vt, ty: nx * vt, vt: Math.abs(vt), skin: new Float32Array(T.n), seen: new Int32Array(T.n) });
+    // (the dense structure's momentum: the hit changes the car's speed by about dv along the normal,
+    // over about KICK_T s; its free parts, not yet told, carry on toward what it hit)
+    const dv = T.inertia ? vn * (patch ? 0.6 : 1.1) : 0, kT = Math.max(KICK_T, Math.min(0.15, 1.5 * Math.max(0.05, Dmax - d0) / Math.max(1, vn)));
+    s.planes.push({ x: lx, y: ly, nx, ny, R, Dmax, d: d0, v: vn, E, E0: E, hold: 0, tx: -ny * vt, ty: nx * vt, vt: Math.abs(vt), skin: new Float32Array(T.n), seen: new Int32Array(T.n), kx: -nx * dv, ky: -ny * dv, kT, t: 0 });
     s.awake = 1; s.idle = 0; s.age = 0;
     return E;
   }
 
-  const SUB = 2, ITER = 6, DAMP = 0.9, MU = 0.6, MU_TYRE = 1.0;
+  const SUB = 2, ITER = 6, DAMP = 0.9, MU = 0.6, MU_TYRE = 1.0, KICK_T = 0.05, DENSE_HZ = 120;
   // how far a suspension link may turn at its mounts before they tear out (cosines): 45 degrees
   // while its corner is whole, 20 once half its corner's links have gone
   const LINK_TURN = Math.cos(45 * Math.PI / 180), LINK_TURN_ALONE = Math.cos(20 * Math.PI / 180);
@@ -248,10 +341,13 @@
   // one race step for the car's structure; returns true when something broke off
   function step(s, dt) {
     if (!s.awake) return false;
-    const T = template(), p = s.p, q = s.q, L0 = s.L0, br = s.broken, off = s.off;
-    const h = dt / SUB;
+    // (the dense structure is solved at DENSE_HZ, each call in finer substeps, the time between
+    // gathered up: half the calls of the race's own step for the same span)
+    if (tpl(s).inertia) { s.acc = (s.acc || 0) + dt; if (s.acc < 1 / DENSE_HZ - 1e-9) return false; dt = s.acc; s.acc = 0; }
+    const T = tpl(s), p = s.p, q = s.q, L0 = s.L0, br = s.broken, off = s.off;
+    const NSUB = T.sub, h = dt / NSUB, DMP = T.damp, NIT = T.iter;
     let snapped = false, moved = 0;
-    for (let sub = 0; sub < SUB; sub++) {
+    for (let sub = 0; sub < NSUB; sub++) {
       // planes advance at the speed their remaining energy gives; spent or at the survival
       // cell, they hold for a moment and let go (the elastic part springs back)
       for (const P of s.planes) {
@@ -261,28 +357,55 @@
         P.adv = P.d - d0; P.tick = (P.tick || 0) + 1;
       }
       s.planes = s.planes.filter(P => P.hold < 0.02);
+      // (the dense structure: a car ground along a wall starts a new contact every step, and each
+      // one tested every node many times a step; it keeps the six newest, and each finds the nodes
+      // in its reach, with a margin, once a substep)
+      if (T.inertia) {
+        if (s.planes.length > 6) s.planes.splice(0, s.planes.length - 6);
+        for (const P of s.planes) {
+          const c = P.cand || (P.cand = new Uint16Array(T.n)), RR = (P.R + 0.1) * (P.R + 0.1);
+          let m = 0;
+          for (let i = 0; i < T.n; i++) {
+            if (T.fixed[i] || off[i]) continue;
+            const px = p[i * 3] - P.x, py = p[i * 3 + 1] - P.y, dn = px * P.nx + py * P.ny, tx = px - dn * P.nx, ty = py - dn * P.ny;
+            if (tx * tx + ty * ty <= RR && dn < P.d + 0.5) c[m++] = i;
+          }
+          P.nc = m;
+        }
+      }
       let work = 0;
+      // the car's change of speed during a hit, felt by everything not bolted to the survival cell
+      // (the dense structure only; spread evenly over the first KICK_T s of the contact)
+      if (T.inertia) for (const P of s.planes) {
+        if (P.t >= P.kT || (!P.kx && !P.ky)) continue;
+        const dt2 = Math.min(h, P.kT - P.t), kx = P.kx * dt2 / P.kT * h, ky = P.ky * dt2 / P.kT * h;
+        for (let i = 0; i < T.n; i++) { if (T.fixed[i] || off[i]) continue; q[i * 3] -= kx; q[i * 3 + 1] -= ky; }
+      }
+      for (const P of s.planes) P.t += h;
       // integrate (positions only; no gravity in the car's frame)
       for (let i = 0; i < T.n; i++) {
         if (T.fixed[i] || off[i]) continue;
         const i3 = i * 3;
-        for (let k = 0; k < 3; k++) { const x = p[i3 + k], v = (x - q[i3 + k]) * DAMP; q[i3 + k] = x; p[i3 + k] = x + v; }
+        for (let k = 0; k < 3; k++) { const x = p[i3 + k], v = (x - q[i3 + k]) * DMP; q[i3 + k] = x; p[i3 + k] = x + v; }
       }
-      for (let it = 0; it < ITER; it++) {
-        for (let e = 0; e < T.nb; e++) {
+      const TA = T.a, TB = T.b, TK = T.k, TI = T.inv, NB = T.nb;
+      for (let it = 0; it < NIT; it++) {
+        for (let e = 0; e < NB; e++) {
           if (br[e]) continue;
-          const a = T.a[e], b = T.b[e], wa = off[a] ? 0 : T.inv[a], wb = off[b] ? 0 : T.inv[b], w = wa + wb;
+          const a = TA[e], b = TB[e], wa = off[a] ? 0 : TI[a], wb = off[b] ? 0 : TI[b], w = wa + wb;
           if (w === 0) continue;
           const a3 = a * 3, b3 = b * 3;
           const dx = p[b3] - p[a3], dy = p[b3 + 1] - p[a3 + 1], dz = p[b3 + 2] - p[a3 + 2];
           const L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
-          const f = T.k[e] * (L - L0[e]) / (L * w);
+          const f = TK[e] * (L - L0[e]) / (L * w);
           p[a3] += dx * f * wa; p[a3 + 1] += dy * f * wa; p[a3 + 2] += dz * f * wa;
           p[b3] -= dx * f * wb; p[b3 + 1] -= dy * f * wb; p[b3 + 2] -= dz * f * wb;
         }
         // contact planes: nothing in the contact patch stays on the wrong side
         for (const P of s.planes) {
-          for (let i = 0; i < T.n; i++) {
+          const nn = P.cand ? P.nc : T.n;
+          for (let ii = 0; ii < nn; ii++) {
+            const i = P.cand ? P.cand[ii] : ii;
             if (T.fixed[i] || off[i]) continue;
             const i3 = i * 3, px = p[i3] - P.x, py = p[i3 + 1] - P.y;
             const dn = px * P.nx + py * P.ny, tx = px - dn * P.nx, ty = py - dn * P.ny;
@@ -306,11 +429,11 @@
         }
       }
       // nothing passes through the survival cell: a node pushed into it stops at its side
-      keepOut(p, off);
+      keepOut(T, p, off);
       // plasticity and fracture
       // (a corner that has lost half its links: the rest snap at a small further strain)
       const lost = [0, 0, 0, 0];
-      for (let e = 0; e < T.nb; e++) if (br[e] && T.linkCorner[e] >= 0) lost[T.linkCorner[e]]++;
+      for (let k = 0; k < 4; k++) for (const e of T.cornerLinks[k]) lost[k] += br[e];
       for (let e = 0; e < T.nb; e++) {
         if (br[e]) continue;
         const lc = T.linkCorner[e];
@@ -325,7 +448,7 @@
           if (cs < (lost[lc] * 2 >= T.nLinks[lc] ? LINK_TURN_ALONE : LINK_TURN)) { br[e] = 1; snapped = true; lost[lc]++; work += T.F[e] * T.L0[e] * 0.25; continue; }
         }
         const a3 = T.a[e] * 3, b3 = T.b[e] * 3;
-        const L = Math.hypot(p[b3] - p[a3], p[b3 + 1] - p[a3 + 1], p[b3 + 2] - p[a3 + 2]);
+        const ex = p[b3] - p[a3], ey = p[b3 + 1] - p[a3 + 1], ez = p[b3 + 2] - p[a3 + 2], L = Math.sqrt(ex * ex + ey * ey + ez * ez);
         // it snaps past its breaking strain (counted from its original length) and bends for
         // good past its yield strain (counted from its present rest length)
         if (Math.abs(L - T.L0[e]) > T.brk[e] * T.L0[e]) { br[e] = 1; snapped = true; work += T.F[e] * T.L0[e] * 0.25; continue; }
@@ -344,9 +467,9 @@
         const dx = p[H3] - T.rest[H3], dy = p[H3 + 1] - T.rest[H3 + 1], dz = p[H3 + 2] - T.rest[H3 + 2];
         const moved = Math.hypot(dx, dy, dz), inward = -dy * Math.sign(T.rest[H3 + 1]);
         let any = false, all = true;
-        for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k) { if (br[e]) any = true; else all = false; }
+        for (const e of T.cornerLinks[k]) { if (br[e]) any = true; else all = false; }
         if (all || !((any && moved > HUB_LOOSE) || inward > HUB_SHOVED)) continue;
-        for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k && !br[e]) { br[e] = 1; snapped = true; }
+        for (const e of T.cornerLinks[k]) if (!br[e]) { br[e] = 1; snapped = true; }
       }
     }
     for (let i = 0; i < T.n; i++) { if (T.fixed[i] || off[i]) continue; const i3 = i * 3; moved = Math.max(moved, Math.abs(p[i3] - q[i3]) + Math.abs(p[i3 + 1] - q[i3 + 1]) + Math.abs(p[i3 + 2] - q[i3 + 2])); }
@@ -362,8 +485,8 @@
   }
 
   // the survival cell is solid: a loose node inside its outline goes back out the side it belongs to
-  function keepOut(p, off) {
-    const T = template(), tb = T.tub, x0 = tb[0][0], x1 = tb[tb.length - 1][0];
+  function keepOut(T, p, off) {
+    const tb = T.tub, x0 = tb[0][0], x1 = tb[tb.length - 1][0];
     for (let i = 0; i < T.n; i++) {
       if (T.fixed[i] || off[i]) continue;
       const i3 = i * 3, x = p[i3];
@@ -379,7 +502,7 @@
 
   // nodes no longer joined (through unbroken beams) to the survival cell come off
   function connectivity(s) {
-    const T = template(), seen = new Uint8Array(T.n), stack = [];
+    const T = tpl(s), seen = new Uint8Array(T.n), stack = [];
     for (let i = 0; i < T.n; i++) if (T.fixed[i]) { seen[i] = 1; stack.push(i); }
     if (!T.adj) {
       T.adj = Array.from({ length: T.n }, () => []);
@@ -401,7 +524,7 @@
 
   // damage figures per group, wheel geometry, part losses, colliders
   function measure(s) {
-    const T = template(), p = s.p;
+    const T = tpl(s), p = s.p;
     T.gname.forEach((g, gi) => {
       if (g === 'tub') return;
       const nodes = T.groups[g];
@@ -431,7 +554,7 @@
 
   // part names that have come off (most of their nodes gone)
   function lost(s) {
-    const T = template(), out = [];
+    const T = tpl(s), out = [];
     for (const g of T.gname) {
       if (g === 'tub' || CORNER.includes(g)) continue;
       const nodes = T.groups[g];
@@ -446,7 +569,7 @@
   function colliders(s) {
     const CC = F1.Race && F1.Race.CC;
     if (!CC) return;
-    const T = template();
+    const T = tpl(s);
     if (!T.ccBind) {
       T.ccBind = CC.map(([x, y]) => {
         let best = -1, bd = 1e9;
@@ -466,7 +589,7 @@
 
   // the pit crew: a new nose and front wing (nodes back to their rest places, beams renewed)
   function repair(s, gnames) {
-    const T = template(), want = new Set(gnames.map(g => T.gid[g]));
+    const T = tpl(s), want = new Set(gnames.map(g => T.gid[g]));
     for (let i = 0; i < T.n; i++) {
       if (!want.has(T.grp[i])) continue;
       for (let k = 0; k < 3; k++) s.p[i * 3 + k] = s.q[i * 3 + k] = T.rest[i * 3 + k];
@@ -482,7 +605,7 @@
   // a corner torn out by a load its contact planes do not carry (a wheel forced against a wall:
   // js/race.js wallLoad): every link to the car goes, and the wheel comes away
   function tear(s, k) {
-    const T = template();
+    const T = tpl(s);
     let any = false;
     for (let e = 0; e < T.nb; e++) if (T.linkCorner[e] === k && !s.broken[e]) { s.broken[e] = 1; any = true; }
     if (!any) return false;
@@ -491,5 +614,5 @@
     return true;
   }
 
-  F1.Soft = { MAT, LABEL, CORNER, template, init, impact, step, measure, lost, repair, tear, get gid() { return template().gid; } };
+  F1.Soft = { MAT, LABEL, CORNER, template, init, impact, step, measure, lost, repair, tear, get gid() { return template('std').gid; } };
 })(typeof window !== 'undefined' ? window : globalThis);

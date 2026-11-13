@@ -201,7 +201,7 @@
       if (isPlayer && sim && cfg.setup && F1.Setup) Object.assign(spec, F1.Setup.apply(Object.assign({}, Car.SPEC, spec), cfg.setup));
       // the whole field runs with the player's damage setting
       const dmgMode = (cfg.assists || {}).damage;
-      const assists = isPlayer ? Object.assign({}, cfg.assists || {}) : { abs: true, tc: 1, autoGear: true, stability: 0, steerAssist: 1, gripMul: 1, damage: dmgMode === 'full' ? 'full' : dmgMode !== false };
+      const assists = isPlayer ? Object.assign({}, cfg.assists || {}) : { abs: true, tc: 1, autoGear: true, stability: 0, steerAssist: 1, gripMul: 1, damage: dmgMode === 'full' ? 'full' : dmgMode !== false, crash: (cfg.assists || {}).crash };
       if (!sim) Object.assign(assists, { gripMul: 1.12, abs: true, tc: 2, autoGear: true, stability: isPlayer ? 1 : 0 });
       assists.tyreSim = sim;
       // AI start tyre: the planner's choice for the whole race, with a little personal preference

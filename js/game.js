@@ -26,7 +26,7 @@
     state: 'boot', race: null, world: null, flow: { kind: 'race', mode: 'arcade', track: 'kestrel', team: 0, driver: 0 },
     settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
       mobile: 'auto', touchSteer: 'pad', tSens: 1, tiltSens: 1, mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
-    raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', damageArcade: 'off', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
+    raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', damageArcade: 'off', crash: 'std', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
     champ: null, paused: false, hudOn: true,
   };
   // graphics presets for the 3D renderer (see Settings > Graphics)
@@ -1394,6 +1394,8 @@
     const help = { brakeHelp: R.brakeHelp | 0, steerHelp: R.steerHelp | 0 };
     const assists = sim ? { abs: R.abs, tc: R.tc, autoGear: R.autoGear, steerAssist: R.steerAssist ? 1 : 0, stability: 0, damage: R.damage === 'full' ? 'full' : R.damage === false || R.damage === 'off' ? false : true, gripMul: 1 }
       : { abs: true, tc: 2, autoGear: true, steerAssist: 1, stability: 1, gripMul: 1.12, damage: R.damageArcade === 'full' ? 'full' : false };
+    // (the crash structure, js/softbody.js: 'std' the original, 'beam' the dense soft-body one)
+    assists.crash = R.crash === 'beam' ? 'beam' : 'std';
     if (!o.spectate) Object.assign(assists, help);
     return {
       mandatory: R.mandatory !== false, weather: sim && o.mode !== 'tt' ? R.weather || 'dry' : 'dry', safetyCar: R.safetyCar || 'on',
