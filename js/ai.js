@@ -19,7 +19,11 @@
   const P = {
     look0: 6.364, lookV: 0.2455, slipComp: 0.001863, yawDamp: 0.05257, frontCap: 0.105,
     aCap0: 33.24, aCapV: 0.0047, brkOn: 0.7192, brkFull: 0.9499, errBrk: 0.22, bleed: 2.878,
-    trailOn: 0.25, trailA: 1.2, trailB: 1.163, thr0: 0.2568, thrErr: 0.5, rearThr: 1.4,
+    trailOn: 0.25, underWide: 0.6, ersCut: 260, horEvery: 1,
+    // braking on the car's real stopping power (see stopCap): share of the model it trusts, how far
+    // ahead the pedal goes on (s), where the pedal ramps in (share of the room the stop needs), and
+    // how far over the plan's corner speed it lets itself arrive (the plan is conservative there)
+    stopK: 1, stopLead: 0.06, stopRamp: 0.97, stopTol: 1.15, trailA: 1.2, trailB: 1.163, thr0: 0.2568, thrErr: 0.5, rearThr: 1.4,
     thrRamp: 1.997, thrLoad: 0.2654, leadT: 0.09159,
     // wet track: the share of the tyres' grip the plan uses, a margin on top, and how far in from
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
@@ -236,6 +240,24 @@
     return d;
   }
 
+  // which way is the inside of the bend at each point (+1 left, -1 right, 0 straight): the racing line's
+  // curvature over the next 80 m and the last 20, weighted toward here
+  function insideOf(tr) {
+    if (tr.insideSgn) return tr.insideSgn;
+    const N = tr.N, o = new Float32Array(N), a = Math.round(20 / tr.ds), f = Math.round(80 / tr.ds);
+    for (let i = 0; i < N; i++) {
+      let acc = 0;
+      for (let k = -a; k <= f; k++) acc += tr.line.kap[(i + k + N) % N] * (1 - Math.abs(k) / (f + 1));
+      o[i] = U.clamp(acc / 0.02, -1, 1);
+    }
+    return (tr.insideSgn = o);
+  }
+  // the 10 m learning bucket of each sample (js/race.js THINK), worked out once per circuit
+  function bucket10(tr, n) {
+    if (tr.bk10 && tr.bk10.n === n) return tr.bk10;
+    const o = new Int32Array(tr.N); for (let j = 0; j < tr.N; j++) o[j] = Math.floor(j * tr.ds / 10) % n;
+    o.n = n; return (tr.bk10 = o);
+  }
   function nextCornerSign(tr, i, range) {
     const n = Math.round(range / tr.ds);
     let acc = 0;
@@ -662,6 +684,22 @@
     return best;
   }
 
+  // The car's real stopping power: tyre grip on its weight and downforce plus drag, a = k (A0 + A1 v^2).
+  // The plan's braking curve came from coaching and asks for 60-80 m/s^2 into slow corners, where the
+  // car can make 35: it arrived 25 km/h hot and ran into the wall. A driver's habit (brkK) and the tyres'
+  // state scale it. Stopping distance from v to w: ln((A0 + A1 v^2) / (A0 + A1 w^2)) / (2 k A1).
+  // It only overrides the tuned trigger where that would arrive more than 15 per cent over the plan,
+  // as at the street hairpins (Mont-Aurele: 6 wall touches a lap to none).
+  const STOP = { A0: 0, A1: 0, k: 0 };
+  function stopCap(car, b) {
+    const sp = car.spec, m = sp.mass + car.fuel, mu = sp.mu * (sp.muX || 1);
+    const g = (car.grip == null ? 0.972 : car.grip) / 0.972;
+    STOP.A0 = mu * 9.81 * g;
+    STOP.A1 = (mu * g * 0.5 * 1.225 * sp.ClA * (car.dfMul == null ? 1 : car.dfMul) + 0.5 * 1.225 * sp.CdA) / m;
+    STOP.k = P.stopK * (b.brkK || 1) * (b.gapAhead < 40 ? P.trafBrk : 1) * (car.wetness > 0.02 ? 0.92 : 1);
+    return STOP;
+  }
+  function stopDist(sc, v, w) { return Math.log((sc.A0 + sc.A1 * v * v) / (sc.A0 + sc.A1 * w * w)) / (2 * sc.k * sc.A1); }
   // Steering + pedals toward lateral offset `lat` and speed `vt`.
   function control(race, car, latAt, vt, dt) {
     const tr = race.track, b = car.brain;
@@ -720,6 +758,10 @@
     const aReq = b && b.aReq != null ? b.aReq : 0;
     let thr = 0, brk = 0;
     if (aReq > P.brkOn * (b ? b.brkK * (b.gapAhead < 40 ? P.trafBrk : 1) : 1) * aCap) brk = U.clamp(aReq / (P.brkFull * aCap), 0, 1);
+    // the plan's braking curve can ask for more than the tyres have (into slow corners, where the
+    // downforce is gone): once the stop to the next corner needs nearly all the road there is, the
+    // pedal goes on harder, to full when it needs it all (ABS holds the tyres at their peak)
+    if (b && b.stopR > P.stopRamp) brk = Math.max(brk, U.clamp((b.stopR - P.stopRamp) / (1 - P.stopRamp), 0, 1));
     else if (err < -1.2) brk = U.clamp(-err * P.errBrk, 0, 1);
     // once on the brakes, stay on them and bleed the pedal off (no on/off chatter): the
     // tyres now build slip progressively, so a held, smoothly released pedal is quicker
@@ -742,7 +784,10 @@
         if (Math.abs(kl) > 1 / 300) {
           const out = -Math.sign(kl);
           const room = tr.hw - 0.9 - dNow * out, toward = b.dRate * out;
-          if (toward > 0.3) {
+          // (only when it is running wide of the line: on the exit the line itself heads for the
+          // outside kerb, and braking there for the planned drift out cost 60 km/h at Kestrel)
+          const wideOf = (dNow - tr.line.off[i]) * out;
+          if (toward > 0.3 && wideOf > P.underWide) {
             const tEdge = Math.max(0, room) / toward;
             if (tEdge < 1.1) { b.under = U.clamp((1.1 - tEdge) * 0.8, 0.12, 0.55); brk = Math.max(brk, b.under); }
           }
@@ -892,7 +937,10 @@
     if (b.noiseT <= 0) { b.noiseT = 2 + b.rng() * 3; b.noise = 1 + (b.rng() - 0.5) * 0.012 * (1.4 - b.aggr); }
     if (P.live && race.green) readGrip(car, b, tr, i);
     const leadIdx = (i + Math.round((v * P.leadT + 2) / tr.ds)) % tr.N;
-    let vt = b.prof[leadIdx] * b.noise * gripAt(b, tr, leadIdx);
+    // pace learned live (js/race.js THINK): a speed factor per 10 m the look-ahead has found the car can
+    // carry, and the one it is trying now
+    const paceAt = j => (b.paceF || 1) * (b.paceMem ? b.paceMem[Math.floor(j * tr.ds / 10) % b.paceMem.length] : 1);
+    let vt = b.prof[leadIdx] * b.noise * gripAt(b, tr, leadIdx) * paceAt(leadIdx);
     if (b.style) { const st = b.style, slow = U.clamp((70 - vt) / 40, 0, 1); if (tr.brk[leadIdx] || Math.abs(tr.line.kap[leadIdx]) > 1 / 500) vt *= st.form * (st.slow * slow + st.fast * (1 - slow)); }
     // off-line penalty in corners, and a slower car with a damaged front wing
     const kl = Math.abs(tr.line.kap[leadIdx]);
@@ -1013,7 +1061,11 @@
     const dodge = b.style && b.closeFollow ? 0.6 * (nextCornerSign(tr, i, 150) || 0) : 0;
     let miss = 0;
     if (b.wideA != null) { const w = Tracks.fwd(tr, b.wideA, car.loc.s); if (w < 110) miss = b.wide * Math.sin(Math.PI * w / 110); else if (w < tr.L - 220) b.wideA = null; }
-    let latFn = b.style ? j => U.clamp(LL.clamp(j, tr.line.off[j] + (dodge ? dodge * tr.styleEnv[j] : styleAt(b, j)) + miss), lo, hi) : j => U.clamp(LL.clamp(j, tr.line.off[j]), lo, hi);
+    // the line learned live (js/race.js THINK): metres toward the inside of the bend, per 10 m, and the
+    // shift being tried now
+    const lineK = b.lineF || b.lineMem ? insideOf(tr) : null;
+    const lineAt = lineK ? j => ((b.lineF || 0) + (b.lineMem ? b.lineMem[Math.floor(j * tr.ds / 10) % b.lineMem.length] : 0)) * lineK[j] : () => 0;
+    let latFn = b.style ? j => U.clamp(LL.clamp(j, tr.line.off[j] + (dodge ? dodge * tr.styleEnv[j] : styleAt(b, j)) + miss + lineAt(j)), lo, hi) : j => U.clamp(LL.clamp(j, tr.line.off[j] + lineAt(j)), lo, hi);
     if (b.pit && b.pit.phase === 'approach') {
       const d = Tracks.fwd(tr, car.loc.s, tr.pit.sIn);
       const past = Tracks.fwd(tr, tr.pit.sIn, car.loc.s), near = past < pitOpen(tr);
@@ -1034,17 +1086,28 @@
     if (Math.abs(car.loc.d) > tr.hw + 1.2 && !car.inPit) vt = Math.min(vt, Math.max(30, car.u - 5));
     // look down the road for the hardest braking this approach needs (same modifiers
     // as the target speed: pace noise, line offset, damage, tyre condition)
-    {
+    // (every P.horEvery steps: the answer moves slowly and this is the costliest part of driving)
+    b.horN = (b.horN || 0) + 1;
+    if (b.horN >= P.horEvery || b.aReq == null) {
+      b.horN = 0;
       // (a damaged car brakes for the corner it can take now, not for the one it had before)
       const dmK = car.dm && !(tr.brk[leadIdx] || kl > 1 / 500) ? car.dm.paceK : 1;
       const scale = vt / Math.max(1, b.prof[leadIdx]) * dmK;
       const horizon = v * v / (car.wetness > 0.02 ? 24 * Math.min(1, (car.grip == null ? 0.972 : car.grip) / 0.972) : 24) + 15;
-      let aReq = 0;
+      let aReq = 0, stopR = 0;
+      const sc = stopCap(car, b);
       const lat = car.loc.d, pitV = b.pit && b.pit.phase === 'approach' && !car.inPit ? pitLaneV(tr) : null;
       let offRun = 0;
+      // (what does not change along the loop, worked out once: this loop runs every step of every
+      // look-ahead try, and was a third of their cost)
+      const kLead = Math.min(scale / paceAt(leadIdx), b.hot ? b.hot : 1.02) / Math.max(0.5, gripAt(b, tr, leadIdx));
+      const pm = b.paceMem, pmN = pm ? pm.length : 0, pF = b.paceF || 1, live = P.live && b.gripK, cmap = live ? cornerMap(tr) : null;
+      const vv = v * v, stopTol = P.stopTol, lead = v * P.stopLead;
+      const bk = pm ? bucket10(tr, pmN) : null, prof = b.prof, kk = kLead * pF, N = tr.N, dsI = 1 / tr.ds;
       for (let d = 4; d < horizon; d += 4) {
-        const j = (i + Math.round(d / tr.ds)) % tr.N;
-        let vj = b.prof[j] * Math.min(scale, b.hot ? b.hot : 1.02) * (gripAt(b, tr, j) / Math.max(0.5, gripAt(b, tr, leadIdx)));
+        let j = i + Math.round(d * dsI); if (j >= N) j -= N;
+        const cj = live ? cmap[j] : -1;
+        let vj = prof[j] * kk * (pm ? pm[bk[j]] : 1) * (cj >= 0 ? b.gripK[cj] : 1);
         if (pitV) vj = Math.min(vj, pitV[j]);
         // still off the racing line when we get there? that corner is slower: brake earlier.
         // The worst gap on the way in counts, not just the one at the corner: a car that
@@ -1053,12 +1116,22 @@
         offRun = Math.max(offRun, Math.abs(lat - tr.line.off[j]));
         const offj = offRun * (1 - 0.5 * d / horizon);
         if (offj > 1) vj *= 1 - Math.min(0.22, offj * Math.min(1, Math.abs(tr.line.kap[j]) * 60) * 0.035);
-        if (v > vj) { const a = (v * v - vj * vj) / (2 * d); if (a > aReq) aReq = a; }
+        if (v > vj) {
+          const a = (vv - vj * vj) / (2 * d); if (a > aReq) aReq = a;
+          // the distance this car really needs to get down to vj, against what is left
+          // (the pedal's lead only counts for a stop still some way off: a point a few metres ahead
+          // that the car is a touch over is the steering's and the throttle's business)
+          const vs = vj * stopTol, r = v > vs + 0.5 ? stopDist(sc, v, vs) / Math.max(0.7 * d, d - lead) : 0;
+          if (r > stopR) stopR = r;
+        }
       }
-      b.aReq = aReq;
+      b.aReq = aReq; b.stopR = stopR;
     }
     // safety car queue: never faster than the cap that keeps us off the car in front
     if (car.scCap != null && !car.inPit) vt = Math.min(vt, car.scCap);
+    // energy: no deployment past 260 km/h, where it buys little and flattens the battery into
+    // super-clipping on every straight; the charge goes into the corner exits instead
+    if (car.ersCut == null) car.ersCut = P.ersCut;
     control(race, car, latFn, vt, dt);
     // waving a faster car through: easing off the throttle while it goes by (a lift, never the brakes,
     // so nobody behind is caught out)

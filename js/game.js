@@ -1071,8 +1071,12 @@
     Game.show = team == null ? null : { team, driver: driver || 0, t0: performance.now() };
   };
 
+  let thinkPool = null;
   function newRace(cfg) {
     const race = Race.create(cfg);
+    // the AI's look-ahead on worker threads (js/thinkpool.js); the last race's workers go
+    if (thinkPool) { thinkPool.close(); thinkPool = null; }
+    if (F1.ThinkPool) race.thinkPool = thinkPool = F1.ThinkPool.forRace(race);
     // distant AI cars' physics at half rate (advanced graphics; on in Rock; see Race.step)
     race.physLod = !!Game.settings.gfx.physLod; race.physLodDist = Game.settings.gfx.physLodDist;
     buildWorld(race.track);
@@ -1207,6 +1211,7 @@
     const c = race.cars.find(x => x.driver.code === code);
     if (!c) return null;
     race.cars = [c]; race.order = [c]; race.player = c; race.autoPlayer = true;
+    race.thinkOff = true; // (the look-ahead would make this second of work ten)
     if (sim) { c.fuel = 10; c.compound = F1.Car.COMPOUNDS.S; c.tyreHist = ['S']; c.plan = null; }
     const DT = 1 / 240, cap = Math.ceil((race.track.refLap || 90) * 6 / DT);
     for (let n = 0; n < cap && c.lapTimes.length < 3 && !c.retired; n++) { Race.step(race, DT); race.fx.length = 0; }

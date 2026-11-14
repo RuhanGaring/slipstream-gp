@@ -14,7 +14,7 @@
   // Keys never walked. Their value is still copied, as a reference: these objects are shared
   // constants, big derived tables, or recording state that has its own way back.
   const SHARED = new Set(['track', 'cfg', 'diff', 'rng', 'spec', 'team', 'driver', 'compound', 'prof', 'style', 'profFor',
-    'rec', 'ghost', 'ghostRec', 'assistProf', 'cornerMarks', 'fb', 'player']);
+    'rec', 'ghost', 'ghostRec', 'assistProf', 'cornerMarks', 'fb', 'player', 'aiMemSeed', 'thinkPool', '_carSet', 'insideSgn', 'bk10']);
   const DROP = new Set(['fx', 'events']); // the frame's effect and event buffers: emptied on the way back
 
   const isTyped = ArrayBuffer.isView;

@@ -367,9 +367,11 @@
       if (rpm >= sp.rpmLimit) Pice *= 0.05;
       // MGU-K deployment at full throttle, tapering above 290 km/h (Overtake keeps it to 337)
       const taper = c.overtake ? U.clamp((355 - kmh) / 18, 0, 1) : U.clamp((345 - kmh) / 55, 0, 1);
+      // (an AI energy plan may hold the deployment back above a speed, keeping charge for the exits)
+      const cut = c.ersCut && !c.overtake ? U.clamp((c.ersCut - kmh) / 20, 0, 1) : 1;
       // energy management meters deployment against the charge left (Overtake opens it up)
       const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - 0.12) / 0.3, 0, 1);
-      if (throttle > 0.85) Pk = sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
+      if (throttle > 0.85) Pk = sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
       // super-clipping: with an almost flat battery the MGU-K harvests at full throttle at speed
       if (c.soc < 0.3 && !c.overtake && kmh > 270) Pk = -120000 * kScale;
     }

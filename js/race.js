@@ -448,6 +448,236 @@
   }
 
   const WALL_HIT = 3, WALL_SCRUB = 0.035, WALL_KEEP_MIN = 0.35, WALL_LIMP = 0.08, WALL_LIMP_MAX = 1.5; // (m/s of impact, per m/s, s per m/s, s)
+
+  // ---------------- look-ahead driving ----------------
+  // A driver does not just follow marks: they feel where the car will be in a few seconds and choose
+  // now. Every THINK.di seconds an AI car tries a few pedal actions for the next THINK.di on itself
+  // (its own physics, its own tyres, damage and fuel as they are), each followed by its normal driving
+  // out to THINK.h seconds, alone on the road, and keeps the one that gets furthest without running
+  // off. With its base driving among the choices it can only do better than that driving, and it
+  // finds what the stored plan gets wrong: Mont-Aurele 87.1 to 77.9 s solo, with no wall touched.
+  // The car is put back exactly as it was after each try (its own objects only, copied in place).
+  const THINK = { on: true, skip: true, minPace: 0.95, di: 0.25, offW: 0.7, offK: 300, endK: 60, gamble: 0.75,  h: 3, hz: 240, keep: 0.05, acts: [null, [1, 0], [0, 0], [0, 0.6], { f: 1.05 }, { f: 0.95 }, { l: 0.6 }, { l: -0.6 }], learn: 0.3, memLo: 0.85, memHi: 1.3, lineMax: 2.5, sec: 200, nearM: 400, diFar: 0.5 };
+  const THINK_CARS = ['near', 'nds', 'ahead', 'behind', 'alongside', 'target', 'rival', 'hazard', 'blk'];
+  const THINK_SKIP = new Set(['track', 'spec', 'team', 'driver', 'compound', 'prof', 'style', 'dm', 'rng', 'profFor', 'ghost', 'rec',
+    'near', 'nds', 'ahead', 'behind', 'alongside', 'target', 'rival', 'hazard', 'blk', 'onShift', 'think', 'plan', 'pitPlan', 'strategy']);
+  function snapCar(race, c) {
+    const seen = new Set(), list = [], cars = race._carSet || (race._carSet = new Set(race.cars));
+    const walk = (o, root) => {
+      if (o === null || typeof o !== 'object' || seen.has(o) || (!root && cars.has(o))) return;
+      seen.add(o);
+      if (ArrayBuffer.isView(o)) { if (o.length <= 4096) list.push(o, o.slice()); return; }
+      if (Array.isArray(o)) { const cp = o.slice(); list.push(o, cp); for (const v of cp) if (v !== null && typeof v === 'object') walk(v); return; }
+      const pr = Object.getPrototypeOf(o);
+      if (pr !== Object.prototype && pr !== null) return;
+      const cp = {};
+      for (const k in o) { const v = o[k]; cp[k] = v; if (v !== null && typeof v === 'object' && !THINK_SKIP.has(k)) walk(v); }
+      list.push(o, cp);
+    };
+    walk(c, true);
+    return list;
+  }
+  function putCar(list) {
+    for (let i = 0; i < list.length; i += 2) {
+      const o = list[i], cp = list[i + 1];
+      if (ArrayBuffer.isView(o)) o.set(cp);
+      else if (Array.isArray(o)) { o.length = cp.length; for (let k = 0; k < cp.length; k++) o[k] = cp[k]; }
+      else { for (const k in o) if (!(k in cp)) delete o[k]; for (const k in cp) o[k] = cp[k]; }
+    }
+  }
+  // one try: score is the distance covered plus a little for the speed carried, less a price for
+  // running wide of the road, near a wall, or sideways
+  function tryAct(solo, c, act) {
+    const tr = solo.track, dt = 1 / THINK.hz, n1 = Math.round(THINK.di / dt), n2 = Math.round(THINK.h / dt);
+    let dist = 0, pen = 0, prevS = c.loc.s;
+    // (a pace choice holds for the whole try: a faster or slower corner, brake point and all)
+    c.brain.paceF = act && act.f ? act.f : 1; c.brain.lineF = act && act.l ? act.l : 0;
+    for (let k = 0; k < n2; k++) {
+      solo.time += dt;
+      AI.drive(solo, c, dt);
+      if (k < n1 && act && act.length) { c.ctl.throttle = act[0]; c.ctl.brake = act[1]; }
+      Car.step(c, tr, dt);
+      const xz = tr.xzone ? tr.xzone[c.loc.i] : 0;
+      c.aeroX = !!xz && c.ctl.brake < 0.05 && Math.abs(c.steer) < 0.05;
+      let ds = c.loc.s - prevS; if (ds > tr.L / 2) ds -= tr.L; else if (ds < -tr.L / 2) ds += tr.L;
+      dist += ds; prevS = c.loc.s;
+      const i = c.loc.i, d = c.loc.d;
+      const off = Math.abs(d) - (tr.hw + THINK.offW);
+      if (off > 0) pen += THINK.offK * off * dt;
+      const wall = Math.min(barrierFace(tr, 1, i) - d, barrierFace(tr, 0, i) + d);
+      if (wall < 1.3) pen += (1.3 - wall) * 400 * dt;
+      const beta = Math.abs(Math.atan2(c.v, Math.max(1, Math.abs(c.u))));
+      if (beta > 0.2) pen += (beta - 0.2) * 200 * dt;
+      if (c.u < 1) break;
+    }
+    // past the horizon: arriving too fast for the next corner to stop for it (the driving's own
+    // check of the stop, js/ai.js) is a run-off still to come
+    const b = c.brain;
+    if (b.stopR > 1) pen += (b.stopR - 1) * THINK.endK;
+    return dist + 0.5 * c.u - pen;
+  }
+  // Lap-to-lap learning is checked against the clock: the track is cut into THINK.sec metre sectors,
+  // and a sector's changed pace is kept only when the sector went quicker than its best (and put back
+  // to the best one when it went slower). Sectors driven in traffic, after a mistake or off the road
+  // prove nothing and are put back too.
+  // What a car starts from: a circuit's learned pace and line when it is given some (js/aimem.js or
+  // race.aiMemSeed, which tools use; the game ships none, see js/aimem.js), else the plan as it is.
+  function memInit(race, b) {
+    const tr = race.track, NB = Math.ceil(tr.L / 10);
+    if (b.paceMem && b.paceMem.length === NB) return;
+    const seed = race.aiMemSeed || (F1.AIMem && F1.AIMem[tr.id]);
+    const ok = seed && seed.pace && seed.pace.length === NB && seed.line && seed.line.length === NB;
+    b.paceMem = ok ? Float32Array.from(seed.pace) : new Float32Array(NB).fill(1);
+    b.lineMem = ok ? Float32Array.from(seed.line) : new Float32Array(NB);
+  }
+  // what the field learned this race, to keep: the thinking car with the fastest clean lap
+  function memOut(race) {
+    let best = null, t = 1e9;
+    for (const c of race.cars) { const b = c.brain; if (b && b.paceBest && c.bestLap && c.bestLap < t) { t = c.bestLap; best = b; } }
+    return best ? { pace: Array.from(best.paceBest, x => +x.toFixed(4)), line: Array.from(best.lineBest, x => +x.toFixed(3)), lap: +t.toFixed(3) } : null;
+  }
+  function sectorClock(race, c) {
+    const b = c.brain, tr = race.track;
+    memInit(race, b);
+    const NS = Math.ceil(tr.L / THINK.sec), si = Math.floor(c.loc.s / THINK.sec) % NS;
+    if (!b.secBest || b.secBest.length !== NS) { b.secBest = new Float32Array(NS).fill(1e9); b.paceBest = Float32Array.from(b.paceMem); b.lineBest = Float32Array.from(b.lineMem); b.secI = si; b.secT0 = race.time; b.secDirty = true; }
+    if (b.gapAhead < 50 || b.alongside || b.hot || b.wideA != null || b.pit || c.inPit || Math.abs(c.loc.d) > tr.hw + 1 || !race.green) b.secDirty = true;
+    if (si === b.secI) return;
+    // (in practice, the laps the look-ahead explores on are not judged: the next lap, driven on what
+    // was learned alone, is; so what is kept works without the look-ahead too)
+    if (b.exploring) { b.secI = si; b.secT0 = race.time; b.secDirty = false; return; }
+    const done = b.secI, t = race.time - b.secT0, fwd = (si - done + NS) % NS === 1;
+    const k0 = Math.floor(done * THINK.sec / 10), k1 = Math.min(b.paceMem.length, Math.floor((done + 1) * THINK.sec / 10));
+    if (fwd && !b.secDirty && t < b.secBest[done] - 0.002) { b.secBest[done] = t; for (let k = k0; k < k1; k++) { b.paceBest[k] = b.paceMem[k]; b.lineBest[k] = b.lineMem[k]; } }
+    else if (!fwd || b.secDirty || t > b.secBest[done] + 0.01) { for (let k = k0; k < k1; k++) { b.paceMem[k] = b.paceBest[k]; b.lineMem[k] = b.lineBest[k]; } }
+    b.secI = si; b.secT0 = race.time; b.secDirty = false;
+  }
+  function think(race, c) {
+    const b = c.brain;
+    // (the learned pace and line belong to the look-ahead: a field that does not think would only
+    // crowd itself driving them, which raced twice the contacts below Legend)
+    if (THINK.learn && !race.thinkOff && race.diff && race.diff.pace >= THINK.minPace) sectorClock(race, c);
+    if (!THINK.on || race.thinkOff || !(race.diff && race.diff.pace >= THINK.minPace) || !race.green || c.isPlayer && !race.autoPlayer || c.finished || c.retired || c.incident || c.inPit || b.pit
+      || (race.sc && race.sc.state !== 'none') || Math.abs(c.loc.d) > race.track.hw + 1 || c.speed < 15) { b.think = null; b.paceF = 1; b.lineF = 0; return; }
+    if (b.think && race.time > b.thinkUntil) { b.think = null; b.paceF = 1; b.lineF = 0; }
+    if (b.thinkT > race.time) return;
+    // (cars near the one on screen think every THINK.di, the rest half as often: the cost is the field's)
+    const fo = race.lodFocus || race.player;
+    let gap = fo && fo !== c ? Math.abs(c.loc.s - fo.loc.s) : 0; if (gap > race.track.L / 2) gap = race.track.L - gap;
+    b.thinkT = race.time + (gap > THINK.nearM ? THINK.diFar : THINK.di);
+    // flat out on a straight with no braking and no bend within the look-ahead: nothing to choose
+    if (THINK.skip && c.ctl.throttle > 0.98 && c.ctl.brake === 0) {
+      const tr = race.track, n = Math.round((c.u * THINK.h + 30) / tr.ds);
+      let quiet = true;
+      for (let k = 0; k < n; k += 2) { const j = (c.loc.i + k) % tr.N; if (tr.brk[j] || Math.abs(tr.line.kap[j]) > 1 / 400) { quiet = false; break; } }
+      if (quiet) { b.think = null; return; }
+    }
+    // on a worker thread when the game has a pool (js/thinkpool.js): the answer comes back a frame or
+    // two later and holds from then for the rest of its window
+    if (race.thinkPool && race.thinkPool.ask(race, c)) return;
+    const k = decide(race, c);
+    thinkTook(race, c, k >= 0 ? THINK.acts[k] : null, race.time);
+  }
+  // an answer, from the page or a worker: drive it for its window, and remember a pace that worked
+  function thinkTook(race, c, a, t) {
+    const b = c.brain;
+    b.think = a; b.thinkUntil = t + THINK.di + 0.03;
+    b.paceF = a && a.f ? a.f : 1; b.lineF = a && a.l ? a.l : 0;
+    if (!THINK.learn) return;
+    const tr = race.track, NB = Math.ceil(tr.L / 10);
+    memInit(race, b);
+    if (a && a.l && !(b.stopR > THINK.gamble)) {
+      const i0 = Math.floor(c.loc.s / 10), n = Math.round((c.u * THINK.h * 0.5 + 20) / 10);
+      for (let q = 0; q < n; q++) { const i = (i0 + q) % NB; b.lineMem[i] = U.clamp(b.lineMem[i] + a.l * THINK.learn, -THINK.lineMax, THINK.lineMax); }
+    }
+    // a pace step it chose sets the stretch ahead a little that way for next time; any other answer
+    // says the pace it has here is right
+    // (only where both ways were open to it: into a stop it may only slow, and learning from that alone
+    // would wind the pace down lap by lap)
+    if (a && a.f && !(b.stopR > THINK.gamble)) {
+      const i0 = Math.floor(c.loc.s / 10), n = Math.round((c.u * THINK.h * 0.5 + 20) / 10);
+      for (let q = 0; q < n; q++) { const i = (i0 + q) % NB; b.paceMem[i] = U.clamp(b.paceMem[i] * (1 + (a.f - 1) * THINK.learn), THINK.memLo, THINK.memHi); }
+    }
+  }
+  // The look-ahead itself: which of THINK.acts (index) is best for car c now. Leaves the car and the
+  // race exactly as it found them.
+  function decide(race, c) {
+    const b = c.brain;
+    const snap = snapCar(race, c), fx = race.fx.length, ev = race.events.length;
+    // (the same dice in every try as the real drive will get: the futures it compares are the real one)
+    const rs = b.rng && b.rng.get ? b.rng.get() : null, put = () => { putCar(snap); if (rs != null) b.rng.set(rs); };
+    const solo = Object.create(race);
+    solo.cars = [c]; solo._carSet = race._carSet; solo.fx = []; solo.events = [];
+    // (alone on the road: what it knew of the others goes, and it looks round at once; a worker's copy
+    // starts from the same place)
+    const alone = () => { for (const k of THINK_CARS) b[k] = null; b.near = []; b.nds = []; b.senseT = 0; };
+    let best = 0, bs = -1e18, scores = null;
+    // (into a stop the car can only just make, staying on the power is a gamble a tiny difference loses:
+    // there it may only choose to brake more)
+    const late = b.stopR > THINK.gamble;
+    for (let k = 0; k < THINK.acts.length; k++) {
+      const ak = THINK.acts[k];
+      if (late && ak && (ak.length ? !(ak[1] > 0) : ak.f > 1)) continue;
+      solo.time = race.time; alone();
+      const sc = tryAct(solo, c, THINK.acts[k]);
+      if (THINK.log) (scores || (scores = [])).push([sc, c.u]);
+      put();
+      if (sc > bs + (k ? THINK.keep : 0)) { bs = sc; best = k; }
+    }
+    if (THINK.log) THINK.log(c, scores, THINK.acts[best]);
+    race.fx.length = fx; race.events.length = ev;
+    return best;
+  }
+  // A car's state for a look-ahead on another thread: its own objects as plain data (no other cars,
+  // no shared tables; the crash structure only as its small parts), and the dice.
+  const SEND_SKIP = new Set([...THINK_SKIP].filter(k => k !== 'style' && k !== 'dm'));
+  function carState(race, c) {
+    const cars = race._carSet || (race._carSet = new Set(race.cars)), seen = new Set();
+    const walk = (o, depth, key) => {
+      if (o === null || typeof o !== 'object') return o;
+      if (seen.has(o) || cars.has(o) && depth) return undefined;
+      seen.add(o);
+      if (ArrayBuffer.isView(o)) return o.length <= (key === 'dm' ? 64 : 4096) || depth < 2 ? o.slice() : undefined;
+      if (Array.isArray(o)) return o.map(v => walk(v, depth + 1, key));
+      const pr = Object.getPrototypeOf(o);
+      if (pr !== Object.prototype && pr !== null) return undefined;
+      const out = {};
+      for (const k in o) {
+        const v = o[k];
+        if (typeof v === 'function') continue;
+        if (v !== null && typeof v === 'object') { if (SEND_SKIP.has(k)) continue; const w = walk(v, depth + 1, key || (k === 'dm' ? 'dm' : null)); if (w !== undefined) out[k] = w; }
+        else out[k] = v;
+      }
+      return out;
+    };
+    return { car: walk(c, 0, null), rng: c.brain.rng && c.brain.rng.get ? c.brain.rng.get() : null };
+  }
+  // and written back into the same car on the other side, object by object
+  function setCarState(c, st) {
+    const put = (o, v) => {
+      for (const k in v) {
+        const x = v[k], y = o[k];
+        if (x !== null && typeof x === 'object' && y !== null && typeof y === 'object') {
+          if (ArrayBuffer.isView(y) && ArrayBuffer.isView(x) && y.length === x.length) y.set(x);
+          else if (ArrayBuffer.isView(x) || Array.isArray(x) !== Array.isArray(y)) o[k] = x;
+          else if (Array.isArray(x)) { if (x.some(e => e !== null && typeof e === 'object')) { y.length = x.length; for (let i = 0; i < x.length; i++) { if (x[i] !== null && typeof x[i] === 'object' && y[i] !== null && typeof y[i] === 'object') put(y[i], x[i]); else y[i] = x[i]; } } else o[k] = x; }
+          else put(y, x);
+        } else o[k] = x;
+      }
+    };
+    put(c, st.car);
+    if (st.rng != null && c.brain.rng && c.brain.rng.set) c.brain.rng.set(st.rng);
+  }
+  // the chosen action, laid over what the driving decided: never more throttle than the traffic
+  // allows (following, alongside, a car braking ahead), and braking only ever adds
+  function thinkApply(race, c) {
+    const b = c.brain, a = b.think;
+    if (!a || !a.length || race.time > b.thinkUntil) return;
+    if (a[1] > 0) { c.ctl.brake = Math.max(c.ctl.brake, a[1]); c.ctl.throttle = 0; return; }
+    if (b.followBrake > 0 || b.closeFollow || b.alongside || b.yieldLift || c.ctl.brake > 0 && b.gapAhead < 60) return;
+    c.ctl.throttle = a[0]; c.ctl.brake = 0;
+  }
+
   function wallCollide(race, c) {
     const tr = race.track;
     const i0 = c.loc.i;
@@ -1194,7 +1424,9 @@
       const pitAuto = c.brain.pit && (c.brain.pit.phase !== 'approach' || Tracks.fwd(tr, c.loc.s, tr.pit.sIn) < 300 || Tracks.fwd(tr, tr.pit.sIn, c.loc.s) < (AI.pitOpen ? AI.pitOpen(tr) : 60));
       const auto = !c.isPlayer || pitAuto || c.finished || race.autoPlayer;
       if (auto) {
+        if (!race._thinking) { race._thinking = true; think(race, c); race._thinking = false; }
         AI.drive(race, c, dt);
+        thinkApply(race, c);
         if (c.finished) { c.ctl.throttle *= 0.55; }
       } else {
         // a racing wheel sets the front-wheel angle itself (js/game.js); anything else steers by ctl.steer
@@ -1456,7 +1688,7 @@
     event(race, 'done', null, '');
   }
 
-  F1.Race = { renameTrack, CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, planOpts, classifyRest, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
+  F1.Race = { THINK, thinkParts: { snapCar, putCar, tryAct, decide, carState, setCarState, took: thinkTook, memInit, memOut }, renameTrack, CC, incidentDrive, tyreFor, create, step, getTrack, learnedGrip, learnedBrake, planOpts, classifyRest, forgetTrack, Strategy, planFor, recover, servicePit, teamSpec, HL, HW, BOX_OFF, finish };
   // pit service hook used by AI.pitDrive
   F1.Race.attach = race => {
     race.servicePit = c => servicePit(race, c);

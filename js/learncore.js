@@ -78,6 +78,7 @@
   // car got into trouble (the failure rules of tools/learn.js).
   function Runner(id, mode) {
     const race = F1.Race.create({ track: id, mode, laps: 9999, difficulty: 4, team: 0, driver: 0, field: 1, seed: 3 });
+    race.thinkOff = true; // (it learns the plan the base driving holds; the look-ahead sits on top of it)
     race.cars = [race.player]; race.order = [race.player];
     race.autoPlayer = true;
     const c = race.player;
