@@ -51,7 +51,20 @@
       A.verb.buffer = ir;
     }
     A.verbIn = ctx.createGain(); A.verbIn.gain.value = 0.12;
-    A.verbIn.connect(A.verb); A.verb.connect(A.sfx);
+    // The place (js/audio-space.js): the room above stands in only without it. Three rooms run at
+    // once, open air, one big face close by, a street between buildings, and the race turns their
+    // levels as the car moves (updateRace). A phone gets the open air alone.
+    A.space = null;
+    if (F1.AudioSpace) {
+      const ir = F1.AudioSpace.irs(ctx), phone = F1.Game && F1.Game.mobile && F1.Game.mobile();
+      A.space = {};
+      for (const k of phone ? ['open'] : ['open', 'semi', 'street']) {
+        const cv = ctx.createConvolver(), g = ctx.createGain();
+        cv.buffer = ir[k]; g.gain.value = k === 'open' ? 1 : 0;
+        A.verbIn.connect(cv); cv.connect(g); g.connect(A.sfx);
+        A.space[k] = g;
+      }
+    } else { A.verbIn.connect(A.verb); A.verb.connect(A.sfx); }
     // A very small, dark space for the engines: about a third of a second of decorrelated,
     // low-passed decay. Mixed in faintly it moves the low end out of the head (dry bass sounds
     // as if it were inside the ears) without being heard as reverb.
@@ -201,17 +214,25 @@
     const s = tm && (SET_BY_TEAM[tm.id] || SET_BY_ENGINE[tm.engine]);
     return ES && ES.sets[s] ? s : (ES && Object.keys(ES.sets)[0]);
   }
-  // the recordings, fetched and decoded once (2.6 MB); resolves false when they cannot be had
+  // the recordings, loaded and decoded once (2.6 MB); resolves false when they cannot be had
   function loadRecorded() {
     const ES = F1.EngineSounds;
     if (REC.bufs) return Promise.resolve(true);
     if (REC.failed || !ES || !A.ctx) return Promise.resolve(false);
     if (REC.loading) return REC.loading;
     const keys = Object.keys(ES.files), bufs = {};
-    REC.loading = Promise.all(keys.map(k => fetch(ES.dir + k + '.mp3')
-      .then(r => { if (!r.ok) throw new Error(k + ': ' + r.status); return r.arrayBuffer(); })
-      .then(b => new Promise((ok, no) => A.ctx.decodeAudioData(b, ok, no)))
-      .then(buf => { bufs[k] = buf; })))
+    // (the loops come as a script, js/assets/engine_audio.js: a page opened from a file may not
+    // fetch files, but it may load scripts)
+    const script = () => (F1.EngineAudio ? Promise.resolve() : new Promise((ok, no) => {
+      const me = document.querySelector('script[src*="js/audio.js"]'), m = me && /[?&]v=(\w+)/.exec(me.src);
+      const el = document.createElement('script'); el.src = ES.script + (m ? '?v=' + m[1] : '');
+      el.onload = () => (F1.EngineAudio ? ok() : no(new Error('no recordings in ' + ES.script)));
+      el.onerror = () => no(new Error(ES.script + ' did not load'));
+      document.head.appendChild(el);
+    }));
+    const bytes = b64 => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; };
+    REC.loading = script().then(() => Promise.all(keys.map(k => new Promise((ok, no) => A.ctx.decodeAudioData(bytes(F1.EngineAudio[k]), ok, no))
+      .then(buf => { bufs[k] = buf; }))))
       .then(() => { REC.bufs = bufs; return true; },
         e => { REC.failed = true; REC.loading = null; console.warn('recorded engines unavailable, using the synthesised one', e); A.engineInfo = 'realistic (recordings would not load: ' + (e && e.message || e) + ')'; return false; });
     return REC.loading;
@@ -241,8 +262,21 @@
     r.items.forEach(it => { it.g.gain.setTargetAtTime(0, t, 0.03); try { it.src.stop(t + (when || 0.2)); } catch (x) { /* ignore */ } });
     setTimeout(() => r.items.forEach(it => { try { it.g.disconnect(); } catch (x) { /* ignore */ } }), ((when || 0.2) + 0.1) * 1000);
   }
+  // The recordings are onboard microphone recordings already: most of their sound sits around 1 to
+  // 2 kHz with little under 250 Hz. The camera EQ (MIC) was voiced for the synthesised engine, which
+  // is all body, and takes bass out; on the recordings that left them thin. So a recorded voice
+  // keeps its own tone instead: the body lifted, the honk around 1.6 kHz taken down a little.
+  // (sized against the synthesised engine in the same race: the recordings were 10 dB short around
+  // 250 Hz, where an engine's body is, and 4 to 6 dB over at 1 to 2 kHz)
+  const REC_TONE = { low: 1.5, lowF: 160, body: 8, bodyF: 260, bodyQ: 0.9, mid: -2.5, midF: 1600, midQ: 0.7 };
+  function recTone(v) {
+    v.shelf.frequency.value = REC_TONE.lowF; v.shelf.gain.value = REC_TONE.low;
+    v.eq.frequency.value = REC_TONE.bodyF; v.eq.Q.value = REC_TONE.bodyQ; v.eq.gain.value = REC_TONE.body;
+    v.boom.frequency.value = REC_TONE.midF; v.boom.Q.value = REC_TONE.midQ; v.boom.gain.value = REC_TONE.mid;
+  }
   function recordedVoice(cheap, set, dest) {
     const v = makeVoice(cheap, dest, true);
+    recTone(v);
     v.rec = recSources(set, v.node);
     return v;
   }
@@ -385,12 +419,14 @@
       R.engine = voice(false);
       // Reflections: the engine bounced back off the barrier on each side, delayed by the trip
       // there and back (2 x distance / 343 m/s), darker and quieter the further away the wall
-      R.refl = [0, 1].map(k => {
+      // (taps 0 and 1: the barriers; 2 and 3: the nearest grandstand, pit building or house front
+      // on each side, a hard, bright slap: js/audio-space.js)
+      R.refl = [0, 1, 2, 3].map(k => {
         const dl = ctx0.createDelay(0.5), f = ctx0.createBiquadFilter(), g = ctx0.createGain();
         const pn = ctx0.createStereoPanner ? ctx0.createStereoPanner() : null;
         f.type = 'lowpass'; f.frequency.value = 2800; g.gain.value = 0; dl.delayTime.value = 0.05;
         R.engine.out.connect(dl); dl.connect(f); f.connect(g);
-        if (pn) { pn.pan.value = k ? 0.75 : -0.75; g.connect(pn); pn.connect(A.sfx); } else g.connect(A.sfx);
+        if (pn) { pn.pan.value = k % 2 ? 0.75 : -0.75; g.connect(pn); pn.connect(A.sfx); } else g.connect(A.sfx);
         return { dl, f, g };
       });
       // phones and tablets: fewer cars' engines on the audio thread, which a phone's CPU may not
@@ -501,6 +537,9 @@
       return { d, dop: U.clamp(343 / (343 + vs), 0.7, 1.4), lat, fwd };
     };
     const me = src('me', p.x, p.y);
+    if (F1.AudioSpace && race.track && (!R.space || R.space.tr !== race.track) && F1.Game && F1.Game.world && F1.Game.world.tr === race.track) {
+      R.space = { tr: race.track, map: F1.AudioSpace.build(race.track, F1.Game.world) };
+    }
     // --- the player's engine ---
     // the voicing fitted to a T-cam microphone recording (js/audio-engine-worklet.js), at every
     // camera; MIC above does the rest
@@ -513,11 +552,13 @@
     const far = onboard ? 1 : Math.min(1, Math.pow(10 / me.d, 1.25));
     const engLvl = mic.level * far;
     R.engine.out.gain.setTargetAtTime(dead ? 0 : engLvl, t, 0.03);
-    R.engine.eq.gain.setTargetAtTime(mic.eq, t, 0.2);
-    R.engine.eq.frequency.setTargetAtTime(mic.eqF, t, 0.2);
-    R.engine.shelf.gain.setTargetAtTime(mic.shelf, t, 0.2);
-    R.engine.boom.gain.setTargetAtTime(mic.boom, t, 0.2);
-    R.engine.shelf.frequency.setTargetAtTime(mic.shelfF, t, 0.2);
+    if (!R.engine.rec) { // (a recorded engine keeps its own tone: recTone)
+      R.engine.eq.gain.setTargetAtTime(mic.eq, t, 0.2);
+      R.engine.eq.frequency.setTargetAtTime(mic.eqF, t, 0.2);
+      R.engine.shelf.gain.setTargetAtTime(mic.shelf, t, 0.2);
+      R.engine.boom.gain.setTargetAtTime(mic.boom, t, 0.2);
+      R.engine.shelf.frequency.setTargetAtTime(mic.shelfF, t, 0.2);
+    }
     R.engine.roomSend.gain.setTargetAtTime(mic.room, t, 0.3);
     R.engine.verbSend.gain.setTargetAtTime(mic.verb, t, 0.3);
     // the direct sound falls with distance faster than the reverb does
@@ -539,6 +580,26 @@
         at(r.g.gain, (onboard ? 0.16 : 0.11) * Math.exp(-w / 22) * far, 0.08);
         at(r.f.frequency, 3500 / (1 + w / 30), 0.1);
       });
+      // the place: which rooms are heard here, and the slap off the nearest big face each side
+      const sp = R.space && R.space.tr === tr ? R.space.map : null;
+      if (sp) {
+        const st = sp.street[i], se = sp.semi[i], fo = sp.forest[i];
+        if (A.space) {
+          at(A.space.open.gain, Math.max(0.15, 1 - 0.7 * Math.max(st, se)) * (1 + 0.6 * fo), 0.4);
+          if (A.space.semi) at(A.space.semi.gain, 1.5 * se, 0.4);
+          if (A.space.street) at(A.space.street.gain, 2.2 * st, 0.4);
+        }
+        // (in a street the open air's long tail gives way to the street's own ringing)
+        at(A.airIn.gain, 0.14 * (1 - 0.6 * st), 0.4);
+        [0, 1].forEach(s => {
+          const r = R.refl[2 + s], D = sp.slapD[s][i], h = sp.slapH[s][i];
+          const w = D > 0 ? Math.max(2, s ? D - dd : D + dd) : 0;
+          if (!w || w > 75) { at(r.g.gain, 0, 0.15); return; }
+          at(r.dl.delayTime, U.clamp(2 * w / 343, 0.004, 0.45), 0.08);
+          at(r.g.gain, (onboard ? 0.24 : 0.17) * Math.min(1, h / 10) * Math.exp(-w / 40) * far, 0.1);
+          at(r.f.frequency, 5000 / (1 + w / 50), 0.1);
+        });
+      }
     }
     // --- tyres ---
     const W = p.wheels || [];
