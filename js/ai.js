@@ -404,9 +404,18 @@
     // the corridor reaches out as far as the racing line does over the next stretch, so the
     // line is never trimmed where it uses a kerb (see Raceline.lineLimits), while a car
     // squeezed by another is not pushed past the asphalt where there is no kerb
-    let lo = -lim, hi = lim;
+    // (the stretch's reach depends on the place alone, so it is worked out once per circuit point:
+    // every car did this scan every step, and the look-ahead's rollouts ten thousand times more)
     const LL = edgeOf(tr);
-    for (let q = 0, n = Math.round(60 / tr.ds); q <= n; q += 2) { const j = (i + q) % tr.N, o = LL.clamp(j, tr.line.off[j]); if (o > hi) hi = o; else if (o < lo) lo = o; }
+    if (!LL.cLo) {
+      LL.cLo = new Float64Array(tr.N); LL.cHi = new Float64Array(tr.N);
+      for (let p = 0, n = Math.round(60 / tr.ds); p < tr.N; p++) {
+        let a = 1e9, z = -1e9;
+        for (let q = 0; q <= n; q += 2) { const j = (p + q) % tr.N, o = LL.clamp(j, tr.line.off[j]); if (o > z) z = o; if (o < a) a = o; }
+        LL.cLo[p] = a; LL.cHi[p] = z;
+      }
+    }
+    let lo = Math.min(-lim, LL.cLo[i]), hi = Math.max(lim, LL.cHi[i]);
     // in the wet, off the painted kerbs (near ice) and a metre clear of the edge: the car runs
     // wide on less grip, and a wheel on the grass or in the gravel there is a spin
     if (car.wetness > 0.05) {

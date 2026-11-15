@@ -1077,6 +1077,7 @@
     // the AI's look-ahead on worker threads (js/thinkpool.js); the last race's workers go
     if (thinkPool) { thinkPool.close(); thinkPool = null; }
     if (F1.ThinkPool) race.thinkPool = thinkPool = F1.ThinkPool.forRace(race);
+    race.thinkPage = false; // (never on the page: see Race think)
     // distant AI cars' physics at half rate (advanced graphics; on in Rock; see Race.step)
     race.physLod = !!Game.settings.gfx.physLod; race.physLodDist = Game.settings.gfx.physLodDist;
     buildWorld(race.track);

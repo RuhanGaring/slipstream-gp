@@ -575,6 +575,9 @@
     // on a worker thread when the game has a pool (js/thinkpool.js): the answer comes back a frame or
     // two later and holds from then for the rest of its window
     if (race.thinkPool && race.thinkPool.ask(race, c)) return;
+    // (the game never thinks on the page: one look-ahead is about 90 ms, a dropped frame or five, so
+    // while the workers start, or on a machine without them, the car drives on its plan)
+    if (race.thinkPage === false) { b.think = null; b.paceF = 1; b.lineF = 0; return; }
     const k = decide(race, c);
     thinkTook(race, c, k >= 0 ? THINK.acts[k] : null, race.time);
   }
@@ -631,11 +634,14 @@
   // A car's state for a look-ahead on another thread: its own objects as plain data (no other cars,
   // no shared tables; the crash structure only as its small parts), and the dice.
   const SEND_SKIP = new Set([...THINK_SKIP].filter(k => k !== 'style' && k !== 'dm'));
-  function carState(race, c) {
+  // (sent: arrays the other side already holds and that only ever change by being replaced, such as
+  // the driving style's waves, 120 kB of the 145 kB a question used to carry; left out, the copy keeps
+  // its own)
+  function carState(race, c, sent) {
     const cars = race._carSet || (race._carSet = new Set(race.cars)), seen = new Set();
     const walk = (o, depth, key) => {
       if (o === null || typeof o !== 'object') return o;
-      if (seen.has(o) || cars.has(o) && depth) return undefined;
+      if (seen.has(o) || cars.has(o) && depth || sent && sent.has(o)) return undefined;
       seen.add(o);
       if (ArrayBuffer.isView(o)) return o.length <= (key === 'dm' ? 64 : 4096) || depth < 2 ? o.slice() : undefined;
       if (Array.isArray(o)) return o.map(v => walk(v, depth + 1, key));
