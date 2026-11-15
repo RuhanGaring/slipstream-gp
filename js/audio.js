@@ -1,4 +1,5 @@
-// All sound is synthesised with WebAudio: no samples, so it works offline.
+// Sound is synthesised with WebAudio, so it works offline; the one exception is the optional
+// recorded engines (Settings: Engine sound), loops cut from real F1 engine recordings (see below).
 // Engines: a physically inspired voice on the audio thread (js/audio-engine-worklet.js):
 // cylinder firings through a tuned exhaust pipe, turbo, MGU-K and gear whine, overrun pops.
 // The player's car has the full voice; the five nearest cars get lighter ones, placed by
@@ -6,7 +7,7 @@
 // The rest of the car: tyre squeal and scrub, lock-up judder, road roar by surface, kerb
 // thumps timed to the kerb blocks, gravel and grass crunch, wind and helmet buffeting,
 // plank and wall scraping, rain and spray, shifts, the pit limiter, impacts and breakages.
-// Every car has the one engine sound, at every camera. A camera changes only what a microphone
+// Every car has the one engine sound (or, recorded, its power unit's), at every camera. A camera changes only what a microphone
 // there would change: its EQ, level, distance, Doppler and how much of the track's reverb it hears.
 // If the AudioWorklet is not available, a simpler oscillator engine stands in.
 (function (G) {
@@ -101,6 +102,7 @@
           else { A.engineInfo = 'basic (engine worklet refused: ' + errs.join('; ') + ')'; console.warn('engine worklet unavailable', errs); }
         });
     } else A.workletReady = Promise.resolve();
+    if (A.engineMode === 'recorded') loadRecorded();
   }
 
   function noiseSrc(brown) {
@@ -112,7 +114,7 @@
   const at = (param, v, tc) => param.setTargetAtTime(v, A.ctx.currentTime, tc || 0.04);
 
   // ---------- engine voices ----------
-  function makeVoice(cheap, dest) {
+  function makeVoice(cheap, dest, recorded) {
     const ctx = A.ctx;
     const out = ctx.createGain(); out.gain.value = 0;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 16000; lp.Q.value = 0.5;
@@ -125,7 +127,8 @@
     if (cheap) { eq.frequency.value = MIC.out.eqF; eq.gain.value = MIC.out.eq; } // another car is always heard from outside it
     const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let node, legacy = null;
-    if (A.worklet) {
+    if (recorded) node = ctx.createGain(); // (the recordings mix in here: recordedVoice)
+    else if (A.worklet) {
       try {
         node = new AudioWorkletNode(ctx, 'engine-voice', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
         node.port.postMessage({ cheap: cheap ? 1 : 0 });
@@ -148,6 +151,7 @@
   }
   // send parameters (only when they change enough)
   function setVoice(v, o) {
+    if (v.rec) { recSet(v, o); return; }
     if (v.legacy) { legacySet(v.legacy, o.rpm * (o.dop || 1), o.thr); return; }
     const L = v.last;
     if (Math.abs((L.rpm || 0) - o.rpm) > 15 || Math.abs((L.thr || 0) - o.thr) > 0.02 || Math.abs((L.speed || 0) - o.speed) > 0.5 || L.dop !== o.dop || L.on !== o.on || Math.abs((L.kers || 0) - o.kers) > 0.05 || Math.abs((L.harv || 0) - (o.harv || 0)) > 0.05 || L.gear !== o.gear || L.view !== o.view || L.shift !== o.shift) {
@@ -157,6 +161,7 @@
   function stopVoice(v) {
     if (!v) return;
     try { v.out.gain.setTargetAtTime(0, A.ctx.currentTime, 0.05); } catch (x) { /* already stopped */ }
+    if (v.rec) recStop(v.rec, 0.3);
     setTimeout(() => { try { if (v.legacy) legacyStop(v.legacy); else if (v.node.port) v.node.port.postMessage({ stop: 1 }); v.node.disconnect(); v.out.disconnect(); v.roomSend.disconnect(); v.verbSend.disconnect(); v.airSend.disconnect(); } catch (x) { /* ignore */ } }, 300);
   }
   // the fallback: oscillators through a waveshaper (the original engine sound)
@@ -178,6 +183,97 @@
     at(e.out.gain, 0.25 + 0.5 * thr, 0.03);
   }
   function legacyStop(e) { e.o1.stop(); e.o2.stop(); }
+
+  // ---------- recorded engines (Settings: Engine sound, RECORDED) ----------
+  // Engine recordings from the BeamNG 2023 F1 car mods (js/engine-sounds.js, tools/engine_samples.py):
+  // one set per power unit, each recording a steady RPM, in two rows (off load, on load). A voice
+  // plays every recording of its set at once, looped, each pitched by RPM over the RPM it was
+  // recorded at, and mixes the two either side of the RPM (equal power) and the two rows by the
+  // throttle: what BeamNG's 2D blend does. The game's engine makers map onto the four units; the
+  // one Alfa Romeo variant goes to the other Ferro customer.
+  const SET_BY_ENGINE = { 'Ferro 066': 'ferrari', 'Meridian EQ': 'mercedes', 'Halcyon H1': 'honda', 'Vanta V6': 'renault' };
+  const SET_BY_TEAM = { solenne: 'ferrari_b' };
+  const REC = { bufs: null, loading: null, failed: false };
+  // (as loud as the synthesised engine in the same race: measured on the master bus, 0.145 against 0.08 RMS)
+  const REC_LEVEL = 0.55;
+  function setOf(car) {
+    const ES = F1.EngineSounds, tm = car && car.team;
+    const s = tm && (SET_BY_TEAM[tm.id] || SET_BY_ENGINE[tm.engine]);
+    return ES && ES.sets[s] ? s : (ES && Object.keys(ES.sets)[0]);
+  }
+  // the recordings, fetched and decoded once (2.6 MB); resolves false when they cannot be had
+  function loadRecorded() {
+    const ES = F1.EngineSounds;
+    if (REC.bufs) return Promise.resolve(true);
+    if (REC.failed || !ES || !A.ctx) return Promise.resolve(false);
+    if (REC.loading) return REC.loading;
+    const keys = Object.keys(ES.files), bufs = {};
+    REC.loading = Promise.all(keys.map(k => fetch(ES.dir + k + '.mp3')
+      .then(r => { if (!r.ok) throw new Error(k + ': ' + r.status); return r.arrayBuffer(); })
+      .then(b => new Promise((ok, no) => A.ctx.decodeAudioData(b, ok, no)))
+      .then(buf => { bufs[k] = buf; })))
+      .then(() => { REC.bufs = bufs; return true; },
+        e => { REC.failed = true; REC.loading = null; console.warn('recorded engines unavailable, using the synthesised one', e); A.engineInfo = 'realistic (recordings would not load: ' + (e && e.message || e) + ')'; return false; });
+    return REC.loading;
+  }
+  // the sources of one set, into mix (one per recording and RPM: a recording in both rows plays once)
+  function recSources(set, mix) {
+    const ES = F1.EngineSounds, ctx = A.ctx, rows = ES.sets[set], items = [], byKey = {};
+    rows.forEach((row, ri) => row.forEach(([key, rpm], i) => {
+      const id = key + '@' + rpm;
+      let it = byKey[id];
+      if (!it) {
+        const f = ES.files[key], src = ctx.createBufferSource(), g = ctx.createGain();
+        src.buffer = REC.bufs[key]; src.loop = true; src.loopStart = f.len / 2; src.loopEnd = f.len * 1.5;
+        g.gain.value = 0; src.connect(g); g.connect(mix);
+        // (each voice starts somewhere else in the loop, or cars of one team would phase together)
+        src.start(0, f.len / 2 + Math.random() * f.len);
+        it = byKey[id] = { key, rpm, src, g, w: [0, 0] };
+        items.push(it);
+      }
+      (it.rows || (it.rows = [])).push([ri, i]);
+    }));
+    return { set, items, rows: rows.map(r => r.map(([key, rpm]) => byKey[key + '@' + rpm])) };
+  }
+  function recStop(r, when) {
+    if (!r) return;
+    const t = A.ctx.currentTime;
+    r.items.forEach(it => { it.g.gain.setTargetAtTime(0, t, 0.03); try { it.src.stop(t + (when || 0.2)); } catch (x) { /* ignore */ } });
+    setTimeout(() => r.items.forEach(it => { try { it.g.disconnect(); } catch (x) { /* ignore */ } }), ((when || 0.2) + 0.1) * 1000);
+  }
+  function recordedVoice(cheap, set, dest) {
+    const v = makeVoice(cheap, dest, true);
+    v.rec = recSources(set, v.node);
+    return v;
+  }
+  // a voice now on a car of another power unit takes that unit's recordings
+  function recRetune(v, set) {
+    if (!v.rec || v.rec.set === set) return;
+    recStop(v.rec); v.rec = recSources(set, v.node); v.last = {};
+  }
+  function recSet(v, o) {
+    const ES = F1.EngineSounds, L = v.last, r = v.rec;
+    const rpm = Math.max(500, o.rpm), dop = o.dop || 1;
+    const load = U.clamp(o.thr, 0, 1) * (o.on == null ? 1 : o.on);
+    if (Math.abs((L.rpm || 0) - rpm) < 12 && Math.abs((L.thr || 0) - load) < 0.02 && L.dop === dop) return;
+    L.rpm = rpm; L.thr = load; L.dop = dop;
+    const t = A.ctx.currentTime, k = (ES.gain[r.set] || 1) * REC_LEVEL;
+    r.items.forEach(it => { it.w[0] = 0; it.w[1] = 0; });
+    r.rows.forEach((row, ri) => {
+      const n = row.length;
+      if (rpm <= row[0].rpm) { row[0].w[ri] += 1; return; }
+      if (rpm >= row[n - 1].rpm) { row[n - 1].w[ri] += 1; return; }
+      let i = 0; while (i < n - 2 && rpm > row[i + 1].rpm) i++;
+      const f = (rpm - row[i].rpm) / (row[i + 1].rpm - row[i].rpm);
+      row[i].w[ri] += Math.cos(f * Math.PI / 2); row[i + 1].w[ri] += Math.sin(f * Math.PI / 2);
+    });
+    for (const it of r.items) {
+      const g = k * (it.w[0] * (1 - load) * ES.offLoadGain + it.w[1] * load * ES.onLoadGain);
+      it.g.gain.setTargetAtTime(g, t, 0.025);
+      // (a silent one keeps its last pitch: nothing to hear, no need to move it)
+      if (g > 1e-4 || !it.rate) { it.rate = U.clamp(rpm / it.rpm * dop, 0.25, 4); it.src.playbackRate.setTargetAtTime(it.rate, t, 0.02); }
+    }
+  }
 
   // ---------- one-shots ----------
   function blip(freq, dur, type = 'sine', vol = 0.15, slide = 0, bus) {
@@ -274,16 +370,19 @@
     if (!A.on) return;
     stopRace();
     R.pending = true;
-    A.workletReady.then(() => {
+    A.workletReady.then(() => (A.engineMode === 'recorded' ? loadRecorded() : false)).then(rec => {
       if (!R.pending) return;
       R.pending = false;
+      // (recorded engines: every voice starts on the first set and takes its car's own on the first update)
+      const set0 = rec ? setOf(null) : null, voice = cheap => (rec ? recordedVoice(cheap, set0) : makeVoice(cheap));
+      R.recorded = !!rec;
       // the player's car's own sounds (tyres, road, wind...) share one bus, so a camera away
       // from the car hears them at the right distance and side
       const ctx0 = A.ctx;
       R.carBus = ctx0.createGain(); R.carLp = ctx0.createBiquadFilter(); R.carLp.type = 'lowpass'; R.carLp.frequency.value = 16000;
       R.carPan = ctx0.createStereoPanner ? ctx0.createStereoPanner() : null;
       R.carBus.connect(R.carLp); if (R.carPan) { R.carLp.connect(R.carPan); R.carPan.connect(A.sfx); } else R.carLp.connect(A.sfx);
-      R.engine = makeVoice(false);
+      R.engine = voice(false);
       // Reflections: the engine bounced back off the barrier on each side, delayed by the trip
       // there and back (2 x distance / 343 m/s), darker and quieter the further away the wall
       R.refl = [0, 1].map(k => {
@@ -297,7 +396,7 @@
       // phones and tablets: fewer cars' engines on the audio thread, which a phone's CPU may not
       // keep up with (it would break up or fall silent); the two nearest still carry the race
       const mobile = F1.Game && F1.Game.mobile && F1.Game.mobile();
-      for (let k = 0; k < (mobile ? Math.min(2, N_OTHERS) : N_OTHERS); k++) R.others.push(makeVoice(true));
+      for (let k = 0; k < (mobile ? Math.min(2, N_OTHERS) : N_OTHERS); k++) R.others.push(voice(true));
       R.loops = {
         squeal: loop({ f: [['bandpass', 1500, 4]] }),
         squeal2: loop({ f: [['bandpass', 2400, 5]] }),
@@ -408,6 +507,7 @@
     const view = 1, mic = MIC[mode] || MIC.out, airK = race.track && race.track.def && race.track.def.style === 'street' ? 1.4 : 1;
     const harv = (p.harvest || 0) * Math.min(1, v / 30);
     const dopMe = onboard ? 1 : +me.dop.toFixed(3);
+    if (R.engine.rec) recRetune(R.engine, setOf(p));
     setVoice(R.engine, { rpm: dead ? Math.max(600, (p.rpm || 4000) * 0.2) : p.rpm, thr: dead ? 0 : thr0, speed: v, gear: p.gear, dop: dopMe, kers: p.deploy || 0, harv: +harv.toFixed(2), view, shift: R.shiftN || 0, shiftDir: R.shiftDir || 1, on: dead ? 0.05 : on, gain: 1 });
     // outside: the level falls past 10 m, the air takes the top end off, and the car sits where it is
     const far = onboard ? 1 : Math.min(1, Math.pow(10 / me.d, 1.25));
@@ -499,11 +599,20 @@
     at(L.crowd.g.gain, 0.025 + 0.015 * Math.max(0, Math.sin(t * 0.13)) + 0.1 * R.crowdUp, 0.3);
 
     // --- the nearest cars ---
-    const near = race.cars.filter(c => c !== p && !c.retired).map(c => ({ c, d: Math.hypot(c.x - lx, c.y - ly) })).sort((a, b) => a.d - b.d).slice(0, R.others.length);
-    R.others.forEach((e, k) => {
-      const n = near[k];
-      if (!n || n.d > 400) { e.out.gain.setTargetAtTime(0, t, 0.1); return; }
-      const c = n.c, s0 = src('c' + c.id, c.x, c.y), dop = s0.dop, lat = s0.lat, fwd = s0.fwd;
+    // (each voice stays with its car while that car is among the nearest: a voice handed from car to
+    // car as two of them swap places would jump in pitch and level, and a recorded one in sound)
+    const near = race.cars.filter(c => c !== p && !c.retired).map(c => ({ c, d: Math.hypot(c.x - lx, c.y - ly) })).filter(n => n.d <= 400).sort((a, b) => a.d - b.d).slice(0, R.others.length);
+    const dOf = new Map(near.map(n => [n.c, n.d]));
+    R.others.forEach(e => { if (e.car && !dOf.has(e.car)) e.car = null; });
+    for (const n of near) {
+      if (R.others.some(e => e.car === n.c)) continue;
+      const e = R.others.find(x => !x.car);
+      if (e) { e.car = n.c; if (e.rec) recRetune(e, setOf(n.c)); }
+    }
+    R.others.forEach(e => {
+      const c = e.car, n = c && { c, d: dOf.get(c) };
+      if (!n) { e.out.gain.setTargetAtTime(0, t, 0.1); return; }
+      const s0 = src('c' + c.id, c.x, c.y), dop = s0.dop, lat = s0.lat, fwd = s0.fwd;
       const cdead = c.dm && c.dm.failed === 'ENGINE';
       setVoice(e, { rpm: cdead ? 700 : c.rpm, thr: cdead ? 0 : (c.throttleOut != null ? c.throttleOut : 0.5), speed: c.speed, gear: c.gear, dop: +dop.toFixed(3), kers: 0, view: 1, on: cdead ? 0 : 1, gain: 1 });
       // level falls with distance; the air takes the top end off far-away cars; behind is duller
@@ -568,5 +677,16 @@
     A.musicBus.gain.value = A.vol.music * 0.5;
   }
 
-  F1.Audio = { impactAt, crowdRoar, pitGuns, A, init, ui, impact, crack, engineBlow, light, go, shiftClack, chime, startRace, stopRace, updateRace, musicStart, musicStop, setVolumes, blip, _race: R };
+  // Settings, Engine sound: 'synth' (the worklet voice) or 'recorded' (the car mods' recordings, one
+  // set per power unit). A race already running swaps its sounds at once.
+  function setEngineMode(mode) {
+    const m = mode === 'recorded' ? 'recorded' : 'synth';
+    if (A.engineMode === m) return;
+    A.engineMode = m;
+    if (m === 'recorded' && A.ctx) loadRecorded(); // (fetched ahead of the race)
+    if (A.on && (R.loops || R.pending)) startRace();
+  }
+  A.engineMode = 'synth';
+
+  F1.Audio = { setEngineMode, loadRecorded, impactAt, crowdRoar, pitGuns, A, init, ui, impact, crack, engineBlow, light, go, shiftClack, chime, startRace, stopRace, updateRace, musicStart, musicStop, setVolumes, blip, _race: R };
 })(typeof window !== 'undefined' ? window : globalThis);

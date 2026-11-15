@@ -24,7 +24,7 @@
 
   const Game = F1.Game = {
     state: 'boot', race: null, world: null, flow: { kind: 'race', mode: 'arcade', track: 'kestrel', team: 0, driver: 0 },
-    settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
+    settings: Object.assign({ master: 0.8, sfx: 0.9, music: 0.5, engineSound: 'synth', camera: 'chase', zoom: 1, zoomStep: 1, units: 'kmh', gapMode: 'interval', tags: true, headMotion: true,
       mobile: 'auto', touchSteer: 'pad', tSens: 1, tiltSens: 1, mSens: 1, mDead: 0.04, mCurve: 'progressive', mCentre: 0, mSmooth: 0.04, mInvert: false }, store.get('slip_settings', {})),
     raceDefaults: Object.assign({ laps: 3, difficulty: 2, grid: 10, field: 20, compound: 'M', abs: true, tc: 1, autoGear: true, steerAssist: true, damage: 'full', damageArcade: 'off', crash: 'std', lineSim: 'brake', lineArcade: 'full' }, store.get('slip_race', {})),
     champ: null, paused: false, hudOn: true,
@@ -2083,6 +2083,7 @@
   Game.applySettings = () => {
     const s = Game.settings;
     Audio.setVolumes({ master: Game.muted ? 0 : s.master, sfx: s.sfx, music: s.music });
+    if (Audio.setEngineMode) Audio.setEngineMode(s.engineSound);
     if (R3ok) R3.setQuality(autoGfx());
     document.documentElement.style.setProperty('--hud-k', s.hudSize || 1);
     document.body.classList.toggle('line-safe', s.lineSafe === true);

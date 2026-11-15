@@ -1143,8 +1143,10 @@
     add(optRow('Master volume', '', vols, () => st.master, v => { st.master = v; touched(); }, pct), 'AUDIO');
     add(optRow('Effects volume', '', vols, () => st.sfx, v => { st.sfx = v; touched(); }, pct));
     add(optRow('Music volume', 'Menus only', vols, () => st.music, v => { st.music = v; touched(); }, pct));
+    // the engine: the synthesised voice, or recordings of real power units, one per engine maker
+    add(optRow('Engine sound', 'Recorded: real F1 engine recordings, one per engine maker (Ferro, Meridian, Halcyon, Vanta)', ['synth', 'recorded'], () => st.engineSound || 'synth', v => { st.engineSound = v; touched(); }, v => (v === 'recorded' ? 'RECORDED' : 'SYNTHESISED')));
     // which engine sound this browser runs (the realistic worklet, or the basic stand-in and why)
-    if (tab === 'audio') { const info = h('div', 'opt info', `<div class="on">Engine sound<small>${(F1.Audio && F1.Audio.A.engineInfo) || 'starts with the first key or tap'}</small></div><div></div>`); col.appendChild(info); }
+    if (tab === 'audio') { const info = h('div', 'opt info', `<div class="on">Synthesised engine<small>${(F1.Audio && F1.Audio.A.engineInfo) || 'starts with the first key or tap'}</small></div><div></div>`); col.appendChild(info); }
     here = 'display';
     add(optRow('Camera', '', F1.Game.CAMS, () => st.camera, v => { st.camera = v; touched(); }, v => F1.Game.CAM_NAMES[v] || v), 'DISPLAY');
     add(optRow('Camera zoom', '', [0.8, 0.9, 1, 1.1, 1.25], () => st.zoom, v => { st.zoom = v; touched(); }, v => Math.round(v * 100) + '%'));
