@@ -1683,9 +1683,9 @@
         <div class="ld-blurb">${def.blurb}</div>
         <div class="ld-learn"></div>
         <div class="ld-stats">
-          <div><b>${(tr.L / 1000).toFixed(3)}</b><span>KM</span></div>
-          <div><b>${tr.apexes.length}</b><span>CORNERS</span></div>
-          <div><b>${tr.drs.length}</b><span>OVERTAKE ZONES</span></div>
+          <div><b class="ld-km">${tr ? (tr.L / 1000).toFixed(3) : '-.---'}</b><span>KM</span></div>
+          <div><b class="ld-cn">${tr ? tr.apexes.length : '-'}</b><span>CORNERS</span></div>
+          <div><b class="ld-ot">${tr ? tr.drs.length : '-'}</b><span>OVERTAKE ZONES</span></div>
           ${o.laps ? `<div><b>${o.laps}</b><span>LAPS</span></div>` : ''}
           <div><b>${o.best ? U.fmtTime(o.best) : '--:--.---'}</b><span>YOUR BEST</span></div>
         </div>
@@ -1696,9 +1696,17 @@
         <div class="ld-tip"><span class="lbl">TIP</span>${TIPS[Math.floor(Math.random() * TIPS.length)]}</div>
         <div class="ld-prog"><div class="ld-bar"><i></i></div><div class="ld-state">LOADING CIRCUIT</div></div>
       </div>`;
-    requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
+    // (the card goes up before the circuit is built, which can take seconds: its numbers and map follow)
+    if (tr) requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
     return { el, items: [] };
   };
+  function loadingTrack(tr) {
+    const el = document.getElementById('scr-loading');
+    if (!el || !tr) return;
+    const set = (q, v) => { const e = el.querySelector(q); if (e) e.textContent = v; };
+    set('.ld-km', (tr.L / 1000).toFixed(3)); set('.ld-cn', tr.apexes.length); set('.ld-ot', tr.drs.length);
+    requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
+  }
 
   // the second press within a few seconds does it: a mistaken key must not end anyone's race
   const sure = fn => e => {
@@ -1928,5 +1936,5 @@
     UI.root = document.getElementById('screens');
   }
 
-  F1.UI = { UI, init, go, hide, key, drawTrackMap, setFocus, FLAGS };
+  F1.UI = { UI, init, go, hide, key, drawTrackMap, setFocus, FLAGS, loadingTrack };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1428,21 +1428,24 @@
     Audio.ui.select();
     const fade = document.getElementById('fade');
     fade.classList.add('on');
-    setTimeout(() => {
+    // The loading screen goes up before the circuit is built: building one (a whole town for
+    // Mont-Aurele and the generated city circuits) holds the page for seconds, and it used to do
+    // so behind the black of the fade. Now the card is on screen first, the circuit is built
+    // behind it, and its numbers, map and scene follow.
+    const showLoading = () => {
       Game.state = 'loading';
       // a restart comes here straight from the race: its HUD must not show over the loading screen
       document.getElementById('hud').classList.add('off');
       Game.paused = false;
-      startLoadScene(def.id, Game.flow.team || 0);
-      const tr0 = Race.getTrack(def.id);
       const R0 = Object.assign({}, Game.raceDefaults, o.over || {});
       UIm.go('loading', {
-        def, tr: tr0, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali, practice: o.practice, daily: !!o.daily,
+        def, tr: null, round: o.round, total: Tracks.DEFS.length, mode: o.mode, ttHandling: o.ttHandling, quali: o.quali, practice: o.practice, daily: !!o.daily,
         laps: o.mode === 'tt' ? null : R0.laps, best: Game.bestLap(def.id, o.mode === 'arcade' || (o.mode === 'tt' && o.ttHandling !== 'sim') ? 'arcade' : 'sim'),
         team: F1.Data.TEAMS[Game.flow.team || 0], driver: F1.Data.TEAMS[Game.flow.team || 0].drivers[Game.flow.driver || 0],
       });
       document.getElementById('shade').className = 'load';
       fade.classList.remove('on');
+    };
       const build = () => {
         // a weekend times the AI's laps once, here behind the loading screen (and before the
         // session's own race resets the track's rubber)
@@ -1501,6 +1504,7 @@
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
       // so nobody ever races the unlearned AI
+      const afterBuild = () => {
       const st = def.gen && F1.LearnJob ? F1.LearnJob.status(def.id) : null;
       if (st && st.state !== 'done') {
         const el = document.querySelector('#scr-loading .ld-learn');
@@ -1520,8 +1524,18 @@
         }, () => { if (left) learn(left - 1); else go(); });
         learn(2);
       } else setTimeout(build, 60);
+    };
+    setTimeout(() => {
+      showLoading();
+      // (two frames, so the card is painted, and the fade and the card's slide-in done, then the heavy part)
+      afterPaint(() => {
+        startLoadScene(def.id, Game.flow.team || 0);
+        if (UIm.loadingTrack) UIm.loadingTrack(Race.getTrack(def.id));
+        afterBuild();
+      });
     }, 380);
   }
+  const afterPaint = fn => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(fn, 480)));
 
   Game.restart = () => {
     setBlur(false);
@@ -1544,11 +1558,14 @@
     setTimeout(() => {
       document.getElementById('hud').classList.add('off');
       Game.paused = false;
-      startAttract();
+      // (the menu first, then the race behind it: building that race's circuit can hold the page
+      // for seconds, which showed as black while the fade was still on)
+      Game.race = null; Game.state = 'menu';
       document.getElementById('shade').className = 'on';
       UIm.go('main');
       Audio.musicStart();
       fade.classList.remove('on');
+      afterPaint(() => { if (Game.state === 'menu' && !Game.race) startAttract(); });
     }, 380);
   };
 
@@ -2012,6 +2029,7 @@
       if (race.done || race.time > 240) startAttract();
     }
     if (Game.state === 'loading' && load.on) { stepLoadScene(dt); drawLoadScene(dt); }
+    else if (!race) { /* (the menu, a moment before its race is built) */ }
     else {
       // draw the cars where they are between the last two fixed physics steps, not where the
       // last step left them: the number of steps per frame varies, and so would the motion
