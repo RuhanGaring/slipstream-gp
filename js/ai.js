@@ -29,7 +29,7 @@
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
-    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, launchT: 0, launchGap: 0.6, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
+    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 1.6, launchT: 0, launchGap: 0.6, capClose: 0, crawlK: 0, sepLook: 0.5, sepHard: 1, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
     // live grip reading: on, tyre load that counts as past the limit, metres off line that count as
     // running wide, load below which there is grip to spare, the step down and up, the limits
@@ -642,7 +642,16 @@
     {
       const reach = v * v / 40 + 30;
       let hz = null, hzd = 1e9;
-      for (let k = 0; k < b.near.length; k++) { const o = b.near[k], ds = b.nds[k]; if (ds > 0 && ds < reach && ds < hzd && (o.speed < 20 || v > o.speed + 18) && v > o.speed + 4 && !o.inPit) { hz = o; hzd = ds; } }
+      // (P.crawlK: a car far under the speed the road allows there, a damaged one limping round, is
+      // a hazard too, and stays one while this car waits behind it: judged against the road, not
+      // against this car's own speed, which drops to the crawler's once it has caught it)
+      for (let k = 0; k < b.near.length; k++) {
+        const o = b.near[k], ds = b.nds[k];
+        if (!(ds > 0 && ds < reach && ds < hzd) || o.inPit) continue;
+        // (not off the grid, where every car is still slow against the road)
+        const crawl = P.crawlK > 0 && race.time - race.startTime > 8 && o.speed < P.crawlK * b.prof[o.loc.i] && ds < 80;
+        if (crawl || (o.speed < 20 || v > o.speed + 18) && v > o.speed + 4) { hz = o; hzd = ds; }
+      }
       if (hz) {
         const E = edgeOf(tr), j = hz.loc.i, rR = E.R[j] - hz.loc.d, rL = hz.loc.d + E.L[j], sg = rR >= rL ? 1 : -1, room = Math.max(rR, rL);
         if (room > 2.4) {
@@ -660,14 +669,17 @@
       if (b.mpcT <= 0) { b.mpcT = MPC_DT * (1 + (1 - b.style.skill) * 0.8); predict(race, car, b, lim, v, P.mpc >= 2 ? U.clamp(edgeOf(tr).clamp(i, lineOff), lo, hi) : null); }
       if (b.mpcL != null) { lo = Math.max(lo, Math.min(hi, b.mpcL - 0.5)); hi = Math.min(hi, Math.max(lo, b.mpcL + 0.5)); }
     } else { b.mpcL = null; b.mpcK = 1; }
-    // keep a car's width plus margin to anyone alongside
+    // keep a car's width plus margin to anyone alongside (P.sepLook: from that many seconds before
+    // the cars overlap, at the speed they close; P.sepHard: that room is kept at once, not eased
+    // into by the lane's rate limit below, which left a moment wheel to wheel as a car arrived)
     b.squeezed = false;
+    let sepLo = -1e9, sepHi = 1e9;
     for (let k = 0; k < b.near.length; k++) {
-      const o = b.near[k];
-      if (Math.abs(b.nds[k]) > 7.5) continue;
+      const o = b.near[k], cl = Math.abs(v - o.speed);
+      if (Math.abs(b.nds[k]) > 7.5 + P.sepLook * cl) continue;
       const dd = o.loc.d - car.loc.d;
       if (Math.abs(dd) > 4.8) continue;
-      if (dd > 0) hi = Math.min(hi, o.loc.d - SEP); else lo = Math.max(lo, o.loc.d + SEP);
+      if (dd > 0) { hi = Math.min(hi, o.loc.d - SEP); sepHi = Math.min(sepHi, o.loc.d - SEP); } else { lo = Math.max(lo, o.loc.d + SEP); sepLo = Math.max(sepLo, o.loc.d + SEP); }
     }
     // never past the edge of the road here, whoever is alongside: a squeezed car lifts (below)
     // rather than being pushed onto the grass
@@ -678,6 +690,7 @@
     b.loS = b.loS == null ? lo : (lo > b.loS ? Math.min(lo, b.loS + lrate) : lo);
     b.hiS = b.hiS == null ? hi : (hi < b.hiS ? Math.max(hi, b.hiS - lrate) : hi);
     lo = b.loS; hi = b.hiS;
+    if (P.sepHard) { if (sepLo > lo) lo = b.loS = Math.min(sepLo, hi); if (sepHi < hi) hi = b.hiS = Math.max(sepHi, lo); }
     if (lo > hi) { const m = (lo + hi) / 2; lo = hi = m; }
     b.lo = lo; b.hi = hi;
     b.desired = U.clamp(edgeOf(tr).clamp(i, lineOff), lo, hi);
@@ -1032,7 +1045,10 @@
         const launchPh = race.time - race.startTime < P.launchT;
         const want = (b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + P.gapV * v + wait + (nearBrake ? P.gapBrk * v : 0)) * (launchPh ? P.launchGap : lap1 ? P.lap1Gap : 1);
         const closing = v - blk.speed;
-        if (blk.ctl.brake > 0.25 && gap < want + 25) vt = Math.min(vt, blk.speed + Math.max(0, gap - want) * 0.5);
+        // (the car ahead braking caps this one to its speed; P.capClose: only while this one is
+        // actually closing on it, so a queue does not brake in a cascade, earlier and earlier down
+        // the grid, behind brake lights alone)
+        if (blk.ctl.brake > 0.25 && gap < want + 25 && (!P.capClose || closing > 0)) vt = Math.min(vt, blk.speed + Math.max(0, gap - want) * 0.5);
         // (in a tow the run is the point: it may close right up before easing off)
         const towing = b.mode === 'tow' && blk === b.target && !nearBrake;
         if (closing > 0) {
