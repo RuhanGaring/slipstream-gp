@@ -717,7 +717,15 @@
         '    float bJw = fwidth(bU * 2.0) * 1.5 + 0.004;',
         '    float bJoint = 1.0 - smoothstep(0.0, bJw, abs(fract(bU * 2.0 + 0.5) - 0.5));',
         '    float bWx = 0.92 + 0.08 * wNoise(vFogWorld.xz * 0.25 + vFogWorld.y);',
-        '    diffuseColor.rgb *= mix(1.0, bWx * (1.0 - 0.32 * bDirt) * (1.0 - 0.62 * bScuff) * (1.0 - 0.45 * bJoint), bSide);',
+        // each board a slightly different age (printed at different times, washed differently)
+        '    float bPan = fract(sin(floor(bU * 2.0 + 0.5) * 12.9898 + floor(vFogWorld.x * 0.01) * 4.1) * 43758.5453);',
+        '    bWx *= 0.9 + 0.1 * bPan;',
+        // black tyre rubber smeared along the lower face where wheels have kissed it
+        '    float bRub = (1.0 - smoothstep(0.05, 0.3, bV)) * smoothstep(0.55, 0.8, wNoise(vec2(bU * 1.3, 0.0) + vFogWorld.xz * 0.05)) * (0.5 + 0.5 * wNoise(vec2(bU * 60.0, bV * 3.0)));',
+        // printed whites are never paper white in sun: keep them under about 0.75 albedo
+        '    float bL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));',
+        '    diffuseColor.rgb *= mix(1.0, min(1.0, 0.75 / max(bL, 1e-3)), bSide);',
+        '    diffuseColor.rgb *= mix(1.0, bWx * (1.0 - 0.45 * bDirt) * (1.0 - 0.62 * bScuff) * (1.0 - 0.7 * bRub) * (1.0 - 0.45 * bJoint), bSide);',
         '  }',
         '#endif'].join('\n'));
     });

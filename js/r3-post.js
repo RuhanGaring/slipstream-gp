@@ -458,7 +458,7 @@
     '  return 0.03 + 0.97 * k;',
     '}',
     'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
-    'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain;',
+    'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain; uniform vec3 uGrade;',
     // The AO target is half size. Read plainly (bilinear), along a silhouette it mixes the near
     // surface's value into the far one's: the road beside a car took the car's own (unoccluded)
     // value, a pale outline round the car against its shadow. Each of the four half-size texels
@@ -564,7 +564,12 @@
     '  c *= uExposure;',
     '  if (uLens > 0.5) c *= mix(1.0, smoothstep(1.0, 0.3, length(d * vec2(1.0, 0.8))), 0.18);', // optical vignetting
     '  c = uTone == 1 ? aces(c) : agx(c);',
+    // a circuit's own grade (Q.grade, off by default): the black point set a little deeper,
+    // saturation, and an S-curve on the display values for mid-tone contrast
+    '  c = max(c - uGrade.z, 0.0) / (1.0 - uGrade.z);',
+    '  { float gL = dot(c, vec3(0.2126, 0.7152, 0.0722)); c = max(gL + uGrade.y * (c - gL), 0.0); }',
     '  c = toSRGB(c);',
+    '  c = mix(c, c * c * (3.0 - 2.0 * c), uGrade.x);',
     // grain doubles as dither, which also hides 8-bit banding in skies and fog
     '  float g = hash(vUv * uRes + fract(uTime) * 61.0) - 0.5;',
     '  c += g * (uLens > 0.5 ? 0.016 : 0.006) * uGrain;',
@@ -576,7 +581,7 @@
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
     uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
-    uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() },
+    uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() }, uGrade: { value: new THREE.Vector3(0, 1, 0) },
   });
 
   // ---------- targets ----------
@@ -762,6 +767,7 @@
     u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
     u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
+    { const gr = view.grade || [0, 1, 0]; u.uGrade.value.set(gr[0], gr[1], gr[2]); }
     u.uLens.value = Q.lens ? 1 : 0; u.uTime.value = performance.now() / 1000; u.uTone.value = (view.tone || Q.tone) === 'aces' ? 1 : 0;
     u.uRes.value.set(R.domElement.width, R.domElement.height);
     // 7. FXAA on the finished picture (the composite then draws into an 8-bit target, without grain)

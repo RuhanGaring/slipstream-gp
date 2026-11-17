@@ -951,7 +951,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
     const tk = state.tunApplied || 0;
-    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.7 - hemi.intensity) * tk; }
+    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.45 - hemi.intensity) * tk; }
     if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== oc) { F1.R3Shadow.setSoften(1 + 4 * oc); state.ocS = oc; }
     if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(1 - 0.88 * oc);
@@ -1894,6 +1894,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const walls = new Batch(true), roofs = new Batch(true), relief = new Batch(true), ub = new THREE.BoxGeometry(1, 1, 1);
       const hipG = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1, true); hipG.rotateY(Math.PI / 4); hipG.translate(0, 0.5, 0);
       const roofCyl = new THREE.CylinderGeometry(1, 1, 1, 8);
+      const domeG = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
       const shops = W2.town && T.has('city_shop') ? new Batch(false) : null;
       const awn = ['#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a', '#3d3f44', '#8a6a3a'];
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
@@ -1983,6 +1984,24 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               relief.add(ub, at(0.86, y + 0.95, L, 0.05, 0.05), rail);
               relief.add(ub, at(0.86, y + 0.2, L, 0.04, 0.04), rail);
             }
+          }
+        }
+        // Landmarks, a few to a town: a Belle Epoque hall crowned by a drum and a copper dome gone
+        // green, or a church's bell tower rising over the roofs with its tiled pyramid cap. Large
+        // blocks only, picked from the block's own seed; merged into the roofs (no extra draws).
+        if (town && it.base == null && !it.tower && it.w * it.h > 380) {
+          const pick2 = (it.seed >> 2) % 23;
+          if (pick2 === 0) {
+            const R = Math.min(it.w, it.h) * 0.24, top = hgt + 3 + gy;
+            roofs.add(roofCyl, mat(it.x, top + 1.6, it.y, 0, R * 1.08, 3.2, R * 1.08), col('#e9e1d0'));
+            roofs.add(domeG, mat(it.x, top + 3.2, it.y, 0, R, R * 0.92, R), col('#6f9a86'));
+            roofs.add(roofCyl, mat(it.x, top + 3.2 + R * 0.92 + 0.9, it.y, 0, 0.6, 1.8, 0.6), col('#e9e1d0'));
+            for (const [qx, qz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const [cx2, cz2] = W2L(qx * (it.w / 2 - 2), qz * (it.h / 2 - 2)); roofs.add(domeG, mat(cx2, top + 0.2, cz2, 0, 1.6, 1.8, 1.6), col('#6f9a86')); }
+          } else if (pick2 === 1) {
+            const [bx2, bz2] = W2L(it.w / 2 - 3, it.h / 2 - 3), tH = hgt + 3 + 14, base2 = gy;
+            roofs.add(ub, mat(bx2, base2 + tH / 2, bz2, ry, 5.2, tH, 5.2), col('#e6dcc8'));
+            roofs.add(ub, mat(bx2, base2 + tH - 3.2, bz2, ry, 5.6, 0.5, 5.6), col('#d9cdb4'));
+            roofs.add(hipG, mat(bx2, base2 + tH, bz2, ry, 5.8, 4.2, 5.8), col('#b5613c'));
           }
         }
         if (town && !it.tower && hgt < 36 && (it.seed >> 3) % 10 < 6) {
@@ -2864,38 +2883,86 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // the tunnel, after Monaco's: pale stone-tiled walls with pilasters behind the barriers, a flat
     // grey slab ceiling, two rows of warm lamps along it near the walls
     if (town.tunnel) {
-      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(), ceil = new Acc(), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.55, 0.1, 1.5), pil = new Batch(true), pb = new THREE.BoxGeometry(1, 1, 1);
+      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(true), ceil = new Acc(), rail = new Batch(false), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.55, 0.1, 1.5), pil = new Batch(true), pb = new THREE.BoxGeometry(1, 1, 1);
       const off = (k, sd) => sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4), H = 6.4;
+      // the walls in five rows so they can carry the grime of a road in a box: exhaust soot thick at
+      // the foot, thinning up the wall and gathering again under the roof, in streaks of uneven age
+      const WR = [[-0.2, 0.3], [0.9, 0.52], [2.6, 0.84], [H - 1.1, 0.74], [H, 0.48]], tg = new THREE.Color(), sr = U.rng(7331);
       for (const sd of [-1, 1]) {
         let prev = null, along = 0;
         for (let i = i0 - 2; i <= i1 + 2; i++) {
           const k = ((i % N) + N) % N, d = off(k, sd), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, y = tr.z[k];
           along += tr.ds;
-          const a = wl.v(x, y - 0.2, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, 0), c = wl.v(x, y + H, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, H / 3);
-          if (prev) { if (sd > 0) { wl.t(prev[0], prev[1], a); wl.t(prev[1], c, a); } else { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); } }
-          prev = [a, c];
+          const st = 0.72 + 0.28 * sr(), row = WR.map(([h, g]) => wl.v(x, y + h, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, (h + 0.2) / 3, tg.setScalar(g * (h < 3 ? st : 1))));
+          if (prev) for (let r = 0; r < row.length - 1; r++) { const a = row[r], c = row[r + 1], pa = prev[r], pc = prev[r + 1]; if (sd > 0) { wl.t(pa, pc, a); wl.t(pc, c, a); } else { wl.t(pa, a, pc); wl.t(pc, a, c); } }
+          prev = row;
         }
       }
       // the roof: its underside faces the road, its top carries the promontory's garden
       let prev = null;
       for (let i = i0 - 2; i <= i1 + 2; i++) {
         const k = ((i % N) + N) % N, dl = off(k, -1), dr = off(k, 1), y = tr.z[k] + H;
-        const a = wl.v(tr.x[k] + tr.nx[k] * dl, y, tr.y[k] + tr.ny[k] * dl, 0, -1, 0, 0, i / 3), c = wl.v(tr.x[k] + tr.nx[k] * dr, y, tr.y[k] + tr.ny[k] * dr, 0, -1, 0, 1, i / 3);
-        const a2 = wl.v(tr.x[k] + tr.nx[k] * dl, y + 1.2, tr.y[k] + tr.ny[k] * dl, 0, 1, 0, 0, i / 3), c2 = wl.v(tr.x[k] + tr.nx[k] * dr, y + 1.2, tr.y[k] + tr.ny[k] * dr, 0, 1, 0, 1, i / 3);
-        if (prev) { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); wl.t(prev[2], prev[3], a2); wl.t(prev[3], c2, a2); }
+        const a = ceil.v(tr.x[k] + tr.nx[k] * dl, y, tr.y[k] + tr.ny[k] * dl, 0, -1, 0, 0, i / 3), c = ceil.v(tr.x[k] + tr.nx[k] * dr, y, tr.y[k] + tr.ny[k] * dr, 0, -1, 0, 1, i / 3);
+        const a2 = wl.v(tr.x[k] + tr.nx[k] * dl, y + 1.2, tr.y[k] + tr.ny[k] * dl, 0, 1, 0, 0, i / 3, tg.setScalar(0.8)), c2 = wl.v(tr.x[k] + tr.nx[k] * dr, y + 1.2, tr.y[k] + tr.ny[k] * dr, 0, 1, 0, 1, i / 3, tg);
+        if (prev) { ceil.t(prev[0], a, prev[1]); ceil.t(prev[1], a, c); wl.t(prev[2], prev[3], a2); wl.t(prev[3], c2, a2); }
         prev = [a, c, a2, c2];
         const ry = -Math.atan2(tr.ty[k], tr.tx[k]) + Math.PI / 2;
+        // armco along both walls, as in Monaco's tunnel: two rails on posts every 2 m
+        for (const [o, sd] of [[dl, -1], [dr, 1]]) {
+          const q = o - sd * 0.5, rx = tr.x[k] + tr.nx[k] * q, rz = tr.y[k] + tr.ny[k] * q;
+          for (const ry0 of [0.52, 0.86]) rail.add(pb, mat(rx, tr.z[k] + ry0, rz, ry, 0.06, 0.3, tr.ds + 0.04));
+          if (i % Math.max(1, Math.round(2 / tr.ds)) === 0) rail.add(pb, mat(tr.x[k] + tr.nx[k] * (q + sd * 0.12), tr.z[k] + 0.5, tr.y[k] + tr.ny[k] * (q + sd * 0.12), ry, 0.12, 1, 0.12));
+        }
         // two rows of lamps, 1.6 m in from each wall, every 4 m
         if (i % Math.max(1, Math.round(4 / tr.ds)) === 0) for (const o of [dl + 1.6, dr - 1.6]) lamps.add(lg, mat(tr.x[k] + tr.nx[k] * o, y - 0.07, tr.y[k] + tr.ny[k] * o, ry));
         // pilasters on both walls every 7 m: a pale stone pier standing a little proud of the tiles
         if (i % Math.max(1, Math.round(7 / tr.ds)) === 0) for (const [o, sd] of [[dl, -1], [dr, 1]]) { const q = o - sd * 0.22; pil.add(pb, mat(tr.x[k] + tr.nx[k] * q, tr.z[k] + H / 2 - 0.1, tr.y[k] + tr.ny[k] * q, ry, 0.45, H + 0.2, 0.9), col('#efe6d4')); }
       }
       // (kept out of the merged shadow casters: merged, its roof stopped casting and the sun lit the road under it)
-      if (!M.tunnelWall) { M.tunnelWall = M.concrete.clone(); M.tunnelWall.color = new THREE.Color('#e6d7b8'); }
+      if (!M.tunnelWall) { M.tunnelWall = M.concrete.clone(); M.tunnelWall.color = new THREE.Color('#ddd6c6'); M.tunnelWall.vertexColors = true; }
+      if (!M.tunnelCeil) { M.tunnelCeil = M.concrete.clone(); M.tunnelCeil.color = new THREE.Color('#a29d93'); M.tunnelCeil.emissive = new THREE.Color('#2a261f'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
       const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) tm.userData.noProxy = true;
+      const tc = add(ceil.geo(), M.tunnelCeil, { cast: true }); if (tc) tc.userData.noProxy = true;
+      add(rail.geo(), M.armco, { cast: false });
       add(pil.geo(), M.vcol, { cast: false });
       if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#fff3d6', emissive: '#ffe2a8', emissiveIntensity: 6, roughness: 0.5 });
       add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
+    }
+    // Flags along the seafront, as round Monaco's harbour on a race weekend: a white pole every
+    // 18 m on the water side of the lap, its flag stiff in the sea breeze; and cafe terraces on
+    // the town side's pavements, parasols over little tables. Merged; drawn to 420 and 220 m.
+    {
+      const fl = new Batch(true), cafe = new Batch(true), pole = new THREE.CylinderGeometry(0.05, 0.07, 1, 6), bx = new THREE.BoxGeometry(1, 1, 1);
+      const para = new THREE.ConeGeometry(1, 1, 8, 1, true); para.translate(0, 0.5, 0);
+      const fr = U.rng(911), N = tr.N, flagCols = [['#c8102e', '#ffffff'], ['#0b3d91', '#ffffff'], ['#ffffff', '#c8102e'], ['#1a7f3c', '#ffffff'], ['#f2c230', '#c8102e'], ['#14161a', '#f2c230']];
+      const paraCols = ['#f3efe6', '#e8e2d4', '#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a'];
+      const tun = k => town.tunnel && k >= town.tunnel.i0 - 4 && k <= town.tunnel.i1 + 4;
+      for (let i = 0; i < N; i += Math.max(1, Math.round(18 / tr.ds))) {
+        if (tun(i) || !isNaN(tr.pit.off[i])) continue;
+        for (const sd of [-1, 1]) {
+          const o = sd * ((sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 1.6), x = tr.x[i] + tr.nx[i] * o, z = tr.y[i] + tr.ny[i] * o, u = site.inland(x, z);
+          if (!inside(x, z)) continue;
+          const ry = -Math.atan2(tr.ty[i], tr.tx[i]), y = Math.max(tr.z[i], gy(x, z));
+          if (u > 2 && u < 45) {
+            const [c1, c2] = flagCols[Math.floor(fr() * flagCols.length)];
+            fl.add(pole, mat(x, y + 4.5, z, 0, 1, 9, 1), col('#f2f2ee'));
+            fl.add(bx, mat(x + Math.cos(ry) * 1.0, y + 8.4, z - Math.sin(ry) * 1.0, ry, 1.9, 0.6, 0.03), col(c1));
+            fl.add(bx, mat(x + Math.cos(ry) * 1.0, y + 7.8, z - Math.sin(ry) * 1.0, ry, 1.9, 0.6, 0.03), col(c2));
+          } else if (u > 60 && fr() < 0.22) {
+            // a terrace: two or three parasols over their tables, a little back from the barrier
+            const back = sd * 2.6;
+            for (let q = -1; q <= 1; q++) {
+              if (fr() < 0.3) continue;
+              const px = x + Math.cos(ry) * q * 3.2 + tr.nx[i] * back, pz = z - Math.sin(ry) * q * 3.2 + tr.ny[i] * back, py = Math.max(tr.z[i], gy(px, pz));
+              cafe.add(pole, mat(px, py + 1.2, pz, 0, 0.8, 2.4, 0.8), col('#d9d6cf'));
+              cafe.add(para, mat(px, py + 2.15, pz, fr() * 6, 1.6, 0.55, 1.6), col(paraCols[Math.floor(fr() * paraCols.length)]));
+              cafe.add(pole, mat(px, py + 0.38, pz, 0, 7.5, 0.04, 7.5), col('#cfcbc2'));
+            }
+          }
+        }
+      }
+      if (fl.parts.length) add(fl.geo(), M.vcol, { cast: true, far: 420 });
+      if (cafe.parts.length) add(cafe.geo(), M.vcol2 || (M.vcol2 = std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })), { cast: true, far: 220 });
     }
     // street lamps along the circuit: a slim pole behind the barrier every 28 m, alternating sides,
     // its arm and lantern reaching out over the road
@@ -4505,6 +4572,8 @@ void main() {
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
         mode, // (a change of camera is a cut for the motion blur and the TAA history)
+        // a filmic grade on the harbour towns: a little contrast, a touch of saturation and a real black point
+        grade: state.tr && state.tr.gen2 && state.tr.gen2.city ? [0.25, 1.08, 0.012] : null,
         wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || []),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),
