@@ -551,9 +551,10 @@
     // the tread's true normal (straight out from the axle) in view space: the model's tread is a
     // ring of flat facets, and on glossy rubber each facet would reflect the sky as its own band
     // (aWc: the wheel's centre in a merged mesh of four wheels; a single wheel has no such attribute and reads zero)
-    sh.vertexShader = 'attribute vec3 aWc; attribute float aWi; varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying float vTyWi;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position - aWc; vTyN = normal; vTyWi = aWi; vTyRad = normalMatrix * normalize(vec3(vTyP.xy, 0.0) + vec3(1e-5));');
+    // (aTyS: the tyre's outer radius and half width, for the rounded shoulder; vTyAx the axle in view space)
+    sh.vertexShader = 'attribute vec3 aWc; attribute float aWi; attribute vec2 aTyS; varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying vec3 vTyAx; varying float vTyWi; varying vec2 vTyS;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position - aWc; vTyN = normal; vTyWi = aWi; vTyS = aTyS; vTyRad = normalMatrix * normalize(vec3(vTyP.xy, 0.0) + vec3(1e-5)); vTyAx = normalMatrix * vec3(0.0, 0.0, 1.0);');
     sh.fragmentShader = [
-      'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying float vTyWi; uniform vec4 uTyWear;',
+      'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying vec3 vTyAx; varying float vTyWi; varying vec2 vTyS; uniform vec4 uTyWear;',
       'float tyH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }',
       'float tyN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
       '  return mix(mix(mix(tyH(i), tyH(i + vec3(1, 0, 0)), f.x), mix(tyH(i + vec3(0, 1, 0)), tyH(i + vec3(1, 1, 0)), f.x), f.y),',
@@ -563,7 +564,15 @@
     ].join('\n') + '\n' + sh.fragmentShader
       .replace('#include <map_fragment>', [
         '#include <map_fragment>',
-        '  float tySide = smoothstep(0.3, 0.9, abs(normalize(vTyN).z)), tyTread = 1.0 - tySide;',
+        // A slick's shoulder is round (some 6 cm), so the light rolls from the tread over onto the
+        // sidewall. The model's shoulder is a few hard facets: its normal is worked out here from
+        // where the point sits against the tyre's radius and width (tyNn: the rounded normal in the
+        // tyre's radial/axial plane), and the tread and sidewall finishes blend along the same curve.
+        '  float tyRho = length(vTyP.xy), tyAz = abs(vTyP.z), tyRs = clamp(vTyS.y * 0.36, 0.035, 0.07);',
+        '  vec2 tyD = vec2(tyRho - (vTyS.x - tyRs), tyAz - (vTyS.y - tyRs));',
+        '  vec2 tyNn = max(tyD, vec2(0.0)); tyNn = dot(tyNn, tyNn) < 1e-8 ? (tyD.y > tyD.x ? vec2(0.0, 1.0) : vec2(1.0, 0.0)) : normalize(tyNn);',
+        '  float tyShape = vTyS.x > 0.1 ? smoothstep(vTyS.x - tyRs - 0.03, vTyS.x - tyRs, tyRho) : 0.0;',
+        '  float tySide = mix(smoothstep(0.3, 0.9, abs(normalize(vTyN).z)), smoothstep(0.15, 0.95, tyNn.y), tyShape), tyTread = 1.0 - tySide;',
         '  float tyR = length(vTyP.xy); vec2 tyCs = vTyP.xy / max(tyR, 1e-4);',
         // the rubber, not the printing: dark and unsaturated in the texture
         '  float tyMx = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)), tyMn = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));',
@@ -580,7 +589,11 @@
         '  diffuseColor.rgb = mix(diffuseColor.rgb, mix(tySw, tyTr, tyTread), tyRub);',
       ].join('\n'))
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, mix(0.4, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyW), tyTread), tyRub);')
-      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 tyRn = normalize(vTyRad); tyRn *= sign(dot(tyRn, normal) + 1e-4); normal = normalize(mix(normal, tyRn, smoothstep(0.35, 0.95, tyTread))); }');
+      .replace('#include <normal_fragment_maps>', [
+        '#include <normal_fragment_maps>',
+        '  { vec3 tyRn = normalize(vTyRad); tyRn *= sign(dot(tyRn, normal) + 1e-4);',
+        '    vec3 tyAx = normalize(vTyAx) * sign(vTyP.z + 1e-6), tySh = normalize(tyNn.x * normalize(vTyRad) + tyNn.y * tyAx); tySh *= sign(dot(tySh, normal) + 1e-4);',
+        '    normal = normalize(mix(mix(normal, tyRn, smoothstep(0.35, 0.95, tyTread)), tySh, tyShape)); }'].join('\n'));
   }
   function carMat(o, C, hue) {
     const T = i => (i >= 0 ? C.tex[i] : null), kind = surface(o.n);
@@ -792,23 +805,38 @@
   // The merged mesh's origin stands at wheel-centre height, as a single wheel's does (the road
   // shade measures from it), and each vertex knows its wheel's centre (the tyre shader turns about it).
   const WL_Y = 0.36, WI = { FL: 0, FR: 1, RL: 2, RR: 3 };
+  // each wheel's tyre: outer radius and half width (m), measured on the full-detail tyre about its centre
+  function tyShape(MD) {
+    if (MD.tyS) return MD.tyS;
+    const out = {}, v = new THREE.Vector3();
+    for (const key of ['FL', 'FR', 'RL', 'RR']) {
+      let R = 0, W = 0;
+      for (const p of MD.lods[0].wheels[key].parts) {
+        if (surface(MD.mats[p.m].name || '') !== 'tyre') continue;
+        const P = p.G.attributes.position;
+        for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i); R = Math.max(R, Math.hypot(v.x, v.y)); W = Math.max(W, Math.abs(v.z)); }
+      }
+      out[key] = [R, W];
+    }
+    return (MD.tyS = out);
+  }
   function wheelsLowGeo(MD, L = MD.lods[1]) {
     const done = MD.wlOf || (MD.wlOf = new Map());
     if (done.has(L)) return done.get(L);
-    const by = new Map();
+    const by = new Map(), TS = tyShape(MD);
     const v = new THREE.Vector3(), nv = new THREE.Vector3(), q = new THREE.Quaternion(), q0 = new THREE.Quaternion();
     for (const key of ['FL', 'FR', 'RL', 'RR']) {
       const W = L.wheels[key], c = MD.lods[0].wheels[key].c;
       q.fromArray(W.q);
       for (const { G: Gw, m, hub } of W.parts.map(x => Object.assign({ hub: false }, x)).concat(W.hub.map(x => Object.assign({ hub: true }, x)))) {
-        const b = by.get(m) || { pos: [], nor: [], uv: [], idx: [], wc: [], wi: [] }, p = Gw.attributes.position, n = Gw.attributes.normal, t = Gw.attributes.uv, base = b.pos.length / 3;
+        const b = by.get(m) || { pos: [], nor: [], uv: [], idx: [], wc: [], wi: [], ts: [] }, p = Gw.attributes.position, n = Gw.attributes.normal, t = Gw.attributes.uv, base = b.pos.length / 3;
         by.set(m, b);
         const qq = hub ? q0 : q;
         // read through the attributes: the normals are packed (normalised bytes)
         for (let i = 0; i < p.count; i++) {
           v.fromBufferAttribute(p, i).applyQuaternion(qq); nv.fromBufferAttribute(n, i).applyQuaternion(qq);
           b.pos.push(v.x + c[0], v.y + c[1] - WL_Y, v.z + c[2]);
-          b.wc.push(c[0], c[1] - WL_Y, c[2]); b.wi.push(WI[key]);
+          b.wc.push(c[0], c[1] - WL_Y, c[2]); b.wi.push(WI[key]); b.ts.push(TS[key][0], TS[key][1]);
           b.nor.push(nv.x, nv.y, nv.z);
           b.uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
         }
@@ -822,6 +850,7 @@
       g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       g.setAttribute('aWc', new THREE.Float32BufferAttribute(b.wc, 3));
       g.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(b.wi), 1));
+      g.setAttribute('aTyS', new THREE.Float32BufferAttribute(b.ts, 2));
       g.setIndex(b.idx); g.computeBoundingSphere();
       g.userData.yUp = WL_Y;
       return [m, g];
@@ -931,7 +960,12 @@
     // (which wheel each tyre vertex belongs to, for its wear: once per model)
     if (!MD.wiDone) {
       MD.wiDone = true;
-      ['FL', 'FR', 'RL', 'RR'].forEach((key, wi) => { for (const L of MD.lods) for (const p of L.wheels[key].parts) if (!p.G.attributes.aWi) p.G.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(p.G.attributes.position.count).fill(wi), 1)); });
+      const TS = tyShape(MD);
+      ['FL', 'FR', 'RL', 'RR'].forEach((key, wi) => { for (const L of MD.lods) for (const p of L.wheels[key].parts) {
+        const n = p.G.attributes.position.count;
+        if (!p.G.attributes.aWi) p.G.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(n).fill(wi), 1));
+        if (!p.G.attributes.aTyS) { const a = new Float32Array(n * 2); for (let i = 0; i < n; i++) { a[i * 2] = TS[key][0]; a[i * 2 + 1] = TS[key][1]; } p.G.setAttribute('aTyS', new THREE.BufferAttribute(a, 2)); }
+      } });
     }
     for (const key of ['FL', 'FR', 'RL', 'RR']) {
       const W0 = MD.lods[0].wheels[key];
