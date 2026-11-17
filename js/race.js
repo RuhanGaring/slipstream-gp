@@ -457,7 +457,7 @@
   // off. With its base driving among the choices it can only do better than that driving, and it
   // finds what the stored plan gets wrong: Mont-Aurele 87.1 to 77.9 s solo, with no wall touched.
   // The car is put back exactly as it was after each try (its own objects only, copied in place).
-  const THINK = { on: true, skip: true, minPace: 0.95, di: 0.25, offW: 0.7, offK: 300, endK: 60, gamble: 0.75,  h: 3, hz: 240, keep: 0.05, acts: [null, [1, 0], [0, 0], [0, 0.6], { f: 1.05 }, { f: 0.95 }, { l: 0.6 }, { l: -0.6 }], learn: 0.3, memLo: 0.85, memHi: 1.3, lineMax: 2.5, sec: 200, nearM: 400, diFar: 0.5 };
+  const THINK = { on: true, skip: true, minPace: 0.95, di: 0.25, offW: 0.7, offK: 300, endK: 60, gamble: 0.75,  h: 3, hz: 240, keep: 0.05, acts: [null, [1, 0], [0, 0], [0, 0.6], { f: 1.05 }, { f: 0.95 }, { l: 0.6 }, { l: -0.6 }], learn: 0.3, memLo: 0.85, memHi: 1.3, lineMax: 2.5, sec: 200, nearM: 400, diFar: 0.5, share: false };
   const THINK_CARS = ['near', 'nds', 'ahead', 'behind', 'alongside', 'target', 'rival', 'hazard', 'blk'];
   const THINK_SKIP = new Set(['track', 'spec', 'team', 'driver', 'compound', 'prof', 'style', 'dm', 'rng', 'profFor', 'ghost', 'rec',
     'near', 'nds', 'ahead', 'behind', 'alongside', 'target', 'rival', 'hazard', 'blk', 'onShift', 'think', 'plan', 'pitPlan', 'strategy']);
@@ -548,8 +548,22 @@
     if (b.exploring) { b.secI = si; b.secT0 = race.time; b.secDirty = false; return; }
     const done = b.secI, t = race.time - b.secT0, fwd = (si - done + NS) % NS === 1;
     const k0 = Math.floor(done * THINK.sec / 10), k1 = Math.min(b.paceMem.length, Math.floor((done + 1) * THINK.sec / 10));
-    if (fwd && !b.secDirty && t < b.secBest[done] - 0.002) { b.secBest[done] = t; for (let k = k0; k < k1; k++) { b.paceBest[k] = b.paceMem[k]; b.lineBest[k] = b.lineMem[k]; } }
+    let kept = false;
+    if (fwd && !b.secDirty && t < b.secBest[done] - 0.002) { kept = true; b.secBest[done] = t; for (let k = k0; k < k1; k++) { b.paceBest[k] = b.paceMem[k]; b.lineBest[k] = b.lineMem[k]; } }
     else if (!fwd || b.secDirty || t > b.secBest[done] + 0.01) { for (let k = k0; k < k1; k++) { b.paceMem[k] = b.paceBest[k]; b.lineMem[k] = b.lineBest[k]; } }
+    // The field shares what it learns. Few cars can think at once (js/thinkpool.js: the ones near
+    // the camera first), so a sector a thinking car proved quicker goes into the race's memory, and
+    // a car not thinking now drives the next sector on it. Its own clock then judges it like any
+    // other change: kept if the sector went quicker for it too, put back if not.
+    if (THINK.share) {
+      const NB = b.paceMem.length, F = race.fieldMem && race.fieldMem.pace.length === NB ? race.fieldMem : (race.fieldMem = { pace: new Float32Array(NB).fill(1), line: new Float32Array(NB) });
+      const thinking = race.time - (b.thinkAt == null ? -1e9 : b.thinkAt) < 2;
+      if (kept && thinking) for (let k = k0; k < k1; k++) { F.pace[k] = b.paceBest[k]; F.line[k] = b.lineBest[k]; }
+      else if (!thinking) {
+        const j0 = Math.floor(si * THINK.sec / 10), j1 = Math.min(NB, Math.floor((si + 1) * THINK.sec / 10));
+        for (let j = j0; j < j1; j++) { b.paceMem[j] = F.pace[j]; b.lineMem[j] = F.line[j]; }
+      }
+    }
     b.secI = si; b.secT0 = race.time; b.secDirty = false;
   }
   function think(race, c) {
@@ -584,7 +598,7 @@
   // an answer, from the page or a worker: drive it for its window, and remember a pace that worked
   function thinkTook(race, c, a, t) {
     const b = c.brain;
-    b.think = a; b.thinkUntil = t + THINK.di + 0.03;
+    b.think = a; b.thinkUntil = t + THINK.di + 0.03; b.thinkAt = t;
     b.paceF = a && a.f ? a.f : 1; b.lineF = a && a.l ? a.l : 0;
     if (!THINK.learn) return;
     const tr = race.track, NB = Math.ceil(tr.L / 10);

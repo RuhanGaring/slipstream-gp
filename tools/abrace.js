@@ -13,6 +13,10 @@ if (!isMainThread) {
   const F1 = require(path.join(root, 'tools', 'load'))(['util.js', 'tracks.js', 'car.js', 'damage.js', 'softbody.js', 'raceline.js', 'lines.js', 'limits.js', 'aimem.js', 'data.js', 'ai.js', 'race.js']);
   const race = F1.Race.create({ track, mode: 'sim', laps, difficulty: diff, team: 0, driver: 0, grid: 10, field, seed, assists: { damage: 'full' }, safetyCar: 'off', mandatory: false });
   race.autoPlayer = true;
+  if (process.env.NOTHINK) F1.Race.THINK.on = false; // (every car on its plan, the look-ahead off)
+  // NEAR=1: as in the browser (js/thinkpool.js), only the cars near the player think; the rest
+  // drive their plan (true: taken, no answer comes; false: think on the spot)
+  if (process.env.NEAR) race.thinkPool = { ask: (r, c) => { const fo = r.player; let g = Math.abs(c.loc.s - fo.loc.s); if (g > r.track.L / 2) g = r.track.L - g; return c !== fo && g > F1.Race.THINK.nearM; } };
   let walls = 0, contacts = 0, resets = 0, passes = 0, n = 0, prev = null;
   const last = new Map(), or = race.recover; race.recover = c => { resets++; or(c); };
   while (!race.done && race.time < 300 * laps) {

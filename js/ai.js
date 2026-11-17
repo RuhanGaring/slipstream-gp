@@ -29,7 +29,7 @@
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
-    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
+    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 2.2, launchT: 0, launchGap: 0.6, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
     // live grip reading: on, tyre load that counts as past the limit, metres off line that count as
     // running wide, load below which there is grip to spare, the step down and up, the limits
@@ -1025,7 +1025,12 @@
         // (sitting in a tow on a straight, a driver closes right up to the gearbox)
         // (with no run to try, a driver hangs back a little and saves his tyres)
         const wait = b.style && v - blk.speed < 0.5 ? 2.5 * (1 - Math.min(1, b.style.nerve)) : 0;
-        const want = (b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + P.gapV * v + wait + (nearBrake ? P.gapBrk * v : 0)) * (lap1 ? P.lap1Gap : 1);
+        // (P.launchT > 0: off the grid the field runs nose to tail for that long, closer gaps by
+        // P.launchGap. Off: 0.6 for 8 s gave 22% more ground in the first 10 s with no more lap 1
+        // contacts, but over whole 20-car races it cost contacts, retirements and 2 s to the winner,
+        // and gentler settings were no better: tools/startlab.js, tools/abrace.js NOTHINK=1)
+        const launchPh = race.time - race.startTime < P.launchT;
+        const want = (b.mode === 'tow' && blk === b.target && !nearBrake ? 1.2 + 0.03 * v : 1.5 + P.gapV * v + wait + (nearBrake ? P.gapBrk * v : 0)) * (launchPh ? P.launchGap : lap1 ? P.lap1Gap : 1);
         const closing = v - blk.speed;
         if (blk.ctl.brake > 0.25 && gap < want + 25) vt = Math.min(vt, blk.speed + Math.max(0, gap - want) * 0.5);
         // (in a tow the run is the point: it may close right up before easing off)
