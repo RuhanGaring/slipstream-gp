@@ -253,6 +253,7 @@
     // the receivers: each distinct geometry of the bodywork levels (not the wheels)
     const geos = new Map();
     for (const g of bu.lodGroups || []) g.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.normal && !geos.has(m.geometry)) geos.set(m.geometry, rel(m)); });
+    if (bu.midG) bu.midG.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.normal && !geos.has(m.geometry)) geos.set(m.geometry, rel(m)); });
     if (bu.farG) bu.farG.traverse(m => { if (m.isMesh && m.geometry && m.geometry.attributes.normal && !geos.has(m.geometry)) geos.set(m.geometry, rel(m)); });
     let V = 0;
     for (const g of geos.keys()) V += g.attributes.position.count;
