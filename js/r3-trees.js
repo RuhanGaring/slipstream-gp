@@ -107,7 +107,7 @@
     const color = load(s.color, true), nrm = load(s.normal, false);
     const u = { uTAspect: { value: s.W / s.H }, uTNrm: { value: nrm }, uTCrown: { value: new THREE.Vector2(CROWN[0], CROWN[1]) }, uTSkirt: { value: /^fir/.test(name) ? 1 : 0 }, uTDead: { value: /^fir/.test(name) ? 0.03 : 0.008 } };
     const lit = new THREE.MeshStandardMaterial({ map: color, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75, metalness: 0 });
-    lit.userData.patchExtra = sh => patchLit(sh, u);
+    lit.userData.patchExtra = sh => { patchLit(sh, u); sharpAlpha(sh); };
     lit.userData.patchKey = 'tree';
     const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: color, alphaTest: 0.5, side: THREE.DoubleSide });
     depth.onBeforeCompile = sh => patchDepth(sh, u);
@@ -115,6 +115,21 @@
     return (species[name] = { s, lit, depth });
   }
 
+  // Leaf edges that hold up at a distance (Ben Golus): further away the texture is read from
+  // smaller mips whose alpha averages leaves with the gaps between them, so under the cut-off the
+  // thin branches vanish and the crowns break into floating clumps with stair-stepped edges. The
+  // coverage is raised with the mip level the pixel reads, and the edge is sharpened to a pixel
+  // wide (the TAA smooths it), so a crown keeps its mass and outline at any distance.
+  function sharpAlpha(sh) {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', [
+      '#ifdef USE_MAP',
+      '  { vec2 tSz = vec2(textureSize(map, 0)); vec2 tDx = dFdx(vMapUv * tSz), tDy = dFdy(vMapUv * tSz);',
+      '    float tMip = max(0.0, 0.5 * log2(max(dot(tDx, tDx), dot(tDy, tDy))));',
+      '    diffuseColor.a *= 1.0 + tMip * 0.2;',
+      '    diffuseColor.a = clamp((diffuseColor.a - 0.5) / max(fwidth(diffuseColor.a), 1e-4) + 0.5, 0.0, 1.0); }',
+      '#endif',
+      '#include <alphatest_fragment>'].join('\n'));
+  }
   function quad() {
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0], 3));

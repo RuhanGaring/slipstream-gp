@@ -11,6 +11,10 @@
     // the circuit's traced sky shade on the road (js/r3-carshade.js bakeRoad): lap length, the
     // grid's first lateral offset and width; off until a circuit has one
     uRoadShade: { value: null }, uRoadShadeP: { value: new THREE.Vector3(1, -8, 16) }, uRoadShadeOn: { value: 0 },
+    // how much of that shade, and of the rubber and wear, the racing road shows (a harbour town's
+    // circuit is its public streets: it looks like the side streets, only its barriers mark it), and
+    // the tunnel's lamps (render3d tunnelLight: the floor the road's shade cannot go under there)
+    uRoadShadeK: { value: 1 }, uRubK: { value: 1 }, uTunLamp: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
@@ -525,10 +529,10 @@
       sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', [
         '#include <aomap_fragment>',
         '  if (uRoadShadeOn > 0.5 && abs(vTrk.y - uRoadShadeP.y - uRoadShadeP.z * 0.5) < uRoadShadeP.z * 0.5) {',
-        '    float rsk = texture2D(uRoadShade, vec2(vTrk.x / uRoadShadeP.x, (vTrk.y - uRoadShadeP.y) / uRoadShadeP.z)).r;',
+        '    float rsk = max(mix(1.0, texture2D(uRoadShade, vec2(vTrk.x / uRoadShadeP.x, (vTrk.y - uRoadShadeP.y) / uRoadShadeP.z)).r, uRoadShadeK), uTunLamp);',
         '    reflectedLight.indirectDiffuse *= rsk; reflectedLight.indirectSpecular *= rsk;',
         '  }'].join('\n'));
-      sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber; uniform sampler2D uRoadShade; uniform vec3 uRoadShadeP; uniform float uRoadShadeOn;\n' + NOISE + '\n' + sh.fragmentShader
+      sh.fragmentShader = 'varying vec4 vTrk;\nuniform sampler2D uRubber; uniform sampler2D uRoadShade; uniform vec3 uRoadShadeP; uniform float uRoadShadeOn; uniform float uRoadShadeK; uniform float uRubK; uniform float uTunLamp;\n' + NOISE + '\n' + sh.fragmentShader
         .replace('#include <map_fragment>', [
           '#include <map_fragment>',
           FAR_AVG,
@@ -548,11 +552,21 @@
           // many separate tyre-track pairs, each a car's own path, baked (tools/rubber_bake.py)
           '  float aMany = texture2D(uRubber, vec2(vTrk.x / 512.0, clamp(aL / 20.0 + 0.5, 0.01, 0.99))).r * 0.5;',
           '  float aRub = aTr * aBreak * (0.28 + 0.5 * aLoad) + aBand * 0.14 * aLoad + aWide * 0.1 + aWider * 0.05 + aSkid * 0.35 + aMany * (0.5 + 0.5 * aLoad);',
-          '  diffuseColor.rgb *= (1.0 - clamp(aRub, 0.0, 0.5));',
+          '  diffuseColor.rgb *= (1.0 - clamp(aRub * uRubK, 0.0, 0.5));',
           '  float aMar = smoothstep(2.4, 4.5, abs(aL)) * (1.0 - smoothstep(0.0, 1.3, min(abs(vTrk.y) - 0.0, 20.0) * 0.0)) * (0.35 + 0.65 * aW) * smoothstep(0.45, 0.85, wNoise(vec2(vTrk.y * 5.0, vTrk.x * 0.35) + 3.0));',
-          '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.33, 0.32) * dot(diffuseColor.rgb, vec3(0.333)) * 3.0, aMar * 0.28);',
+          '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.33, 0.32) * dot(diffuseColor.rgb, vec3(0.333)) * 3.0, aMar * 0.28 * uRubK);',
+          // A street that has been dug up and patched for decades: irregular repairs of darker,
+          // newer asphalt, each ringed by its strip of tar seal, and a slow drift of tone between
+          // them (on every road, the circuit and the side streets alike: world position, not lap)
+          '  vec2 pW = vFogWorld.xz;',
+          '  float pN = wNoise(pW * 0.045) * 0.6 + wNoise(pW * 0.11 + 7.0) * 0.4;',
+          '  float pFw = max(fwidth(pN), 1e-4);',
+          '  float pIn = smoothstep(0.615 - pFw, 0.615 + pFw, pN);',
+          '  float pSeal = 1.0 - smoothstep(0.0, 0.006 + pFw, abs(pN - 0.615));',
+          '  diffuseColor.rgb *= mix(1.0, 0.82 + 0.08 * wNoise(pW * 0.35 + 3.0), pIn) * (1.0 - 0.45 * pSeal);',
+          '  diffuseColor.rgb *= 0.94 + 0.12 * wNoise(pW * 0.012 + 11.0);',
         ].join('\n'))
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= 1.0 - 0.28 * aBand;');
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= (1.0 - 0.28 * aBand * uRubK) * (1.0 - 0.12 * pIn + 0.1 * pSeal);');
     });
   }
   // Kerbs: paint chipped back to concrete in patches, black tyre rubber smeared along the
@@ -686,5 +700,27 @@
     return todo.length;
   }
 
-  F1.R3S = { U, SOFT_W, SOFT_H, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone } };
+  // Barrier walls (the printed hoardings): a street circuit's concrete blocks have joints every
+  // couple of metres, road grime climbing from the foot, black tyre scuffs at wheel height where
+  // cars have touched, and weathering over the print. uv.y runs from the foot (0) to the top (about
+  // 1) of the face, uv.x along it; the top of the block is told apart by the surface's own slope.
+  function barrierWear(m) {
+    return ext(m, 'barrier', sh => {
+      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <map_fragment>', [
+        '#include <map_fragment>',
+        '#ifdef USE_MAP',
+        '  { vec3 bN = normalize(cross(dFdx(vFogWorld), dFdy(vFogWorld)));',
+        '    float bSide = 1.0 - smoothstep(0.5, 0.8, abs(bN.y));',
+        '    float bV = vMapUv.y, bU = vMapUv.x;',
+        '    float bDirt = (1.0 - smoothstep(0.0, 0.38, bV)) * (0.5 + 0.5 * wNoise(vFogWorld.xz * 0.6 + vFogWorld.y * 2.0));',
+        '    float bScuff = smoothstep(0.1, 0.18, bV) * (1.0 - smoothstep(0.36, 0.48, bV)) * smoothstep(0.62, 0.86, wNoise(vec2(bU * 3.0, 4.0) + vFogWorld.xz * 0.03)) * (0.6 + 0.4 * wNoise(vec2(bU * 40.0, bV * 12.0)));',
+        '    float bJw = fwidth(bU * 2.0) * 1.5 + 0.004;',
+        '    float bJoint = 1.0 - smoothstep(0.0, bJw, abs(fract(bU * 2.0 + 0.5) - 0.5));',
+        '    float bWx = 0.92 + 0.08 * wNoise(vFogWorld.xz * 0.25 + vFogWorld.y);',
+        '    diffuseColor.rgb *= mix(1.0, bWx * (1.0 - 0.32 * bDirt) * (1.0 - 0.62 * bScuff) * (1.0 - 0.45 * bJoint), bSide);',
+        '  }',
+        '#endif'].join('\n'));
+    });
+  }
+  F1.R3S = { U, SOFT_W, SOFT_H, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone, barrier: barrierWear } };
 })(typeof window !== 'undefined' ? window : globalThis);

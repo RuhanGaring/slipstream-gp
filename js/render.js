@@ -252,7 +252,11 @@
   function crownFits(W, it) {
     const g = wallGap(W.tr, it.x, it.y);
     if (g > 60) return true;
-    const reach = g + (it.type === 'palm' ? 2 : 0.6);
+    // (along the tunnel no crown may reach over its wall at all, or the leaves show inside it)
+    const T = W.town && W.town.tunnel, tr = W.tr;
+    let inTun = false;
+    if (T) tr.hash.near(it.x, it.y, 40, i => { const rel = ((i - T.i0) % tr.N + tr.N) % tr.N; if (rel <= T.i1 - T.i0 + 8 || rel >= tr.N - 8) inTun = true; });
+    const reach = inTun ? g - 0.8 : g + (it.type === 'palm' ? 2 : 0.6);
     if (it.r <= reach) return true;
     if (reach < 2.4) return false;
     it.r = reach;
@@ -584,6 +588,20 @@
           if (rnd() < 0.55) W.boats.push({ x, y, h: Math.atan2(uy, ux), l: L, col: rnd() < 0.8 ? '#f6f7f5' : '#20262e', big: true });
         }
         t += L + 6 + rnd() * 20;
+      }
+    }
+    // The hotel over the tunnel (js/trackgen2.js cityTunnel), as at Monaco: a block of stucco
+    // and balconies standing on the tunnel's roof, wider than the road, in segments that follow
+    // its bend. Last, so nothing placed before it moves; its own dice.
+    if (town.tunnel) {
+      const T = town.tunnel, N = tr.N, hr = U.rng(4211 + T.i0), roofTop = 6.4 + 1.2;
+      const seg = Math.max(4, Math.round(16 / tr.ds)), hgt = 15 + Math.floor(hr() * 4) * 3.3;
+      for (let i = T.i0 - 2; i <= T.i1 + 2; i += seg) {
+        const k = ((i % N) + N) % N, k2 = ((Math.min(i + seg, T.i1 + 2) % N) + N) % N;
+        const xa = tr.x[k], ya = tr.y[k], xb = tr.x[k2], yb = tr.y[k2], len = Math.hypot(xb - xa, yb - ya) + 1.2;
+        const wl = tr.barr[0][k] + 3.2, wr = tr.barr[1][k] + 3.2, mid = (wr - wl) / 2;
+        const cx = (xa + xb) / 2 + tr.nx[k] * mid, cy = (ya + yb) / 2 + tr.ny[k] * mid;
+        addDecor(W, { type: 'building', x: cx, y: cy, w: len, h: wl + wr, a: Math.atan2(yb - ya, xb - xa), hgt, base: tr.z[k] + roofTop + 3, front: false, tunnelTop: true, seed: 7700 + i, col: '#d8cfc2', r: Math.max(len, wl + wr) / 2 });
       }
     }
   }

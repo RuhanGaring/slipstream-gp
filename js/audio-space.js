@@ -91,9 +91,21 @@
     };
     const w = Math.max(1, Math.round(20 / (step * tr.ds)));
     sm(pS, out.street, w); sm(pM, out.semi, w); sm(pF, out.forest, w);
+    // the tunnel (js/trackgen2.js cityTunnel): walls both sides and a roof, faded in over 20 m at
+    // each mouth; inside it the walls are the slaps, the ceiling over them
+    out.tunnel = new Float32Array(N);
+    const T = tr.gen2 && tr.gen2.tunnel;
+    if (T) {
+      const ramp = Math.round(20 / tr.ds), len = T.i1 - T.i0;
+      for (let q = -ramp; q <= len + ramp; q++) {
+        const i = ((T.i0 + q) % N + N) % N, w = q < 0 ? 1 + q / ramp : q > len ? 1 - (q - len) / ramp : 1;
+        out.tunnel[i] = Math.max(out.tunnel[i], w);
+      }
+    }
     // (a slap belongs to the face that is there: nearest, not averaged)
     for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) { const q = Math.round(i / step) % P; out.slapD[s][i] = pD[s][q]; out.slapH[s][i] = pH[s][q]; }
     out.raw = raw;
+    if (T) for (let q = 0; q <= T.i1 - T.i0; q++) { const i = ((T.i0 + q) % N + N) % N; for (let sd = 0; sd < 2; sd++) { out.slapD[sd][i] = tr.barr[sd][i] + 0.4; out.slapH[sd][i] = 6.4; } }
     tr.acoustic = out;
     return out;
   }
@@ -135,6 +147,17 @@
       }
       for (let i = 0; i < a.length; i++) { const t = i / sr; a[i] += (r() * 2 - 1) * 0.6 * Math.exp(-6.9 * t / 1.4) * Math.min(1, t / 0.02); }
       lowpass(a, sr, 6500);
+    });
+    // a tunnel: concrete walls 11 m apart and a roof, the sound bouncing across every 0.065 s and
+    // off the ceiling, a dense, bright, long ring
+    out.tunnel = make(2.2, (a, ch, r) => {
+      const P = 0.065;
+      for (let n = 1; n * P < 2.1; n++) {
+        const t = n * P + (ch === n % 2 ? 0 : 0.002), i0 = Math.floor(t * sr), amp = Math.exp(-6.9 * t / 2.0) * (ch === n % 2 ? 1 : 0.7) * 3, spread = sr * (0.0015 + 0.003 * n);
+        for (let j = 0; j < spread * 4 && i0 + j < a.length; j++) a[i0 + j] += (r() * 2 - 1) * amp * Math.exp(-j / spread);
+      }
+      for (let i = 0; i < a.length; i++) { const t = i / sr; a[i] += (r() * 2 - 1) * 0.8 * Math.exp(-6.9 * t / 1.8) * Math.min(1, t / 0.01); }
+      lowpass(a, sr, 7500);
     });
     return out;
   }

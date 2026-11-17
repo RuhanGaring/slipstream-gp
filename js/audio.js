@@ -58,7 +58,7 @@
     if (F1.AudioSpace) {
       const ir = F1.AudioSpace.irs(ctx), phone = F1.Game && F1.Game.mobile && F1.Game.mobile();
       A.space = {};
-      for (const k of phone ? ['open'] : ['open', 'semi', 'street']) {
+      for (const k of phone ? ['open'] : ['open', 'semi', 'street', 'tunnel']) {
         const cv = ctx.createConvolver(), g = ctx.createGain();
         cv.buffer = ir[k]; g.gain.value = k === 'open' ? 1 : 0;
         A.verbIn.connect(cv); cv.connect(g); g.connect(A.sfx);
@@ -583,14 +583,16 @@
       // the place: which rooms are heard here, and the slap off the nearest big face each side
       const sp = R.space && R.space.tr === tr ? R.space.map : null;
       if (sp) {
-        const st = sp.street[i], se = sp.semi[i], fo = sp.forest[i];
+        const st = sp.street[i], se = sp.semi[i], fo = sp.forest[i], tn = sp.tunnel ? sp.tunnel[i] : 0, out = 1 - tn;
         if (A.space) {
-          at(A.space.open.gain, Math.max(0.15, 1 - 0.7 * Math.max(st, se)) * (1 + 0.6 * fo), 0.4);
-          if (A.space.semi) at(A.space.semi.gain, 1.5 * se, 0.4);
-          if (A.space.street) at(A.space.street.gain, 2.2 * st, 0.4);
+          at(A.space.open.gain, Math.max(0.15, 1 - 0.7 * Math.max(st, se)) * (1 + 0.6 * fo) * out, 0.25);
+          if (A.space.semi) at(A.space.semi.gain, 1.5 * se * out, 0.25);
+          if (A.space.street) at(A.space.street.gain, 2.2 * st * out, 0.25);
+          // (in the tunnel its own ring takes over, quickly: the mouth is a hard edge)
+          if (A.space.tunnel) at(A.space.tunnel.gain, 2.8 * tn, 0.15);
         }
-        // (in a street the open air's long tail gives way to the street's own ringing)
-        at(A.airIn.gain, 0.14 * (1 - 0.6 * st), 0.4);
+        // (in a street the open air's long tail gives way to the street's own ringing; in the tunnel, gone)
+        at(A.airIn.gain, 0.14 * (1 - 0.6 * st) * (1 - 0.9 * tn), 0.3);
         [0, 1].forEach(s => {
           const r = R.refl[2 + s], D = sp.slapD[s][i], h = sp.slapH[s][i];
           const w = D > 0 ? Math.max(2, s ? D - dd : D + dd) : 0;

@@ -157,7 +157,7 @@
     const cells = new Map(), M = new THREE.Matrix4(), v = new THREE.Vector3(), c = new THREE.Vector3();
     for (const m of root.children.slice()) {
       const mt = m.material;
-      if (!m.isMesh || !m.castShadow || m.isInstancedMesh || !m.geometry || m.geometry.isInstancedBufferGeometry || Array.isArray(mt)) continue;
+      if (!m.isMesh || !m.castShadow || m.isInstancedMesh || !m.geometry || m.geometry.isInstancedBufferGeometry || Array.isArray(mt) || m.userData.noProxy) continue;
       if (mt.transparent || mt.alphaTest > 0 || mt.alphaMap || m.customDepthMaterial || mt.userData.patchExtra || mt.userData.grass || m.geometry.morphAttributes.position) continue;
       const g = m.geometry, P = g.attributes.position;
       if (!P) continue;
@@ -323,7 +323,7 @@
     MATS.rubber = std({ color: '#0a0a0b', roughness: 0.5, transparent: true, opacity: 0.32, depthWrite: false, normalMap: aN });
     MATS.concrete = ph ? pbr('concrete', [3, 0.45], { side: THREE.DoubleSide }) : std({ map: T.concrete(), roughness: 0.9, side: THREE.DoubleSide });
     // printed vinyl hoardings on concrete: uniform satin, the wall's relief shows through
-    MATS.adwall = std({ map: adTexture(), roughness: 0.5, side: THREE.DoubleSide, normalMap: ph ? T.photo('concrete_n', [5, 0.45], false) : null });
+    MATS.adwall = F1.R3S.wear.barrier(std({ map: adTexture(), roughness: 0.5, side: THREE.DoubleSide, normalMap: ph ? T.photo('concrete_n', [5, 0.45], false) : null }));
     if (ph) MATS.adwall.normalScale.set(0.35, 0.35);
     // galvanised W-beam: metal, roughness from the photo, ridges from a profile normal map
     MATS.armco = ph ? std({ color: '#b4b9be', roughness: 0.42, metalness: 0.8, side: THREE.DoubleSide, normalMap: T.corrugation() })
@@ -891,7 +891,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // onboard pictures of a harbour circuit are high-key
     const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
     // (+1.1 EV in all: broadcast onboard pictures of a Riviera noon are high key, whites clip)
-    if (rivi) { state.exposure *= 1.4; sun.intensity *= 1.1; } else state.exposure *= L.expK || 1.15;
+    // (and a harder sun against cooler, dimmer shade than the flat high-key it had: the depth of a
+    // photograph, sunlit fronts against streets in shade)
+    if (rivi) { state.exposure *= 1.3; sun.intensity *= 1.3; } else state.exposure *= L.expK || 1.15;
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     S3.uRoadSky.value = L.roadSky || 3.2;
@@ -900,7 +902,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
     for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? 1 : L.env;
     // (the light bounced off sunlit stucco into the street's shade)
-    if (rivi) { hemi.color.set('#f2e6d2'); hemi.groundColor.set('#b8a88e'); hemi.intensity = 0.7; }
+    if (rivi) {
+      hemi.color.set('#e4e9f2'); hemi.groundColor.set('#b8a48a'); hemi.intensity = 0.5;
+      // aerial perspective over the sea air: the mountain behind the town a few kilometres off goes
+      // soft and blue, as in every photograph of the Riviera; height thins the haze only slowly
+      S3.uFogDensity.value *= 1.6; S3.uFogFalloff.value = 1 / 1100;
+      S3.uFogCol.value.lerp(new THREE.Color('#c9d6e6'), 0.45); scene.fog.color.copy(S3.uFogCol.value);
+    }
     // (shade is lit by the sky and the ground: without this, shadowed foliage goes black)
     else if (H0) { hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.42; }
     state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
@@ -940,6 +948,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
     hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777');
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
+    // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
+    // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
+    const tk = state.tunApplied || 0;
+    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.7 - hemi.intensity) * tk; }
     if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== oc) { F1.R3Shadow.setSoften(1 + 4 * oc); state.ocS = oc; }
     if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(1 - 0.88 * oc);
@@ -1067,7 +1079,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // the circuit's traced sky shade on the road, made once per built circuit (not on the
     // phone presets, which have no post-processing and little time to spare while loading)
     if (built.roadSky === undefined) built.roadSky = F1.R3CarShade && !POT && GFX.post !== false && GFX.roadShade !== false ? F1.R3CarShade.bakeRoad(tr, built.root) : null;
-    { const RS = built.roadSky, S3 = F1.R3S.U; S3.uRoadShadeOn.value = RS ? 1 : 0; if (RS) { S3.uRoadShade.value = RS.tex; S3.uRoadShadeP.value.set(RS.L, RS.d0, RS.dw); } }
+    { const RS = built.roadSky, S3 = F1.R3S.U; S3.uRoadShadeOn.value = RS ? 1 : 0; if (RS) { S3.uRoadShade.value = RS.tex; S3.uRoadShadeP.value.set(RS.L, RS.d0, RS.dw); }
+      // (a harbour town's circuit is its own streets: as light as the side streets beside it, its
+      // racing line only faintly rubbered; the barriers alone mark it out)
+      const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0; }
+    state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null;
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
@@ -1744,7 +1760,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         wallRun(fen, tr, i0, i1 - 1, k => d(k) + pit.side * 0.3, 1.1, 3.6, 1.6, 1.6, 0);
       }
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
-      if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap })); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
+      if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = F1.R3S.wear.barrier(std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap }))); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
       if (armW.k) add(armW.geo(), M.railW || (M.railW = std({ color: '#cfd4d2', roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide, normalMap: T.corrugation() })), { cast: true });
       if (orn.k) add(orn.geo(), M.orangeEnd || (M.orangeEnd = std({ map: absorberTex(), roughness: 0.7, side: THREE.DoubleSide })), { cast: true });
@@ -1877,6 +1893,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     {
       const walls = new Batch(true), roofs = new Batch(true), relief = new Batch(true), ub = new THREE.BoxGeometry(1, 1, 1);
       const hipG = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1, true); hipG.rotateY(Math.PI / 4); hipG.translate(0, 0.5, 0);
+      const roofCyl = new THREE.CylinderGeometry(1, 1, 1, 8);
       const shops = W2.town && T.has('city_shop') ? new Batch(false) : null;
       const awn = ['#2f5d3a', '#7a2a2a', '#20324f', '#c9b48a', '#3d3f44', '#8a6a3a'];
       const kinds = T.has('glass') ? [['office', 28, new Batch(false)], ['glass', 15, new Batch(false)], ['glasslit', 15, new Batch(false)]] : [];
@@ -1893,9 +1910,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const ry = -(it.a || 0), ca = Math.cos(it.a || 0), sa = Math.sin(it.a || 0);
         // (lx, lz) in the block's own frame, to the world
         const W2L = (lx, lz) => [it.x + lx * ca - lz * sa, it.y + lx * sa + lz * ca];
-        // on a slope it stands on its lowest corner, its foundations below the rest
-        let gmin = Tracks.groundAt(tr, it.x, it.y);
-        if (it.a != null) for (const [qx, qz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) gmin = Math.min(gmin, Tracks.groundAt(tr, ...W2L(qx * it.w / 2, qz * it.h / 2)));
+        // on a slope it stands on its lowest corner, its foundations below the rest (a building on
+        // a raised base, the hotel over the tunnel, stands on that)
+        let gmin = it.base != null ? it.base : Tracks.groundAt(tr, it.x, it.y);
+        if (it.a != null && it.base == null) for (const [qx, qz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) gmin = Math.min(gmin, Tracks.groundAt(tr, ...W2L(qx * it.w / 2, qz * it.h / 2)));
         const pick = r();
         // the blocks facing the circuit are the old town's stone and stucco (glass and office
         // towers stand further back, as at Monaco)
@@ -1911,7 +1929,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           roofs.add(ub, mat(it.x, hgt + 3 + gy0, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
           continue;
         }
-        const g = new THREE.BoxGeometry(it.w, hgt, it.h);
+        // (split every 6 m up, so the street-level shade below can follow the height)
+        const g = new THREE.BoxGeometry(it.w, hgt, it.h, 1, Math.max(1, Math.ceil(hgt / 6)), 1);
         const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
         // a generated harbour town's blocks wear its own stucco fronts (shuttered windows, two bays
         // by two floors a 6.4 m tile), the rest the venue's facade
@@ -1923,7 +1942,26 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         const gy = gmin - 3; // foundations below sloping streets
         g.scale(1, (hgt + 3) / hgt, 1);
-        (town ? town[1] : walls).add(g, mat(it.x, (hgt + 3) / 2 + gy, it.y, ry), col(town ? townTints[Math.floor(r() * townTints.length)] : tints[Math.floor(r() * tints.length)]));
+        // The street's own shade, baked: the lower floors of a street see less sky (the buildings
+        // opposite take it) and less bounce, so they sit darker than the upper floors in the same
+        // light, the look of a real narrow street. In the vertex colour, so it costs nothing a frame.
+        {
+          const tint = col(town ? townTints[Math.floor(r() * townTints.length)] : tints[Math.floor(r() * tints.length)]), P2 = g.attributes.position, cl = new Float32Array(P2.count * 3);
+          for (let k = 0; k < P2.count; k++) {
+            const up = P2.getY(k) + (hgt + 3) / 2 - 3, f = it.base != null ? 1 : 0.7 + 0.3 * Math.min(1, Math.max(0, up / 16)) ** 0.8;
+            cl[k * 3] = tint.r * f; cl[k * 3 + 1] = tint.g * f; cl[k * 3 + 2] = tint.b * f;
+          }
+          g.setAttribute('color', new THREE.BufferAttribute(cl, 3));
+        }
+        (town ? town[1] : walls).add(g, mat(it.x, (hgt + 3) / 2 + gy, it.y, ry), null);
+        // the town's stucco blocks in relief: a stone band over the ground floor and a slim string
+        // course every two floors round the whole block, catching the sun on top and throwing a
+        // line of shade under it (real geometry, merged with the balconies; drawn to 480 m)
+        if (town && it.base == null) {
+          const band = col(['#efe7d8', '#e9dfcc', '#f3ede2'][it.seed % 3]);
+          relief.add(ub, mat(it.x, gy + 3 + 3.75, it.y, ry, it.w + 0.36, 0.42, it.h + 0.36), band);
+          for (let y = 3 + 3.75 + 6.6; y < hgt + 1.5; y += 6.6) relief.add(ub, mat(it.x, gy + y, it.y, ry, it.w + 0.18, 0.18, it.h + 0.18), band);
+        }
         // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
         // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
         // dark glazing under fabric awnings
@@ -1953,6 +1991,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         } else {
           roofs.add(ub, mat(it.x, hgt + 3 + gy, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
           if (town && it.w * it.h > 90) { const [hx, hz] = W2L(it.w * 0.18 * ((it.seed & 1) * 2 - 1), it.h * 0.15); roofs.add(ub, mat(hx, hgt + 3 + gy + 1.3, hz, ry, 3.2, 2.2, 2.6), col('#c9c6bf')); }
+          // what stands on a town's flat roofs: air-conditioning units in a row, a water tank on its
+          // frame, an aerial or two (merged with the roofs: no extra draws)
+          if (town && it.w * it.h > 60) {
+            const top = hgt + 3 + gy + 0.3, rr = U.rng(it.seed * 7 + 3), ac = col('#d8d6d0'), dk = col('#8d8f92');
+            const nAC = 1 + Math.floor(rr() * 3);
+            for (let q = 0; q < nAC; q++) { const [ax, az] = W2L((rr() - 0.5) * it.w * 0.6, (rr() - 0.5) * it.h * 0.6); roofs.add(ub, mat(ax, top + 0.45, az, ry + (rr() < 0.5 ? 0 : Math.PI / 2), 1.3, 0.9, 0.8), ac); }
+            if (rr() < 0.35) { const [tx, tz] = W2L((rr() - 0.5) * it.w * 0.5, (rr() - 0.5) * it.h * 0.5); roofs.add(roofCyl, mat(tx, top + 1.6, tz, 0, 1.0, 1.7, 1.0), col('#bfc3c6')); roofs.add(ub, mat(tx, top + 0.35, tz, ry, 1.8, 0.7, 1.8), dk); }
+            if (rr() < 0.45) { const [nx2, nz2] = W2L((rr() - 0.5) * it.w * 0.7, (rr() - 0.5) * it.h * 0.7); roofs.add(roofCyl, mat(nx2, top + 1.6, nz2, 0, 0.05, 3.2, 0.05), dk); roofs.add(ub, mat(nx2, top + 2.6, nz2, ry, 1.1, 0.05, 0.05), dk); }
+          }
         }
       }
       add(relief.geo(), M.vcol, { cast: true, far: 480 });
@@ -2185,7 +2232,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     };
     const paintY = (x, z) => { const m = lapAt(tr, x, z); return m && m.bar < 0.6 ? Tracks.surfS(tr, m.s, m.dl) + 0.016 : yRoad(x, z) + 0.016; };
     const iron = col('#343436');
-    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 14, c = mark.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(mark.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) mark.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#45454a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(mark.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), mark.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; mark.t(a0, a1, b0); mark.t(a1, b1, b0); } };
+    // (manhole covers: rough cast iron of their own, not the glossy paint, whose sky reflection turned them blue)
+    const hole = new Acc(true);
+    const manhole = (p, R) => { const y = paintY(p[0], p[1]) + 0.002, n = 14, c = hole.v(p[0], y, p[1], 0, 1, 0, 0, 0, iron), vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vs.push(hole.v(p[0] + Math.cos(a) * R, y, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, iron)); } for (let k = 0; k < n; k++) hole.t(c, vs[(k + 1) % n], vs[k]); const rim = col('#45454a'), vr = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; vr.push(hole.v(p[0] + Math.cos(a) * (R + 0.07), y + 0.001, p[1] + Math.sin(a) * (R + 0.07), 0, 1, 0, 0, 0, rim), hole.v(p[0] + Math.cos(a) * R, y + 0.001, p[1] + Math.sin(a) * R, 0, 1, 0, 0, 0, rim)); } for (let k = 0; k < n; k++) { const a0 = vr[k * 2], a1 = vr[k * 2 + 1], b0 = vr[(k + 1) % n * 2], b1 = vr[(k + 1) % n * 2 + 1]; hole.t(a0, a1, b0); hole.t(a1, b1, b0); } };
     for (const e of edges) {
       const s0 = setOf(e, 0), s1 = e.L - setOf(e, 1);
       if (s1 - s0 < 1) continue;
@@ -2465,6 +2514,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!M.townPave) { M.townPave = T.has('city_tile') ? pbr('city_tile', 1, { color: '#8f8b80', side: THREE.DoubleSide, envMapIntensity: 0.25 }) : M.concrete; if (M.townPave.roughnessMap) { M.townPave.roughnessMap = null; M.townPave.metalnessMap = null; M.townPave.roughness = 0.96; M.townPave.metalness = 0; } }
     add(pave.geo(), M.townPave);
     add(mark.geo(), M.paint, { receive: true, order: 1, far: 300 });
+    if (hole.k) add(hole.geo(), M.castIron || (M.castIron = F1.R3S.wear.paint(std({ vertexColors: true, roughness: 0.92, metalness: 0.25, envMapIntensity: 0.35, depthWrite: false }))), { receive: true, order: 1, far: 300 });
     // ---- what a town closed for a race looks like (from the Monaco onboard, frame by frame) ----
     // A side street has no closure of its own: the ordinary barrier carries straight on along the
     // kerb line, with asphalt and paint running under it, and only what stands beyond says a street
@@ -2513,13 +2563,22 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       wheel.rotateZ(Math.PI / 2);
       const body = new THREE.CapsuleGeometry(0.17, 0.42, 2, 6), leg = new THREE.CapsuleGeometry(0.075, 0.62, 1, 5), limb = new THREE.CapsuleGeometry(0.055, 0.46, 1, 5);
       const disc = new THREE.CircleGeometry(0.35, 12), discs = new Batch(true), red = col('#c8342c'), wh = col('#ece9e2'), or = col('#e8641c'), dk = col('#17181a'), helmet = col('#efeee8');
-      const yb = (x, z) => yRoad(x, z) + 0.14, skin = ['#d9a982', '#b98a66', '#8a5f42', '#e2b896'], shirts = ['#d8d8d4', '#26415f', '#b5332e', '#2c2c30', '#6f8a6a', '#e2c34a', '#5d6d86', '#c9b8a2'];
+      const yb = (x, z) => yRoad(x, z) + 0.14, skin = ['#d9a982', '#b98a66', '#8a5f42', '#e2b896'], shirts = ['#e8e6e0', '#f2f0ea', '#26415f', '#9c3a33', '#2c2c30', '#6f8a6a', '#c9a64a', '#5d6d86', '#c9b8a2', '#8aa5c4', '#d7cfc0', '#3e5a48'];
+      // a person: height and build vary, a spectator may be cheering with one arm or both raised,
+      // most have hair, trousers are dark, denim or pale (a marshal is orange all over, helmeted)
+      const hairs = ['#2a2018', '#3d2c1e', '#1a1a1a', '#6b5136', '#b39a72', '#4a4a48'], trs = ['#1d2230', '#2f3d55', '#3a3a3c', '#c9bfae', '#5a5048'];
       const person = (x, z, k, shirt, hat) => {
-        const y = yb(x, z), sn = Math.sin(k), cs = Math.cos(k), trou = shirt === or ? or : dk;
-        for (const q of [-0.1, 0.1]) people.add(leg, mat(x + cs * q, y + 0.42, z - sn * q, k, 1, 1, 1), trou);
-        people.add(body, mat(x, y + 1.08, z, k, 1, 1, 0.72), shirt);
-        for (const q of [-0.25, 0.25]) people.add(limb, mat(x + cs * q, y + 1.1, z - sn * q, k, 1, 1, 1), shirt);
-        people.add(head, mat(x, y + 1.58, z, 0, 1, 1.1, 1), hat);
+        const y = yb(x, z), sn = Math.sin(k), cs = Math.cos(k), marshal = shirt === or, pr = rnd();
+        const sc = 0.92 + rnd() * 0.14, wd = 0.9 + rnd() * 0.22, trou = marshal ? or : col(trs[Math.floor(rnd() * trs.length)]);
+        for (const q of [-0.1, 0.1]) people.add(leg, mat(x + cs * q * wd, y + 0.42 * sc, z - sn * q * wd, k, wd, sc, 1), trou);
+        people.add(body, mat(x, y + 1.08 * sc, z, k, wd, sc, 0.72), shirt);
+        for (const q of [-0.25, 0.25]) {
+          // (raised: the arm turned up over the shoulder, as when a car goes by)
+          const up = !marshal && (pr < 0.12 || (pr < 0.3 && q > 0));
+          people.add(limb, up ? mat(x + cs * q * wd, y + 1.62 * sc, z - sn * q * wd, k, 1, sc, 1, 0, q > 0 ? -2.7 : 2.7) : mat(x + cs * q * wd, y + 1.1 * sc, z - sn * q * wd, k, 1, sc, 1), shirt);
+        }
+        people.add(head, mat(x, y + 1.58 * sc, z, 0, 1, 1.1, 1), hat);
+        if (!marshal && rnd() < 0.8) people.add(head, mat(x, y + 1.63 * sc, z, 0, 1.06, 0.62, 1.06), col(hairs[Math.floor(rnd() * hairs.length)]));
       };
       // a service truck: box, cab with its windscreen, wheels
       const vehicle = (x, z, ry, L, c, box = true) => {
@@ -2603,7 +2662,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         banK.forEach((a, k) => { if (a.k) add(a.geo(), M['banner' + k] || (M['banner' + k] = std({ map: adTexture(k * 2 + 1), roughness: 0.5, side: THREE.DoubleSide })), { cast: true }); });
       }
       if (paint.parts.length) add(paint.geo(), M.vcol, { cast: true, far: 520 });
-      if (people.parts.length) add(people.geo(), M.vcol, { cast: false, far: 190 });
+      if (people.parts.length) add(people.geo(), M.vcol, { cast: true, far: 190 });
       if (steel.parts.length) add(steel.geo(), M.steel, { cast: true });
       if (glassB.parts.length) add(glassB.geo(), M.carGlass || (M.carGlass = std({ color: '#14191e', roughness: 0.12, metalness: 0.2 })), { cast: false });
       if (discs.parts.length) add(discs.geo(), M.noEntry || (M.noEntry = new THREE.MeshBasicMaterial({ map: noEntryTex(), side: THREE.DoubleSide })), { cast: false, far: 200 });
@@ -2802,9 +2861,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       add(hull.geo(), M.vcol, { cast: true }); add(cabin.geo(), M.vcol, { cast: true }); add(mast.geo(), M.white);
       add(glass.geo(), M.dark);
     }
-    // the tunnel: walls behind the barriers, a slab roof, a strip of lamps along the ceiling
+    // the tunnel, after Monaco's: pale stone-tiled walls with pilasters behind the barriers, a flat
+    // grey slab ceiling, two rows of warm lamps along it near the walls
     if (town.tunnel) {
-      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.5, 0.08, 2.2);
+      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(), ceil = new Acc(), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.55, 0.1, 1.5), pil = new Batch(true), pb = new THREE.BoxGeometry(1, 1, 1);
       const off = (k, sd) => sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4), H = 6.4;
       for (const sd of [-1, 1]) {
         let prev = null, along = 0;
@@ -2824,9 +2884,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const a2 = wl.v(tr.x[k] + tr.nx[k] * dl, y + 1.2, tr.y[k] + tr.ny[k] * dl, 0, 1, 0, 0, i / 3), c2 = wl.v(tr.x[k] + tr.nx[k] * dr, y + 1.2, tr.y[k] + tr.ny[k] * dr, 0, 1, 0, 1, i / 3);
         if (prev) { wl.t(prev[0], a, prev[1]); wl.t(prev[1], a, c); wl.t(prev[2], prev[3], a2); wl.t(prev[3], c2, a2); }
         prev = [a, c, a2, c2];
-        if (i % Math.max(1, Math.round(6 / tr.ds)) === 0) lamps.add(lg, mat(tr.x[k], y - 0.06, tr.y[k], -Math.atan2(tr.ty[k], tr.tx[k]) + Math.PI / 2));
+        const ry = -Math.atan2(tr.ty[k], tr.tx[k]) + Math.PI / 2;
+        // two rows of lamps, 1.6 m in from each wall, every 4 m
+        if (i % Math.max(1, Math.round(4 / tr.ds)) === 0) for (const o of [dl + 1.6, dr - 1.6]) lamps.add(lg, mat(tr.x[k] + tr.nx[k] * o, y - 0.07, tr.y[k] + tr.ny[k] * o, ry));
+        // pilasters on both walls every 7 m: a pale stone pier standing a little proud of the tiles
+        if (i % Math.max(1, Math.round(7 / tr.ds)) === 0) for (const [o, sd] of [[dl, -1], [dr, 1]]) { const q = o - sd * 0.22; pil.add(pb, mat(tr.x[k] + tr.nx[k] * q, tr.z[k] + H / 2 - 0.1, tr.y[k] + tr.ny[k] * q, ry, 0.45, H + 0.2, 0.9), col('#efe6d4')); }
       }
-      add(wl.geo(), M.concrete, { cast: true });
+      // (kept out of the merged shadow casters: merged, its roof stopped casting and the sun lit the road under it)
+      if (!M.tunnelWall) { M.tunnelWall = M.concrete.clone(); M.tunnelWall.color = new THREE.Color('#e6d7b8'); }
+      const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) tm.userData.noProxy = true;
+      add(pil.geo(), M.vcol, { cast: false });
       if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#fff3d6', emissive: '#ffe2a8', emissiveIntensity: 6, roughness: 0.5 });
       add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
     }
@@ -3296,7 +3363,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       rimal: { forA: '#6b5a3f', forB: '#7c6a4c', open: '#c79c6c', rockA: '#b8916a', rockB: '#8e6c4e', scree: '#d2ad80', cover: -1, line: 1, mix: 0, belt: 0 },
       lonestar: { forA: '#4a4a2c', forB: '#5e5c38', open: '#a9916a', rockA: '#b08e6c', rockB: '#83664c', scree: '#c2a884', cover: -0.32, line: 1, mix: 0.4, belt: 0 },
     };
-    const C = MTN[id] || { forA: '#1d2f1e', forB: '#33492a', open: L.ridge[0], rockA: '#8a857b', rockB: '#5d5952', scree: '#a39d90', cover: 0.18, line: 1, mix: 0.5, belt: 1 };
+    // (a harbour town's mountain, as behind Monaco: pale limestone crags and screes over dark maquis
+    // scrub in the gullies and along the foot, not a green hill)
+    const RIVI = { forA: '#232c1e', forB: '#38422c', forC: '#4f4f37', foot: '#7a7558', open: '#857e66', rockA: '#9d9586', rockB: '#6a645a', scree: '#aaa292', cover: 0.12, line: 0.62, mix: 1, belt: 0.55, rk: [0.12, 0.32, 0.8], soft: 0.12, gully: 0.7 };
+    const C = (tr && tr.gen2 && tr.gen2.city) ? RIVI : MTN[id] || { forA: '#1d2f1e', forB: '#33492a', open: L.ridge[0], rockA: '#8a857b', rockB: '#5d5952', scree: '#a39d90', cover: 0.18, line: 1, mix: 0.5, belt: 1 };
     const A = 640, NR = 84, Ri = bd.Ri, Ro = bd.Ro;
     const gC = tr && tr.H ? tr.H(bd.cx, bd.cz) : 0;
     const nv = A * NR, pos = new Float32Array(nv * 3), colr = new Float32Array(nv * 3), hh = new Float32Array(nv), sea = new Uint8Array(nv);
@@ -4327,6 +4397,40 @@ void main() {
     return Promise.all([p.catch(() => {}), F1.R3Post.Q.on ? F1.R3Post.precompile() : null]).then(() => rt.dispose());
   }
 
+  // In the tunnel (js/trackgen2.js cityTunnel): the roof's shadow takes the sun, but the sky's light
+  // (the environment map and the hemisphere) would still light everything as in the open. With the
+  // camera inside, that sky light is turned down to the lamps' level and the exposure opens up, as a
+  // broadcast camera's does, so the road ahead is dim under its strip of lamps and the way out
+  // flares white. It eases in and out over the last 25 m outside each mouth.
+  const TUN_LAMP = new THREE.Color('#ffdcae'), TUN_FLOOR = new THREE.Color('#7a6e5e');
+  function tunnelLight(dt) {
+    const tr = state.tr, T = tr && tr.gen2 && tr.gen2.tunnel;
+    let want = 0;
+    if (T) {
+      const cp = camera.position, loc = state.tunLoc || (state.tunLoc = { i: -1 });
+      Tracks.locate(tr, cp.x, cp.z, state.tunLoc.i >= 0 ? state.tunLoc.i : null, loc);
+      // (from last frame's place it can lock onto the wrong stretch after a camera cut: search afresh)
+      if (Math.abs(loc.d) > 25) Tracks.locate(tr, cp.x, cp.z, null, loc);
+      const N = tr.N, i = loc.i, rel = ((i - T.i0) % N + N) % N, len = T.i1 - T.i0, k = i;
+      const wall = loc.d >= 0 ? tr.barr[1][k] : tr.barr[0][k];
+      if (Math.abs(loc.d) < wall + 0.3 && cp.y < tr.z[k] + 6.2) {
+        const ramp = 25 / tr.ds, before = rel > N / 2 ? N - rel : null;
+        if (before != null) want = Math.max(0, 1 - before / ramp) * 0.35;                 // approaching the mouth
+        else if (rel <= len) want = Math.min(1, 0.35 + 0.65 * Math.min(rel, len - rel) / Math.max(1, 12 / tr.ds));
+        else want = Math.max(0, 1 - (rel - len) / ramp) * 0.35;                           // just out
+      }
+    }
+    // (the eye, or the camera's iris, takes a moment)
+    state.tunK = (state.tunK || 0) + (want - (state.tunK || 0)) * Math.min(1, dt * 3);
+    const k = state.tunK < 0.003 ? 0 : state.tunK;
+    F1.R3S.U.uTunLamp.value = 0.85 * k;
+    if (k !== state.tunApplied) {
+      state.tunApplied = k;
+      if (!state.envMats && state.root) { state.envMats = []; state.root.traverse(m => { const ms = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : []; for (const mt of ms) if (mt && mt.envMapIntensity != null && !mt.userData.tunEnv) { mt.userData.tunEnv = mt.envMapIntensity; state.envMats.push(mt); } }); }
+      if (state.envMats) for (const mt of state.envMats) mt.envMapIntensity = mt.userData.tunEnv * (1 - 0.5 * k);
+    }
+    return k;
+  }
   function render(o) {
     if (!renderer || !state.tr || compiling) return;
     sortFrame++;
@@ -4389,7 +4493,8 @@ void main() {
       carShade(G.__noCarOcc ? [] : near.slice(0, 8));
     }
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
-    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1);
+    const tunK = tunnelLight(dt);
+    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (1 + 0.8 * tunK);
     F1.R3Shadow.U.r3SunA.value = F1.R3Post.Q.on ? 1 : 0;
     if (F1.R3Post.Q.on) {
       renderer.toneMapping = THREE.NoToneMapping;

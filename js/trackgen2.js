@@ -1486,7 +1486,6 @@
     const raw = new Float64Array(tr.N);
     for (let i = 0; i < tr.N; i++) raw[i] = s0.H(tr.x[i], tr.y[i]);
     // a harbour town's quays and seafront stand a couple of metres above the water
-    const tunnel = null;
     if (city) for (let i = 0; i < tr.N; i++) raw[i] = Math.max(raw[i], 2.5);
     const gr = grade(tr, raw, st);
     applyProfile(tr, gr.z, s0.H, st);
@@ -1496,6 +1495,9 @@
     const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed };
     if (city) {
       res.city = { buildings: F1.roadOnly ? [] : cityBuildings(r, tr, s0), roads: s0.roads };
+      // (after the buildings: the tunnel draws no dice, so a circuit's town stays as it was)
+      const tunnel = cityTunnel(tr, s0);
+      if (tunnel) for (let i = tunnel.i0; i <= tunnel.i1; i++) role[((i % tr.N) + tr.N) % tr.N] = 'tunnel';
       res.role = role;
       res.tunnel = tunnel;
     }
@@ -1516,6 +1518,48 @@
       bank0[i] = U.clamp(-Math.sign(k) * (tr.def.terrain.bank) * gk + U.clamp(side, -1, 1) * 0.25, -0.06, 0.06);
     }
     tr.z = z; tr.dz = dz; tr.ddz = smoothLoop(dd, 8 / ds); tr.bank = smoothLoop(bank0, 25 / ds);
+  }
+  // A harbour town's tunnel, as at Monaco's under the hotel on the seafront: the lap runs under a
+  // building for 100 to 220 m where no side street meets it (a street would end at the tunnel's
+  // wall), the road bends gently at most, and it is well clear of the grid and the pit lane.
+  // Of those stretches the one nearest the water. Picked from the circuit alone, with no dice.
+  function cityTunnel(tr, s0) {
+    const N = tr.N, ds = tr.ds, L = tr.L, ok = new Uint8Array(N).fill(1), net = s0.net;
+    // side streets: every street off the lap that ends within 14 m of it blocks 16 m either side
+    if (net) {
+      const deg = new Map(), lapNode = new Set();
+      for (const e of net.edges) for (const n of [e.a, e.b]) { deg.set(n, (deg.get(n) || 0) + 1); if (e.lap) lapNode.add(n); }
+      const loc = { i: -1 };
+      for (const e of net.edges) {
+        if (e.lap) continue;
+        for (const n of [e.a, e.b]) {
+          if (!lapNode.has(n)) continue;
+          const nd = net.nodes[n];
+          F1.Tracks.locate(tr, nd.x, nd.y, null, loc);
+          if (Math.abs(loc.d) > tr.hw + 14) continue;
+          for (let q = -Math.round(16 / ds); q <= Math.round(16 / ds); q++) ok[(loc.i + q + N) % N] = 0;
+        }
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      const s = i * ds;
+      if (s < 350 || s > L - 350 || !isNaN(tr.pit.off[i]) || Math.abs(tr.kap[i]) > 1 / 70) ok[i] = 0;
+    }
+    let best = null;
+    for (let i = 0; i < N;) {
+      if (!ok[i]) { i++; continue; }
+      let j = i; while (j + 1 < N && ok[j + 1]) j++;
+      const len = (j - i + 1) * ds;
+      if (len >= 100) {
+        // at most 220 m, from the middle of the run
+        const n = Math.round(Math.min(len, 220) / ds), a = i + Math.floor((j - i + 1 - n) / 2), b = a + n - 1;
+        let wet = 0; for (let k = a; k <= b; k += 4) wet += s0.inland ? s0.inland(tr.x[k], tr.y[k]) : 0;
+        const score = wet / Math.ceil(n / 4) - n * ds * 0.05;
+        if (!best || score < best.score) best = { i0: a, i1: b, score };
+      }
+      i = j + 1;
+    }
+    return best ? { i0: best.i0, i1: best.i1 } : null;
   }
   function pitClear(tr, need) {
     const N = tr.N, ds = tr.ds, p = tr.pit;
