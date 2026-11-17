@@ -223,7 +223,44 @@
     return ok;
   }
 
+  // How far a point lies behind the circuit's walls (m, negative: on the road side of them), against
+  // every part of the lap nearby, not only the nearest point: at a hairpin or beside a parallel
+  // straight a point can be well clear of its own stretch and on another.
+  function wallGap(tr, x, y) {
+    let g = 1e9;
+    tr.hash.near(x, y, 60, i => {
+      const dx = x - tr.x[i], dy = y - tr.y[i];
+      if (Math.abs(dx * tr.tx[i] + dy * tr.ty[i]) > tr.ds * 0.75) return;
+      const d = dx * tr.nx[i] + dy * tr.ny[i];
+      g = Math.min(g, Math.abs(d) - tr.barr[d > 0 ? 1 : 0][i]);
+    });
+    return g;
+  }
+  // the least wallGap over a box (centre x, y; w along angle a, h across), its edges every 2 m
+  function boxGap(tr, x, y, w, h, a) {
+    const ca = Math.cos(a), sa = Math.sin(a);
+    let g = 1e9;
+    const at = (u, v) => { g = Math.min(g, wallGap(tr, x + u * ca - v * sa, y + u * sa + v * ca)); };
+    for (let u = -w / 2; u <= w / 2 + 1e-6; u += Math.max(0.5, w / Math.ceil(w / 2))) { at(u, -h / 2); at(u, h / 2); }
+    for (let v = -h / 2; v <= h / 2 + 1e-6; v += Math.max(0.5, h / Math.ceil(h / 2))) { at(-w / 2, v); at(w / 2, v); }
+    return g;
+  }
+  // On a town circuit the trees stand close behind the walls, and a crown must not reach out over
+  // the road at a driver's eye: past the wall by 0.6 m at most (a palm's fronds sit high, 2 m). A
+  // tree too close for its crown gets a smaller one (not under 2.4 m), and one with no room for even
+  // that is left out. (Fitted after the tree is drawn from the dice, so no other tree changes place.)
+  function crownFits(W, it) {
+    const g = wallGap(W.tr, it.x, it.y);
+    if (g > 60) return true;
+    const reach = g + (it.type === 'palm' ? 2 : 0.6);
+    if (it.r <= reach) return true;
+    if (reach < 2.4) return false;
+    it.r = reach;
+    return true;
+  }
+
   function addDecor(W, item) {
+    if (W.crownGuard && (item.type === 'tree' || item.type === 'palm') && !crownFits(W, item)) return;
     W.decor.push(item);
     const r = item.r || Math.hypot(item.w || 0, item.h || 0);
     const c0 = Math.floor((item.x - r) / 200), c1 = Math.floor((item.x + r) / 200);
@@ -296,12 +333,24 @@
         const off = st.side * (tr.barr[side][i] + 9);
         const [x, y, h] = Tracks.pointAt(tr, s, off);
         if (!clearance(tr, x, y, 4)) continue;
-        addDecor(W, { type: 'stand', x, y, h, w: 28, d: 12, side: st.side, seed: Math.floor(rnd() * 1e6), r: 18 });
-        W.solid.push({ x, y, r: 22 });
+        const seed = Math.floor(rnd() * 1e6);
+        // A stand is a straight 28 m box, and at a corner its ends can reach the road (its own
+        // stretch curving away or another part of the lap): checked along its whole footprint,
+        // stepped back from the wall until it is clear, and left out if 6 m is not enough.
+        // (its front is 6.1 m before its centre, its back 6.4 m behind; h is the track's heading)
+        let ok = null;
+        for (let back = 0; back <= 6 && !ok; back += 1.5) {
+          const [bx, by, bh] = Tracks.pointAt(tr, s, off + st.side * back), cx = bx + 0.15 * st.side * -Math.sin(h), cy = by + 0.15 * st.side * Math.cos(h);
+          if (boxGap(tr, cx, cy, 28, 12.5, h) >= 1) ok = [bx, by, bh];
+        }
+        if (!ok) continue;
+        addDecor(W, { type: 'stand', x: ok[0], y: ok[1], h, w: 28, d: 12, side: st.side, seed, r: 18 });
+        W.solid.push({ x: ok[0], y: ok[1], r: 22 });
       }
     }
     // trees / palms / city blocks
     const area = (W.bounds.x1 - W.bounds.x0) * (W.bounds.y1 - W.bounds.y0);
+    W.crownGuard = !!(town || th.city);
     if (town) townScenery(W, town, rnd);
     else if (th.city) {
       const cell = 34;
@@ -312,7 +361,9 @@
         const x = gx + cell / 2, y = gy + cell / 2;
         if (!clearance(tr, x, y, 14, W)) continue;
         const roofs = ['#c9a27a', '#b9805a', '#d8cfc2', '#a7a39b', '#c4b59f', '#9c6b4e', '#e3ddd2'];
-        addDecor(W, { type: 'building', x, y, w, h, h0: 0, col: roofs[Math.floor(rnd() * roofs.length)], seed: Math.floor(rnd() * 1e6), r: 30 });
+        const it = { type: 'building', x, y, w, h, h0: 0, col: roofs[Math.floor(rnd() * roofs.length)], seed: Math.floor(rnd() * 1e6), r: 30 };
+        // (the centre test above is not the corners': a block whose corner crosses the wall line goes)
+        if (boxGap(tr, x, y, w, h, 0) >= 1) addDecor(W, it);
       }
       // marina boats
       if (W.water) for (let k = 0; k < 70; k++) {
