@@ -439,6 +439,7 @@
     if (!geo.attributes.aSkI) geo.setAttribute('aSkI', new THREE.BufferAttribute(new Uint16Array(P.count * 4), 4));
     if (!geo.attributes.aSkT) geo.setAttribute('aSkT', new THREE.BufferAttribute(new Uint8Array(P.count * 4), 4, true));
     if (tyre && !geo.attributes.aWc) geo.setAttribute('aWc', new THREE.BufferAttribute(new Float32Array(P.count * 3), 3));
+    if (tyre && !geo.attributes.aWi) geo.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(P.count), 1));
   }
   // Patch a lit material once. Basic/shader materials (sky, particles, UI decals) keep theirs.
   function patch(m) {

@@ -542,13 +542,18 @@
   // geometry spins about its own z, so a face whose normal runs along z is sidewall and one
   // pointing out from the axle is tread. The noise is sampled on circles round the axle (3D noise
   // at (cos, sin) of the angle), so it closes on itself with no seam.
-  function tyrePatch(sh) {
+  // Wear (uTyWear, one value per wheel FL FR RL RR, 0 new to 1 spent; aWi says which wheel a vertex
+  // belongs to): a new slick is smooth, even charcoal with a soft satin sheen; the scuffed bands,
+  // the graining and the picked-up rubber come in as the tyre loses grip (js/render3d.js updateCars).
+  const TY_NEW = { value: new THREE.Vector4() };
+  function tyrePatch(sh, wear) {
+    sh.uniforms.uTyWear = wear || TY_NEW;
     // the tread's true normal (straight out from the axle) in view space: the model's tread is a
     // ring of flat facets, and on glossy rubber each facet would reflect the sky as its own band
     // (aWc: the wheel's centre in a merged mesh of four wheels; a single wheel has no such attribute and reads zero)
-    sh.vertexShader = 'attribute vec3 aWc; varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position - aWc; vTyN = normal; vTyRad = normalMatrix * normalize(vec3(vTyP.xy, 0.0) + vec3(1e-5));');
+    sh.vertexShader = 'attribute vec3 aWc; attribute float aWi; varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying float vTyWi;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position - aWc; vTyN = normal; vTyWi = aWi; vTyRad = normalMatrix * normalize(vec3(vTyP.xy, 0.0) + vec3(1e-5));');
     sh.fragmentShader = [
-      'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad;',
+      'varying vec3 vTyP; varying vec3 vTyN; varying vec3 vTyRad; varying float vTyWi; uniform vec4 uTyWear;',
       'float tyH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }',
       'float tyN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
       '  return mix(mix(mix(tyH(i), tyH(i + vec3(1, 0, 0)), f.x), mix(tyH(i + vec3(0, 1, 0)), tyH(i + vec3(1, 1, 0)), f.x), f.y),',
@@ -568,10 +573,13 @@
         '  float tyBand = tyC(tyCs, 3.0, vTyP.z * 55.0) * 0.6 + tyC(tyCs, 9.0, vTyP.z * 140.0 + 7.0) * 0.4;',
         '  float tyGrain = tyC(tyCs, 1400.0, vTyP.z * 22.0);',
         '  float tyPick = smoothstep(0.72, 0.9, tyC(tyCs, 420.0, vTyP.z * 180.0 + 3.0));',
-        '  vec3 tyTr = vec3(0.036, 0.035, 0.034) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick);',
+        '  float tyW = clamp(dot(uTyWear, vec4(equal(vec4(floor(vTyWi + 0.5)), vec4(0.0, 1.0, 2.0, 3.0)))), 0.0, 1.0);',
+        // (worn: the scuffed, grained, spotted tread; new: one even charcoal, the dust on the sidewall only a trace)
+        '  vec3 tyTr = mix(vec3(0.033, 0.032, 0.031), vec3(0.036, 0.035, 0.034) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick), tyW);',
+        '  tySw = mix(vec3(0.026) + (tySw - vec3(0.026)) * 0.3, tySw, tyW);',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, mix(tySw, tyTr, tyTread), tyRub);',
       ].join('\n'))
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyTread), tyRub);')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, mix(0.4, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyW), tyTread), tyRub);')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n  { vec3 tyRn = normalize(vTyRad); tyRn *= sign(dot(tyRn, normal) + 1e-4); normal = normalize(mix(normal, tyRn, smoothstep(0.35, 0.95, tyTread))); }');
   }
   function carMat(o, C, hue) {
@@ -597,7 +605,7 @@
       // (not on the wheels: the cockpit's region is in the car's frame, but a wheel's mesh sits in its
       // own, where the region's hard edges fell across the tyre as a line)
       if (kind !== 'tyre' && kind !== 'rim' && kind !== 'disc') cockpitPatch(sh, kind === 'paint');
-      if (kind === 'tyre') tyrePatch(sh);
+      if (kind === 'tyre') tyrePatch(sh, null);
       // a team running this car in its own colours: the base colour's hue turned (luma kept)
       if (turn) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
         '#include <map_fragment>',
@@ -621,9 +629,9 @@
   function farPatch(sh, U, cut) {
     cockpitPatch(sh, true);
     sh.uniforms.uFarAtlas = U;
-    sh.vertexShader = 'attribute vec2 aFaUv; attribute vec4 aFaRect; attribute vec4 aFaSurf; varying vec2 vFaUv; varying vec4 vFaRect; varying vec4 vFaSurf;\n'
-      + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vFaUv = aFaUv; vFaRect = aFaRect; vFaSurf = aFaSurf;');
-    sh.fragmentShader = 'uniform sampler2D uFarAtlas; varying vec2 vFaUv; varying vec4 vFaRect; varying vec4 vFaSurf;\n' + sh.fragmentShader
+    sh.vertexShader = 'attribute vec2 aFaUv; attribute vec4 aFaRect; attribute vec4 aFaSurf; attribute float aFaSpec; varying vec2 vFaUv; varying vec4 vFaRect; varying vec4 vFaSurf; varying float vFaSpec;\n'
+      + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vFaUv = aFaUv; vFaRect = aFaRect; vFaSurf = aFaSurf; vFaSpec = aFaSpec;');
+    sh.fragmentShader = 'uniform sampler2D uFarAtlas; varying vec2 vFaUv; varying vec4 vFaRect; varying vec4 vFaSurf; varying float vFaSpec;\n' + sh.fragmentShader
       .replace('#include <map_fragment>', [
         '  vec2 faUv = vFaRect.xy + fract(vFaUv) * vFaRect.zw;',
         // the gradients of the unwrapped UVs: fract() would pick a tiny mip level along every wrap
@@ -631,7 +639,8 @@
       ].concat(cut ? ['  if (diffuseColor.a < 0.5) discard;', '  diffuseColor.a = 1.0;'] : []).join('\n'))
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = vFaSurf.x;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = vFaSurf.y;')
-      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat = vFaSurf.z;\n  material.clearcoatRoughness = clamp(vFaSurf.w, 0.0525, 1.0);\n#endif');
+      // (each surface's own specular strength: most of the car's materials have 0.5, not three's 1)
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.specularF90 = mix(vFaSpec, 1.0, metalnessFactor);\n  material.specularColor = mix(vec3(min(pow2((material.ior - 1.0) / (material.ior + 1.0)), 1.0)) * vFaSpec, diffuseColor.rgb, metalnessFactor);\n#ifdef USE_CLEARCOAT\n  material.clearcoat = vFaSurf.z;\n  material.clearcoatRoughness = clamp(vFaSurf.w, 0.0525, 1.0);\n#endif');
   }
   const meta2 = MD => (MD.meta.shadow ? MD.C.geo(MD.meta.shadow) : MD.farG[0][0]);
   function farMaterial(MD, decal) {
@@ -644,11 +653,12 @@
     return m;
   }
   // one square chart per surface, each a power of two in size, sized by how much of the car it covers
+  // (the charts cover the surfaces of both merged levels, far and mid, which share the atlas)
   function farCharts(MD) {
-    const L = MD.farL || MD.lods[1], parts = L.body.map(p => [p.m, p.G]).concat(wheelsLowGeo(MD, L));
+    const L = MD.farL || MD.lods[1], parts = L.body.map(p => [p.m, p.G]).concat(wheelsLowGeo(MD, L)), mid = midParts(MD);
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), charts = new Map();
     const keyOf = m => { const M = MD.mats[m], o = MD.meta.mats[m]; return (M.map ? M.map.uuid : 'flat') + '|' + o.c.join() + '|' + o.a + '|' + (surface(M.name || '') === 'tyre' ? 't' : ''); };
-    for (const [m, g] of parts) {
+    for (const [m, g] of parts.concat(mid)) {
       const k = keyOf(m), P = g.attributes.position, ix = g.index;
       const ch = charts.get(k) || { key: k, m, area: 0, flat: !MD.mats[m].map };
       charts.set(k, ch);
@@ -657,12 +667,19 @@
         ch.area += b.sub(a).cross(c.sub(a)).length() / 2;
       }
     }
-    return { parts, charts, keyOf };
+    return { parts, mid, charts, keyOf };
   }
+  // The mid level (low detail, carNear to carFar): the low-detail model's own parts, merged the far
+  // level's way onto the far level's atlas and materials, so a car there costs three draw calls
+  // (bodywork, decals, tail light) instead of one per material, some 26. The tail light stays
+  // apart: it is each car's own material, which flashes in the rain and at the pit limiter.
+  // The tyres stay apart too: their own shader shows their wear.
+  const isTyre = (MD, m) => surface(MD.mats[m].name || '') === 'tyre';
+  const midParts = MD => MD.lods[1].body.filter(p => p.m !== MD.rear).map(p => [p.m, p.G]).concat(wheelsLowGeo(MD, MD.lods[1]).filter(([m]) => !isTyre(MD, m)));
   const FAR_ATLAS = () => (F1.CarModels && F1.CarModels.small ? 1024 : 2048);
   function farGeo(MD) {
     if (MD.farG) return MD.farG;
-    const { parts, charts, keyOf } = farCharts(MD), A = FAR_ATLAS(), list = [...charts.values()];
+    const { parts, mid, charts, keyOf } = farCharts(MD), A = FAR_ATLAS(), list = [...charts.values()];
     const total = list.reduce((s, c) => s + (c.flat ? 0 : c.area), 0) || 1;
     // lay the charts out largest first, shrinking them all until they fit
     for (let k = 1; ; k *= 0.84) {
@@ -679,23 +696,24 @@
       }
       if (ok) break;
     }
-    const build = want => {
-      const use = parts.filter(([m]) => (MD.meta.mats[m].a === 'B') === want);
+    const build = (want, from = parts) => {
+      const use = from.filter(([m]) => (MD.meta.mats[m].a === 'B') === want);
       if (!use.length) return null;
       let nv = 0, ni = 0;
       for (const [, g] of use) { nv += g.attributes.position.count; ni += g.index.count; }
-      const pos = new Float32Array(nv * 3), nor = new Int8Array(nv * 3), uv = new Float32Array(nv * 2), rect = new Uint16Array(nv * 4), surf = new Uint8Array(nv * 4), idx = new Uint32Array(ni);
+      const pos = new Float32Array(nv * 3), nor = new Int8Array(nv * 3), uv = new Float32Array(nv * 2), rect = new Uint16Array(nv * 4), surf = new Uint8Array(nv * 4), spec = new Uint8Array(nv), idx = new Uint32Array(ni);
       let v = 0, n = 0;
       for (const [m, g] of use) {
         const P = g.attributes.position, N = g.attributes.normal, T = g.attributes.uv, I = g.index, ch = charts.get(keyOf(m));
         const o = MD.mats[m], tyre = surface(o.name || '') === 'tyre', pad = Math.max(1, ch.s >> 6), up = g.userData.yUp || 0, base = v;
         const r = [ch.x + pad, ch.y + pad, ch.s - pad * 2, ch.s - pad * 2].map(x => Math.round(x / A * 65535));
         const s = [tyre ? 0.56 : o.roughness, o.metalness, o.clearcoat || 0, o.clearcoatRoughness || 0].map(x => Math.round(x * 255));
+        const sp = Math.round(Math.max(0, Math.min(1, o.specularIntensity == null ? 1 : o.specularIntensity)) * 255);
         for (let i = 0; i < P.count; i++, v++) {
           pos[v * 3] = P.getX(i); pos[v * 3 + 1] = P.getY(i) + up; pos[v * 3 + 2] = P.getZ(i);
           nor[v * 3] = Math.round(N.getX(i) * 127); nor[v * 3 + 1] = Math.round(N.getY(i) * 127); nor[v * 3 + 2] = Math.round(N.getZ(i) * 127);
           uv[v * 2] = T ? T.getX(i) : 0; uv[v * 2 + 1] = T ? T.getY(i) : 0;
-          rect.set(r, v * 4); surf.set(s, v * 4);
+          rect.set(r, v * 4); surf.set(s, v * 4); spec[v] = sp;
         }
         for (let i = 0; i < I.count; i++) idx[n++] = base + I.getX(i);
       }
@@ -705,12 +723,14 @@
       G2.setAttribute('aFaUv', new THREE.BufferAttribute(uv, 2));
       G2.setAttribute('aFaRect', new THREE.BufferAttribute(rect, 4, true));
       G2.setAttribute('aFaSurf', new THREE.BufferAttribute(surf, 4, true));
+      G2.setAttribute('aFaSpec', new THREE.BufferAttribute(spec, 1, true));
       G2.setIndex(new THREE.BufferAttribute(idx, 1)); G2.computeBoundingSphere();
       return G2;
     };
     MD.farCh = list;
     MD.farU = { value: null };
     MD.farG = [[build(false), farMaterial(MD, false)], [build(true), farMaterial(MD, true)]].filter(x => x[0]);
+    MD.midG = [[build(false, mid), MD.farG[0][1]], [build(true, mid), (MD.farG[1] || [])[1] || farMaterial(MD, true)]].filter(x => x[0]);
     return MD.farG;
   }
   // The atlas: each surface's texture drawn into its chart in the car's own colours, the rubber as
@@ -771,7 +791,7 @@
   // cars of a team. Used at the low detail level, where a wheel's turn and steer cannot be seen.
   // The merged mesh's origin stands at wheel-centre height, as a single wheel's does (the road
   // shade measures from it), and each vertex knows its wheel's centre (the tyre shader turns about it).
-  const WL_Y = 0.36;
+  const WL_Y = 0.36, WI = { FL: 0, FR: 1, RL: 2, RR: 3 };
   function wheelsLowGeo(MD, L = MD.lods[1]) {
     const done = MD.wlOf || (MD.wlOf = new Map());
     if (done.has(L)) return done.get(L);
@@ -781,14 +801,14 @@
       const W = L.wheels[key], c = MD.lods[0].wheels[key].c;
       q.fromArray(W.q);
       for (const { G: Gw, m, hub } of W.parts.map(x => Object.assign({ hub: false }, x)).concat(W.hub.map(x => Object.assign({ hub: true }, x)))) {
-        const b = by.get(m) || { pos: [], nor: [], uv: [], idx: [], wc: [] }, p = Gw.attributes.position, n = Gw.attributes.normal, t = Gw.attributes.uv, base = b.pos.length / 3;
+        const b = by.get(m) || { pos: [], nor: [], uv: [], idx: [], wc: [], wi: [] }, p = Gw.attributes.position, n = Gw.attributes.normal, t = Gw.attributes.uv, base = b.pos.length / 3;
         by.set(m, b);
         const qq = hub ? q0 : q;
         // read through the attributes: the normals are packed (normalised bytes)
         for (let i = 0; i < p.count; i++) {
           v.fromBufferAttribute(p, i).applyQuaternion(qq); nv.fromBufferAttribute(n, i).applyQuaternion(qq);
           b.pos.push(v.x + c[0], v.y + c[1] - WL_Y, v.z + c[2]);
-          b.wc.push(c[0], c[1] - WL_Y, c[2]);
+          b.wc.push(c[0], c[1] - WL_Y, c[2]); b.wi.push(WI[key]);
           b.nor.push(nv.x, nv.y, nv.z);
           b.uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
         }
@@ -801,6 +821,7 @@
       g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       g.setAttribute('aWc', new THREE.Float32BufferAttribute(b.wc, 3));
+      g.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(b.wi), 1));
       g.setIndex(b.idx); g.computeBoundingSphere();
       g.userData.yUp = WL_Y;
       return [m, g];
@@ -851,7 +872,19 @@
     // the tail light: this car's own copy of the model's material, so it can flash alone
     const rainMat = MD.rear >= 0 ? MD.mats[MD.rear].clone() : new THREE.MeshStandardMaterial({ color: 0x400808 });
     rainMat.emissive = new THREE.Color(0xff2010); rainMat.emissiveIntensity = 0;
-    const matOf = m => (m === MD.rear ? rainMat : MD.mats[m]);
+    // the tyres: this car's own copies of the model's tyre materials, which carry its tyres' wear
+    const tyWear = new THREE.Vector4(), tyHold = { value: tyWear }, tyMats = new Map();
+    const tyMat = m => {
+      if (tyMats.has(m)) return tyMats.get(m);
+      const src = MD.mats[m], t = src.clone(), ud = Object.assign({}, src.userData);
+      delete ud.r3s; // (patched afresh, js/r3-shaders.js)
+      const ex = src.userData.patchExtra;
+      ud.patchExtra = sh => { if (ex) ex(sh); sh.uniforms.uTyWear = tyHold; };
+      t.userData = ud;
+      tyMats.set(m, t);
+      return t;
+    };
+    const matOf = m => (m === MD.rear ? rainMat : surface(MD.mats[m].name || '') === 'tyre' ? tyMat(m) : MD.mats[m]);
     // only the larger, opaque parts cast shadows: the small ones (brackets, lamps, the parts
     // inside the wheels) cannot be told apart in a shadow map's texels and cost a draw each
     const meshOf = (G2, m) => {
@@ -895,6 +928,11 @@
       }
     }
     // wheels: one pivot per corner (steers), spinning group inside, both LODs
+    // (which wheel each tyre vertex belongs to, for its wear: once per model)
+    if (!MD.wiDone) {
+      MD.wiDone = true;
+      ['FL', 'FR', 'RL', 'RR'].forEach((key, wi) => { for (const L of MD.lods) for (const p of L.wheels[key].parts) if (!p.G.attributes.aWi) p.G.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(p.G.attributes.position.count).fill(wi), 1)); });
+    }
     for (const key of ['FL', 'FR', 'RL', 'RR']) {
       const W0 = MD.lods[0].wheels[key];
       const pivot = new THREE.Group();
@@ -944,6 +982,12 @@
     for (const [G2, mat] of farGeo(MD)) { const q = new THREE.Mesh(G2, mat); q.castShadow = !mat.transparent; q.receiveShadow = true; farG.add(q); }
     farG.visible = false;
     root.add(farG);
+    const midG = new THREE.Group();
+    for (const [G2, mat] of MD.midG) { const q = new THREE.Mesh(G2, mat); q.castShadow = !mat.transparent; q.receiveShadow = true; midG.add(q); }
+    for (const p of mergedBody(MD, MD.lods[1])) if (p.m === MD.rear) { const q = meshOf(p.G, p.m); q.castShadow = false; midG.add(q); }
+    for (const [m, G2] of wheelsLowGeo(MD)) if (isTyre(MD, m)) { const q = meshOf(G2, m); q.position.y = WL_Y; q.receiveShadow = true; midG.add(q); }
+    midG.visible = false;
+    root.add(midG);
     const driverIdx = Math.max(0, team.drivers.findIndex(d => d[3] === num));
     const cockpit = buildCockpit(team, driverIdx, MD);
     root.add(cockpit.group);
@@ -971,7 +1015,7 @@
     { const e = G.__helmetEye || [-0.12, 1.46, -6.2]; hEye.position.set(e[0], e[1], 0); hLook.position.set(30, e[2], 0); }
     root.add(hEye, hLook); // bolted to the chassis, not the head
     root.add(tcamEye, tcamLook);
-    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
+    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, midG, tyWear, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
     // Who fades with what when the level changes. A mesh points at its set's fade value; the car's
     // materials are shared with the team mate, so the value reaches the shader per draw (lodHook).
     const u = root.userData, sL = u.sL = [{ v: 0 }, { v: 0 }, { v: 0 }], sC = u.sC = { v: 0 }, sI = u.sI = { v: 0 };
@@ -985,7 +1029,7 @@
       w.userData.hubs.forEach((g, k) => tag(g, sL[k]));
       w.userData.stripes.forEach(m => { m.lodS = sL[0]; });
     }
-    tag(wl, sL[1]); tag(farG, sL[2]); tag(nose, sC);
+    tag(wl, sL[1]); tag(midG, sL[1]); tag(farG, sL[2]); tag(nose, sC);
     const hel = new Set(cockpit.helmet || []), ck = cockpit;
     ck.kids = ck.group.children.slice().map(ch => { let h = false; ch.traverse(m => { if (hel.has(m)) h = true; }); tag(ch, h ? sC : sI); return { ch, h }; });
     for (const o of [root, wl]) o.traverse(m => { if (m.isMesh && m.material && !Array.isArray(m.material)) { m.material.userData.lodFade = true; m.material.onBeforeRender = lodHook; } });
@@ -1014,17 +1058,20 @@
   // wheel and its buttons, the arms, harness and pads) goes, and its animation stops with it.
   function levels(u, root, mask, inner) {
     const put = (g, on, par) => { g.visible = on; if (on && !g.parent) par.add(g); else if (!on && g.parent) g.parent.remove(g); };
-    u.lodGroups.forEach((g, k) => put(g, !!(mask & (1 << k)), root));
+    // (the mid level stands in for the low-detail model, its body and its wheels)
+    const mid = !!u.useMid;
+    u.lodGroups.forEach((g, k) => put(g, !!(mask & (1 << k)) && !(k === 1 && mid), root));
     // the compound rings on the sidewalls are a centimetre wide: full detail only. At low detail
     // the four wheels are the merged pair of meshes (unless one has come off in a crash)
     const merged = !!u.wheelsLow && u.wheels.every(w => w.userData.lods.length);
     for (const w of u.wheels) {
-      const on = k => !!(mask & (1 << k)) && !(k === 1 && merged);
+      const on = k => !!(mask & (1 << k)) && !(k === 1 && (merged || mid));
       w.userData.lods.forEach((g, k) => put(g, on(k), w.userData.spin));
       if (w.userData.hubs) w.userData.hubs.forEach((g, k) => put(g, on(k), w));
       w.userData.stripes.forEach(m => { m.visible = !!(mask & 1); });
     }
-    if (u.wheelsLow) put(u.wheelsLow, !!(mask & 2) && merged, root);
+    if (u.wheelsLow) put(u.wheelsLow, !!(mask & 2) && merged && !mid, root);
+    if (u.midG) put(u.midG, !!(mask & 2) && mid, root);
     if (u.farG) put(u.farG, !!(mask & 4), root);
     // the number and the driver stay on at low detail: they are what the eye goes to on a car
     if (u.nose) u.nose.visible = !!(mask & 3);
@@ -1045,6 +1092,10 @@
   function setLod(root, lod, inner = true, dt = 0) {
     const u = root.userData;
     if (!u.lodGroups) return;
+    // the mid level, unless the car is damaged (it cannot show a dent or a missing wheel either),
+    // or the atlas cannot be made; then the low-detail model as it is. Debug: G.__noMid
+    const wantMid = !!u.midG && !G.__noMid && !u.hurt && u.wheels.every(w => w.userData.lods.length) && bakeFar(u.md);
+    if (wantMid !== !!u.useMid) { u.useMid = wantMid; if (u.lod != null && u.lod >= 0) levels(u, root, (u.lodFrom >= 0 ? 1 << u.lodFrom : 0) | (1 << u.lod), u.inner || u.innerT >= 0); }
     if (u.lod === lod && u.inner === inner && u.lodFrom < 0 && u.innerT < 0 && !(lod === 2 && u.hurt)) return; // settled, as nearly every car is on nearly every frame
     // the far mesh cannot show a dent or a missing wheel, and it needs its atlas
     if (lod === 2 && (u.hurt || !u.wheels.every(w => w.userData.lods.length) || !bakeFar(u.md))) lod = 1;

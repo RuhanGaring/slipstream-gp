@@ -3698,6 +3698,12 @@ void main() {
       ud.ground.rotation.set(rr, 0, pr);
       roadFeel(c, ud, body, dt);
       const PW = c.wheels && c.wheels.length === 4 ? c.wheels : null;
+      // tyre wear as the eye sees it: how much grip wear has cost (js/car.js: 9% by the end of
+      // the tyre's life, then the cliff past 70%), 0 new to 1 spent. Debug: G.__tyWear pins it
+      if (bu.tyWear) for (let k = 0; k < 4; k++) {
+        const wr = G.__tyWear != null ? G.__tyWear : PW && PW[k] && PW[k].wear || 0;
+        bu.tyWear.setComponent(k, Math.min(1, (0.09 * wr + (wr > 0.7 ? 1.4 * (wr - 0.7) ** 2 : 0)) / 0.216));
+      }
       bu.wheels.forEach((w, k) => {
         const pw = PW && PW[k], wd = w.userData;
         // each wheel turns at its own speed: lockups stop it, wheelspin races it
