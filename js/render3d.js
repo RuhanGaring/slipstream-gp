@@ -34,6 +34,7 @@
 
   let renderer = null, scene, camera, sun, hemi, skyMesh, skyMat, envScene, pmrem, envRT = null;
   let W = 1, H = 1;
+  let sortFrame = 0; // (the opaque sort's cache of program ids, renewed each frame)
   const state = { tr: null, look: null, root: null, gantry: [], cache: new Map(), water: null, tvCams: [] };
   const live = new Map(); // car object -> model
   // the guide's corner marks; Okabe-Ito colours for Settings > Colour-safe guide
@@ -612,6 +613,27 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap; // filter radius set per cascade (js/r3-shadow.js)
+    // Opaque draws grouped by shader program before material. three's own order (material, then
+    // depth) switches program on most draws: about 220 switches for 600 draws with a full grid,
+    // and each switch uploads every uniform the program has (some 70 on a lit material, the five
+    // shadow lights among them). Grouping by program first leaves only the switches between
+    // programs; within a program the order is three's own. What is drawn is unchanged.
+    {
+      const props = renderer.properties;
+      const pid = m => {
+        if (m._r3pf === sortFrame) return m._r3pid;
+        const p = props.get(m).currentProgram;
+        m._r3pf = sortFrame; m._r3pid = p ? p.id : 0;
+        return m._r3pid;
+      };
+      renderer.setOpaqueSort((a, b) => {
+        if (a.groupOrder !== b.groupOrder) return a.groupOrder - b.groupOrder;
+        if (a.renderOrder !== b.renderOrder) return a.renderOrder - b.renderOrder;
+        const ma = a.material, mb = b.material;
+        if (ma.id !== mb.id) { if (G.__noProgSort) return ma.id - mb.id; const pa = pid(ma), pb = pid(mb); return pa !== pb ? pa - pb : ma.id - mb.id; } // (debug: G.__noProgSort, three's own order)
+        return a.z !== b.z ? a.z - b.z : a.id - b.id;
+      });
+    }
     // The shadow slices are drawn one at a time (see js/r3-shadow.js). The near slice draws the
     // whole scene. The outer two draw it without the cars (they are re-drawn only every few
     // frames, and a moving car's shadow would lag it), and their cars' maps draw only the cars,
@@ -662,6 +684,19 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     hemi = new THREE.HemisphereLight('#cfe0f5', '#5a6248', 0.35);
     scene.add(hemi);
     if (hasClip) reverseDepth(renderer);
+    // The uniforms every patched material shares (js/r3-shaders.js R3S.U: sun, fog, cascades, car
+    // occlusion boxes, wind...) reach the GPU once per shader program per render call, not once per
+    // material: three uploads all of a material's uniforms each time the material changes, some 35
+    // of them shared and unchanged, on each of 300 material switches a frame. The tag is read in
+    // js/vendor/three.min.js (WebGLUniforms.upload, patched): a tagged value is skipped when that
+    // program last took this same value object in this render call. Samplers are never skipped
+    // (their texture units are handed out per draw). Values must not change during a render call.
+    {
+      const EPOCH = { v: 0 }, rr = renderer.render.bind(renderer);
+      for (const k in F1.R3S.U) F1.R3S.U[k].r3s = EPOCH;
+      renderer.render = (sc, cam) => { EPOCH.v++; rr(sc, cam); };
+      G.__noUniShare = () => { for (const k in F1.R3S.U) delete F1.R3S.U[k].r3s; }; // debug: back to three's own uploads
+    }
     if (F1.R3CarShade) F1.R3CarShade.init(renderer);
     // the sun lights the scene; its shadow comes from the cascades (js/r3-shadow.js)
     sun = new THREE.DirectionalLight('#ffffff', 2.5);
@@ -4288,6 +4323,7 @@ void main() {
 
   function render(o) {
     if (!renderer || !state.tr || compiling) return;
+    sortFrame++;
     const dt = o.dt || 0.016;
     clock += dt;
     state.lastCars = o.cars;

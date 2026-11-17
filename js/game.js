@@ -356,7 +356,7 @@
     console.log('Slipstream graphics report', d);
     el = document.createElement('div'); el.id = 'gfx-report';
     el.style.cssText = 'position:fixed;left:16px;top:16px;z-index:90;max-width:min(920px,92vw);padding:14px 16px;background:rgba(10,10,14,.94);color:#e8e8ee;font:12px/1.55 Consolas,monospace;white-space:pre-wrap;border-top:3px solid #e10600';
-    el.textContent = 'GRAPHICS REPORT (F9 to close)\n' + Object.entries(d).map(([k, v]) => k + ': ' + v).join('\n');
+    el.textContent = 'GRAPHICS REPORT (F9 to close; F8 shows where each frame\'s time goes)\n' + Object.entries(d).map(([k, v]) => k + ': ' + v).join('\n');
     document.body.appendChild(el);
   }
   function onKey(code, repeat) {
@@ -845,12 +845,14 @@
     // (crashes kept and played back in a flashback, js/r3-damage.js: the race clock while racing,
     // and the moment on show while rewinding)
     if (F1.R3D) { F1.R3D.clock = Game.state === 'race' || Game.state === 'rewind' ? race.time : null; F1.R3D.rewindT = Game.state === 'rewind' && fb.P ? fb.P.T : null; }
+    const tR3 = F1.Perf ? F1.Perf.t0() : 0;
     R3.render({
       cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: Game.settings.shake === false ? 0 : cam.shake, fx: FX,
       assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
       lightsOn: Game.state === 'replay' ? race.lightsOn : race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
       weather: race, sc: race.sc, free: vw && vw.free, snap: vw && vw.snap,
     });
+    if (F1.Perf) F1.Perf.r3(tR3);
     if (vw) F1.Viewer.afterRender();
     // name tags over the other cars
     if (Game.settings.tags && mode !== 'tv' && mode !== 'show' && p && !(vw && F1.Viewer.V.overlay === false)) {
@@ -1845,10 +1847,13 @@
     if (cap && booted >= 3 && now - last < 1000 / cap - 2) { requestAnimationFrame(frame); return; }
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
+    const PF = F1.Perf;
+    if (PF) PF.frameBegin();
     try { tick(dt); frameFails = 0; } catch (err) {
       console.error(err);
       if (++frameFails === 30) HUD.message('SOMETHING WENT WRONG', 'red', 'THE GAME MAY NEED A RELOAD', 8);
     }
+    if (PF) PF.frameEnd();
     // the boot screen (index.html) goes once the first frames are on screen (the very first
     // one also compiles every shader, so it is slow)
     if (booted < 3 && G.__bootLog) G.__bootLog.push(['frame ' + (booted + 1), Math.round(performance.now()), R3ok && R3.renderer ? R3.renderer.info.programs.length : 0]);
@@ -1895,12 +1900,15 @@
       // On the potato and rock presets (phones) a race does the same below 30 fps: catching up
       // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
       const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.catchup || 40;
+      const PF = F1.Perf, tSim = PF ? PF.t0() : 0;
       while (acc >= DT && n < maxSteps) {
         if (Game.state === 'race' && !Game.spectate) applyInput(race.player, DT, pad, wh);
         snapPoses(race);
         Race.step(race, DT);
+        if (PF) PF.step();
         acc -= DT; n++;
       }
+      if (PF) PF.add('sim', tSim);
       if (n >= maxSteps) acc = Game.state === 'menu' ? acc % DT : 0;
       // the replay recorder: every car, twenty times a second
       if (Game.state === 'race' && race.rec) { race.rec.capture(); for (const f of race.fx) race.rec.contact(f); }
