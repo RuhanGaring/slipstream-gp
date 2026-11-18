@@ -1,0 +1,157 @@
+// Tyre shader tuning panel. F7 shows or hides it. Every value of the tyre's shader (js/r3-tyre.js
+// SCHEMA), grouped, each with a slider and a number box (colours with a picker); changes show at once
+// on every car. Double-click a value's name to put it back to its default; a dot marks values that
+// differ from the defaults. Preview: pin the tyres' wear, show a compound, freeze the game.
+// Save writes tyre-shader.json (all values) to the downloads folder, to be sent back and made the
+// defaults; Load reads such a file back in. The values also stay in this browser between visits,
+// until the defaults change.
+(function (G) {
+  'use strict';
+  const F1 = G.F1, KEY = 'slip_tyretune';
+  let panel = null;
+  const T = () => F1.R3Tyre;
+  const baseOf = () => JSON.stringify(T().DEFAULTS);
+  const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values })); } catch (e) {} };
+  // the values kept from last time, unless the defaults have changed since
+  function restore() {
+    if (!T()) return;
+    try {
+      const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (o && o.base === baseOf() && o.values) T().set(o.values);
+    } catch (e) {}
+  }
+
+  const CSS = `
+  #tytune { position: fixed; top: 10px; right: 10px; width: 360px; max-height: calc(100vh - 20px); overflow: auto; z-index: 99999;
+    background: rgba(12,14,18,0.95); color: #e6e8eb; font: 12px/1.35 system-ui, "Segoe UI", sans-serif; border: 1px solid #2c323a;
+    border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); }
+  #tytune header { position: sticky; top: 0; background: #12161c; padding: 10px 12px 8px; border-bottom: 1px solid #2c323a; z-index: 1; }
+  #tytune h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; display: flex; justify-content: space-between; align-items: center; }
+  #tytune h3 small { font-weight: 400; color: #8a939e; }
+  #tytune .tt-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+  #tytune button { background: #232a33; color: #e6e8eb; border: 1px solid #3a434e; border-radius: 5px; padding: 4px 9px; font: inherit; cursor: pointer; }
+  #tytune button:hover { background: #2d3641; }
+  #tytune button.tt-main { background: #1f6feb; border-color: #1f6feb; }
+  #tytune button.tt-on { background: #3a434e; border-color: #8a939e; }
+  #tytune details { border-bottom: 1px solid #222830; }
+  #tytune summary { padding: 8px 12px; cursor: pointer; font-weight: 600; color: #c9d1d9; user-select: none; }
+  #tytune .tt-rows { padding: 2px 12px 10px; }
+  #tytune .tt-row { display: grid; grid-template-columns: 1fr 96px 62px; gap: 6px; align-items: center; margin: 4px 0; }
+  #tytune .tt-row.tt-c { grid-template-columns: 1fr 40px 118px; }
+  #tytune .tt-row label { color: #aeb6bf; cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tytune .tt-row label.tt-chg::before { content: '\\25CF  '; color: #f0b429; }
+  #tytune input[type=range] { width: 96px; }
+  #tytune input[type=number], #tytune input[type=text] { width: 100%; box-sizing: border-box; background: #0b0d10; color: #e6e8eb; border: 1px solid #333b45; border-radius: 4px; padding: 2px 4px; font: inherit; }
+  #tytune input[type=color] { width: 40px; height: 22px; padding: 0; border: 1px solid #333b45; background: none; }
+  #tytune .tt-note { color: #8a939e; padding: 6px 12px 10px; }
+  #tytune .tt-msg { color: #7ee787; min-height: 1em; margin-top: 6px; }`;
+
+  function build() {
+    const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
+    panel = document.createElement('div'); panel.id = 'tytune';
+    // (typing in the panel must not drive the car)
+    for (const ev of ['keydown', 'keyup', 'keypress']) panel.addEventListener(ev, e => { if (e.code !== 'F7') e.stopPropagation(); });
+    panel.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    const head = document.createElement('header');
+    head.innerHTML = '<h3>Tyre shader <small>F7 hides</small></h3><div class="tt-bar"></div><div class="tt-msg"></div>';
+    const bar = head.querySelector('.tt-bar'), msg = head.querySelector('.tt-msg');
+    const say = t => { msg.textContent = t; clearTimeout(say.t); say.t = setTimeout(() => { msg.textContent = ''; }, 4000); };
+    const btn = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; bar.appendChild(b); return b; };
+    const file = () => JSON.stringify({ kind: 'slipstream-tyre-shader', version: 1, saved: new Date().toISOString(), values: T().values }, null, 2);
+    btn('Save file', () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([file()], { type: 'application/json' }));
+      a.download = 'tyre-shader.json'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      say('Saved tyre-shader.json to your downloads.');
+    }, 'tt-main');
+    const pick = document.createElement('input'); pick.type = 'file'; pick.accept = '.json,application/json'; pick.style.display = 'none';
+    pick.onchange = () => {
+      const f = pick.files && pick.files[0]; if (!f) return;
+      f.text().then(t => { const o = JSON.parse(t); T().set(o.values || o); store(); refresh(); say('Loaded ' + f.name + '.'); }).catch(() => say('That file could not be read.'));
+      pick.value = '';
+    };
+    head.appendChild(pick);
+    btn('Load file', () => pick.click());
+    btn('Copy', () => { navigator.clipboard.writeText(file()).then(() => say('Copied the values.'), () => say('Copy was blocked; use Save file.')); });
+    btn('Reset all', () => { T().set(T().DEFAULTS); store(); refresh(); say('Back to the defaults.'); });
+    panel.appendChild(head);
+
+    // preview: wear, compound, freeze
+    const pv = document.createElement('details'); pv.open = true;
+    pv.innerHTML = '<summary>Preview (not saved)</summary><div class="tt-rows"></div>';
+    const pr = pv.querySelector('.tt-rows');
+    {
+      const row = document.createElement('div'); row.className = 'tt-row';
+      row.innerHTML = '<label>Wear (0 new, 1 spent)</label><input type="range" min="0" max="1" step="0.01"><label style="display:flex;gap:4px;align-items:center"><input type="checkbox"> live</label>';
+      const [rg, cb] = row.querySelectorAll('input');
+      const sync = () => { G.__tyWear = cb.checked ? null : +rg.value; };
+      cb.checked = G.__tyWear == null; rg.value = G.__tyWear != null ? G.__tyWear : 0;
+      rg.oninput = () => { cb.checked = false; sync(); }; cb.onchange = sync;
+      pr.appendChild(row);
+    }
+    {
+      const row = document.createElement('div'); row.className = 'tt-bar'; row.style.margin = '6px 0';
+      const lab = document.createElement('span'); lab.textContent = 'Compound:'; lab.style.cssText = 'color:#aeb6bf;align-self:center;margin-right:4px'; row.appendChild(lab);
+      for (const [id, name] of [['S', 'Soft'], ['M', 'Medium'], ['H', 'Hard']]) {
+        const b = document.createElement('button'); b.textContent = name;
+        b.onclick = () => { for (const m of (F1.R3 && F1.R3.carModels ? F1.R3.carModels.values() : [])) { const u = m.userData.body && m.userData.body.userData; if (u && u.tyComp) u.tyComp.value.copy(T().compColor(id)); } say(name + ' markings on every car (until a pit stop changes them).'); };
+        row.appendChild(b);
+      }
+      const fz = document.createElement('button'); fz.textContent = 'Freeze game';
+      fz.onclick = () => { const g = G.__game && G.__game.Game; if (!g) return; g.paused = !g.paused; fz.classList.toggle('tt-on', g.paused); };
+      row.appendChild(fz);
+      pr.appendChild(row);
+    }
+    panel.appendChild(pv);
+
+    // the values, by group
+    const inputs = [];
+    const groups = new Map();
+    for (const d of T().SCHEMA) {
+      if (!groups.has(d.group)) {
+        const g = document.createElement('details'); g.open = groups.size < 2;
+        g.innerHTML = `<summary>${d.group}</summary><div class="tt-rows"></div>`;
+        panel.appendChild(g); groups.set(d.group, g.querySelector('.tt-rows'));
+      }
+      const row = document.createElement('div'); row.className = 'tt-row' + (d.type === 'c' ? ' tt-c' : '');
+      const lab = document.createElement('label'); lab.textContent = d.label; lab.title = d.key + ' (double-click: default ' + d.def + ')';
+      row.appendChild(lab);
+      const put = v => { T().set({ [d.key]: v }); store(); show(); };
+      let show;
+      if (d.type === 'c') {
+        const col = document.createElement('input'); col.type = 'color';
+        const hex = document.createElement('input'); hex.type = 'text'; hex.spellcheck = false;
+        col.oninput = () => put(col.value);
+        hex.onchange = () => { const v = hex.value.trim(); if (/^#?[0-9a-f]{6}$/i.test(v)) put(v[0] === '#' ? v : '#' + v); else show(); };
+        show = () => { const v = T().values[d.key]; col.value = v; hex.value = v; lab.classList.toggle('tt-chg', v.toLowerCase() !== String(d.def).toLowerCase()); };
+        row.append(col, hex);
+      } else {
+        const rg = document.createElement('input'); rg.type = 'range'; rg.min = d.min; rg.max = d.max; rg.step = d.step;
+        const nb = document.createElement('input'); nb.type = 'number'; nb.step = d.step;
+        rg.oninput = () => put(+rg.value);
+        nb.onchange = () => { if (nb.value !== '' && isFinite(+nb.value)) put(+nb.value); else show(); };
+        show = () => { const v = T().values[d.key]; rg.value = v; nb.value = +(+v).toFixed(5); lab.classList.toggle('tt-chg', Math.abs(v - d.def) > 1e-9); };
+        row.append(rg, nb);
+      }
+      lab.ondblclick = () => put(d.def);
+      inputs.push(show); show();
+      groups.get(d.group).appendChild(row);
+    }
+    const note = document.createElement('div'); note.className = 'tt-note';
+    note.textContent = 'Save file, then send tyre-shader.json back to have these made the defaults.';
+    panel.appendChild(note);
+    panel.refresh = () => inputs.forEach(f => f());
+    document.body.appendChild(panel);
+  }
+  function refresh() { if (panel) panel.refresh(); }
+  function toggle() {
+    if (!T()) return;
+    if (!panel) build(); else panel.style.display = panel.style.display === 'none' ? '' : 'none';
+    refresh();
+  }
+
+  G.addEventListener('keydown', e => { if (e.code === 'F7' && !e.repeat) { e.preventDefault(); toggle(); } });
+  restore();
+  F1.TyreTune = { toggle, restore };
+})(window);

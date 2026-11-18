@@ -328,6 +328,7 @@
   function setCompound(root, comp) {
     if (root.userData.comp === comp) return;
     root.userData.comp = comp;
+    if (root.userData.tyComp && F1.R3Tyre) root.userData.tyComp.value.copy(F1.R3Tyre.compColor(comp)); // (the 2026 tyre's painted markings)
     for (const w of root.userData.wheels) for (const s of w.userData.stripes || [w.userData.stripe]) s.material = compoundMat(comp);
   }
 
@@ -337,6 +338,33 @@
   // wheels, a one-mesh far level with the textures baked into vertex colours, and the steering
   // wheel in its own frame. A team may run its car in other colours (team.hue: a hue turn in
   // degrees applied to every textured surface).
+  // The 2026 tyre (js/r3-tyre.js) in place of each model's own, at every detail level: the model's
+  // tyre meshes go, and the rest of the spinning wheel (rim, cover, disc) is narrowed about its
+  // middle to the new width, its face a little inside the sidewall's bulge. The bead sits where the
+  // model's did, behind the rim's flange. Debug: G.__oldTyres (before a car is first built).
+  function retyre(MD) {
+    const T = F1.R3Tyre;
+    if (!T || G.__oldTyres) return;
+    const ti = MD.mats.length, v = new THREE.Vector3();
+    MD.mats.push(T.material());
+    MD.meta = Object.assign({}, MD.meta, { mats: MD.meta.mats.concat([{ n: 'tyre26', c: [1, 1, 1, 1], a: 'O' }]) });
+    const sets = MD.lods.map((L, k) => [L, k]).concat(MD.farL ? [[MD.farL, 2]] : []);
+    for (const [L, lvl] of sets) for (const key of Object.keys(L.wheels)) {
+      const W = L.wheels[key], old = W.parts.filter(p => isTyre(MD, p.m));
+      if (!old.length) continue;
+      let rb = 1e9, hwOld = 0;
+      for (const p of old) {
+        const P = p.G.attributes.position;
+        for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i); rb = Math.min(rb, Math.hypot(v.x, v.y)); hwOld = Math.max(hwOld, Math.abs(v.z)); }
+      }
+      const S = T.SIZE[key[0]], k = (S.hw - 0.012) / hwOld;
+      W.parts = W.parts.filter(p => !isTyre(MD, p.m)).map(p => { const g = p.G.clone(); g.scale(1, 1, k); return { G: g, m: p.m }; });
+      // (each wheel its own copy: its wear attribute marks which wheel it is)
+      W.parts.push({ G: T.geometry(S.R, S.hw, rb, S.hw - 0.02, lvl).clone(), m: ti });
+      W.r = S.R; W.w = S.hw * 2;
+    }
+    MD.retyred = true;
+  }
   const built = new Map(); // car id + hue -> shared geometries and materials
   function modelFor(team) {
     const id = team && team.car, CM = F1.CarModels;
@@ -357,6 +385,7 @@
       // the tail light (flashes with the pit limiter and in the rain)
       rear: meta.mats.findIndex(o => /rear_light|rtt_light/i.test(o.n)),
     };
+    retyre(MD);
     MD.grip = gripOf(MD.swParts);
     MD.hole = HOLE_AT[id] || (MD.grip ? holeOf(MD.swParts, MD.grip) : null);
     MD.thumb = handPose(id) ? THUMB.slice(0, 3).concat(handPose(id).thumb) : thumbFor(MD);
@@ -768,7 +797,7 @@
         g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([u0, u0, u1, u0, u1, u1, u0, u0, u1, u1, u0, u1]), 2));
         const mat = new THREE.ShaderMaterial({
           uniforms: { uMap: { value: M.map || null }, uCol: { value: new THREE.Vector4(o.c[0], o.c[1], o.c[2], o.a === 'O' ? 1 : o.c[3]) } },
-          defines: Object.assign({}, M.map ? { HAS_MAP: 1 } : {}, o.a === 'O' ? { SOLID: 1 } : {}, surface(M.name || '') === 'tyre' ? { TYRE: 1 } : {}, MD.hue && M.map ? { HUE: 1 } : {}),
+          defines: Object.assign({}, M.map ? { HAS_MAP: 1 } : {}, o.a === 'O' ? { SOLID: 1 } : {}, surface(M.name || '') === 'tyre' ? (M.userData.tyMask ? { TYMASK: 1 } : { TYRE: 1 }) : {}, MD.hue && M.map ? { HUE: 1 } : {}),
           vertexShader: 'varying vec2 vU; void main() { vU = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
           fragmentShader: [
             'uniform sampler2D uMap; uniform vec4 uCol; varying vec2 vU;',
@@ -779,6 +808,11 @@
             '#ifdef TYRE',
             '  { float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));',
             '    c.rgb = mix(c.rgb, vec3(0.031), (1.0 - smoothstep(0.1, 0.22, mx)) * (1.0 - smoothstep(0.05, 0.12, mx - mn))); }',
+            '#endif',
+            // (the 2026 tyre's texture is masks: rubber, and its markings in a neutral grey, since the
+            // atlas is shared by cars on different compounds)
+            '#ifdef TYMASK',
+            '  { vec4 m = texture2D(uMap, vU); c = vec4(mix(mix(vec3(0.034), vec3(0.4), m.r), vec3(0.7), m.g), 1.0); }',
             '#endif',
             '#ifdef HUE',
             '  { const mat3 toY = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);',
@@ -944,12 +978,13 @@
     rainMat.emissive = new THREE.Color(0xff2010); rainMat.emissiveIntensity = 0;
     // the tyres: this car's own copies of the model's tyre materials, which carry its tyres' wear
     const tyWear = new THREE.Vector4(), tyHold = { value: tyWear }, tyMats = new Map();
+    const tyComp = { value: F1.R3Tyre ? F1.R3Tyre.compColor(comp) : new THREE.Color(0xffd400) };
     const tyMat = m => {
       if (tyMats.has(m)) return tyMats.get(m);
       const src = MD.mats[m], t = src.clone(), ud = Object.assign({}, src.userData);
       delete ud.r3s; // (patched afresh, js/r3-shaders.js)
       const ex = src.userData.patchExtra;
-      ud.patchExtra = sh => { if (ex) ex(sh); sh.uniforms.uTyWear = tyHold; };
+      ud.patchExtra = sh => { if (ex) ex(sh); sh.uniforms.uTyWear = tyHold; sh.uniforms.uTyComp = tyComp; };
       t.userData = ud;
       tyMats.set(m, t);
       return t;
@@ -1051,7 +1086,7 @@
       });
       // compound marking on both sidewalls
       const stripes = [];
-      for (const sd of [-1, 1]) {
+      for (const sd of MD.retyred ? [] : [-1, 1]) { // (the 2026 tyre carries its markings itself)
         const t = new THREE.Mesh(new THREE.TorusGeometry(W0.r * 0.79, 0.011, 6, 40), compoundMat(comp));
         t.position.z = sd * (W0.w * 0.5 - 0.012);
         spin.add(t); stripes.push(t);
@@ -1109,7 +1144,7 @@
     { const e = G.__helmetEye || [-0.12, 1.46, -6.2]; hEye.position.set(e[0], e[1], 0); hLook.position.set(30, e[2], 0); }
     root.add(hEye, hLook); // bolted to the chassis, not the head
     root.add(tcamEye, tcamLook);
-    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, midG, tyWear, shBody, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
+    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, midG, tyWear, tyComp, shBody, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
     // Who fades with what when the level changes. A mesh points at its set's fade value; the car's
     // materials are shared with the team mate, so the value reaches the shader per draw (lodHook).
     const u = root.userData, sL = u.sL = [{ v: 0 }, { v: 0 }, { v: 0 }], sC = u.sC = { v: 0 }, sI = u.sI = { v: 0 };
