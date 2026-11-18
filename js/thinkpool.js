@@ -7,7 +7,8 @@
 // with the settings, as those files are data, not sim modules. With no workers, or a circuit the
 // copies cannot rebuild exactly, the AI drives on its plan: the game never thinks on the page (one
 // look-ahead is about 90 ms of work).
-(function (G) {
+// (a named function, so the race's own sim worker, js/simworker.js, can run its look-ahead pool too)
+function thinkPoolModule(G) {
   'use strict';
   const F1 = G.F1;
 
@@ -183,4 +184,5 @@
     try { return new Pool(race, n); } catch (e) { crew.splice(0).forEach(w => w.terminate()); return null; }
   }
   F1.ThinkPool = { forRace };
-})(typeof self !== 'undefined' ? self : this);
+}
+(function (G) { (G.F1workerMods = G.F1workerMods || []).push(thinkPoolModule); thinkPoolModule(G); })(typeof self !== 'undefined' ? self : this);

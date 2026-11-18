@@ -64,11 +64,12 @@
   //               box stand-ins
   //   liveRefl    live reflections on the cars, redrawn every frame from the circuit's reflection
   //               copy (js/r3-reflect.js): 1 its 1.5 m grid, 2 a finer 1 m grid, 0 the sky map alone
+  //   simWorker   the race simulation on a worker thread of its own (js/simworker.js), from the next race
   //   drs         dynamic resolution: the render scale drops a little (to 67% at most) to hold
   //               the frame rate target before Auto quality turns anything off
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
     trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 34, carFar: 130, carDraw: 0, dispHz: 12,
-    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, carShade: 'baked', lensRain: true, wheelBlur: true, carSelfShade: true, roadShade: true, liveRefl: 0 };
+    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, carShade: 'baked', lensRain: true, wheelBlur: true, carSelfShade: true, roadShade: true, liveRefl: 0, simWorker: false };
   const ADV_P = {
     ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17, liveRefl: 2 },
     high: { liveRefl: 1 },
@@ -398,13 +399,13 @@
       }
       if (code === 'KeyH') { Game.hudOn = !Game.hudOn; document.getElementById('hud').classList.toggle('off', !Game.hudOn); return; }
       // (a simulation race gives the reset to a car that is stuck; the time it cost is the penalty)
-      if (code === 'KeyR' && (race.mode !== 'sim' || (p.stuckT || 0) > 1.5) && race.green && !p.finished && !p.inPit && !p.retired) { race.recover(p); p.stuckT = 0; return; }
+      if (code === 'KeyR' && (race.mode !== 'sim' || (p.stuckT || 0) > 1.5) && race.green && !p.finished && !p.inPit && !p.retired) { if (!simAct('recover', p)) race.recover(p); p.stuckT = 0; return; }
       if (race.sim && !p.assist.autoGear && race.green) {
-        if (code === 'KeyE' || code === 'ShiftLeft') Car.shift(p, 1);
-        if (code === 'KeyQ' || code === 'ControlLeft') Car.shift(p, -1);
+        if (code === 'KeyE' || code === 'ShiftLeft') { if (!simAct('shift', p, 1)) Car.shift(p, 1); }
+        if (code === 'KeyQ' || code === 'ControlLeft') { if (!simAct('shift', p, -1)) Car.shift(p, -1); }
       }
       if (race.sim && race.mode !== 'tt' && code === 'KeyP') {
-        if (Game.pitMenu || p.brain.pit) { Game.pitMenu = false; if (p.brain.pit && p.brain.pit.phase === 'approach') { p.brain.pit = null; HUD.message('PIT STOP CANCELLED', 'yellow'); } }
+        if (Game.pitMenu || p.brain.pit) { Game.pitMenu = false; if (p.brain.pit && p.brain.pit.phase === 'approach') { p.brain.pit = null; simAct('set', p, ['brain', 'pit'], null); HUD.message('PIT STOP CANCELLED', 'yellow'); } }
         else if (!p.inPit && !p.finished) {
           Game.pitMenu = true;
           const adv = race.advice;
@@ -1053,6 +1054,10 @@
   // ---------- race lifecycle ----------
   let acc = 0;
   let evIdx = 0;
+  // the race's sim on a worker thread (js/simworker.js), when Settings has it on (or ?simw=1)
+  let simLink = null;
+  const simWanted = () => !!(Game.settings.gfx.simWorker || /[?&]simw=1/.test(location.search)) && !!F1.SimWorker && F1.SimWorker.available();
+  const simAct = (name, car, ...args) => !!(simLink && simLink.usable && simLink.act(name, car, ...args));
   let finishT = -1, retireT = -1, launching = false;
   const trace = { cur: [], best: null };
 
@@ -1080,6 +1085,7 @@
     const race = Race.create(cfg);
     // the AI's look-ahead on worker threads (js/thinkpool.js); the last race's workers go
     if (thinkPool) { thinkPool.close(); thinkPool = null; }
+    if (simLink) { simLink.close(); simLink = null; }
     if (F1.ThinkPool) race.thinkPool = thinkPool = F1.ThinkPool.forRace(race);
     race.thinkPage = false; // (never on the page: see Race think)
     // distant AI cars' physics at half rate (advanced graphics; on in Rock; see Race.step)
@@ -1473,6 +1479,8 @@
           setTimeout(() => {
             load.on = false;
             Game.race = race;
+            // (not time trial: its ghost lap is kept in the browser's storage, which a worker cannot reach)
+            if (simWanted() && race.mode !== 'tt') { simLink = F1.SimWorker.link(race); if (simLink) F1.SimWorker.Link.onFail = l => { if (l === simLink) simLink = null; }; }
             Game.state = 'race'; Game.paused = false; Game.pitMenu = false;
             UIm.hide();
             document.getElementById('shade').className = '';
@@ -1845,6 +1853,7 @@
     if (!p || !Game.pitMenu) return;
     p.pitPlan = { compound: comp };
     p.brain.pit = { phase: 'approach', service: 2.4, served: false };
+    simAct('set', p, ['pitPlan'], { compound: comp }); simAct('set', p, ['brain', 'pit'], { phase: 'approach', service: 2.4, served: false });
     Game.pitMenu = false;
     document.getElementById('pitpanel').classList.remove('show');
     HUD.message('BOX, BOX', 'red', `${Car.COMPOUNDS[comp].name} TYRES  /  THIS LAP`);
@@ -1912,6 +1921,8 @@
     const pad = pollPad();
     const wh = pollWheel(dt);
     const race = Game.race;
+    // the worker holds whenever the race does not run live: the page's copy is the race meanwhile
+    if (simLink && (simLink.race !== race || Game.state !== 'race' || Game.paused)) simLink.hold();
     if (race && (Game.state === 'race' && !Game.paused || Game.state === 'menu')) {
       // (just after a flashback the race eases back up to speed)
       let flow = 1;
@@ -1924,7 +1935,17 @@
       // there spirals (more steps, a slower frame, more steps), a touch of slow motion does not
       const maxSteps = Game.state === 'menu' ? 7 : Game.settings.gfx.catchup || 40;
       const PF = F1.Perf, tSim = PF ? PF.t0() : 0;
-      while (acc >= DT && n < maxSteps) {
+      // on the sim's own thread: this frame's steps (and the player's controls for each) are asked
+      // for, the answer to the last request is drawn (js/simworker.js)
+      const W = simLink && simLink.race === race && simLink.usable && Game.state === 'race' ? simLink : null;
+      if (W) {
+        W.run();
+        const want = Math.min(maxSteps, Math.floor(acc / DT)), ctls = [];
+        if (W.canSend) for (let s = 0; s < want; s++) { if (!Game.spectate) applyInput(race.player, DT, pad, wh); ctls.push(F1.SimWorker.input(race.player)); }
+        const r = W.frame(W.canSend ? want : 0, ctls);
+        if (r.sent > 0) { acc -= r.sent * DT; n = r.sent; if (PF) for (let s = 0; s < n; s++) PF.step(); }
+        if (acc > maxSteps * DT) acc = maxSteps * DT; // (a worker that falls behind: the race slows rather than piling up steps)
+      } else while (acc >= DT && n < maxSteps) {
         if (Game.state === 'race' && !Game.spectate) applyInput(race.player, DT, pad, wh);
         snapPoses(race);
         Race.step(race, DT);
@@ -1932,7 +1953,7 @@
         acc -= DT; n++;
       }
       if (PF) PF.add('sim', tSim);
-      if (n >= maxSteps) acc = Game.state === 'menu' ? acc % DT : 0;
+      if (!W && n >= maxSteps) acc = Game.state === 'menu' ? acc % DT : 0;
       // the replay recorder: every car, twenty times a second
       if (Game.state === 'race' && race.rec) { race.rec.capture(); for (const f of race.fx) race.rec.contact(f); }
       if (Game.state === 'race' && fb.ring && race.green && !race.done) fb.ring.capture();

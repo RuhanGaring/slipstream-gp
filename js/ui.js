@@ -1292,6 +1292,7 @@
     ['debris', 'Crash debris', 'Loose parts kept on the track', [0, 10, 20, 40, 80], v => (v ? String(v) : 'OFF')],
     ['rainK', 'Rain density', 'Drops drawn in wet weather', [0.25, 0.4, 0.6, 1], pctF],
     ['SIMULATION'],
+    ['simWorker', 'Physics thread', 'The race simulation on its own CPU thread: a faster, steadier frame rate, one frame more input delay. Applies on the next race', [false, true], v => (v ? 'OWN THREAD' : 'MAIN THREAD')],
     ['physLod', 'Distant AI physics', 'Half rate past the distance below. Close racing is untouched', [false, true], v => (v ? 'HALF RATE' : 'FULL')],
     ['physLodDist', 'Half rate beyond', '', [100, 150, 250, 400], mF],
     ['catchup', 'Slow motion below', 'When the device falls behind: slow the game instead of stuttering', [40, 12, 8], v => ({ 40: 'OFF', 12: '20 FPS', 8: '30 FPS' })[v] || v],
