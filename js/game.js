@@ -866,7 +866,7 @@
       PLACED.length = 0;
       for (const { c, d } of TAGS) {
         if (PLACED.length >= 10) break;
-        const q = R3.project(c.x, c.y, 1.7);
+        const q = R3.project(c.x, c.y, 1.7, c.zRoad);
         if (!q) continue;
         let clash = false;
         for (let k = 0; k < PLACED.length && !clash; k += 2) clash = Math.abs(PLACED[k] - q.x) < 42 && Math.abs(PLACED[k + 1] - q.y) < 16;

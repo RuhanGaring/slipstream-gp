@@ -894,6 +894,45 @@
     return L.merged;
   }
 
+  // The full-detail body's shadow in one draw. A car close to the camera is drawn into the near
+  // shadow map in full detail, part by part (some 20 to 30 draws a car); its parts that cast and
+  // never move against the body are merged here, once per model, into one position-only mesh per
+  // kind of face culling, which only the shadow cameras see (layer SHADOW_ONLY). Same triangles,
+  // same depth material: the same shadow. Cut-out parts keep their own (their depth needs the
+  // texture). The wheels, the wing flap and the driver are not part of it: they move.
+  const _sv = new THREE.Vector3();
+  function shadowBody(MD) {
+    if (MD.shBody) return MD.shBody;
+    const by = new Map();
+    for (const p of mergedBody(MD, MD.lods[0])) {
+      const mat = MD.mats[p.m];
+      if (!p.cast || mat.alphaTest > 0 || mat.alphaMap || mat.transparent) continue;
+      const key = mat.side + '|' + mat.shadowSide;
+      if (!by.has(key)) by.set(key, { side: mat.side, shadowSide: mat.shadowSide, pos: [], idx: [] });
+      const b = by.get(key), P = p.G.attributes.position, I = p.G.index, base = b.pos.length / 3;
+      for (let i = 0; i < P.count; i++) { _sv.fromBufferAttribute(P, i); b.pos.push(_sv.x, _sv.y, _sv.z); }
+      for (let i = 0; i < I.count; i++) b.idx.push(base + I.getX(i));
+    }
+    MD.shBody = [...by.values()].map(b => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+      g.setIndex(b.pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(b.idx, 1) : new THREE.Uint16BufferAttribute(b.idx, 1));
+      g.computeBoundingSphere();
+      const m = new THREE.MeshBasicMaterial({ side: b.side, colorWrite: false, depthWrite: false });
+      m.shadowSide = b.shadowSide != null ? b.shadowSide : null;
+      return { g, m };
+    });
+    return MD.shBody;
+  }
+  // a damaged car's body loses parts, which the merged mesh would still shadow: its parts cast again
+  function shadowBodyOff(u) {
+    const sb = u.shBody;
+    if (!sb || !sb.on) return;
+    sb.on = false;
+    for (const q of sb.meshes) q.visible = false;
+    for (const m of sb.parts) m.castShadow = true;
+  }
+
   function makeModelCar(team, num, comp) {
     const MD = modelFor(team);
     const root = new THREE.Group();
@@ -933,6 +972,25 @@
       root.add(g);
       lodGroups.push(g);
     });
+    // (the full-detail body's shadow in one draw, see shadowBody; G.__noShadowBody: part by part)
+    const shBody = { on: false, meshes: [], parts: [] };
+    if (!G.__noShadowBody && F1.R3Shadow) {
+      for (const { g, m } of shadowBody(MD)) {
+        const q = new THREE.Mesh(g, m);
+        q.castShadow = true; q.receiveShadow = false; q.layers.set(F1.R3Shadow.SHADOW_ONLY);
+        q.userData.shOnly = true; q.userData.noSplit = true;
+        lodGroups[0].add(q); shBody.meshes.push(q);
+      }
+      if (shBody.meshes.length) {
+        for (const q of lodGroups[0].children) {
+          if (!q.isMesh || q.userData.shOnly || !q.castShadow) continue;
+          const mt = q.material;
+          if (mt.alphaTest > 0 || mt.alphaMap || mt.transparent) continue;
+          q.castShadow = false; shBody.parts.push(q);
+        }
+        shBody.on = true;
+      }
+    }
     // A model's tyre is two meshes (tread over the shoulders, and sidewall) meeting in a ring, each
     // with its own normals, so the light broke along the join. Once per model, the normals of every
     // vertex the tyre's meshes share (same place, a tenth of a millimetre) are averaged across both,
@@ -1049,7 +1107,7 @@
     { const e = G.__helmetEye || [-0.12, 1.46, -6.2]; hEye.position.set(e[0], e[1], 0); hLook.position.set(30, e[2], 0); }
     root.add(hEye, hLook); // bolted to the chassis, not the head
     root.add(tcamEye, tcamLook);
-    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, midG, tyWear, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
+    root.userData = { wheels, wheelsLow: wl, flapPivot: new THREE.Group(), rainMat, spin: 0, comp, lodGroups, farG, midG, tyWear, shBody, md: MD, shadowGeo: meta2(MD), shadowMat: FAR_SHADOW(), nose, helmet: cockpit.helmet, model: true, carId: MD.id, cockpit, tcamEye, tcamLook, eyeA, lookA, eyeP, hEye, hLook };
     // Who fades with what when the level changes. A mesh points at its set's fade value; the car's
     // materials are shared with the team mate, so the value reaches the shader per draw (lodHook).
     const u = root.userData, sL = u.sL = [{ v: 0 }, { v: 0 }, { v: 0 }], sC = u.sC = { v: 0 }, sI = u.sI = { v: 0 };
@@ -1126,6 +1184,7 @@
   function setLod(root, lod, inner = true, dt = 0) {
     const u = root.userData;
     if (!u.lodGroups) return;
+    if (u.hurt && u.shBody && u.shBody.on) shadowBodyOff(u);
     // the mid level, unless the car is damaged (it cannot show a dent or a missing wheel either),
     // or the atlas cannot be made; then the low-detail model as it is. Debug: G.__noMid
     const wantMid = !!u.midG && !G.__noMid && !u.hurt && u.wheels.every(w => w.userData.lods.length) && bakeFar(u.md);

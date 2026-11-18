@@ -158,7 +158,10 @@
     for (const m of root.children.slice()) {
       const mt = m.material;
       if (!m.isMesh || !m.castShadow || m.isInstancedMesh || !m.geometry || m.geometry.isInstancedBufferGeometry || Array.isArray(mt) || m.userData.noProxy) continue;
-      if (mt.transparent || mt.alphaTest > 0 || mt.alphaMap || m.customDepthMaterial || mt.userData.patchExtra || mt.userData.grass || m.geometry.morphAttributes.position) continue;
+      // (a material's shader patch, barrier, zinc or the facades' rooms, does not reach the shadow
+      // pass: three draws shadows with its own depth material, so a patched mesh merges like any other.
+      // What does reach it stays apart: transparency, cut-outs and custom depth materials)
+      if (mt.transparent || mt.alphaTest > 0 || mt.alphaMap || m.customDepthMaterial || mt.userData.grass || m.geometry.morphAttributes.position) continue;
       const g = m.geometry, P = g.attributes.position;
       if (!P) continue;
       if (!g.boundingSphere) g.computeBoundingSphere();
@@ -643,15 +646,44 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const SM = renderer.shadowMap, smRender = SM.render.bind(SM), SH = F1.R3Shadow.S;
       const carScene = new THREE.Scene(), hid = [];
       const shown = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
-      const fillCars = () => {
-        carScene.children.length = 0;
+      // The stand-ins are drawn batched: one instanced mesh per car model (team mates share one),
+      // so a map with twenty cars is ten draw calls, not twenty. Same geometry, same material,
+      // same places: the same shadow. (Unculled: the cars out of the map's reach cost the GPU a few
+      // thousand clipped triangles each, far less than a draw call costs the CPU.)
+      // (two sets: three uploads an instanced mesh's matrices once a frame, and every shadow map is
+      // drawn within the same frame, so the near slice cannot refill the outer maps' meshes)
+      const pools = { cars: new Map(), near: new Map() }, _bm = [];
+      const batchOf = (batches, geo, mat) => {
+        let b = batches.get(geo);
+        if (!b) {
+          const im = new THREE.InstancedMesh(geo, mat, 8);
+          im.castShadow = true; im.receiveShadow = false; im.frustumCulled = false; im.matrixAutoUpdate = false; im.matrixWorldAutoUpdate = false;
+          b = { im, n: 0 }; batches.set(geo, b);
+        }
+        return b;
+      };
+      // fill the batches with every car that passes keep(o); returns the meshes with cars in them
+      const batch = (batches, keep) => {
+        if (G.__noShadowBatch) { // (debug: each stand-in drawn on its own, as before)
+          _bm.length = 0;
+          for (const o of live.values()) { const px = o.userData.body && o.userData.body.userData.shadowProxy; if (!px || !keep(o)) continue; const tw = px.userData.twin; tw.matrixWorld.copy(px.matrixWorld); _bm.push(tw); }
+          return _bm;
+        }
+        for (const b of batches.values()) b.n = 0;
         for (const o of live.values()) {
           const px = o.userData.body && o.userData.body.userData.shadowProxy;
-          if (!px || !shown(o)) continue;
-          const tw = px.userData.twin;
-          tw.matrixWorld.copy(px.matrixWorld); tw.parent = carScene;
-          carScene.children.push(tw);
+          if (!px || !keep(o)) continue;
+          const tw = px.userData.twin, b = batchOf(batches, tw.geometry, tw.material);
+          if (b.n >= b.im.instanceMatrix.count) continue; // (more than eight cars of one model: never in a race)
+          b.im.setMatrixAt(b.n++, px.matrixWorld);
         }
+        _bm.length = 0;
+        for (const b of batches.values()) { b.im.count = b.n; if (b.n) { b.im.instanceMatrix.needsUpdate = true; _bm.push(b.im); } }
+        return _bm;
+      };
+      const fillCars = () => {
+        carScene.children.length = 0;
+        for (const im of batch(pools.cars, shown)) { im.parent = carScene; carScene.children.push(im); }
       };
       SM.render = (lights, sc, cam) => {
         if (lights.length < 2 || G.__shFull) return smRender(lights, sc, cam); // debug: G.__shFull draws every slice in full
@@ -665,13 +697,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             for (const o of live.values()) if (o.visible) { o.visible = false; hid.push(o); }
             try { smRender([l], sc, cam); } finally { for (const o of hid) o.visible = true; hid.length = 0; }
           } else {
-            const tw = [], cp = camera.position;
-            for (const o of live.values()) {
-              const px = o.userData.body && o.userData.body.userData.shadowProxy;
-              if (!o.visible || !px || o.position.distanceToSquared(cp) < 130) continue;
-              o.visible = false; hid.push(o);
-              const t = px.userData.twin; t.matrixWorld.copy(px.matrixWorld); t.parent = sc; sc.children.push(t); tw.push(t);
-            }
+            // the near slice: the cars within 11 m in full detail, the others as their stand-ins
+            // (batched, in their own set of instanced meshes)
+            const cp = camera.position;
+            const far = o => o.visible && o.position.distanceToSquared(cp) >= 130 && !!(o.userData.body && o.userData.body.userData.shadowProxy);
+            for (const o of live.values()) if (far(o)) { o.visible = false; hid.push(o); }
+            const tw = batch(pools.near, o => hid.includes(o)).slice();
+            for (const t of tw) { t.parent = sc; sc.children.push(t); }
             try { smRender([l], sc, cam); } finally { for (const o of hid) o.visible = true; hid.length = 0; sc.children.length -= tw.length; for (const t of tw) t.parent = null; }
           }
         }
@@ -4658,8 +4690,10 @@ void main() {
 
   // world point -> CSS pixels (null when behind the camera)
   const PJ = new THREE.Vector3();
-  function project(x, y, h) {
-    PJ.set(x, h + (state.tr ? Tracks.groundAt(state.tr, x, y) : 0), y).project(camera);
+  // (gy: the ground height there when the caller knows it, as for a car: the ground search on a
+  // generated town circuit is slow, and the name tags asked for it twenty times a frame)
+  function project(x, y, h, gy) {
+    PJ.set(x, h + (gy != null ? gy : state.tr ? Tracks.groundAt(state.tr, x, y) : 0), y).project(camera);
     if (PJ.z > 1 || PJ.z < -1) return null;
     return { x: (PJ.x + 1) / 2 * W, y: (1 - PJ.y) / 2 * H, d: camera.position.distanceTo(V(x, h, y)) };
   }

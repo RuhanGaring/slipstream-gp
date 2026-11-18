@@ -35,7 +35,7 @@
   }
   function bodyMeshes(root) {
     const out = [];
-    for (const g of root.userData.lodGroups || []) g.traverse(m => { if (m.isMesh && m.geometry.attributes.position) out.push(m); });
+    for (const g of root.userData.lodGroups || []) g.traverse(m => { if (m.isMesh && m.geometry.attributes.position && !m.userData.shOnly) out.push(m); }); // (not the shadow-only body, js/r3-car.js shadowBody)
     return out;
   }
   const hash = (a, b, c) => { const s = Math.sin(a * 12.9898 + b * 78.233 + c * 37.719) * 43758.5453; return s - Math.floor(s); };
