@@ -160,7 +160,139 @@
   }
 
   // ---------- open circuits ----------
-  function openLayout(r, style, st) {
+  // Layout version 2 (ids ending -2). Real circuits are not blobs: measured on 40 real centrelines
+  // they turn 250 to 340 degrees a kilometre (twice what the first outlines did), with two or
+  // three hairpins, three to five long straights, and no two alike. A real lap reads as a chain
+  // of sections: a long straight into a heavy stop at a hairpin (Bahrain, Shanghai, Abu Dhabi),
+  // a winding infield of short straights and slow corners (the Hungaroring, Marina Bay), a fast
+  // sweeper or a run of esses (Suzuka, Silverstone, COTA), a corner that goes on round in two or
+  // three bites (Istanbul's 8, COTA's 16 to 18, Sepang's last), a chicane at the end of a straight
+  // (Monza). So the lap is walked as such a chain, each section drawn with its own lengths,
+  // angles and radii, and closed by stretching or shrinking its straights (the least change that
+  // brings the walk back to where it started, longer straights giving more). Walks that cross
+  // themselves or run too close to another part of the lap are thrown away and another walked;
+  // the style sets the mix of sections.
+  const WALK = {
+    park: { n: [15, 23], mix: { brake: 0.2, tech: 0.18, sweep: 0.2, esses: 0.14, multi: 0.1, chicane: 0.06, medium: 0.12 } },
+    mountain: { n: [14, 21], mix: { brake: 0.17, tech: 0.1, sweep: 0.3, esses: 0.18, multi: 0.1, chicane: 0.04, medium: 0.11 } },
+    modern: { n: [16, 25], mix: { brake: 0.27, tech: 0.25, sweep: 0.1, esses: 0.1, multi: 0.1, chicane: 0.08, medium: 0.1 } },
+  };
+  function segsCross(v) {
+    const n = v.length;
+    const cr = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const a = v[i], b = v[(i + 1) % n], c = v[j], d = v[(j + 1) % n];
+      if (cr(a, b, c) * cr(a, b, d) < 0 && cr(c, d, a) * cr(c, d, b) < 0) return true;
+    }
+    return false;
+  }
+  // nearest approach of two segments
+  function segGap(a, b, c, d) {
+    const pt = (p, q, s) => { const vx = s[0] - q[0], vy = s[1] - q[1], l2 = vx * vx + vy * vy || 1, t = U.clamp(((p[0] - q[0]) * vx + (p[1] - q[1]) * vy) / l2, 0, 1); return Math.hypot(p[0] - q[0] - vx * t, p[1] - q[1] - vy * t); };
+    return Math.min(pt(a, c, d), pt(b, c, d), pt(c, a, b), pt(d, a, b));
+  }
+  function walkLayout(r, style, st) {
+    const W = WALK[style], R = (a, b) => a + (b - a) * r(), D2R = Math.PI / 180;
+    const pickPhrase = () => { let x = r(); for (const [k, p] of Object.entries(W.mix)) { if (x < p) return k; x -= p; } return 'medium'; };
+    for (let tries = 0; tries < 300; tries++) {
+      // the chain: a list of [straight before the corner, turn (radians, signed), radius, least straight]
+      const cs = [], want = Math.round(R(W.n[0], W.n[1]));
+      const sgn = () => (r() < 0.5 ? -1 : 1);
+      const C = (l, deg, rad, lmin) => cs.push({ l, th: deg * D2R, rad, lmin: lmin || 30 });
+      let guard = 0;
+      while (cs.length < want && guard++ < 60) {
+        const ph = pickPhrase();
+        if (ph === 'brake') {
+          // a long straight into a hairpin or a slow square corner
+          const hp = r() < 0.75, s = sgn();
+          // (and out of it a short run to the next corner, which takes the lap away from the
+          // straight it came down, as at Bahrain's first corner or Shanghai's last)
+          if (hp) { const rad = R(11, 22), d = R(135, 180), lh = 2 * rad * Math.tan(d / 4 * D2R) + 1; C(R(450, 1100), s * d / 2, rad, 300); cs[cs.length - 1].fix = 1; C(lh, s * d / 2, rad, lh); cs[cs.length - 1].fix = 1; C(R(90, 260), (r() < 0.6 ? -s : s) * R(35, 95), R(28, 90), 70); }
+          else { C(R(400, 1000), s * R(80, 125), R(14, 32), 300); if (r() < 0.5) C(R(80, 220), sgn() * R(30, 80), R(30, 100), 60); }
+        } else if (ph === 'tech') {
+          // a winding infield: three to five slow corners on short straights
+          const m = 3 + Math.floor(r() * 3);
+          let s = sgn();
+          for (let j = 0; j < m; j++) { C(j ? R(70, 200) : R(120, 400), s * R(45, 120), R(16, 45), j ? 55 : 100); if (r() < 0.7) s = -s; }
+        } else if (ph === 'sweep') {
+          C(R(200, 600), sgn() * R(20, 75), R(110, 320), 120);
+        } else if (ph === 'esses') {
+          const m = 3 + Math.floor(r() * 2);
+          let s = sgn();
+          for (let j = 0; j < m; j++) { C(j ? R(50, 130) : R(150, 450), s * R(22, 60), R(50, 140), j ? 40 : 100); s = -s; }
+        } else if (ph === 'multi') {
+          // one corner taken in two or three bites, or a long carousel
+          const m = 2 + Math.floor(r() * 2), s = sgn(), tot = R(100, 220);
+          for (let j = 0; j < m; j++) C(j ? R(30, 110) : R(250, 650), s * tot / m * R(0.8, 1.2), R(35, 120), j ? 25 : 150);
+        } else if (ph === 'chicane') {
+          const s = sgn(), a = R(45, 85);
+          C(R(400, 900), s * a, R(13, 22), 250); C(R(25, 50), -s * a * R(0.85, 1.1), R(13, 22), 20);
+        } else {
+          C(R(150, 550), sgn() * R(55, 125), R(28, 110), 100);
+        }
+      }
+      const n = cs.length;
+      // the turns add up to one full turn round (the way the lap goes is the way it mostly turns)
+      const S = cs.reduce((a, c) => a + c.th, 0), tgt = (Math.abs(S) > 0.3 ? Math.sign(S) : sgn()) * 2 * Math.PI, need = tgt - S;
+      // (taken from every corner in proportion, the hairpins excepted)
+      const wsum = cs.reduce((a, c) => a + (c.fix ? 0 : Math.abs(c.th)), 0);
+      if (Math.abs(need) > 0.6 * wsum) continue;
+      for (const c of cs) if (!c.fix) c.th += need * Math.abs(c.th) / wsum;
+      if (cs.some(c => Math.abs(c.th) > 1.65 * Math.PI / 2 * 1.2)) continue;
+      // headings and the straights' directions
+      let h = R(0, 2 * Math.PI);
+      const ux = [], uy = [];
+      // (straight i leads into corner i, on the heading left by corner i - 1)
+      for (let i = 0; i < n; i++) { ux.push(Math.cos(h)); uy.push(Math.sin(h)); h += cs[i].th; }
+      // close the walk: the least weighted change of straight lengths that brings it home, with no
+      // straight shorter than it may be (those held fixed and the rest solved again)
+      const len = cs.map(c => c.l), fixed = new Array(n).fill(false);
+      let okc = false;
+      for (let it = 0; it < 6; it++) {
+        let ex = 0, ey = 0;
+        for (let i = 0; i < n; i++) { ex += len[i] * ux[i]; ey += len[i] * uy[i]; }
+        if (Math.hypot(ex, ey) < 0.5) { okc = true; break; }
+        let a11 = 0, a12 = 0, a22 = 0;
+        for (let i = 0; i < n; i++) if (!fixed[i]) { const w = len[i]; a11 += w * ux[i] * ux[i]; a12 += w * ux[i] * uy[i]; a22 += w * uy[i] * uy[i]; }
+        const det = a11 * a22 - a12 * a12;
+        if (Math.abs(det) < 1e-6) break;
+        const lx = (a22 * ex - a12 * ey) / det, ly = (a11 * ey - a12 * ex) / det;
+        for (let i = 0; i < n; i++) if (!fixed[i]) {
+          len[i] -= len[i] * (ux[i] * lx + uy[i] * ly);
+          if (len[i] < cs[i].lmin) { len[i] = cs[i].lmin; fixed[i] = true; }
+        }
+      }
+      if (!okc || len.some((l, i) => l > Math.max(1300, cs[i].l * 2.2))) continue;
+      const L = len.reduce((a, b) => a + b, 0);
+      if (L < st.len[0] * 1.0 || L > st.len[1] * 1.03) continue;
+      // the corners: corner i sits at the end of straight i
+      const v = [];
+      let x = 0, y = 0;
+      for (let i = 0; i < n; i++) { x += len[i] * ux[i]; y += len[i] * uy[i]; v.push([x, y, cs[i].rad]); }
+      if (segsCross(v)) continue;
+      // no two parts of the lap that are far apart along it may come close
+      let near = false;
+      const cum = [0];
+      for (let i = 0; i < n; i++) cum.push(cum[i] + Math.hypot(v[(i + 1) % n][0] - v[i][0], v[(i + 1) % n][1] - v[i][1]));
+      for (let i = 0; i < n && !near; i++) for (let j = i + 2; j < n && !near; j++) {
+        if (i === 0 && j === n - 1) continue;
+        const along = Math.min(Math.abs(cum[j] - cum[i + 1]), L - Math.abs(cum[j + 1] - cum[i]));
+        if (along < 260) continue;
+        if (segGap(v[i], v[(i + 1) % n], v[j], v[(j + 1) % n]) < st.sep + 50) near = true;
+      }
+      if (near) continue;
+      // the longest straight is the start straight (the last segment)
+      let best = 0, bl = 0;
+      for (let k = 0; k < n; k++) { const l = Math.hypot(v[(k + 1) % n][0] - v[k][0], v[(k + 1) % n][1] - v[k][1]); if (l > bl) { bl = l; best = k; } }
+      if (bl < 450) continue;
+      const vv = v.map(p => [Math.round(p[0]), Math.round(p[1]), Math.round(p[2])]);
+      return { v: vv.slice(best + 1).concat(vv.slice(0, best + 1)), pitSides: [1, -1], features: [] };
+    }
+    return { fail: 'no closed walk' };
+  }
+  function openLayout(r, style, st, lv) {
+    if (lv >= 2) return walkLayout(r, style, st);
     const TG = F1.TrackGen;
     const vs = TG._layout(r, { len: st.len, clear: st.sep, street: false });
     let v = TG._radii(r, vs, { street: false });
@@ -736,11 +868,53 @@
     // the limit changes gradually: the tightest value within 30 m, softened over 20 m
     return smoothLoop(minFilter(g, Math.round(30 / ds)), 20 / ds / 2);
   }
-  function grade(tr, raw, st) {
+  // Where two parts of the lap pass close to each other (much closer across the ground than along
+  // the lap: the legs of a hairpin, a straight beside the infield), the earthworks between them
+  // must meet in one bank; a road graded only along its own length can leave them at heights no
+  // bank can join, and a wall would stand in a parkland infield. Real builders level such ground,
+  // so the profile is drawn together there: each such pair may differ by no more than the banks
+  // between them can make up, and the excess is split between them and spread along the road.
+  function levelPairs(tr, slope) {
+    const N = tr.N, ds = tr.ds, edge = new Float64Array(N), pairs = [];
+    for (let i = 0; i < N; i++) edge[i] = Math.max(tr.barr[0][i], tr.barr[1][i], isNaN(tr.pit.off[i]) ? 0 : Math.abs(tr.pit.off[i]) + tr.pit.lane / 2 + 1) + 4;
+    for (let i = 0; i < N; i += 2) {
+      tr.hash.near(tr.x[i], tr.y[i], REACH, j => {
+        if (j <= i || j % 2) return;
+        const d = Math.hypot(tr.x[j] - tr.x[i], tr.y[j] - tr.y[i]);
+        let a = Math.abs(i - j); a = Math.min(a, N - a) * ds;
+        if (d > REACH || a < 1.15 * d + 15) return;
+        pairs.push(i, j, slope * Math.max(0, d - edge[i] - edge[j]) * 0.8);
+      });
+    }
+    return pairs;
+  }
+  function level(z, pairs, ds) {
+    const N = z.length;
+    for (let it = 0; it < 40; it++) {
+      const c = new Float64Array(N), w = new Float64Array(N);
+      let worst = 0;
+      for (let p = 0; p < pairs.length; p += 3) {
+        const i = pairs[p], j = pairs[p + 1], diff = z[i] - z[j], ex = Math.abs(diff) - pairs[p + 2];
+        if (ex <= 0) continue;
+        worst = Math.max(worst, ex);
+        const m = Math.sign(diff) * ex / 2;
+        c[i] -= m; w[i]++; c[j] += m; w[j]++;
+      }
+      if (worst < 0.05) break;
+      for (let i = 0; i < N; i++) if (w[i]) c[i] /= w[i];
+      // (spread over 30 m either way, so the road eases into the level stretch, not steps)
+      const cs = smoothLoop(c, 30 / ds);
+      for (let i = 0; i < N; i++) z[i] += cs[i] * 5;
+    }
+    return z;
+  }
+  function grade(tr, raw, st, lv) {
     const ds = tr.ds, gl = localGrade(tr, st), v = speedProfile(tr);
+    const pairs = lv >= 2 ? levelPairs(tr, st.slope) : null;
     let z = smoothLoop(raw, 30 / ds), sig = 10, ok = false, n = null;
     for (let tries = 0; tries < 9 && !ok; tries++) {
-      for (let it = 0; it < 3; it++) { z = gradeLimit(z, gl, ds); z = smoothLoop(z, sig / ds); }
+      for (let it = 0; it < 3; it++) { if (pairs) z = level(z, pairs, ds); z = gradeLimit(z, gl, ds); z = smoothLoop(z, sig / ds); }
+      if (pairs) { z = level(z, pairs, ds); z = gradeLimit(z, gl, ds); }
       z = gradeLimit(z, gl.map(x => x * 0.985), ds);
       z = smoothLoop(z, 3 / ds);
       n = loads(z, v, ds);
@@ -1382,7 +1556,7 @@
   }
 
   // ---------- one candidate ----------
-  function candidate(r, seed, style) {
+  function candidate(r, seed, style, lv) {
     const st = STYLES[style];
     let lay, s0, town = null, m = 1, xf = null;
     if (style === 'city') {
@@ -1444,7 +1618,8 @@
         net.edges = net.edges.filter(e => !e.drop);
       }
     } else {
-      lay = openLayout(r, style, st);
+      lay = openLayout(r, style, st, lv);
+      if (lay.fail) return { fail: lay.fail };
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const p of lay.v) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
       s0 = site(r, style, [x0, y0, x1, y1]);
@@ -1492,12 +1667,12 @@
     for (let i = 0; i < tr.N; i++) raw[i] = s0.H(tr.x[i], tr.y[i]);
     // a harbour town's quays and seafront stand a couple of metres above the water
     if (city) for (let i = 0; i < tr.N; i++) raw[i] = Math.max(raw[i], 2.5);
-    const gr = grade(tr, raw, st);
+    const gr = grade(tr, raw, st, city ? 1 : lv);
     applyProfile(tr, gr.z, s0.H, st);
     tr.H2 = groundFn(tr, s0.H, st.slope);
     tr.H = s0.H;          // the natural ground (the renderer's outer terrain)
     tr.waterY = null;     // a town's sea comes from its coastline, not the first generator's harbour
-    const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed };
+    const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed, lv };
     if (city) {
       res.city = { buildings: F1.roadOnly ? [] : cityBuildings(r, tr, s0), roads: s0.roads };
       // (after the buildings: the tunnel draws no dice, so a circuit's town stays as it was)
@@ -1670,7 +1845,9 @@
       }
     }
     info.walls = walls / probes;
-    if (style !== 'city' && walls / probes > (st.walls || 0)) fail('retaining walls', walls + ' probes');
+    // (the second layout's laps fold back on themselves, and where two parts meet a short wall may
+    // stand between their banks, as a real circuit has here and there)
+    if (style !== 'city' && walls / probes > (st.walls || (res.lv >= 2 ? 0.012 : 0))) fail('retaining walls', walls + ' probes');
     if (edgeJump > 0.5) fail('bank reach', 'a cut deeper than the banks reach (' + edgeJump.toFixed(1) + ' m)');
     // city: above the sea, buildings clear of the road and of each other, tunnel sound
     if (style === 'city') {
@@ -1695,6 +1872,7 @@
   // order and on any number of threads (js/gen2pool.js, tools/gen2batch.js): the circuit for a
   // seed is always its lowest-numbered candidate that passes every check.
   const MAX_TRIES = 800;
+  const LV = 2;   // the layout new open circuits are made with (see walkLayout)
   const normSeed = seed => Math.max(1, Math.floor(Math.abs(seed)) % 1000000);
   function stream(seed, k) {
     const r = U.rng(((Math.imul(seed, 2654435761) ^ Math.imul(k + 7, 0x9e3779b1)) >>> 0) || 1);
@@ -1703,14 +1881,15 @@
   }
   const styleOf = (seed, style) => style || STYLE_LIST[Math.floor(stream(normSeed(seed), -1)() * STYLE_LIST.length)];
   // one candidate, built and verified: { ok, res, rep } or { ok: false, why: [reasons] }
-  function attempt(seed, style, k) {
+  function attempt(seed, style, k, lv) {
     seed = normSeed(seed); style = styleOf(seed, style);
+    if (lv == null) lv = style === 'city' ? 1 : LV;
     let res;
-    try { res = candidate(stream(seed, k), seed, style); } catch (e) { res = { fail: 'exception: ' + e.message }; }
+    try { res = candidate(stream(seed, k), seed, style, lv); } catch (e) { res = { fail: 'exception: ' + e.message }; }
     if (res.fail) return { ok: false, why: [res.fail], detail: res.detail };
     const rep = verify(res);
     if (!rep.ok) return { ok: false, why: rep.fails.map(f => f.split(':')[0]), res, rep };
-    res.report = rep; res.cand = k;
+    res.report = rep; res.cand = k; res.lv = lv;
     return { ok: true, res, rep };
   }
   // the circuit for a seed, on this thread (opt.from: first candidate to try, when the lowest
@@ -1719,7 +1898,7 @@
     seed = normSeed(seed); style = styleOf(seed, style);
     const reasons = {}, t0 = Date.now();
     for (let k = opt.from || 0; k < (opt.maxTries || MAX_TRIES); k++) {
-      const a = attempt(seed, style, k);
+      const a = attempt(seed, style, k, opt.lv);
       if (a.ok) { a.res.tries = k + 1; a.res.reasons = opt.reasons || reasons; a.res.ms = Date.now() - t0; return a.res; }
       for (const w of a.why) reasons[w] = (reasons[w] || 0) + 1;
       if (opt.onReject && a.res) opt.onReject(a.res, a.rep);
@@ -1738,8 +1917,10 @@
     mountain: { suf: ['Mountain Circuit', 'Ring', 'Hill Circuit'], regions: ['Highland Pass', 'Cedar Valley', 'Mountain Province'], kind: 'Mountain circuit' },
     modern: { suf: ['International Circuit', 'Autodrome', 'Grand Prix Circuit'], regions: ['Desert Gulf', 'Salt Plains', 'Coastal Plain'], kind: 'Modern circuit' },
   };
-  const idOf = (style, seed, cand) => 'gen2-' + style + '-' + seed + '-' + cand;
-  const parseId = id => { const m = /^gen2-(city|park|mountain|modern)-(\d+)-(\d+)$/.exec(id || ''); return m ? { style: m[1], seed: +m[2], cand: +m[3] } : null; };
+  // (an open circuit laid out by the second layout, walkLayout, carries -2 on the end; ids
+  // without it rebuild with the first, so circuits saved before it stay as they were)
+  const idOf = (style, seed, cand, lv) => 'gen2-' + style + '-' + seed + '-' + cand + (lv >= 2 ? '-' + lv : '');
+  const parseId = id => { const m = /^gen2-(city|park|mountain|modern)-(\d+)-(\d+)(?:-(\d+))?$/.exec(id || ''); return m ? { style: m[1], seed: +m[2], cand: +m[3], lv: m[4] ? +m[4] : 1 } : null; };
   const defs = new Map(), fresh = new Map();
   // the game's definition for a finished circuit: name, country, flag and blurb, its id, and the
   // fields the track list and the AI learning look for
@@ -1749,7 +1930,7 @@
     const word = F1.TrackGen._word(r), suf = nm.suf[Math.floor(r() * nm.suf.length)];
     const info = res.report.info, km = (res.tr.L / 1000).toFixed(2);
     Object.assign(d, {
-      id: idOf(style, seed, cand), gen: seed, gen2: { style, seed, cand },
+      id: idOf(style, seed, cand, res.lv), gen: seed, gen2: { style, seed, cand, lv: res.lv },
       name: word + ' ' + suf, country: nm.regions[Math.floor(r() * nm.regions.length)], flag: word.slice(0, 2).toUpperCase(),
       blurb: `${nm.kind} built from seed ${seed}. ${km} km, ${info.corners} corners, climbing ${Math.round(info.range)} m with ${(info.gMax * 100).toFixed(0)} % at its steepest.`,
     });
@@ -1761,7 +1942,7 @@
   function rebuild(id) {
     const p = parseId(id);
     if (!p) return null;
-    const a = attempt(p.seed, p.style, p.cand);
+    const a = attempt(p.seed, p.style, p.cand, p.lv);
     if (!a.ok) throw new Error('circuit ' + id + ' does not rebuild: ' + a.why.join(', '));
     a.res.tries = p.cand + 1;
     present(a.res);
