@@ -353,7 +353,7 @@
     MATS.interior = std({ color: '#1c1e22', roughness: 0.85 });
     MATS.foliage = std({ roughness: 0.75, flatShading: true });
     // (a little of the frond's own colour as emission, as on the tree crowns: backlit fronds stay green)
-    { const pt = palmTex(); MATS.palm = std({ map: pt, roughness: 0.7, side: THREE.DoubleSide, alphaTest: 0.4, emissive: '#ffffff', emissiveMap: pt, emissiveIntensity: 0.1 }); }
+    { const pt = palmTex(); MATS.palm = std({ map: pt, roughness: 0.7, side: THREE.DoubleSide, alphaTest: 0.3, emissive: '#ffffff', emissiveMap: pt, emissiveIntensity: 0.1 }); }
     MATS.bark = std({ color: '#5a4636', roughness: 0.95 });
     // a palm's trunk: pale grey-brown fibre (the bark photo is a dark plane tree's, so with the
     // trees' tint a palm's trunk drew black)
@@ -375,6 +375,38 @@
   // Drawn as green strokes on a clear canvas, the texels along every leaflet's edge came back with
   // next to no alpha and any colour at all, and the smaller mip levels averaged those in with the
   // black of the gaps: the fronds went dark purple from a few metres off.
+  // The tunnel wall's paint as it has aged, 20 m of wall by its 6.6 m height, white where the
+  // paint is clean (the wall's vertex colours carry its bands of tone)
+  function tunnelWallTex() {
+    const W = 512, H = 256, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'), r = U.rng(41), px = W / 20, py = H / 6.6, Y = h => H - (h + 0.2) * py;   // (canvas y of a height above the road)
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+    // each panel a slightly different batch of paint
+    for (let k = 0; k < 8; k++) { g.fillStyle = 'rgba(70,60,45,' + (0.03 + r() * 0.09).toFixed(3) + ')'; g.fillRect(k * 2.5 * px, 0, 2.5 * px, H); }
+    // streaks down from the top and from the joint along the wall
+    for (let k = 0; k < 90; k++) {
+      const x = r() * W, top = r() < 0.5 ? Y(6.4) : Y(3.3), len = (0.4 + r() * 1.6) * py, gr = g.createLinearGradient(0, top, 0, top + len);
+      gr.addColorStop(0, 'rgba(48,40,30,' + (0.1 + r() * 0.16).toFixed(3) + ')'); gr.addColorStop(1, 'rgba(48,40,30,0)');
+      g.fillStyle = gr; g.fillRect(x, top, 1 + r() * 3, len);
+    }
+    // soot low on the wall, behind the rail
+    { const gr = g.createLinearGradient(0, Y(0.9), 0, Y(-0.2)); gr.addColorStop(0, 'rgba(40,34,28,0)'); gr.addColorStop(1, 'rgba(40,34,28,0.3)'); g.fillStyle = gr; g.fillRect(0, Y(0.9), W, Y(-0.2) - Y(0.9)); }
+    // the joints: every 2.5 m, and one along the wall
+    g.fillStyle = 'rgba(30,26,22,0.62)';
+    for (let k = 0; k < 8; k++) g.fillRect(k * 2.5 * px - 1, 0, 2, H);
+    g.fillRect(0, Y(3.3) - 1, W, 2);
+    // the recess (an emergency niche, one in 20 m) and its sign
+    g.fillStyle = '#4a4036'; g.fillRect(13.2 * px, Y(2.5), 1.1 * px, Y(1.5) - Y(2.5));
+    g.fillStyle = '#2a241e'; g.fillRect(13.2 * px, Y(2.5), 1.1 * px, 0.28 * py); g.fillRect(13.2 * px, Y(2.5), 0.14 * px, Y(1.5) - Y(2.5));
+    g.fillStyle = '#2f7d4c'; g.fillRect(13.5 * px, Y(3.1), 0.5 * px, 0.36 * py);
+    g.fillStyle = '#e9ece6'; g.fillRect(13.62 * px, Y(3.03), 0.26 * px, 0.2 * py);
+    // a cable run under the lamps
+    g.fillStyle = 'rgba(34,30,26,0.7)'; g.fillRect(0, Y(5.62), W, 0.07 * py);
+    for (let k = 0; k < 16; k++) g.fillRect((k * 1.25 + 0.3) * px, Y(5.7), 0.06 * px, 0.2 * py);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
   function palmTex() {
     const W = 256, H = 96, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'), r = U.rng(5);
@@ -382,10 +414,12 @@
     g.strokeStyle = '#ffffff'; g.lineCap = 'round';
     for (let k = 0; k < 70; k++) {
       const t = k / 70, x = 6 + t * 240, l = 44 * (1 - t * 0.72) * (0.86 + r() * 0.2), sd = k % 2 ? 1 : -1;
-      g.lineWidth = 4.6 * (1 - t * 0.45);
+      // (wide enough that the leaflets close up into a blade with a toothed edge: single thin
+      // leaflets against the sky were sharpened by the post stack into a purple stipple)
+      g.lineWidth = 7.4 * (1 - t * 0.4);
       g.beginPath(); g.moveTo(x, 48); g.lineTo(x + l * 0.62, 48 + sd * l); g.stroke();
     }
-    g.lineWidth = 3.4; g.beginPath(); g.moveTo(0, 48); g.lineTo(256, 48); g.stroke();
+    g.lineWidth = 5; g.beginPath(); g.moveTo(0, 48); g.lineTo(256, 48); g.stroke();
     const src = g.getImageData(0, 0, W, H).data, d = new Uint8Array(W * H * 4);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       // leaflets a sunlit palm green, yellower along the midrib and toward the tip
@@ -977,21 +1011,23 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
-    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? (rivi ? 0.82 : 1) : L.env;
+    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = MATS[k].userData.noSky ? 0 : H0 ? (rivi ? 0.82 : 1) : L.env;
     // (the light bounced off sunlit stucco into the street's shade)
     if (rivi) {
-      hemi.color.set('#e4e9f2'); hemi.groundColor.set('#b8a48a'); hemi.intensity = 0.42;
+      hemi.color.set('#e9e8e5'); hemi.groundColor.set('#c9ad88'); hemi.intensity = 0.46;
       // aerial perspective over the sea air: milky, as in the onboard pictures. A block 300 m down
       // the street has lost a fifth of its contrast, the hill behind the town half of it, and the
       // mountain a few kilometres off is a pale shape; height thins the haze only slowly
-      state.fogMul = 4.4; S3.uFogDensity.value *= state.fogMul; S3.uFogFalloff.value = 1 / 1100;
-      S3.uFogCol.value.lerp(new THREE.Color('#d8dee6'), 0.6); scene.fog.color.copy(S3.uFogCol.value);
-      // the sky itself pale and bright over that haze, not cobalt
-      scene.backgroundIntensity = (H0 ? H0.bg : 1) * 1.7;
+      // (a blue-grey veil a third thinner than it was: nearly white, it left the hill and its trees
+      // lighter than the sky behind them, like frost. In the pictures the hill stays under the sky.)
+      state.fogMul = 2.9; S3.uFogDensity.value *= state.fogMul; S3.uFogFalloff.value = 1 / 1100;
+      S3.uFogCol.value.lerp(new THREE.Color(RIVI_AIR), 0.85); scene.fog.color.copy(S3.uFogCol.value);
+      // the sky itself pale and bright over that haze, not cobalt (paleSky makes it so all round)
+      scene.backgroundIntensity = (H0 ? H0.bg : 1) * RIVI_SKY;
     }
     // (shade is lit by the sky and the ground: without this, shadowed foliage goes black)
     else if (H0) { hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.42; }
-    state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
+    state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity, hemiC: rivi ? hemi.color.clone() : null, hemiG: rivi ? hemi.groundColor.clone() : null };
   }
 
   // the safety car: a low dark wedge with a light bar, driven round the track by the race
@@ -1026,7 +1062,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // clear sky (cloud under about 0.45) nothing changes.
     const L = state.look || {}, oc = U.clamp(U.smooth(((L.cloud || 0) - 0.45) / 0.3) + 0.9 * k, 0, 1);
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
-    hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777');
+    // (a harbour town's shade is filled by its pale sky and by the sun thrown back off stucco and
+    // paving, warm from below: with the haze's blue-grey and the lake venue's ground it stood blue-black)
+    if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777'); }
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
@@ -1045,7 +1083,30 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     state.wxExp = 1 - 0.18 * k;
     if (state.wx) state.wx.update(k, camera, dt, clock, S3.uFogCol.value);
   }
-  const WX_GREY = new THREE.Color(0.28, 0.3, 0.33), WX_C = new THREE.Color(), RIVI_SUN = new THREE.Color(1.05, 0.985, 0.86);
+  const WX_GREY = new THREE.Color(0.28, 0.3, 0.33), WX_C = new THREE.Color(), RIVI_SUN = new THREE.Color(1.05, 0.985, 0.86), RIVI_AIR = '#93a4b6', RIVI_SKY = 1.15;
+
+  // A harbour town's sky, made from the venue's sky photo once it has arrived. Monaco's race-day
+  // sky in the onboard pictures is pale grey-blue with thin cloud in every direction; the photo is
+  // cobalt with hard white cumulus, and only looked right toward the sun. Half the photo's size (a
+  // soft sky needs no more): the blue drawn most of the way to grey and lifted, the clouds'
+  // contrast with it flattened, and the lowest 35 degrees whitened into the haze all the way round.
+  function paleSky(tex) {
+    if (tex.userData.pale) return tex.userData.pale;
+    const im = tex.image, w = Math.min(2048, im.width), h = w >> 1, c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0, w, h);
+    const id = g.getImageData(0, 0, w, h), d = id.data, SAT = 0.4, PALE = [196, 208, 222], K = 0.52, HAZE = [222, 227, 233];
+    for (let y = 0; y < h; y++) {
+      const el = (0.5 - (y + 0.5) / h) * 180, hz = 0.88 * (1 - U.smooth(Math.max(0, el) / 35));
+      for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+        const l = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+        for (let q = 0; q < 3; q++) { let v = l + (d[i + q] - l) * SAT; v += (PALE[q] - v) * K; d[i + q] = v + (HAZE[q] - v) * hz; }
+      }
+    }
+    g.putImageData(id, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+    return (tex.userData.pale = t);
+  }
 
   // Photo sky: once decoded, it becomes the background and the light probe; the sun and
   // the fog are read off the panorama so shadows and haze agree with the clouds.
@@ -1055,7 +1116,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     state.skyReady = true;
     const L = state.look;
     if (state.hdr) { // lighting already comes from the HDR probe: the photo is only the backdrop
-      scene.background = tex;
+      scene.background = state.tr && state.tr.gen2 && state.tr.gen2.city ? paleSky(tex) : tex;
       scene.backgroundIntensity = state.hdr.bg * (L.skyK || 1); // skyK: lifts a probe photographed under heavy cloud
       skyMesh.visible = false;
       return;
@@ -1219,7 +1280,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : W2.town && T.has('city_tile') ? 'city_tile' : 'pavement', rep = 36 / (style === 'modern' ? 6 : W2.town ? 4.8 : 3.2);   // (a town's banks and yards are stone and paving; its gardens are its trees)
         gm = macro(pbr(key, rep, { color: '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
         if (style === 'modern') gm.color.setRGB(1.73, 1.57, 1.27);
-        if (W2.town) gm.color.set('#7f7b70');
+        if (W2.town) gm.color.set('#6f6b61');
         // desert sand: the photo drawn without a visible repeat, with relief from its own grains
         if (style === 'modern') F1.R3S.noTile(gm, 1.4);
       } else gm = std({ map: style === 'park' ? T.grass(th.grassA, th.grassB) : T.ground(th.ground, th.groundN), roughness: 0.97 });
@@ -1800,7 +1861,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const fast = new Uint8Array(N), span = Math.round(22 / tr.ds);
           for (let k = 0; k < N; k++) { let f = 1; for (let q = -span; q <= span; q += 4) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 48) { f = 0; break; } fast[k] = f; }
           const pitch = Math.max(1, Math.round(3 / tr.ds)), fh = 4.1;
-          for (const [i0, i1] of runs(N, k => !skip(k) && fast[k] && !unit[k])) {
+          // (none in the tunnel: the posts stand behind its walls and their cranked tops came through them)
+          const TU = W2.town && W2.town.tunnel, inTun = k => !!TU && mod(k - TU.i0 + 4, N) <= TU.i1 - TU.i0 + 8;
+          for (const [i0, i1] of runs(N, k => !skip(k) && fast[k] && !unit[k] && !inTun(k))) {
             if (i1 - i0 < Math.round(30 / tr.ds)) continue;
             wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fh, 1.6, 1.6, 0);
             for (const y of [1.5, 2.2, 2.9, 3.6]) wallRun(cab, tr, i0, i1, k => d(k) + sg * 0.42, y, y + 0.022, 4, 1, 0);
@@ -1944,7 +2007,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // seating slope: local x along the track, rising away from it (+z)
       const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
       slope.rotateX(-Math.PI / 2 - Math.atan2(8.5, 12)); slope.translate(0, 5.6, 0);
-      const suv = slope.attributes.uv; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6, (1 - suv.getY(k)) * 0.95);
+      // (a harbour town's stands are seen from further off and in shade: the crowd is drawn 1.6 times
+      // finer there, a speckle of heads and shirts, not seat-sized tiles of colour)
+      const suv = slope.attributes.uv, cf = W2.town ? 1.6 : 1; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6 * cf, (1 - suv.getY(k)) * 0.95 * cf);
       const sideS = new THREE.Shape([new THREE.Vector2(-6, 0), new THREE.Vector2(6.3, 0), new THREE.Vector2(6.3, 10.5), new THREE.Vector2(-6, 1.4)]);
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
@@ -2214,7 +2279,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     vec3 tgS = texture2D(uScrub, vMacroW / 3.2).rgb;
     diffuseColor.rgb = mix(mix(tgS * vec3(0.2, 0.19, 0.1), vec3(0.27, 0.225, 0.15) * (0.55 + 1.5 * tgS.g), smoothstep(0.5, 0.68, mcr)), diffuseColor.rgb, tgUm); }`)
         .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-  roughnessFactor = mix(1.0, max(roughnessFactor, 0.62), tgUm); metalnessFactor *= tgUm;`);
+  roughnessFactor = mix(1.0, max(roughnessFactor, 0.88), tgUm); metalnessFactor *= tgUm;`);
     };
   }
 
@@ -2961,6 +3026,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const hull = new Batch(true), cabin = new Batch(true), mast = new Batch(false), glass = new Batch(false);
       const hs = new THREE.Shape(); [[-0.5, -0.5], [0.2, -0.5], [0.5, 0], [0.2, 0.5], [-0.5, 0.5]].forEach(([x, y], k) => (k ? hs.lineTo(x, y) : hs.moveTo(x, y)));
       const hg = new THREE.ExtrudeGeometry(hs, { depth: 1, bevelEnabled: false }); hg.rotateX(-Math.PI / 2);
+      // (not a slab: the deck rises to the bow, the stem rakes back to the waterline and the sides
+      // flare out from a narrower bottom. The same vertices, moved.)
+      { const p = hg.attributes.position; for (let q = 0; q < p.count; q++) { const x = p.getX(q); if (p.getY(q) > 0.5) p.setY(q, 1 + Math.max(0, x + 0.1) * 0.45); else { p.setZ(q, p.getZ(q) * 0.6); if (x > 0.3) p.setX(q, 0.34); } } hg.computeVertexNormals(); }
       const cb = new THREE.BoxGeometry(1, 1, 1), mg = new THREE.CylinderGeometry(0.06, 0.09, 1, 5); mg.translate(0, 0.5, 0);
       // (a deckhouse is no brick: its top is shorter than its foot and sits aft, so the screen rakes
       // back hard and the stern a little, each deck stepping back from the one below. The same box.)
@@ -2969,12 +3037,12 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const l = it.l, w = l * (it.big ? 0.19 : 0.3), ry = -it.h, f = (k, h0) => [it.x + Math.cos(it.h) * l * k, h0, it.y + Math.sin(it.h) * l * k];
         const fb = l * 0.085 + 0.6;
         hull.add(hg, mat(it.x, -0.5, it.y, ry, l, fb + 0.5, w), col(it.col));
-        const decks = it.big ? 2 + (l > 45 ? 1 : 0) : 1;
+        const decks = it.big ? 2 + (l > 40 ? 1 : 0) : 1, dh = it.big ? 2.3 : 1.9;
         for (let dI = 0; dI < decks; dI++) {
-          const k = 1 - dI * 0.18, [x, y, z] = f(-0.06 - dI * 0.03, fb + 0.55 + dI * 1.9);
-          cabin.add(cb, mat(x, y, z, ry, l * 0.45 * k, 1.7, w * 0.78 * k), col(dI % 2 ? '#e9ecef' : '#f7f8f6'));
-          const [gx, gy2, gz] = f(-0.06 - dI * 0.03 + 0.01, fb + 0.75 + dI * 1.9);
-          glass.add(cb, mat(gx, gy2, gz, ry, l * 0.45 * k + 0.06, 0.6, w * 0.78 * k + 0.06));
+          const k = 1 - dI * 0.2, [x, y, z] = f(-0.08 - dI * 0.035, fb + dh * 0.42 + dI * dh);
+          cabin.add(cb, mat(x, y, z, ry, l * 0.5 * k, dh - 0.2, w * 0.8 * k), col(dI % 2 ? '#e9ecef' : '#f7f8f6'));
+          const [gx, gy2, gz] = f(-0.08 - dI * 0.035 + 0.01, fb + dh * 0.5 + dI * dh);
+          glass.add(cb, mat(gx, gy2, gz, ry, l * 0.5 * k + 0.06, dh * 0.38, w * 0.8 * k + 0.06));
         }
         if (!it.big && rnd() < 0.3) { const [x, , z] = f(0.05, 0); mast.add(mg, mat(x, fb, z, 0, 1, l * 1.1, 1)); }
       }
@@ -2989,13 +3057,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const off = (k, sd) => sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4), H = 6.4;
       // the walls in five rows: a little soot at the foot, the pale painted band to 1.25 m ending in
       // a hard line, grey paint above it, lit again at the top where the lamps hang
-      const WR = [[-0.2, 0.5], [1.25, 0.92], [1.3, 0.47], [H - 1.0, 0.44], [H, 0.7]], tg = new THREE.Color();
+      const WR = [[-0.2, 0.5], [1.25, 0.92], [1.3, 0.36], [H - 1.0, 0.33], [H, 0.62]], tg = new THREE.Color();
       for (const sd of [-1, 1]) {
         let prev = null, along = 0;
         for (let i = i0 - 2; i <= i1 + 2; i++) {
           const k = ((i % N) + N) % N, d = off(k, sd), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, y = tr.z[k];
           along += tr.ds;
-          const st = 1, row = WR.map(([h, g]) => wl.v(x, y + h, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, (h + 0.2) / 3, tg.setScalar(g * (h < 3 ? st : 1))));
+          const st = 1, row = WR.map(([h, g]) => wl.v(x, y + h, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 20, (h + 0.2) / 6.6, tg.setScalar(g * (h < 3 ? st : 1))));
           if (prev) for (let r = 0; r < row.length - 1; r++) { const a = row[r], c = row[r + 1], pa = prev[r], pc = prev[r + 1]; if (sd > 0) { wl.t(pa, pc, a); wl.t(pc, c, a); } else { wl.t(pa, a, pc); wl.t(pc, a, c); } }
           prev = row;
         }
@@ -3033,8 +3101,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // (smooth paint, with none of the concrete photo's maps: its shutter marks, tie holes and grain read as plywood under the lamps)
       // (and no sun on anything but the roof's top: with the iris open the few shadow-map texels of
       // sun that leak on to a wall in the roof's shade stood out as pale blocks)
-      if (!M.tunnelWall) { M.tunnelWall = std({ color: '#cbc8c0', roughness: 0.72, metalness: 0, vertexColors: true, side: THREE.DoubleSide }); M.tunnelWall.userData.patchKey = 'tunWall'; M.tunnelWall.userData.patchExtra = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  float tnUp = step(0.5, inverseTransformDirection(normal, viewMatrix).y); reflectedLight.directDiffuse *= tnUp; reflectedLight.directSpecular *= tnUp;'); tunFlat(sh, 'tnUp'); }; }
-      if (!M.tunnelCeil) { M.tunnelCeil = std({ color: '#8a857c', emissive: '#150e07', roughness: 0.9, metalness: 0, side: THREE.DoubleSide }); M.tunnelCeil.userData.patchKey = 'tunCeil'; M.tunnelCeil.userData.patchExtra = sh => tunFlat(sh, '0.0'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
+      // (not blank from end to end: cast panels 2.5 m long with a joint between them and one along
+      // the wall at half height, a dark recess with its sign every 10 m, and the streaks that run
+      // down from the joints. One small drawn texture over the paint; it also dresses the wall's
+      // last metres outside the mouth, which stood as a flat grey slab beside the car.)
+      // (its colour is over 1: the lamps hang on the walls, whose paint takes far more of their
+      // light than the share that reaches the road and lights everything else in here)
+      if (!M.tunnelWall) { M.tunnelWall = std({ color: '#d3c3a6', map: tunnelWallTex(), roughness: 0.72, metalness: 0, vertexColors: true, side: THREE.DoubleSide }); M.tunnelWall.color.setRGB(1.3, 1.16, 0.92); M.tunnelWall.userData.noSky = true; M.tunnelWall.userData.patchKey = 'tunWall'; M.tunnelWall.userData.patchExtra = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  float tnUp = step(0.5, inverseTransformDirection(normal, viewMatrix).y); reflectedLight.directDiffuse *= tnUp; reflectedLight.directSpecular *= tnUp;'); tunFlat(sh, 'tnUp'); }; }
+      // (the slab is the darkest thing in the pictures of the tunnel: it stood lit beige)
+      if (!M.tunnelCeil) { M.tunnelCeil = std({ color: '#3d3a35', emissive: '#080503', roughness: 0.95, metalness: 0, side: THREE.DoubleSide }); M.tunnelCeil.userData.noSky = true; M.tunnelCeil.userData.patchKey = 'tunCeil'; M.tunnelCeil.userData.patchExtra = sh => tunFlat(sh, '0.0'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
       const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) tm.userData.noProxy = true;
       const tc = add(ceil.geo(), M.tunnelCeil, { cast: true }); if (tc) tc.userData.noProxy = true;
       if (rb.k) rail.add(rb.geo(), null);
@@ -4755,7 +4830,8 @@ void main() {
   // (sodium lamps: orange, and dim enough that the open iris burns the daylight at the mouth out)
   // How far the iris opens (the exposure is 1 + this, deep inside), and the lamps' level to go with
   // it. Without live reflections the cars still mirror the open sky in there, so it opens less.
-  const TUN_LAMP = new THREE.Color('#ffb46c'), TUN_FLOOR = new THREE.Color('#6e4c2c'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
+  // (deeper amber, against the pictures: the walls stood pale pinkish beige)
+  const TUN_LAMP = new THREE.Color('#ffa248'), TUN_FLOOR = new THREE.Color('#5a3818'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
   function tunnelLight(dt) {
     const tr = state.tr, T = tr && tr.gen2 && tr.gen2.tunnel;
     let want = 0;

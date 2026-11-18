@@ -341,9 +341,19 @@
   let ktx = null;
   T.has = key => !!((F1.Assets && F1.Assets[key]) || (ktx && F1.AssetsK && F1.AssetsK[key]));
   const ver = (() => { const s = document.querySelector('script[src*="js/r3-textures.js"]'), m = s && /[?&]v=(\w+)/.exec(s.src); return m ? '?v=' + m[1] : ''; })();
+  // (a bundle that does not arrive is asked for twice more: a circuit built without the photos
+  // keeps its drawn stand-ins, flat boxes with a grid of squares for a town, for the whole session)
+  const later = ms => new Promise(ok => setTimeout(ok, ms));
   const fallback = () => Promise.all((F1.AssetsKFallback || []).map(src => new Promise(ok => {
-    const s = document.createElement('script'); s.src = src + ver; s.onload = s.onerror = ok; document.head.appendChild(s);
+    const go = n => {
+      const s = document.createElement('script'); s.src = src + ver + (n ? (ver ? '&' : '?') + 'again=' + n : '');
+      s.onload = ok; s.onerror = () => { if (n < 2) later(400).then(() => go(n + 1)); else { console.warn('Slipstream: photo bundle missing', src); ok(); } };
+      document.head.appendChild(s);
+    };
+    go(0);
   })));
+  // one compressed file, asked for again (twice) if the request fails
+  const loadK = (L, key, n = 0) => L.loadAsync(F1.AssetsK[key].f + ver).catch(e => { if (n >= 2) throw e; return later(300 * (n + 1)).then(() => loadK(L, key, n + 1)); });
   T.ready = renderer => {
     if (T.readyP) return T.readyP;
     const can = F1.AssetsK && /^https?:/.test(location.protocol) && typeof WebAssembly === 'object' && typeof Worker === 'function' && !G.__noKtx;
@@ -352,7 +362,7 @@
       L.detectSupport(renderer);
       // one tiny file through the whole path first: if anything in it fails, use the JPEGs
       const k0 = Object.keys(F1.AssetsK).sort((a, b) => F1.AssetsK[a].w - F1.AssetsK[b].w)[0];
-      return L.loadAsync(F1.AssetsK[k0].f + ver).then(t => { ktxOf[k0] = Promise.resolve(t); ktx = L; });
+      return loadK(L, k0).then(t => { ktxOf[k0] = Promise.resolve(t); ktx = L; });
     }) : Promise.reject(new Error('no KTX2 here'))).catch(e => {
       if (can) console.warn('Slipstream: compressed textures unavailable, using JPEG', e);
       ktx = null; return fallback();
@@ -360,6 +370,8 @@
     return T.readyP;
   };
   T.compressed = () => !!ktx;
+  // which copy of the photos this session runs on: 'ktx', 'jpeg', or 'none' (the drawn stand-ins)
+  T.pack = () => (ktx ? 'ktx' : F1.Assets && F1.Assets.asphalt ? 'jpeg' : 'none');
   // a KTX2 file's levels, formats and filtering laid onto a texture made earlier (materials keep
   // the object they were given), so all the textures of one photo share the same mip arrays
   function takeKtx(t, ct) {
@@ -378,7 +390,7 @@
     if (Array.isArray(rep)) t.repeat.set(rep[0], rep[1]); else t.repeat.set(rep, rep);
     if (ktx && F1.AssetsK[key]) {
       const k = F1.AssetsK[key];
-      (ktxOf[key] || (ktxOf[key] = ktx.loadAsync(k.f + ver))).then(ct => takeKtx(t, ct), e => console.warn('Slipstream: texture', key, e));
+      (ktxOf[key] || (ktxOf[key] = loadK(ktx, key))).then(ct => takeKtx(t, ct), e => console.warn('Slipstream: texture', key, e));
       return (photoCache[ck] = t);
     }
     let im = imgs[key];
