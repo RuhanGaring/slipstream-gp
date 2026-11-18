@@ -352,8 +352,12 @@
     MATS.vcolMetal = std({ vertexColors: true, roughness: 0.3, metalness: 0.5 });
     MATS.interior = std({ color: '#1c1e22', roughness: 0.85 });
     MATS.foliage = std({ roughness: 0.75, flatShading: true });
-    MATS.palm = std({ map: palmTex(), roughness: 0.75, side: THREE.DoubleSide, alphaTest: 0.38 });
+    // (a little of the frond's own colour as emission, as on the tree crowns: backlit fronds stay green)
+    { const pt = palmTex(); MATS.palm = std({ map: pt, roughness: 0.7, side: THREE.DoubleSide, alphaTest: 0.3, emissive: '#ffffff', emissiveMap: pt, emissiveIntensity: 0.1 }); }
     MATS.bark = std({ color: '#5a4636', roughness: 0.95 });
+    // a palm's trunk: pale grey-brown fibre (the bark photo is a dark plane tree's, so with the
+    // trees' tint a palm's trunk drew black)
+    MATS.palmBark = std({ color: '#8a7a66', roughness: 0.95 });
     MATS.lot = std({ map: T.lot(), roughness: 0.85, normalMap: aN });
     // sea water: dielectric (IOR 1.33), near-mirror, the only detail is wave normals
     MATS.water = new THREE.MeshPhysicalMaterial({ color: '#0f3343', roughness: 0.03, metalness: 0, ior: 1.33, normalMap: waterNormal() });
@@ -367,16 +371,63 @@
   const L0hedge = tr => Tracks.lookOf(tr) === 'kestrel';
 
   // A palm frond: a midrib and its leaflets, cut out by alpha
+  // The shape is drawn in white and kept as the alpha alone; the colour is laid in every texel.
+  // Drawn as green strokes on a clear canvas, the texels along every leaflet's edge came back with
+  // next to no alpha and any colour at all, and the smaller mip levels averaged those in with the
+  // black of the gaps: the fronds went dark purple from a few metres off.
+  // The tunnel wall's paint as it has aged, 20 m of wall by its 6.6 m height, white where the
+  // paint is clean (the wall's vertex colours carry its bands of tone)
+  function tunnelWallTex() {
+    const W = 512, H = 256, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'), r = U.rng(41), px = W / 20, py = H / 6.6, Y = h => H - (h + 0.2) * py;   // (canvas y of a height above the road)
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+    // each panel a slightly different batch of paint
+    for (let k = 0; k < 8; k++) { g.fillStyle = 'rgba(70,60,45,' + (0.03 + r() * 0.09).toFixed(3) + ')'; g.fillRect(k * 2.5 * px, 0, 2.5 * px, H); }
+    // streaks down from the top and from the joint along the wall
+    for (let k = 0; k < 90; k++) {
+      const x = r() * W, top = r() < 0.5 ? Y(6.4) : Y(3.3), len = (0.4 + r() * 1.6) * py, gr = g.createLinearGradient(0, top, 0, top + len);
+      gr.addColorStop(0, 'rgba(48,40,30,' + (0.1 + r() * 0.16).toFixed(3) + ')'); gr.addColorStop(1, 'rgba(48,40,30,0)');
+      g.fillStyle = gr; g.fillRect(x, top, 1 + r() * 3, len);
+    }
+    // soot low on the wall, behind the rail
+    { const gr = g.createLinearGradient(0, Y(0.9), 0, Y(-0.2)); gr.addColorStop(0, 'rgba(40,34,28,0)'); gr.addColorStop(1, 'rgba(40,34,28,0.3)'); g.fillStyle = gr; g.fillRect(0, Y(0.9), W, Y(-0.2) - Y(0.9)); }
+    // the joints: every 2.5 m, and one along the wall
+    g.fillStyle = 'rgba(30,26,22,0.62)';
+    for (let k = 0; k < 8; k++) g.fillRect(k * 2.5 * px - 1, 0, 2, H);
+    g.fillRect(0, Y(3.3) - 1, W, 2);
+    // the recess (an emergency niche, one in 20 m) and its sign
+    g.fillStyle = '#4a4036'; g.fillRect(13.2 * px, Y(2.5), 1.1 * px, Y(1.5) - Y(2.5));
+    g.fillStyle = '#2a241e'; g.fillRect(13.2 * px, Y(2.5), 1.1 * px, 0.28 * py); g.fillRect(13.2 * px, Y(2.5), 0.14 * px, Y(1.5) - Y(2.5));
+    g.fillStyle = '#2f7d4c'; g.fillRect(13.5 * px, Y(3.1), 0.5 * px, 0.36 * py);
+    g.fillStyle = '#e9ece6'; g.fillRect(13.62 * px, Y(3.03), 0.26 * px, 0.2 * py);
+    // a cable run under the lamps
+    g.fillStyle = 'rgba(34,30,26,0.7)'; g.fillRect(0, Y(5.62), W, 0.07 * py);
+    for (let k = 0; k < 16; k++) g.fillRect((k * 1.25 + 0.3) * px, Y(5.7), 0.06 * px, 0.2 * py);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
   function palmTex() {
-    const c = document.createElement('canvas'); c.width = 256; c.height = 96;
+    const W = 256, H = 96, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'), r = U.rng(5);
+    g.fillStyle = '#000000'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#ffffff'; g.lineCap = 'round';
     for (let k = 0; k < 70; k++) {
       const t = k / 70, x = 6 + t * 240, l = 44 * (1 - t * 0.72) * (0.86 + r() * 0.2), sd = k % 2 ? 1 : -1;
-      g.strokeStyle = `rgb(${70 + r() * 34 | 0},${98 + r() * 36 | 0},${38 + r() * 18 | 0})`; g.lineWidth = 3.4 * (1 - t * 0.5);
+      // (wide enough that the leaflets close up into a blade with a toothed edge: single thin
+      // leaflets against the sky were sharpened by the post stack into a purple stipple)
+      g.lineWidth = 7.4 * (1 - t * 0.4);
       g.beginPath(); g.moveTo(x, 48); g.lineTo(x + l * 0.62, 48 + sd * l); g.stroke();
     }
-    g.strokeStyle = '#8c8a4c'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 48); g.lineTo(256, 48); g.stroke();
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    g.lineWidth = 5; g.beginPath(); g.moveTo(0, 48); g.lineTo(256, 48); g.stroke();
+    const src = g.getImageData(0, 0, W, H).data, d = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      // leaflets a sunlit palm green, yellower along the midrib and toward the tip
+      const i = (y * W + x) * 4, rib = Math.max(0, 1 - Math.abs(y - 48) / 5), v = 0.84 + 0.32 * r(), tip = x / W;
+      d[i] = (62 + 26 * tip + 64 * rib) * v; d[i + 1] = (108 + 20 * tip + 30 * rib) * v; d[i + 2] = (42 + 8 * tip + 12 * rib) * v; d[i + 3] = src[i];
+    }
+    const t = new THREE.DataTexture(d, W, H, THREE.RGBAFormat);
+    t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; t.needsUpdate = true;
     return t;
   }
 
@@ -874,7 +925,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
     skyMesh.scale.setScalar(Math.min(1, far / 9000 * 0.75));
     if (state.look) {
-      const d = Math.max(0.9 / state.look.fogF, far < 6000 ? 1.5 / far : 0);
+      // (times the circuit's own haze, applyLook: without it any change of settings mid-session
+      // cleared a harbour town's air)
+      const d = Math.max(0.9 / state.look.fogF, far < 6000 ? 1.5 / far : 0) * (state.fogMul || 1);
       if (scene.fog) scene.fog.density = d;
       if (state.base) state.base.fogD = d;
       F1.R3S.U.uFogDensity.value = d;
@@ -927,7 +980,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       envRT = pmrem.fromEquirectangular(probe);
       probe.dispose();
       state.sunDir = V(H0.sun[0], H0.sun[1], H0.sun[2]).normalize();
-      if (state.tr && state.tr.gen2 && state.tr.gen2.city) { const az = Math.atan2(state.sunDir.z, state.sunDir.x), el = 40 * Math.PI / 180; state.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)); }
+      if (state.tr && state.tr.gen2 && state.tr.gen2.city) { const az = Math.atan2(state.sunDir.z, state.sunDir.x), el = 34 * Math.PI / 180; state.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)); }
       if (state.sunDir.y < 0.06) { state.sunDir.y = 0.06; state.sunDir.normalize(); }
       const e = H0.sunE, lum = e[0] * 0.2126 + e[1] * 0.7152 + e[2] * 0.0722;
       sun.color.setRGB(e[0] / lum, e[1] / lum, e[2] / lum, THREE.LinearSRGBColorSpace); sun.intensity = lum;
@@ -945,28 +998,36 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // a generated Riviera town under a high summer sun: whitewashed walls, pale stone, the
     // onboard pictures of a harbour circuit are high-key
     const rivi = state.tr && state.tr.gen2 && state.tr.gen2.city;
+    state.fogMul = 1;
     // (+1.1 EV in all: broadcast onboard pictures of a Riviera noon are high key, whites clip)
     // (and a harder sun against cooler, dimmer shade than the flat high-key it had: the depth of a
     // photograph, sunlit fronts against streets in shade)
-    if (rivi) { state.exposure *= 1.3; sun.intensity *= 1.3; } else state.exposure *= L.expK || 1.15;
+    // (against the broadcast pictures of Monaco: a lower, warmer sun, sunlit whites held under the
+    // clip, and far less fill, so one side of a street stands in real shade)
+    if (rivi) { state.exposure *= 1.12; sun.intensity *= 1.36; sun.color.multiply(RIVI_SUN); } else state.exposure *= L.expK || 1.15;
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     S3.uRoadSky.value = L.roadSky || 3.2;
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
-    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = H0 ? 1 : L.env;
+    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = MATS[k].userData.noSky ? 0 : H0 ? (rivi ? 0.82 : 1) : L.env;
     // (the light bounced off sunlit stucco into the street's shade)
     if (rivi) {
-      hemi.color.set('#e4e9f2'); hemi.groundColor.set('#b8a48a'); hemi.intensity = 0.5;
-      // aerial perspective over the sea air: the mountain behind the town a few kilometres off goes
-      // soft and blue, as in every photograph of the Riviera; height thins the haze only slowly
-      S3.uFogDensity.value *= 1.6; S3.uFogFalloff.value = 1 / 1100;
-      S3.uFogCol.value.lerp(new THREE.Color('#c9d6e6'), 0.45); scene.fog.color.copy(S3.uFogCol.value);
+      hemi.color.set('#e9e8e5'); hemi.groundColor.set('#c9ad88'); hemi.intensity = 0.46;
+      // aerial perspective over the sea air: milky, as in the onboard pictures. A block 300 m down
+      // the street has lost a fifth of its contrast, the hill behind the town half of it, and the
+      // mountain a few kilometres off is a pale shape; height thins the haze only slowly
+      // (a blue-grey veil a third thinner than it was: nearly white, it left the hill and its trees
+      // lighter than the sky behind them, like frost. In the pictures the hill stays under the sky.)
+      state.fogMul = 2.9; S3.uFogDensity.value *= state.fogMul; S3.uFogFalloff.value = 1 / 1100;
+      S3.uFogCol.value.lerp(new THREE.Color(RIVI_AIR), 0.85); scene.fog.color.copy(S3.uFogCol.value);
+      // the sky itself pale and bright over that haze, not cobalt (paleSky makes it so all round)
+      scene.backgroundIntensity = (H0 ? H0.bg : 1) * RIVI_SKY;
     }
     // (shade is lit by the sky and the ground: without this, shadowed foliage goes black)
     else if (H0) { hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.42; }
-    state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity };
+    state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity, hemiC: rivi ? hemi.color.clone() : null, hemiG: rivi ? hemi.groundColor.clone() : null };
   }
 
   // the safety car: a low dark wedge with a light bar, driven round the track by the race
@@ -1001,12 +1062,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // clear sky (cloud under about 0.45) nothing changes.
     const L = state.look || {}, oc = U.clamp(U.smooth(((L.cloud || 0) - 0.45) / 0.3) + 0.9 * k, 0, 1);
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
-    hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777');
+    // (a harbour town's shade is filled by its pale sky and by the sun thrown back off stucco and
+    // paving, warm from below: with the haze's blue-grey and the lake venue's ground it stood blue-black)
+    if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777'); }
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
     const tk = state.tunApplied || 0;
-    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.45 - hemi.intensity) * tk; }
+    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.75 / (1 + tunOpen()) - hemi.intensity) * tk; }
     if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== oc) { F1.R3Shadow.setSoften(1 + 4 * oc); state.ocS = oc; }
     if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(1 - 0.88 * oc);
@@ -1020,7 +1083,30 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     state.wxExp = 1 - 0.18 * k;
     if (state.wx) state.wx.update(k, camera, dt, clock, S3.uFogCol.value);
   }
-  const WX_GREY = new THREE.Color(0.28, 0.3, 0.33), WX_C = new THREE.Color();
+  const WX_GREY = new THREE.Color(0.28, 0.3, 0.33), WX_C = new THREE.Color(), RIVI_SUN = new THREE.Color(1.05, 0.985, 0.86), RIVI_AIR = '#93a4b6', RIVI_SKY = 1.15;
+
+  // A harbour town's sky, made from the venue's sky photo once it has arrived. Monaco's race-day
+  // sky in the onboard pictures is pale grey-blue with thin cloud in every direction; the photo is
+  // cobalt with hard white cumulus, and only looked right toward the sun. Half the photo's size (a
+  // soft sky needs no more): the blue drawn most of the way to grey and lifted, the clouds'
+  // contrast with it flattened, and the lowest 35 degrees whitened into the haze all the way round.
+  function paleSky(tex) {
+    if (tex.userData.pale) return tex.userData.pale;
+    const im = tex.image, w = Math.min(2048, im.width), h = w >> 1, c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0, w, h);
+    const id = g.getImageData(0, 0, w, h), d = id.data, SAT = 0.4, PALE = [196, 208, 222], K = 0.52, HAZE = [222, 227, 233];
+    for (let y = 0; y < h; y++) {
+      const el = (0.5 - (y + 0.5) / h) * 180, hz = 0.88 * (1 - U.smooth(Math.max(0, el) / 35));
+      for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+        const l = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+        for (let q = 0; q < 3; q++) { let v = l + (d[i + q] - l) * SAT; v += (PALE[q] - v) * K; d[i + q] = v + (HAZE[q] - v) * hz; }
+      }
+    }
+    g.putImageData(id, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+    return (tex.userData.pale = t);
+  }
 
   // Photo sky: once decoded, it becomes the background and the light probe; the sun and
   // the fog are read off the panorama so shadows and haze agree with the clouds.
@@ -1030,7 +1116,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     state.skyReady = true;
     const L = state.look;
     if (state.hdr) { // lighting already comes from the HDR probe: the photo is only the backdrop
-      scene.background = tex;
+      scene.background = state.tr && state.tr.gen2 && state.tr.gen2.city ? paleSky(tex) : tex;
       scene.backgroundIntensity = state.hdr.bg * (L.skyK || 1); // skyK: lifts a probe photographed under heavy cloud
       skyMesh.visible = false;
       return;
@@ -1194,7 +1280,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const key = style === 'park' ? 'grass' : style === 'modern' ? 'sand' : W2.town && T.has('city_tile') ? 'city_tile' : 'pavement', rep = 36 / (style === 'modern' ? 6 : W2.town ? 4.8 : 3.2);   // (a town's banks and yards are stone and paving; its gardens are its trees)
         gm = macro(pbr(key, rep, { color: '#ffffff' }), style === 'park' ? 140 : 180, style === 'park' ? 0.1 : 0.14, 0.1, style === 'park');
         if (style === 'modern') gm.color.setRGB(1.73, 1.57, 1.27);
-        if (W2.town) gm.color.set('#7f7b70');
+        if (W2.town) gm.color.set('#6f6b61');
         // desert sand: the photo drawn without a visible repeat, with relief from its own grains
         if (style === 'modern') F1.R3S.noTile(gm, 1.4);
       } else gm = std({ map: style === 'park' ? T.grass(th.grassA, th.grassB) : T.ground(th.ground, th.groundN), roughness: 0.97 });
@@ -1775,7 +1861,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const fast = new Uint8Array(N), span = Math.round(22 / tr.ds);
           for (let k = 0; k < N; k++) { let f = 1; for (let q = -span; q <= span; q += 4) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 48) { f = 0; break; } fast[k] = f; }
           const pitch = Math.max(1, Math.round(3 / tr.ds)), fh = 4.1;
-          for (const [i0, i1] of runs(N, k => !skip(k) && fast[k] && !unit[k])) {
+          // (none in the tunnel: the posts stand behind its walls and their cranked tops came through them)
+          const TU = W2.town && W2.town.tunnel, inTun = k => !!TU && mod(k - TU.i0 + 4, N) <= TU.i1 - TU.i0 + 8;
+          for (const [i0, i1] of runs(N, k => !skip(k) && fast[k] && !unit[k] && !inTun(k))) {
             if (i1 - i0 < Math.round(30 / tr.ds)) continue;
             wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fh, 1.6, 1.6, 0);
             for (const y of [1.5, 2.2, 2.9, 3.6]) wallRun(cab, tr, i0, i1, k => d(k) + sg * 0.42, y, y + 0.022, 4, 1, 0);
@@ -1919,7 +2007,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // seating slope: local x along the track, rising away from it (+z)
       const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
       slope.rotateX(-Math.PI / 2 - Math.atan2(8.5, 12)); slope.translate(0, 5.6, 0);
-      const suv = slope.attributes.uv; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6, (1 - suv.getY(k)) * 0.95);
+      // (a harbour town's stands are seen from further off and in shade: the crowd is drawn 1.6 times
+      // finer there, a speckle of heads and shirts, not seat-sized tiles of colour)
+      const suv = slope.attributes.uv, cf = W2.town ? 1.6 : 1; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6 * cf, (1 - suv.getY(k)) * 0.95 * cf);
       const sideS = new THREE.Shape([new THREE.Vector2(-6, 0), new THREE.Vector2(6.3, 0), new THREE.Vector2(6.3, 10.5), new THREE.Vector2(-6, 1.4)]);
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
@@ -2065,8 +2155,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             roofs.add(hipG, mat(bx2, base2 + tH, bz2, ry, 5.8, 4.2, 5.8), col('#b5613c'));
           }
         }
-        if (town && !it.tower && hgt < 36 && (it.seed >> 3) % 10 < 6) {
-          const tile = ['#b5613c', '#a9583a', '#bd6e47', '#9c5136'][it.seed % 4];
+        // (four blocks in ten tiled, the rest flat with their plant on show, as Monaco's roofs are;
+        // and the tiles the dusty, uneven terracotta of old roofs, not one fresh orange)
+        if (town && !it.tower && hgt < 36 && (it.seed >> 3) % 10 < 4) {
+          const tile = ['#9d6a52', '#8f6451', '#a67862', '#86604f', '#97705c'][it.seed % 5];
           roofs.add(hipG, mat(it.x, hgt + 3 + gy, it.y, ry, it.w + 0.9, 1.4 + Math.min(it.w, it.h) * 0.16, it.h + 0.9), col(tile));
         } else {
           roofs.add(ub, mat(it.x, hgt + 3 + gy, it.y, ry, it.w + 0.6, 0.6, it.h + 0.6), col(it.col));
@@ -2179,9 +2271,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     gm.userData.patchKey = 'townGround';
     gm.userData.patchExtra = sh => {
       sh.uniforms.uUrban = { value: tex }; sh.uniforms.uUrbanB = { value: B }; sh.uniforms.uScrub = { value: scrub };
-      sh.fragmentShader = 'uniform sampler2D uUrban, uScrub; uniform vec4 uUrbanB;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-  { float um = smoothstep(0.38, 0.62, texture2D(uUrban, (vMacroW - uUrbanB.xy) / uUrbanB.zw).r + (texture2D(uScrub, vMacroW / 17.0).g - 0.3) * 0.4);
-    diffuseColor.rgb = mix(texture2D(uScrub, vMacroW / 3.2).rgb * vec3(0.17, 0.16, 0.09), diffuseColor.rgb, um); }`);
+      // (the unbuilt ground kept the paving's roughness and metal maps: seen at a low angle across
+      // the harbour the whole hillside mirrored the sky and read as snow. Scrub is matte; and it is
+      // olive maquis broken by patches of dry tan rock, on the macro noise the ground already reads)
+      sh.fragmentShader = 'uniform sampler2D uUrban, uScrub; uniform vec4 uUrbanB; float tgUm = 1.0;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  { tgUm = smoothstep(0.38, 0.62, texture2D(uUrban, (vMacroW - uUrbanB.xy) / uUrbanB.zw).r + (texture2D(uScrub, vMacroW / 17.0).g - 0.3) * 0.4);
+    vec3 tgS = texture2D(uScrub, vMacroW / 3.2).rgb;
+    diffuseColor.rgb = mix(mix(tgS * vec3(0.2, 0.19, 0.1), vec3(0.27, 0.225, 0.15) * (0.55 + 1.5 * tgS.g), smoothstep(0.5, 0.68, mcr)), diffuseColor.rgb, tgUm); }`)
+        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+  roughnessFactor = mix(1.0, max(roughnessFactor, 0.88), tgUm); metalnessFactor *= tgUm;`);
     };
   }
 
@@ -2928,42 +3026,50 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const hull = new Batch(true), cabin = new Batch(true), mast = new Batch(false), glass = new Batch(false);
       const hs = new THREE.Shape(); [[-0.5, -0.5], [0.2, -0.5], [0.5, 0], [0.2, 0.5], [-0.5, 0.5]].forEach(([x, y], k) => (k ? hs.lineTo(x, y) : hs.moveTo(x, y)));
       const hg = new THREE.ExtrudeGeometry(hs, { depth: 1, bevelEnabled: false }); hg.rotateX(-Math.PI / 2);
+      // (not a slab: the deck rises to the bow, the stem rakes back to the waterline and the sides
+      // flare out from a narrower bottom. The same vertices, moved.)
+      { const p = hg.attributes.position; for (let q = 0; q < p.count; q++) { const x = p.getX(q); if (p.getY(q) > 0.5) p.setY(q, 1 + Math.max(0, x + 0.1) * 0.45); else { p.setZ(q, p.getZ(q) * 0.6); if (x > 0.3) p.setX(q, 0.34); } } hg.computeVertexNormals(); }
       const cb = new THREE.BoxGeometry(1, 1, 1), mg = new THREE.CylinderGeometry(0.06, 0.09, 1, 5); mg.translate(0, 0.5, 0);
+      // (a deckhouse is no brick: its top is shorter than its foot and sits aft, so the screen rakes
+      // back hard and the stern a little, each deck stepping back from the one below. The same box.)
+      { const p = cb.attributes.position; for (let q = 0; q < p.count; q++) if (p.getY(q) > 0) p.setX(q, p.getX(q) * 0.72 - 0.08); cb.computeVertexNormals(); }
       for (const it of W2.boats || []) {
         const l = it.l, w = l * (it.big ? 0.19 : 0.3), ry = -it.h, f = (k, h0) => [it.x + Math.cos(it.h) * l * k, h0, it.y + Math.sin(it.h) * l * k];
         const fb = l * 0.085 + 0.6;
         hull.add(hg, mat(it.x, -0.5, it.y, ry, l, fb + 0.5, w), col(it.col));
-        const decks = it.big ? 2 + (l > 45 ? 1 : 0) : 1;
+        const decks = it.big ? 2 + (l > 40 ? 1 : 0) : 1, dh = it.big ? 2.3 : 1.9;
         for (let dI = 0; dI < decks; dI++) {
-          const k = 1 - dI * 0.18, [x, y, z] = f(-0.06 - dI * 0.03, fb + 0.55 + dI * 1.9);
-          cabin.add(cb, mat(x, y, z, ry, l * 0.45 * k, 1.7, w * 0.78 * k), col(dI % 2 ? '#e9ecef' : '#f7f8f6'));
-          const [gx, gy2, gz] = f(-0.06 - dI * 0.03 + 0.01, fb + 0.75 + dI * 1.9);
-          glass.add(cb, mat(gx, gy2, gz, ry, l * 0.45 * k + 0.06, 0.6, w * 0.78 * k + 0.06));
+          const k = 1 - dI * 0.2, [x, y, z] = f(-0.08 - dI * 0.035, fb + dh * 0.42 + dI * dh);
+          cabin.add(cb, mat(x, y, z, ry, l * 0.5 * k, dh - 0.2, w * 0.8 * k), col(dI % 2 ? '#e9ecef' : '#f7f8f6'));
+          const [gx, gy2, gz] = f(-0.08 - dI * 0.035 + 0.01, fb + dh * 0.5 + dI * dh);
+          glass.add(cb, mat(gx, gy2, gz, ry, l * 0.5 * k + 0.06, dh * 0.38, w * 0.8 * k + 0.06));
         }
         if (!it.big && rnd() < 0.3) { const [x, , z] = f(0.05, 0); mast.add(mg, mat(x, fb, z, 0, 1, l * 1.1, 1)); }
       }
       add(hull.geo(), M.vcol, { cast: true }); add(cabin.geo(), M.vcol, { cast: true }); add(mast.geo(), M.white);
       add(glass.geo(), M.dark);
     }
-    // the tunnel, after Monaco's: pale stone-tiled walls with pilasters behind the barriers, a flat
-    // grey slab ceiling, two rows of warm lamps along it near the walls
+    // the tunnel, after Monaco's: smooth painted concrete walls behind the barriers, pale on the
+    // lower metre and grey above, a dark slab ceiling, and a nearly unbroken strip of warm lamps
+    // along the top of each wall
     if (town.tunnel) {
-      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(true), ceil = new Acc(), rail = new Batch(false), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.55, 0.1, 1.5), pil = new Batch(true), pb = new THREE.BoxGeometry(1, 1, 1);
+      const { i0, i1 } = town.tunnel, N = tr.N, wl = new Acc(true), ceil = new Acc(), rail = new Batch(true), lamps = new Batch(false), lg = new THREE.BoxGeometry(0.2, 0.14, 1), pb = new THREE.BoxGeometry(1, 1, 1), railC = col('#8f949a'), postC = col('#6f7379');
       const off = (k, sd) => sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4), H = 6.4;
-      // the walls in five rows so they can carry the grime of a road in a box: exhaust soot thick at
-      // the foot, thinning up the wall and gathering again under the roof, in streaks of uneven age
-      const WR = [[-0.2, 0.3], [0.9, 0.52], [2.6, 0.84], [H - 1.1, 0.74], [H, 0.48]], tg = new THREE.Color(), sr = U.rng(7331);
+      // the walls in five rows: a little soot at the foot, the pale painted band to 1.25 m ending in
+      // a hard line, grey paint above it, lit again at the top where the lamps hang
+      const WR = [[-0.2, 0.5], [1.25, 0.92], [1.3, 0.36], [H - 1.0, 0.33], [H, 0.62]], tg = new THREE.Color();
       for (const sd of [-1, 1]) {
         let prev = null, along = 0;
         for (let i = i0 - 2; i <= i1 + 2; i++) {
           const k = ((i % N) + N) % N, d = off(k, sd), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d, y = tr.z[k];
           along += tr.ds;
-          const st = 0.72 + 0.28 * sr(), row = WR.map(([h, g]) => wl.v(x, y + h, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 3, (h + 0.2) / 3, tg.setScalar(g * (h < 3 ? st : 1))));
+          const st = 1, row = WR.map(([h, g]) => wl.v(x, y + h, z, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, along / 20, (h + 0.2) / 6.6, tg.setScalar(g * (h < 3 ? st : 1))));
           if (prev) for (let r = 0; r < row.length - 1; r++) { const a = row[r], c = row[r + 1], pa = prev[r], pc = prev[r + 1]; if (sd > 0) { wl.t(pa, pc, a); wl.t(pc, c, a); } else { wl.t(pa, a, pc); wl.t(pc, a, c); } }
           prev = row;
         }
       }
       // the roof: its underside faces the road, its top carries the promontory's garden
+      const rb = new Acc(true), rPrev = [null, null], RR = [[0.37, 0.55], [0.52, 1.12], [0.67, 0.6], [0.71, 0.6], [0.86, 1.12], [1.01, 0.62]];
       let prev = null;
       for (let i = i0 - 2; i <= i1 + 2; i++) {
         const k = ((i % N) + N) % N, dl = off(k, -1), dr = off(k, 1), y = tr.z[k] + H;
@@ -2975,22 +3081,40 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         // armco along both walls, as in Monaco's tunnel: two rails on posts every 2 m
         for (const [o, sd] of [[dl, -1], [dr, 1]]) {
           const q = o - sd * 0.5, rx = tr.x[k] + tr.nx[k] * q, rz = tr.y[k] + tr.ny[k] * q;
-          for (const ry0 of [0.52, 0.86]) rail.add(pb, mat(rx, tr.z[k] + ry0, rz, ry, 0.06, 0.3, tr.ds + 0.04));
-          if (i % Math.max(1, Math.round(2 / tr.ds)) === 0) rail.add(pb, mat(tr.x[k] + tr.nx[k] * (q + sd * 0.12), tr.z[k] + 0.5, tr.y[k] + tr.ny[k] * (q + sd * 0.12), ry, 0.12, 1, 0.12));
+          // (plain galvanised grey, as one ribbon that follows the road's gradient, light on the two
+          // beams' crowns and dark between them: the corrugated armco map, squeezed on to boxes 0.3 m
+          // deep, broke up into blue stripes, and the boxes, each level, stepped down the slope)
+          const rw = RR.map(([h, g]) => rb.v(rx, tr.z[k] + h, rz, -tr.nx[k] * sd, 0, -tr.ny[k] * sd, 0, 0, tg.copy(railC).multiplyScalar(g))), pr = rPrev[sd > 0 ? 1 : 0];
+          if (pr) for (let r = 0; r < rw.length - 1; r++) { const a = rw[r], c = rw[r + 1], pa = pr[r], pc = pr[r + 1]; if (sd > 0) { rb.t(pa, pc, a); rb.t(pc, c, a); } else { rb.t(pa, a, pc); rb.t(pc, a, c); } }
+          rPrev[sd > 0 ? 1 : 0] = rw;
+          if (i % Math.max(1, Math.round(2 / tr.ds)) === 0) rail.add(pb, mat(tr.x[k] + tr.nx[k] * (q + sd * 0.12), tr.z[k] + 0.5, tr.y[k] + tr.ny[k] * (q + sd * 0.12), ry, 0.12, 1, 0.12), postC);
         }
-        // two rows of lamps, 1.6 m in from each wall, every 4 m
-        if (i % Math.max(1, Math.round(4 / tr.ds)) === 0) for (const o of [dl + 1.6, dr - 1.6]) lamps.add(lg, mat(tr.x[k] + tr.nx[k] * o, y - 0.07, tr.y[k] + tr.ny[k] * o, ry));
-        // pilasters on both walls every 7 m: a pale stone pier standing a little proud of the tiles
-        if (i % Math.max(1, Math.round(7 / tr.ds)) === 0) for (const [o, sd] of [[dl, -1], [dr, 1]]) { const q = o - sd * 0.22; pil.add(pb, mat(tr.x[k] + tr.nx[k] * q, tr.z[k] + H / 2 - 0.1, tr.y[k] + tr.ny[k] * q, ry, 0.45, H + 0.2, 0.9), col('#efe6d4')); }
+        // the lamps: a strip along the top of each wall, 3.4 m lit in every 4 m
+        { const lk = Math.max(1, Math.round(4 / tr.ds)); if (i % lk === 0) for (const o of [dl + 0.16, dr - 0.16]) lamps.add(lg, mat(tr.x[k] + tr.nx[k] * o, y - 0.3, tr.y[k] + tr.ny[k] * o, ry, 1, 1, lk * tr.ds * 0.85)); }
       }
       // (kept out of the merged shadow casters: merged, its roof stopped casting and the sun lit the road under it)
-      if (!M.tunnelWall) { M.tunnelWall = M.concrete.clone(); M.tunnelWall.color = new THREE.Color('#ddd6c6'); M.tunnelWall.vertexColors = true; }
-      if (!M.tunnelCeil) { M.tunnelCeil = M.concrete.clone(); M.tunnelCeil.color = new THREE.Color('#a29d93'); M.tunnelCeil.emissive = new THREE.Color('#2a261f'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
+      // (The lamps' light is even: the screen-space occlusion, which the open iris multiplies by six,
+      // drew its sample pattern down the walls and across the ceiling as stripes. These surfaces tell
+      // the post stack that most of their light is direct, so it takes little of it away. up: the
+      // GLSL for where the surface keeps the scene's own value, the roof's sunlit top.)
+      const tunFlat = (sh, up) => { if (sh.fragmentShader.includes('r3SunA')) sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  gl_FragColor.a = mix(gl_FragColor.a, mix(0.8, gl_FragColor.a, ' + up + '), r3SunA);'); };
+      // (smooth paint, with none of the concrete photo's maps: its shutter marks, tie holes and grain read as plywood under the lamps)
+      // (and no sun on anything but the roof's top: with the iris open the few shadow-map texels of
+      // sun that leak on to a wall in the roof's shade stood out as pale blocks)
+      // (not blank from end to end: cast panels 2.5 m long with a joint between them and one along
+      // the wall at half height, a dark recess with its sign every 10 m, and the streaks that run
+      // down from the joints. One small drawn texture over the paint; it also dresses the wall's
+      // last metres outside the mouth, which stood as a flat grey slab beside the car.)
+      // (its colour is over 1: the lamps hang on the walls, whose paint takes far more of their
+      // light than the share that reaches the road and lights everything else in here)
+      if (!M.tunnelWall) { M.tunnelWall = std({ color: '#d3c3a6', map: tunnelWallTex(), roughness: 0.72, metalness: 0, vertexColors: true, side: THREE.DoubleSide }); M.tunnelWall.color.setRGB(1.3, 1.16, 0.92); M.tunnelWall.userData.noSky = true; M.tunnelWall.userData.patchKey = 'tunWall'; M.tunnelWall.userData.patchExtra = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  float tnUp = step(0.5, inverseTransformDirection(normal, viewMatrix).y); reflectedLight.directDiffuse *= tnUp; reflectedLight.directSpecular *= tnUp;'); tunFlat(sh, 'tnUp'); }; }
+      // (the slab is the darkest thing in the pictures of the tunnel: it stood lit beige)
+      if (!M.tunnelCeil) { M.tunnelCeil = std({ color: '#3d3a35', emissive: '#080503', roughness: 0.95, metalness: 0, side: THREE.DoubleSide }); M.tunnelCeil.userData.noSky = true; M.tunnelCeil.userData.patchKey = 'tunCeil'; M.tunnelCeil.userData.patchExtra = sh => tunFlat(sh, '0.0'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
       const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) tm.userData.noProxy = true;
       const tc = add(ceil.geo(), M.tunnelCeil, { cast: true }); if (tc) tc.userData.noProxy = true;
-      add(rail.geo(), M.armco, { cast: false });
-      add(pil.geo(), M.vcol, { cast: false });
-      if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#fff3d6', emissive: '#ffe2a8', emissiveIntensity: 6, roughness: 0.5 });
+      if (rb.k) rail.add(rb.geo(), null);
+      add(rail.geo(), M.vcol2 || (M.vcol2 = std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })), { cast: false });
+      if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#ffe0b0', emissive: '#ffb668', emissiveIntensity: 1.6, roughness: 0.5 });
       add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
     }
     // Flags along the seafront, as round Monaco's harbour on a race weekend: a white pole every
@@ -3174,6 +3298,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       for (let k = 0; k < cp.count; k++) { const v = V(cp.getX(k), 0.6, cp.getZ(k)).normalize(); cn.setXYZ(k, v.x, v.y, v.z); }
       coneMat = std({ map: T.photo('conifer'), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, emissive: '#ffffff', emissiveMap: T.photo('conifer'), emissiveIntensity: 0.08 });
       M.bark.map = T.photo('bark', [1, 3]); M.bark.color.set('#b7a894'); M.bark.needsUpdate = true;
+      // (the same photo, lifted to a palm trunk's pale fibre: the colour multiplies it past 1)
+      if (!M.palmBark.map) { M.palmBark.map = T.photo('bark', [1, 3]); M.palmBark.color.setRGB(3.3, 3.1, 2.9); M.palmBark.needsUpdate = true; }
     }
     const trunkG = new THREE.CylinderGeometry(0.14, 0.22, 1, 5); trunkG.translate(0, 0.5, 0);
     const palmTrunk = new THREE.CylinderGeometry(0.2, 0.34, 1, 6); palmTrunk.translate(0, 0.5, 0);
@@ -3228,7 +3354,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         for (const m of [trunks, crowns]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.dens = trees.length; root.add(m); }
       }
       if (palms.length) {
-        const trunks = new THREE.InstancedMesh(palmTrunk, M.bark, palms.length);
+        const trunks = new THREE.InstancedMesh(palmTrunk, M.palmBark, palms.length);
         const tops = new THREE.InstancedMesh(fronds, M.palm, palms.length);
         palms.forEach((it, k) => {
           const h = 7 + it.r * 0.9;
@@ -3499,7 +3625,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     };
     // (a harbour town's mountain, as behind Monaco: pale limestone crags and screes over dark maquis
     // scrub in the gullies and along the foot, not a green hill)
-    const RIVI = { forA: '#232c1e', forB: '#38422c', forC: '#4f4f37', foot: '#7a7558', open: '#857e66', rockA: '#9d9586', rockB: '#6a645a', scree: '#aaa292', cover: 0.12, line: 0.62, mix: 1, belt: 0.55, rk: [0.12, 0.32, 0.8], soft: 0.12, gully: 0.7 };
+    // (it stood nearly all pale rock, and through the haze under a high-key exposure it read as a
+    // snow peak: the rock keeps to the crest now and is warmer and darker, the lower half is scrub)
+    const RIVI = { forA: '#262f1f', forB: '#3d4a2e', forC: '#56573a', foot: '#6b6a4c', open: '#7d7558', rockA: '#96886f', rockB: '#685d4d', scree: '#8f836b', cover: 0.3, line: 0.86, mix: 1, belt: 0.8, rk: [0.2, 0.42, 0.7], soft: 0.12, gully: 0.7, scrub: 0.55, crest: 0.8, warm: 0.5 };
     const C = (tr && tr.gen2 && tr.gen2.city) ? RIVI : MTN[id] || { forA: '#1d2f1e', forB: '#33492a', open: L.ridge[0], rockA: '#8a857b', rockB: '#5d5952', scree: '#a39d90', cover: 0.18, line: 1, mix: 0.5, belt: 1 };
     const A = 640, NR = 84, Ri = bd.Ri, Ro = bd.Ro;
     const gC = tr && tr.H ? tr.H(bd.cx, bd.cz) : 0;
@@ -4679,7 +4807,7 @@ void main() {
     // the scenery's light this frame: sky probe (dimmed in the tunnel, tunnelLight), hemisphere,
     // fog and the sun's shadow maps
     const u = PX.mat.uniforms, SH = F1.R3Shadow && F1.R3Shadow.S, tk = state.tunApplied || 0;
-    u.uEnv.value = envRT.texture; u.uEnvK.value = 1 - 0.5 * tk;
+    u.uEnv.value = envRT.texture; u.uEnvK.value = 1 - 0.96 * tk;
     u.uSky.value.copy(hemi.color).multiplyScalar(hemi.intensity); u.uGround.value.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
     if (scene.fog) { u.uFogCol.value.copy(scene.fog.color); u.uFogD.value = scene.fog.density || 0; }
     let on = 0;
@@ -4709,7 +4837,11 @@ void main() {
   // camera inside, that sky light is turned down to the lamps' level and the exposure opens up, as a
   // broadcast camera's does, so the road ahead is dim under its strip of lamps and the way out
   // flares white. It eases in and out over the last 25 m outside each mouth.
-  const TUN_LAMP = new THREE.Color('#ffdcae'), TUN_FLOOR = new THREE.Color('#7a6e5e');
+  // (sodium lamps: orange, and dim enough that the open iris burns the daylight at the mouth out)
+  // How far the iris opens (the exposure is 1 + this, deep inside), and the lamps' level to go with
+  // it. Without live reflections the cars still mirror the open sky in there, so it opens less.
+  // (deeper amber, against the pictures: the walls stood pale pinkish beige)
+  const TUN_LAMP = new THREE.Color('#ffa248'), TUN_FLOOR = new THREE.Color('#5a3818'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
   function tunnelLight(dt) {
     const tr = state.tr, T = tr && tr.gen2 && tr.gen2.tunnel;
     let want = 0;
@@ -4733,8 +4865,11 @@ void main() {
     F1.R3S.U.uTunLamp.value = 0.85 * k;
     if (k !== state.tunApplied) {
       state.tunApplied = k;
-      if (!state.envMats && state.root) { state.envMats = []; state.root.traverse(m => { const ms = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : []; for (const mt of ms) if (mt && mt.envMapIntensity != null && !mt.userData.tunEnv) { mt.userData.tunEnv = mt.envMapIntensity; state.envMats.push(mt); } }); }
-      if (state.envMats) for (const mt of state.envMats) mt.envMapIntensity = mt.userData.tunEnv * (1 - 0.5 * k);
+      // (every material of this circuit, with its own level as it stands in the open: a tag left on
+      // the shared materials by an earlier circuit made the next one's tunnel skip them)
+      if (!state.envMats && state.root) { state.envMats = []; const seen = new Set(); state.root.traverse(m => { const ms = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : []; for (const mt of ms) if (mt && mt.envMapIntensity != null && !seen.has(mt)) { seen.add(mt); state.envMats.push([mt, mt.envMapIntensity]); } }); }
+      // (the sky probe knows nothing of the roof: left in, the wall that faces the sun's side of the sky stood white)
+      if (state.envMats) for (const [mt, e0] of state.envMats) mt.envMapIntensity = e0 * (1 - 0.96 * k);
     }
     return k;
   }
@@ -4801,7 +4936,7 @@ void main() {
     }
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     const tunK = tunnelLight(dt);
-    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (1 + 0.8 * tunK);
+    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (1 + tunOpen() * tunK);
     F1.R3Shadow.U.r3SunA.value = F1.R3Post.Q.on ? 1 : 0;
     if (F1.R3Post.Q.on) {
       renderer.toneMapping = THREE.NoToneMapping;
@@ -4813,7 +4948,8 @@ void main() {
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
         mode, // (a change of camera is a cut for the motion blur and the TAA history)
         // a filmic grade on the harbour towns: a little contrast, a touch of saturation and a real black point
-        grade: state.tr && state.tr.gen2 && state.tr.gen2.city ? [0.25, 1.08, 0.012] : null,
+        // (and the muted colour of a broadcast camera: the saturated version read as a toy town)
+        grade: state.tr && state.tr.gen2 && state.tr.gen2.city ? [0.24, 0.9, 0.012] : null,
         wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || []),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),

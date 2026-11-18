@@ -604,6 +604,39 @@
         addDecor(W, { type: 'building', x: cx, y: cy, w: len, h: wl + wr, a: Math.atan2(yb - ya, xb - xa), hgt, base: tr.z[k] + roofTop + 3, front: false, tunnelTop: true, seed: 7700 + i, col: '#d8cfc2', r: Math.max(len, wl + wr) / 2 });
       }
     }
+    // A row of big yachts moored stern-to along the quay nearest the lap, as in Monaco's harbour on
+    // a race weekend, where the decks stand wall to wall behind the barrier. Wherever the lap runs
+    // within 75 m of the water (not along the pits, whose building stands between): out from the
+    // lap to the shore, the stern three metres off the quay, the bow to sea. Last, with its own
+    // dice, so nothing placed before it moves; nothing is put where a pontoon, a breakwater or
+    // another boat lies.
+    {
+      const qr = U.rng(9173 + tr.N), N = tr.N, obs = [];
+      const along = (a, b, st, r) => { const l = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(l / st)); for (let q = 0; q <= n; q++) obs.push([a[0] + (b[0] - a[0]) * q / n, a[1] + (b[1] - a[1]) * q / n, r]); };
+      for (const pl of site.piers || []) for (let k = 0; k < pl.length - 1; k++) along(pl[k], pl[k + 1], 3, site.pierW / 2 + 1.5);
+      for (const pl of site.pontoons || []) along(pl[0], pl[1], 3, 2.3);
+      for (const pl of site.fingers || []) along(pl[0], pl[1], 3, 1.5);
+      const hullPts = b => { const w = b.l * (b.big ? 0.19 : 0.3), n = Math.max(2, Math.ceil(b.l / Math.max(2, w))), out = []; for (let q = 0; q <= n; q++) { const t = (q / n - 0.5) * (b.l - w); out.push([b.x + Math.cos(b.h) * t, b.y + Math.sin(b.h) * t, w / 2 + 0.7]); } return out; };
+      for (const b of W.boats || []) for (const p of hullPts(b)) obs.push(p);
+      const free = b => { for (const p of hullPts(b)) for (const o of obs) if ((p[0] - o[0]) ** 2 + (p[1] - o[1]) ** 2 < (p[2] + o[2]) ** 2) return false; return true; };
+      const st = Math.max(1, Math.round(4 / tr.ds));
+      let made = 0;
+      for (let i = 0; i < N && made < 70; i += st) {
+        if (!isNaN(tr.pit.off[i])) continue;
+        const x0 = tr.x[i], y0 = tr.y[i], d0 = site.inland(x0, y0);
+        if (!(d0 < 75 && d0 > 4)) continue;
+        const e = 3, gx = site.inland(x0 + e, y0) - site.inland(x0 - e, y0), gy = site.inland(x0, y0 + e) - site.inland(x0, y0 - e), gl = Math.hypot(gx, gy);
+        if (gl < 1e-3) continue;
+        const sx = -gx / gl, sy = -gy / gl, L = 30 + qr() * 24, col = qr() < 0.72 ? '#f6f7f5' : qr() < 0.6 ? '#1c2a40' : '#ece6d6';
+        let t = Math.max(0, d0 - 2); for (let q = 0; q < 40 && site.inland(x0 + sx * t, y0 + sy * t) > -3; q++) t += 1.5;
+        const qx = x0 + sx * t, qy = y0 + sy * t;
+        if (site.inland(qx, qy) > -3 || t > d0 + 45) continue;
+        const b = { x: qx + sx * L / 2, y: qy + sy * L / 2, h: Math.atan2(sy, sx), l: L, col, big: true };
+        // (open water under the whole hull, and beyond the bow)
+        if (site.inland(b.x, b.y) > -L * 0.35 || site.inland(qx + sx * L, qy + sy * L) > -L * 0.5 || !free(b)) continue;
+        W.boats = W.boats || []; W.boats.push(b); for (const p of hullPts(b)) obs.push(p); made++;
+      }
+    }
   }
 
   function buildMini(tr) {
