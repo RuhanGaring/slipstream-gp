@@ -2065,6 +2065,11 @@
     // --- steering wheel, facing the driver; spins about its own axis ---
     const pivot = new THREE.Group();
     pivot.position.copy(WHEEL_C);
+    // A car model's wheel stands where that car's own column puts it (meta.sw.c, from the
+    // converter: 0.60 to 0.68 m up, car by car), not at the one height every car shared: there
+    // it sat up to 8 cm above its own dash, and the parts of the wheel the model keeps on its
+    // bodywork (the lower dials, the column's boss) hung in the air under it.
+    if (MD && MD.sw && MD.sw.c) pivot.position.set(WHEEL_C.x, MD.sw.c[1], MD.sw.c[2] || 0);
     // the face stands vertical, square to the car's axis, as an F1 wheel is mounted (no rake back
     // toward the driver); a car model's own wheel keeps the rake its column has
     const zA = new THREE.Vector3(-1, 0, 0), xA = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), zA).normalize(), yA = new THREE.Vector3().crossVectors(zA, xA);
