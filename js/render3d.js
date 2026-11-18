@@ -685,7 +685,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         carScene.children.length = 0;
         for (const im of batch(pools.cars, shown)) { im.parent = carScene; carScene.children.push(im); }
       };
+      // three (r158) tests a caster's layers against the camera it is handed, the view's camera,
+      // not the shadow camera: the casters drawn only into the shadow maps (layer SHADOW_ONLY, the
+      // merged scenery and the cars' merged bodies) reach the maps only while that camera has the
+      // layer too, so it has it for the shadow pass and not after
+      const LAYER = 1 << F1.R3Shadow.SHADOW_ONLY;
       SM.render = (lights, sc, cam) => {
+        const mask = cam.layers.mask;
+        cam.layers.mask = mask | LAYER;
+        try { slices(lights, sc, cam); } finally { cam.layers.mask = mask; }
+      };
+      const slices = (lights, sc, cam) => {
         if (lights.length < 2 || G.__shFull) return smRender(lights, sc, cam); // debug: G.__shFull draws every slice in full
         let filled = false;
         for (const l of lights) {
