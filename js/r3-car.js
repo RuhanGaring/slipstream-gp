@@ -564,11 +564,11 @@
     ].join('\n') + '\n' + sh.fragmentShader
       .replace('#include <map_fragment>', [
         '#include <map_fragment>',
-        // A slick's shoulder is round (some 6 cm), so the light rolls from the tread over onto the
+        // A slick's shoulder is round (some 6 to 8 cm), so the light rolls from the tread over onto the
         // sidewall. The model's shoulder is a few hard facets: its normal is worked out here from
         // where the point sits against the tyre's radius and width (tyNn: the rounded normal in the
         // tyre's radial/axial plane), and the tread and sidewall finishes blend along the same curve.
-        '  float tyRho = length(vTyP.xy), tyAz = abs(vTyP.z), tyRs = clamp(vTyS.y * 0.36, 0.035, 0.07);',
+        '  float tyRho = length(vTyP.xy), tyAz = abs(vTyP.z), tyRs = clamp(vTyS.y * 0.42, 0.04, 0.085);',
         '  vec2 tyD = vec2(tyRho - (vTyS.x - tyRs), tyAz - (vTyS.y - tyRs));',
         '  vec2 tyNn = max(tyD, vec2(0.0)); tyNn = dot(tyNn, tyNn) < 1e-8 ? (tyD.y > tyD.x ? vec2(0.0, 1.0) : vec2(1.0, 0.0)) : normalize(tyNn);',
         '  float tyShape = vTyS.x > 0.1 ? smoothstep(vTyS.x - tyRs - 0.03, vTyS.x - tyRs, tyRho) : 0.0;',
@@ -578,17 +578,17 @@
         '  float tyMx = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)), tyMn = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));',
         '  float tyRub = (1.0 - smoothstep(0.1, 0.22, tyMx)) * (1.0 - smoothstep(0.05, 0.12, tyMx - tyMn));',
         '  float tyDust = tyC(tyCs, 260.0, tyR * 140.0) * 0.6 + tyC(tyCs, 900.0, tyR * 500.0) * 0.4;',
-        '  vec3 tySw = vec3(0.026, 0.026, 0.026) + vec3(0.009, 0.0085, 0.0075) * smoothstep(0.55, 0.95, tyDust);',
+        '  vec3 tySw = vec3(0.045, 0.045, 0.046) + vec3(0.009, 0.0085, 0.0075) * smoothstep(0.55, 0.95, tyDust);',
         '  float tyBand = tyC(tyCs, 3.0, vTyP.z * 55.0) * 0.6 + tyC(tyCs, 9.0, vTyP.z * 140.0 + 7.0) * 0.4;',
         '  float tyGrain = tyC(tyCs, 1400.0, vTyP.z * 22.0);',
         '  float tyPick = smoothstep(0.72, 0.9, tyC(tyCs, 420.0, vTyP.z * 180.0 + 3.0));',
         '  float tyW = clamp(dot(uTyWear, vec4(equal(vec4(floor(vTyWi + 0.5)), vec4(0.0, 1.0, 2.0, 3.0)))), 0.0, 1.0);',
         // (worn: the scuffed, grained, spotted tread; new: one even charcoal, the dust on the sidewall only a trace)
-        '  vec3 tyTr = mix(vec3(0.033, 0.032, 0.031), vec3(0.036, 0.035, 0.034) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick), tyW);',
-        '  tySw = mix(vec3(0.026) + (tySw - vec3(0.026)) * 0.3, tySw, tyW);',
+        '  vec3 tyTr = mix(vec3(0.058, 0.058, 0.059), vec3(0.06, 0.059, 0.057) * (0.8 + 0.4 * tyBand) * (0.9 + 0.2 * tyGrain) * (1.0 - 0.4 * tyPick), tyW);',
+        '  tySw = mix(vec3(0.045, 0.045, 0.046) + (tySw - vec3(0.045, 0.045, 0.046)) * 0.3, tySw, tyW);',
         '  diffuseColor.rgb = mix(diffuseColor.rgb, mix(tySw, tyTr, tyTread), tyRub);',
       ].join('\n'))
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.5 + 0.12 * tyDust, mix(0.4, 0.34 + 0.18 * tyBand + 0.12 * tyPick, tyW), tyTread), tyRub);')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, mix(0.52 + 0.1 * tyDust, mix(0.42, 0.38 + 0.18 * tyBand + 0.12 * tyPick, tyW), tyTread), tyRub);')
       .replace('#include <normal_fragment_maps>', [
         '#include <normal_fragment_maps>',
         '  { vec3 tyRn = normalize(vTyRad); tyRn *= sign(dot(tyRn, normal) + 1e-4);',
@@ -613,7 +613,9 @@
     const a = (hue * Math.PI) / 180, turn = hue && p.map;
     m.userData.patchKey = (kind === 'tyre' || kind === 'rim' || kind === 'disc' ? 'w' + kind : 'ck' + (kind === 'paint' ? 'p' : '')) + (turn ? '_hue' + hue : '');
     // (no sheen: on rubber it lit every tyre's silhouette as a pale rim, against its own shadow most of all)
-    if (kind === 'tyre') m.envMapIntensity = 1.2;
+    // (rubber reflects as any dielectric does, F0 about 0.04: the model's halved specular left the
+    // tyres without the satin sheen that rolls over a real slick's shoulder)
+    if (kind === 'tyre') { m.envMapIntensity = 1.4; m.specularIntensity = 1; }
     m.userData.patchExtra = sh => {
       // (not on the wheels: the cockpit's region is in the car's frame, but a wheel's mesh sits in its
       // own, where the region's hard edges fell across the tyre as a line)
