@@ -17,7 +17,7 @@
 //
 // The worker is built like the look-ahead's (js/thinkpool.js): a blob made from the sim modules on
 // the page (F1simMods), so it works from file:// too, and it runs the AI's look-ahead pool itself.
-// Off unless Game.settings.simWorker (Settings) or ?simw=1. When the worker cannot start or fails,
+// On by default (Settings > Advanced graphics > Physics thread; ?simw=1 forces it). When the worker cannot start or fails,
 // the page steps the race as before.
 (function (G) {
   'use strict';
