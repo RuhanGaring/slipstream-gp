@@ -87,8 +87,9 @@
       }
       for (let r = 0; r < rows - 1; r++) for (let j = 0; j < n; j++) {
         const a = base + r * n + j, b = base + r * n + (j + 1) % n, c = a + n, d = b + n;
-        // (faces outward on both halves)
-        if (s > 0) idx.push(a, c, b, b, c, d); else idx.push(a, b, c, b, d, c);
+        // (front faces outward on both halves: three turns a double-sided material's normals round
+        // on back faces, so a mesh wound inside out is lit and self-shadowed from the inside)
+        if (s > 0) idx.push(a, b, c, b, d, c); else idx.push(a, c, b, b, c, d);
       }
     }
     const g = new THREE.BufferGeometry();
@@ -296,6 +297,9 @@
   function material() {
     const m = new THREE.MeshPhysicalMaterial({ map: texture(), roughness: 0.6, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 1, specularIntensity: 1 });
     m.name = 'tyre26';
+    // (the shadow map takes the far side of the tyre, so its lit side cannot shade itself in streaks
+    // where the sun grazes the shoulder)
+    m.shadowSide = THREE.BackSide;
     m.userData.tyMask = true;
     m.userData.patchKey = 'wtyre26';
     m.userData.patchExtra = sh => patch(sh, null, null);
