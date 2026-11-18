@@ -295,7 +295,7 @@
     // Roughness and metalness come from measured maps; the constants are only multipliers.
     if (ph) {
       // lifted to a used circuit's mid grey and worn in by F1.R3S.wear.asphalt
-      MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 3.5, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
+      MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 2, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
       MATS.pitlane = macro(pbr('pitlane', 9 / 3, { color: '#dedede' }), 50, 0.07);
       MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#f4ecdf' }), 45, 0.2);
     } else {
@@ -309,7 +309,7 @@
       m.userData.patchKey = (m.userData.patchKey || '') + '_neut';
       m.userData.patchExtra = sh => { if (prev) prev(sh); sh.uniforms.uRoadSky = F1.R3S.U.uRoadSky; sh.fragmentShader = 'uniform float uRoadSky;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= uRoadSky;').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
     }
-    const aN = ph ? T.photo('asphalt_n', 9 / 3.5, false) : null;
+    const aN = ph ? T.photo('asphalt_n', 9 / 2, false) : null;
     // kerbs: painted concrete; UVs run 1.5 m along and across the kerb
     MATS.kerb = std({ vertexColors: true, roughness: ph ? 0.85 : 0.55 });
     MATS.kerb.userData.wetK = [0.7, 1];
