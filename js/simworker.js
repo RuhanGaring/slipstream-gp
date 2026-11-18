@@ -108,7 +108,9 @@
     function put(o, v, race) {
       for (const k in v) {
         const x = v[k], y = o[k];
-        if (x === null || typeof x !== 'object') { o[k] = x; continue; }
+        // (only what changed is written: a string written again is a new string every frame, kept
+        // alive by the long-lived car it hangs on, and so promoted to the old heap sixty times a second)
+        if (x === null || typeof x !== 'object') { if (y !== x) o[k] = x; continue; }
         if ('$c' in x || '$k' in x) { o[k] = dec(x, race); continue; }
         if (ArrayBuffer.isView(x)) { if (ArrayBuffer.isView(y) && y.length === x.length && y.constructor === x.constructor) y.set(x); else o[k] = x; if (x.length > LARGE) race._fromW.add(o[k]); continue; }
         if (Array.isArray(x)) {
@@ -117,6 +119,7 @@
             for (let i = 0; i < x.length; i++) {
               const xi = x[i], yi = y[i];
               if (xi !== null && typeof xi === 'object' && !Array.isArray(xi) && !ArrayBuffer.isView(xi) && !('$c' in xi) && !('$k' in xi) && yi && typeof yi === 'object' && !Array.isArray(yi) && Object.getPrototypeOf(yi) === Object.prototype && !race._carSetW.has(yi)) put(yi, xi, race);
+              else if (xi === null || typeof xi !== 'object') { if (yi !== xi) y[i] = xi; }
               else y[i] = dec(xi, race);
             }
           } else o[k] = dec(x, race);
