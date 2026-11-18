@@ -57,7 +57,12 @@
   ].join('\n');
   // (alpha from a softer level: at close range an atlas texel is several pixels and the 0.5 test
   // would show it as a staircase along every branch)
-  const FRAG_COLOR = '  diffuseColor *= mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.a = mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl); diffuseColor.a = smoothstep(0.22, 0.52, diffuseColor.a); if (uTSkirt > 0.5) diffuseColor.a *= mix(1.0 - smoothstep(0.06, 0.12, abs(vTLoc.x - 0.5)), 1.0, smoothstep(0.015, 0.075, vTLoc.y));';
+  // (the colour: the atlas is black wherever it is clear, so a pixel the softer alpha let through
+  // but whose own texels were half gap drew as a dark rim against the sky, and the deep holes in a
+  // crown as black flecks. The colour is divided by its own coverage, down to a half and no further
+  // (the atlas's alpha is not premultiplied: more would whiten the rim), and never falls under the
+  // dark green of leaves in shade. The same two lookups as before.)
+  const FRAG_COLOR = '  { vec4 tC = mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl); diffuseColor.rgb *= max(tC.rgb / clamp(tC.a, 0.5, 1.0), vec3(0.028, 0.034, 0.012)); diffuseColor.a = smoothstep(0.22, 0.52, mix(texture2D(map, vTUv0, 1.5).a, texture2D(map, vTUv1, 1.5).a, vTBl)); } if (uTSkirt > 0.5) diffuseColor.a *= mix(1.0 - smoothstep(0.06, 0.12, abs(vTLoc.x - 0.5)), 1.0, smoothstep(0.015, 0.075, vTLoc.y));';
   const FRAG_NORMAL = [
     '  vec3 tN0 = texture2D(uTNrm, vTUv0).xyz * 2.0 - 1.0, tN1 = texture2D(uTNrm, vTUv1).xyz * 2.0 - 1.0;',
     // a baked view-space normal back to world space: x along that view's right, z toward it
