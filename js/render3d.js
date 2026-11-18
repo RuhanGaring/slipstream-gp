@@ -1665,28 +1665,29 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           lastB = bId;
         }
       };
-      // how far a line at the wall's foot runs for each metre of the road's own: on the inside of a
-      // tight bend, where a junction's tip turns away, it is squeezed and a kerb swept along it bunches;
-      // and where the wall swings out round a junction's mouth (steeper than 1 in 3) a kerb cut square
-      // to the road would be sheared across it
-      const squeezed = (side, k) => { const sg = side ? 1 : -1; for (let q = -2; q <= 2; q++) { const i = mod(k + q, N), j = mod(i + 1, N), d0 = sg * (tr.barr[side][i] + 0.4), d1 = sg * (tr.barr[side][j] + 0.4); if (((tr.x[j] + tr.nx[j] * d1 - tr.x[i] - tr.nx[i] * d0) * tr.tx[i] + (tr.y[j] + tr.ny[j] * d1 - tr.y[i] - tr.ny[i] * d0) * tr.ty[i]) < 0.5 * tr.ds || Math.abs(d1 - d0) > 0.3 * tr.ds) return true; } return false; };
+      // how far a line at offset off(k) runs for each metre of the road's own: past the centre of a
+      // tight bend it runs backwards and anything swept along it folds into a crumpled loop; and a
+      // line swinging out steeper than 1 in 3 (the wall round a junction's mouth) shears a kerb cut
+      // square to the road
+      const folds = (side, k, off, steep) => { const sg = side ? 1 : -1; for (let q = -2; q <= 2; q++) { const i = mod(k + q, N), j = mod(i + 1, N), d0 = sg * off(i), d1 = sg * off(j); if (((tr.x[j] + tr.nx[j] * d1 - tr.x[i] - tr.nx[i] * d0) * tr.tx[i] + (tr.y[j] + tr.ny[j] * d1 - tr.y[i] - tr.ny[i] * d0) * tr.ty[i]) < (steep ? 0.25 : 0.08) * tr.ds || (steep && Math.abs(d1 - d0) > 0.3 * tr.ds)) return true; } return false; };
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1, arr = side ? tr.kerbR : tr.kerbL, kw = W2.town ? 1.05 : tr.kerbW;
         // the apron's section: a lip up from the road, a low crown, a rounded back edge
         const apron = [[-0.06, 0, 0, 1], [0.02, 0.012, -0.5, 0.86], [0.1, 0.03, -0.35, 0.94], [0.3, 0.052, -0.08, 1], [0.72, 0.056, 0.06, 1], [0.94, 0.03, 0.4, 0.92], [1, 0.002, 0.5, 0.86]];
-        // (in a town an apron lies on the inside of a corner, its back against the kerb line, and
-        // never out in the carriageway; the outside of a bend has only the kerb at the wall's foot)
-        const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45 && !squeezed(side, k)));
+        // (in a town an apron lies on the inside of a corner along the edge of the racing road, as at
+        // a street circuit's apex, whatever the wall behind it does: the wall may stand back across a
+        // junction's mouth or close in on it; the outside of a bend has only the kerb at the wall's foot)
+        const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45 && !folds(side, k, () => hw + kw, false)));
         for (const [i0, i1] of runs(N, on)) {
           if ((i1 - i0) * tr.ds < 6) continue;
-          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = W2.town ? Math.max(hw, tr.barr[side][k] + 0.32 - wd) : hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, W2.town ? 5 : 9);
+          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, W2.town ? 5 : 9);
         }
         // a town's narrow painted kerb, 28 cm wide and 12 high, standing at the foot of the barrier
         if (W2.town) {
           const foot = [[-0.3, 0, -1, 0], [-0.3, 0.12, -1, 0], [-0.27, 0.13, -0.5, 0.86], [0, 0.13, 0, 1]];
           const mouth = W2.townGates ? W2.townGates.side[side] : null, ap5 = new Uint8Array(N);
           for (let k = 0; k < N; k++) if (on(k)) for (let q = -3; q <= 3; q++) ap5[mod(k + q, N)] = 1;
-          const near = k => { if (ap5[k] || (mouth && mouth[k]) || squeezed(side, k)) return false; for (let q = -9; q <= 9; q += 3) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 60) return isNaN(tr.pit.off[k]); return false; };
+          const near = k => { if (ap5[k] || (mouth && mouth[k]) || folds(side, k, i => tr.barr[side][i] + 0.4, true)) return false; for (let q = -9; q <= 9; q += 3) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 60) return isNaN(tr.pit.off[k]); return false; };
           for (const [i0, i1] of runs(N, near)) {
             if ((i1 - i0) * tr.ds < 10) continue;
             sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => sg * (tr.barr[side][k] + 0.42 + u), foot, 1.2, 1.2);
