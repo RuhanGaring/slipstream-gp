@@ -4549,7 +4549,17 @@ void main() {
           if (g.isInstancedBufferGeometry && g.instanceCount === 0) { empty.push([g, 'instanceCount', 0]); g.instanceCount = 1; }
         });
         LP.ready = !!probeEnv;
-        try { renderer.setRenderTarget(F1.R3Post.sceneTarget()); renderer.render(scene, camera); } catch (e) { /* best effort */ }
+        // (the shadow maps are drawn for it too: once as the race draws them, the cars as their
+        // batched stand-ins, and once with every car in full, as a car beside the camera is)
+        const SH = F1.R3Shadow && F1.R3Shadow.S, full = G.__shFull;
+        try {
+          for (const whole of [false, true]) {
+            if (SH && SH.all) for (const l of SH.all) if (l.castShadow) l.shadow.needsUpdate = true;
+            G.__shFull = whole;
+            renderer.setRenderTarget(F1.R3Post.sceneTarget()); renderer.render(scene, camera);
+          }
+        } catch (e) { /* best effort */ }
+        G.__shFull = full;
         LP.ready = was;
         for (const o of unc) o.frustumCulled = true;
         for (const [o, k, v] of empty) o[k] = v;
