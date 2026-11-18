@@ -4515,15 +4515,55 @@ void main() {
     // cockpit view, or the first car to come close, compiles its programs mid-race.
     const bodies = [];
     for (const m of live.values()) { const b = m.userData && m.userData.body; if (b && b.userData.lodGroups) bodies.push(b); }
-    const ps = [];
+    // (compile, then wait on the programs themselves: three's compileAsync waits per material and
+    // never ends when one of them has no program, which a town circuit's scene has)
+    // With live reflections the cars' materials read the probe's map, not the sky's (see
+    // renderBufferDirect in init): compiled against it here too, so they do not all look their
+    // program up again on the race's first frame.
+    const probeEnv = LP.out && PX.scene && (GFX.liveRefl | 0) ? LP.out.texture : null;
     for (const L of bodies.length ? [2, 1, 0] : [0]) {
       bodies.forEach(b => F1.R3Car.setLod(b, L, true));
       const hid = [];
       scene.traverse(o => { if (!o.visible && o !== state.grass) { hid.push(o); o.visible = true; } });
-      try { ps.push(renderer.compileAsync(scene, camera)); } catch (e) { /* compile is best effort */ }
+      try { renderer.compile(scene, camera); } catch (e) { /* compile is best effort */ }
+      if (probeEnv) {
+        const env = scene.environment;
+        scene.environment = probeEnv;
+        try { for (const m of live.values()) renderer.compile(m, camera, scene); } catch (e) { /* best effort */ } finally { scene.environment = env; }
+      }
+      // And drawn once for real, off screen, into the target the frame draws into: on Direct3D
+      // (ANGLE) a program's final form is only built at its first draw call, so a program that is
+      // compiled and linked still held the frame the first time anything used it: the grid's first
+      // frames, and later the first car to change level, the first smoke. Nothing is culled for
+      // this draw, so every mesh in the scene goes through its program at each level.
+      if (F1.R3Post.Q.on && F1.R3Post.sceneTarget) {
+        // (and what draws nothing until it is needed, the smoke, the sparks, the debris, draws one
+        // point or one instance: their first real draw was a second after the lights went out)
+        const unc = [], was = LP.ready, empty = [];
+        scene.traverse(o => {
+          if (o.frustumCulled) { o.frustumCulled = false; unc.push(o); }
+          const g = o.geometry;
+          if (!g || !(o.isMesh || o.isPoints || o.isLine)) return;
+          if (g.drawRange.count === 0) { empty.push([g.drawRange, 'count', 0]); g.drawRange.count = o.isPoints ? 1 : 3; }
+          if (o.isInstancedMesh && o.count === 0) { empty.push([o, 'count', 0]); o.count = 1; }
+          if (g.isInstancedBufferGeometry && g.instanceCount === 0) { empty.push([g, 'instanceCount', 0]); g.instanceCount = 1; }
+        });
+        LP.ready = !!probeEnv;
+        try { renderer.setRenderTarget(F1.R3Post.sceneTarget()); renderer.render(scene, camera); } catch (e) { /* best effort */ }
+        LP.ready = was;
+        for (const o of unc) o.frustumCulled = true;
+        for (const [o, k, v] of empty) o[k] = v;
+      }
       hid.forEach(o => { o.visible = false; });
     }
-    const p = Promise.all(ps);
+    const p = new Promise(res => {
+      const t0 = performance.now();
+      (function wait() {
+        let ok = true;
+        for (const q of renderer.info.programs || []) { try { if (q.isReady && !q.isReady()) { ok = false; break; } } catch (e) { /* a program that failed: not waited for */ } }
+        if (ok || performance.now() - t0 > 30000) res(); else setTimeout(wait, 10);
+      })();
+    });
     renderer.toneMapping = tm;
     renderer.setRenderTarget(prev);
     // the cars' textures go up here too, not on the frame a car first comes close
@@ -4597,7 +4637,8 @@ void main() {
         const prev = renderer.getRenderTarget(), tm = renderer.toneMapping, cc = LP.cam;
         PX.scene.background = envRT.texture; renderer.toneMapping = THREE.NoToneMapping;
         cc.position.set(state.tr.x[0], (state.tr.z ? state.tr.z[0] : 0) + 0.9, state.tr.y[0]); cc.updateMatrixWorld(true);
-        renderer.setRenderTarget(LP.rt, 0); renderer.render(PX.scene, cc.children[0]);
+        if (cc.coordinateSystem !== renderer.coordinateSystem) { cc.coordinateSystem = renderer.coordinateSystem; cc.updateCoordinateSystem(); cc.updateMatrixWorld(true); }
+        for (let f = 0; f < 6; f++) { renderer.setRenderTarget(LP.rt, f); renderer.render(PX.scene, cc.children[f]); }
         LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out);
         renderer.toneMapping = tm; renderer.setRenderTarget(prev);
       } catch (e) { /* best effort */ }

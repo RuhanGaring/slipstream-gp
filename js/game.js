@@ -1514,7 +1514,11 @@
         // straight on as soon as everything is loaded
         const el = document.querySelector('#scr-loading .ld-learn');
         const shown = p => { if (!el) return; el.style.setProperty('--p', p); el.textContent = `PREPARING REFLECTIONS  ${Math.round(p * 100)}%`; el.classList.toggle('on', p < 1); };
-        Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {}).then(() => { shown(1); setTimeout(goRace, 300); });
+        // (and every shader this circuit and its twenty cars use, compiled here and not on the grid:
+        // done on first draw, it was a second of stalls in the race's first frames)
+        Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {})
+          .then(() => (R3ok ? R3.precompile(race.cars) : null)).catch(() => {})
+          .then(() => { shown(1); setTimeout(goRace, 300); });
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
       // so nobody ever races the unlearned AI

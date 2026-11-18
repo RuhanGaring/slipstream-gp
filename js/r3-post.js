@@ -822,5 +822,7 @@
   }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
-  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; } };
+  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
+    // the scene's own HDR target (made if need be), for a warm-up draw off screen (js/render3d.js precompile)
+    sceneTarget: () => { if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; } return RT.scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);
