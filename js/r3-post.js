@@ -284,8 +284,9 @@
   // ---------- bloom ----------
   const preMat = mk([
     'varying vec2 vUv; uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThresh;',
-    // (a texel that is not a number, or below zero, would bloom into a coloured blob: dropped)
-    'vec3 tap(vec2 o){ vec3 c = texture2D(tSrc, vUv + o * uTexel).rgb; if (!(c.r == c.r && c.g == c.g && c.b == c.b)) c = vec3(0.0); return clamp(c, 0.0, 64.0); }',
+    // (a texel that is not a number, or below zero, would bloom into a coloured blob: dropped; and
+    // none counts for more than 16, so one sunlit white wall cannot spread into a blob over the frame)
+    'vec3 tap(vec2 o){ vec3 c = texture2D(tSrc, vUv + o * uTexel).rgb; if (!(c.r == c.r && c.g == c.g && c.b == c.b)) c = vec3(0.0); return clamp(c, 0.0, 16.0); }',
     'void main(){',
     // 4-tap Karis-weighted average suppresses fireflies from specular sparkles
     '  vec3 a = tap(vec2(-1, -1)), b = tap(vec2(1, -1)), c = tap(vec2(-1, 1)), d = tap(vec2(1, 1));',
@@ -537,7 +538,7 @@
     '  vec2 suv = vUv; float drop = 0.0;',
     '  if (uRain > 0.01) { vec3 ld = lensDrops(vUv, uTime); suv = clamp(vUv - ld.xy, vec2(0.001), vec2(0.999)); drop = ld.z; }',
     '  if (uLens > 0.5) {', // lateral chromatic aberration, strongest toward the corners
-    '    vec2 ca = d * dot(d, d) * 0.0045;',
+    '    vec2 ca = d * dot(d, d) * 0.0015;', // (a third of what it was: thin posts carried red and cyan edges well inside the frame)
     '    c = vec3(texture2D(tScene, suv - ca).r, texture2D(tScene, suv).g, texture2D(tScene, suv + ca).b);',
     '  } else c = texture2D(tScene, suv).rgb;',
     // (no pixel below zero or not a number reaches the tone curve, whatever drew it)
