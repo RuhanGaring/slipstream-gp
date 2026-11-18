@@ -1665,13 +1665,18 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           lastB = bId;
         }
       };
+      // how far a line at the wall's foot runs for each metre of the road's own: on the inside of a
+      // tight bend, where a junction's tip turns away, it is squeezed and a kerb swept along it bunches;
+      // and where the wall swings out round a junction's mouth (steeper than 1 in 3) a kerb cut square
+      // to the road would be sheared across it
+      const squeezed = (side, k) => { const sg = side ? 1 : -1; for (let q = -2; q <= 2; q++) { const i = mod(k + q, N), j = mod(i + 1, N), d0 = sg * (tr.barr[side][i] + 0.4), d1 = sg * (tr.barr[side][j] + 0.4); if (((tr.x[j] + tr.nx[j] * d1 - tr.x[i] - tr.nx[i] * d0) * tr.tx[i] + (tr.y[j] + tr.ny[j] * d1 - tr.y[i] - tr.ny[i] * d0) * tr.ty[i]) < 0.5 * tr.ds || Math.abs(d1 - d0) > 0.3 * tr.ds) return true; } return false; };
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1, arr = side ? tr.kerbR : tr.kerbL, kw = W2.town ? 1.05 : tr.kerbW;
         // the apron's section: a lip up from the road, a low crown, a rounded back edge
         const apron = [[-0.06, 0, 0, 1], [0.02, 0.012, -0.5, 0.86], [0.1, 0.03, -0.35, 0.94], [0.3, 0.052, -0.08, 1], [0.72, 0.056, 0.06, 1], [0.94, 0.03, 0.4, 0.92], [1, 0.002, 0.5, 0.86]];
         // (in a town an apron lies on the inside of a corner, its back against the kerb line, and
         // never out in the carriageway; the outside of a bend has only the kerb at the wall's foot)
-        const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45));
+        const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45 && !squeezed(side, k)));
         for (const [i0, i1] of runs(N, on)) {
           if ((i1 - i0) * tr.ds < 6) continue;
           sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = W2.town ? Math.max(hw, tr.barr[side][k] + 0.32 - wd) : hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, W2.town ? 5 : 9);
@@ -1681,7 +1686,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const foot = [[-0.3, 0, -1, 0], [-0.3, 0.12, -1, 0], [-0.27, 0.13, -0.5, 0.86], [0, 0.13, 0, 1]];
           const mouth = W2.townGates ? W2.townGates.side[side] : null, ap5 = new Uint8Array(N);
           for (let k = 0; k < N; k++) if (on(k)) for (let q = -3; q <= 3; q++) ap5[mod(k + q, N)] = 1;
-          const near = k => { if (ap5[k] || (mouth && mouth[k])) return false; for (let q = -9; q <= 9; q += 3) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 60) return isNaN(tr.pit.off[k]); return false; };
+          const near = k => { if (ap5[k] || (mouth && mouth[k]) || squeezed(side, k)) return false; for (let q = -9; q <= 9; q += 3) if (Math.abs(tr.kap[mod(k + q, N)]) > 1 / 60) return isNaN(tr.pit.off[k]); return false; };
           for (const [i0, i1] of runs(N, near)) {
             if ((i1 - i0) * tr.ds < 10) continue;
             sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => sg * (tr.barr[side][k] + 0.42 + u), foot, 1.2, 1.2);
@@ -2269,6 +2274,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const mk = lap(p[0], p[1]);
         if (!inside(p[0], p[1]) || site.inland(p[0], p[1]) < 1 || inPits(p[0], p[1]) || onCarriage(p[0], p[1], 0.6) || (mk && mk.bar < -0.15)) { prev = null; gprev = null; continue; }
         let pw = wide; while (pw > 0.5 && onCarriage(p[0] + nx * pw, p[1] + nz * pw, 0.1)) pw -= 0.6;
+        // (round the inside of a tight corner the pavement's back edge would run backwards and fold
+        // the paving over itself: it narrows there until its edge keeps moving on with the kerb)
+        if (prev) { const sx = p[0] - prev[5], sz = p[1] - prev[6], sl = Math.hypot(sx, sz); while (pw > 0.5 && ((p[0] + nx * pw - prev[7]) * sx + (p[1] + nz * pw - prev[8]) * sz) < 0.35 * sl * sl) pw *= 0.75; pw = Math.max(0.45, pw); }
         const y = yRoad(p[0], p[1]), fx = p[0] + nx * 0.3, fz = p[1] + nz * 0.3, ox = p[0] + nx * pw, oz = p[1] + nz * pw;
         if (!bare) { const gx = p[0] - nx * 0.42, gz = p[1] - nz * 0.42, g0 = gut.v(gx, y + 0.042, gz, 0, 1, 0, gx / 3, gz / 3), g1 = gut.v(p[0], y + 0.042, p[1], 0, 1, 0, p[0] / 3, p[1] / 3); if (gprev != null) { gut.t(gprev, g0, gprev + 1); gut.t(gprev + 1, g0, g1); } gprev = g0; }
         const c0 = kerb.v(p[0], y, p[1], -nx, 0, -nz, along / 3, 0), c1 = kerb.v(p[0], y + 0.14, p[1], 0, 1, 0, along / 3, 0.35), c2 = kerb.v(fx, y + 0.14, fz, 0, 1, 0, along / 3, 1);
@@ -2278,7 +2286,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           if (!bare) { kerb.t(prev[0], c0, prev[1]); kerb.t(prev[1], c0, c1); kerb.t(prev[1], c1, prev[2]); kerb.t(prev[2], c1, c2); }
           pave.t(prev[3], a0, prev[4]); pave.t(prev[4], a0, a1);
         }
-        prev = [c0, c1, c2, a0, a1];
+        prev = [c0, c1, c2, a0, a1, p[0], p[1], ox, oz];
       }
     };
     const paintY = (x, z) => { const m = lapAt(tr, x, z); return m && m.bar < 0.6 ? Tracks.surfS(tr, m.s, m.dl) + 0.016 : yRoad(x, z) + 0.016; };
@@ -2547,7 +2555,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         if (minW >= 5) for (let t = 14 + rnd() * 30; t < L - 8; t += 45 + rnd() * 35) { const q = at(t, (rnd() - 0.5) * hAt(t)); if (ok(q)) holes.push(q); }
       }
-      for (const q of holes) if (lineDist(q[0], q[1]) > 1.1) manhole(q, rnd() < 0.3 ? 0.5 : 0.4);
+      // (none half under a wall: where the circuit's barrier closes a street off, a cover by it is left out)
+      for (const q of holes) if (lineDist(q[0], q[1]) > 1.1) { const r0 = rnd() < 0.3 ? 0.5 : 0.4, mw = lap(q[0], q[1]); if (!(mw && mw.bar > -0.1 - r0 && mw.bar < 1 + r0)) manhole(q, r0); } // (the same draws as before, so the rest of the town is unchanged)
       W2.townLineDist = lineDist;
       if (wordA.k) add(wordA.geo(), M.roadWords || (M.roadWords = F1.R3S.wear.paint(std({ map: wordsTex(), color: '#a8a8a2', transparent: true, depthWrite: false, roughness: 0.6 }))), { receive: true, order: 2 });
     }
@@ -3021,6 +3030,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     {
       const wl = new Acc(), cap = new Acc(), hedge = new Batch(true), doors = new Batch(true), hb = new THREE.BoxGeometry(1, 1, 1), N = tr.N, step = Math.max(1, Math.round(2 / tr.ds));
       const tun = k => town.tunnel && k >= town.tunnel.i0 - 4 && k <= town.tunnel.i1 + 4;
+      // (a line this far out folds back on itself on the inside of a tight bend: no wall there)
+      const foldsAt = (k, sd, o) => { for (let q = -3; q <= 3; q++) if (tr.kap[((k + q) % N + N) % N] * sd * o > 0.6) return true; return false; };
       let nextDoor = 0;
       for (const sd of [-1, 1]) {
         let along = 0, hPrev = 0;
@@ -3033,7 +3044,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // (the wall's height eases along it, never stepping more than 40 cm in 2 m)
           let H = Math.min(7.2, top + 0.4 - y);
           if (prev[0]) H = U.clamp(H, hPrev - 0.4, hPrev + 0.4);
-          if (H < 1.1 || tun(k) || site.inland(tr.x[k], tr.y[k]) < 6 || (W2.townGates && W2.townGates.side[sd > 0 ? 1 : 0][k])) { prev[0] = prev[1] = null; hPrev = 0; continue; }
+          if (H < 1.1 || tun(k) || site.inland(tr.x[k], tr.y[k]) < 6 || (W2.townGates && W2.townGates.side[sd > 0 ? 1 : 0][k]) || foldsAt(k, sd, b0 + (H > 4.2 ? 3.2 : 0.6))) { prev[0] = prev[1] = null; hPrev = 0; continue; }
           hPrev = H;
           const fx = -tr.nx[k] * sd, fz = -tr.ny[k] * sd, ry = -Math.atan2(tr.ty[k], tr.tx[k]), doorway = Math.sin(along / 47 + sd * 2) > 0.25;
           const H1 = H > 4.2 ? Math.min(3.6, H * 0.5) : H, tiers = H > 4.2 ? [[b0, -0.3, H1], [b0 + 2.6, H1, H]] : [[b0, -0.3, H]];
