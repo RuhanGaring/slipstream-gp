@@ -328,114 +328,178 @@
   // two parts of it come closer than the style's clearance. All of it is geometry on a few
   // dozen points, before anything is built.
   // (per style: lap length, main straight, second straights, the longest any other straight may
-  // be, the share of laps that run clockwise, the gates, and the S bend that breaks a middle
-  // length run: how often, its angle and its radius)
+  // be, the share of laps that run clockwise, the gates, the S bend that breaks a middle length
+  // run (how often, then its kinds: weight, angle, radius, and 1 when it is a single kink), the
+  // radius a long run curves at and how often it does, the chicane: its angle and how often it
+  // has three parts, and a square corner's radius)
   const WALK3 = {
-    mountain: { len: [4500, 6100], main: [690, 820], second: [380, 540], rest: 480, cw: 0.66, fold: 1.23, solid: 0.76, near: 0.1, aspect: [1.15, 3.4], s: [0.42, 55, 85, 28, 75] },
-    park: { len: [4400, 5800], main: [820, 1150], second: [450, 800], rest: 800, dom: 0.95, cw: 0.8, fold: 1.0, solid: 1, near: 0, aspect: [2.25, 4.0], s: [0.3, 40, 62, 14, 24] },
-    modern: { len: [5200, 5650], main: [1000, 1200], second: [550, 750], rest: 450, cw: 0.5, fold: 1.32, solid: 0.74, near: 0.16, aspect: [1.2, 3.6], s: [0.6, 45, 80, 22, 55] },
-    classic: { len: [4400, 5900], main: [680, 1150], second: [400, 620], rest: 430, cw: 0.8, fold: 1.22, solid: 0.78, near: 0.08, aspect: [1.0, 3.6], s: [0.55, 40, 70, 25, 60] },
+    mountain: { len: [4300, 5600], main: [620, 900], second: [380, 540], rest: 480, cw: 0.66, fold: 1.23, solid: 0.76, near: 0.1, aspect: [1.15, 3.4], s: [0.5, [0.3, 20, 40, 90, 160, 1], [0.35, 55, 85, 30, 50], [0.35, 60, 95, 18, 28]], bow: [300, 600, 0.55], chic: [42, 68, 0], sq: [14, 30] },
+    park: { len: [4400, 5800], main: [820, 1150], second: [450, 800], rest: 800, dom: 0.95, cw: 0.8, fold: 1.02, solid: 1, near: 0, aspect: [2.25, 4.0], s: [0.3, [0.5, 55, 85, 14, 24], [0.5, 40, 70, 35, 70]], bow: [600, 1400, 0.7], chic: [55, 85, 0.33], sq: [18, 45] },
+    modern: { len: [5400, 5680], main: [1000, 1200], second: [550, 750], rest: 400, cw: 0.5, fold: 1.32, solid: 0.74, near: 0.16, aspect: [1.2, 3.6], s: [0.5, [0.35, 60, 90, 16, 26], [0.35, 45, 75, 50, 80], [0.3, 30, 50, 80, 130]], bow: [330, 560, 0.75], chic: [42, 68, 0], sq: [14, 30] },
+    classic: { len: [4400, 5900], main: [680, 1150], second: [400, 620], rest: 430, cw: 0.8, fold: 1.22, solid: 0.78, near: 0.08, aspect: [1.0, 3.6], s: [0.45, [1, 45, 80, 14, 30]], bow: [350, 900, 0.6], chic: [42, 68, 0], sq: [14, 30] },
   };
   const MAIN3 = [0, 0];
-  // (q: the sections; a sign of 1 turns the way the lap goes round, -1 against it; W: the style)
+  // (q: the sections; a sign of 1 turns the way the lap goes round, -1 against it; W: the style.
+  // q.b(i) is a coin tossed once for the candidate, so a recipe's alternative sections hold
+  // while it is walked and two seeds of one recipe are not the same skeleton)
   const RECIPES3 = {
     modern: {
       wedge(q, W) {
-        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.tech([100, 220], 1, 3); q.fing([150, 300], q.s()); q.fast([180, 380], -1);
-        q.car([150, 330], 1, 120, 175); q.med([200, 420], 1); q.sq([180, 400], 1);
+        q.open(W); q.tech([100, 220], 1, 3, 16, 26); q.fing([150, 300], q.s()); q.fast([180, 380], -1); q.ess([60, 140], 1, 2);
+        q.car([150, 330], 1, 120, 175, 80, 120); q.med([200, 420], 1); q.sq([180, 400], 1);
       },
+      // (Shanghai: the main straight runs into a corner that goes on round and tightens)
       snail(q, W) {
-        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.tech([100, 220], 1, 2); q.multi([150, 330], 1); q.fast([180, 380], -1);
+        q.snail(MAIN3, 1); if (q.b(1)) q.med(W.second, -1, 45, 75, 30, 60); else q.fast(W.second, -1);
+        q.tech([100, 220], 1, 2, 16, 26); q.car([150, 330], 1, 110, 150, 80, 120); q.fast([180, 380], -1); q.ess([60, 140], 1, 2);
         q.fing([150, 300], q.s()); q.med([200, 420], 1); q.sq([180, 400], 1);
       },
       stadium(q, W) {
-        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.u([150, 300], 1); q.u([200, 360], -1); q.fast([150, 300], q.s());
-        q.car([200, 380], 1, 120, 170); q.tech([120, 260], 1, 3); q.med([200, 420], 1, 40, 65);
+        q.open(W); q.u([150, 300], 1); q.u([200, 360], -1); q.fast([150, 300], q.s()); q.ess([60, 140], q.s(), 2);
+        q.car([200, 380], 1, 120, 170, 80, 120); q.tech([120, 260], 1, 3, 16, 26); q.med([200, 420], 1, 40, 65);
+      },
+      // (Yas Marina, Miami: a long strip, its straights side by side)
+      marina(q, W) {
+        if (q.b(2)) q.hair(MAIN3, 1, 148, 162, 18, 30); else q.u2(MAIN3, 1);
+        q.chic(W.second, -1); q.u([60, 150], -1); q.fast(W.second, 1); q.car([150, 330], 1, 150, 185, 80, 120);
+        q.tech([150, 330], q.s(), 3, 16, 26); q.ess([120, 260], q.s(), 2); q.sq([200, 380], 1); q.med([200, 380], 1, 60, 100);
       },
     },
     mountain: {
       valley(q, W) {
-        q.hair(MAIN3, 1, 146, 164); q.bend([200, 380], -1); q.ess([180, 380], q.s(), 3); q.fast([280, 470], q.s()); q.med([220, 430], 1, 60, 100, 60, 110);
-        q.car([150, 320], 1, 150, 188); q.med([150, 320], -1, 50, 85); q.car([200, 400], -1, 110, 150); q.bend([250, 450], q.s());
+        // (the hairpin stands against the main straight on one lap in two, else inside the lap)
+        const hp = q.b(0);
+        if (hp) q.hair(MAIN3, 1, 146, 164, 14, 24); else q.med(MAIN3, 1, 90, 130, 20, 35);
+        q.bend([200, 380], -1); q.ess([180, 380], q.s(), 3); q.fast([280, 470], q.s()); q.med([220, 430], 1, 60, 100, 60, 110);
+        q.car([150, 320], 1, 150, 188); q.med([150, 320], -1, 50, 85);
+        if (hp) q.car([200, 400], -1, 110, 150); else q.hair([200, 400], -1, 125, 150, 14, 24);
+        q.bend([250, 450], q.s());
         q.car([200, 420], 1, 120, 160, 60, 100); q.bend([280, 460], -1); q.bend([280, 460], -1); q.chic([280, 470], 1);
         // (a kink between the chicane and the start straight: the pit lane leaves the road 400 m
         // before the line, and must not leave it inside the chicane)
         q.fast([170, 320], 1);
       },
       infield(q, W) {
-        q.sq(MAIN3, 1, 85, 115); q.bend([260, 450], q.s()); q.car(W.second, 1, 105, 140, 35, 60); q.bend([240, 420], q.s());
+        if (q.b(0)) { q.hair(MAIN3, 1, 125, 150, 14, 24); q.bend([260, 450], q.s()); q.med(W.second, 1, 60, 100, 35, 60); }
+        else { q.sq(MAIN3, 1, 85, 115); q.bend([260, 450], q.s()); q.car(W.second, 1, 105, 140, 35, 60); }
+        q.bend([240, 420], q.s());
         q.fing([120, 260], 1, 2, 360, 540); q.car([140, 300], 1, 110, 160); q.ess([120, 260], -1, 2); q.fast([220, 400], q.s()); q.med([200, 400], 1, 70, 105);
       },
       spoon(q, W) {
+        const hp = q.b(0);
         q.chic(MAIN3, 1); q.bend([280, 460], -1); q.bend([280, 460], -1); q.car([200, 420], 1, 120, 160, 60, 100); q.bend([250, 450], q.s());
-        q.car([200, 400], -1, 110, 150); q.med([150, 320], -1, 50, 85); q.car([150, 320], 1, 150, 188); q.med([220, 430], 1, 60, 100, 60, 110);
-        q.fast([280, 470], q.s()); q.ess([180, 380], q.s(), 3); q.bend([200, 380], -1); q.hair([200, 380], 1, 146, 164);
+        if (hp) q.car([200, 400], -1, 110, 150); else q.hair([200, 400], -1, 125, 150, 14, 24);
+        q.med([150, 320], -1, 50, 85); q.car([150, 320], 1, 150, 188); q.med([220, 430], 1, 60, 100, 60, 110);
+        q.fast([280, 470], q.s()); q.ess([180, 380], q.s(), 3); q.bend([200, 380], -1);
+        if (hp) q.hair([200, 380], 1, 146, 164, 14, 24); else q.med([200, 380], 1, 90, 130, 20, 35);
+      },
+      // (the Red Bull Ring: nine or ten corners round a hillside, no fold in the middle)
+      ring(q, W) {
+        q.sq(MAIN3, 1, 90, 115, 18, 30); q.bend(W.second, -1); q.hair(W.second, 1, 125, 150, 14, 24); q.med(W.second, 1, 85, 115, 25, 45);
+        q.car([180, 380], -1, 100, 140, 50, 80); q.med([100, 240], -1, 40, 70, 35, 60); q.fast([200, 400], 1);
+        q.med([200, 400], 1, 75, 105, 30, 50); q.med([120, 260], 1, 75, 105, 30, 48);
       },
     },
     park: {
       island(q, W) {
-        q.chic(MAIN3, -1); q.bend(W.second, 1); q.chic(W.second, 1); q.hair(W.second, 1); q.fast(W.second, q.s()); q.chic(W.second, q.s());
+        q.chic(MAIN3, -1); q.bend(W.second, 1); q.chic(W.second, 1);
+        if (q.b(0)) q.hair(W.second, 1, 142, 162, 14, 24); else q.car(W.second, 1, 140, 175, 35, 60);
+        q.fast(W.second, q.s()); if (q.b(1)) q.chic(W.second, q.s()); else q.ess(W.second, q.s(), 2, 1);
         q.sq(W.second, 1); q.med([150, 320], 1, 60, 95, 60, 110);
       },
       royal(q, W) {
-        q.chic(MAIN3, 1); q.bend([300, 600], 1, 45, 80); q.chic([250, 500], -1); q.med([300, 600], 1, 55, 80, 55, 90); q.med([150, 280], 1, 55, 80, 55, 90);
-        q.bend(W.second, -1); q.ess(W.second, -1, 3, 1); q.car(W.second, 1, 150, 185, 70, 110);
+        if (q.b(0)) q.chic(MAIN3, 1); else { q.sq(MAIN3, 1, 70, 100); q.med([40, 90], -1, 35, 60, 30, 60); }
+        q.bend([300, 600], 1, 45, 80);
+        if (q.b(1)) q.chic([250, 500], -1); else q.fast([250, 500], -1);
+        if (q.b(2)) { q.med([300, 600], 1, 55, 80, 55, 90); q.med([150, 280], 1, 55, 80, 55, 90); } else q.car([300, 600], 1, 110, 150, 60, 100);
+        q.bend(W.second, -1);
+        if (q.b(3)) q.ess(W.second, -1, 3, 1); else q.chic(W.second, -1);
+        if (q.b(4)) q.car(W.second, 1, 150, 185, 70, 110); else { q.med(W.second, 1, 75, 100, 40, 70); q.med([120, 260], 1, 75, 100, 50, 90); }
       },
       lake(q, W) {
         q.sq(MAIN3, 1); q.med([60, 150], -1, 40, 70); q.sq([200, 420], 1); q.bend(W.second, 1); q.fast(W.second, -1); q.chic(W.second, 1); q.bend(W.second, 1);
         q.sq([300, 600], 1); q.sq([200, 420], 1); q.med([150, 320], -1, 40, 70); q.fast([300, 600], 1);
       },
+      // (Albert Park: a rounded loop with a waist, round a lake; no straight over 760 m)
+      lakeside(q, W) {
+        q.sq(MAIN3, 1, 75, 100); q.fast([50, 120], -1); q.sq([280, 480], 1, 75, 100); q.med([60, 140], -1, 45, 70, 30, 60);
+        q.car([150, 320], 1, 60, 110, 90, 160); q.sq([200, 380], 1, 70, 100); q.bend(W.second, 1, 30, 60);
+        if (q.b(0)) q.chic(W.second, -1); else q.ess(W.second, -1, 2, 1);
+        q.sq([150, 320], 1, 75, 100); q.med([150, 300], 1, 55, 80, 35, 60); q.sq([150, 300], -1, 75, 100); q.sq([60, 140], 1, 75, 100);
+      },
     },
     classic: {
       airfield(q, W) {
-        q.med(MAIN3, 1, 70, 100, 80, 110); q.sq([120, 260], -1, 70, 100); q.car([100, 220], 1, 130, 170, 45, 70); q.fast([200, 400], 1); q.med([120, 260], 1, 90, 110, 25, 40);
-        q.u([80, 180], -1); q.fast([120, 260], -1); q.med(W.second, -1, 80, 110, 45, 70); q.u([60, 150], 1); q.fast([150, 300], 1);
-        q.med([250, 430], 1, 70, 90, 90, 110); q.ess([100, 220], -1, 4, 1);
+        if (q.b(0)) q.med(MAIN3, 1, 70, 100, 55, 85); else q.sq(MAIN3, 1, 75, 105, 16, 30);
+        q.sq([120, 260], -1, 70, 100); q.car([100, 220], 1, 130, 170, 45, 70); q.med([200, 400], 1, 30, 55, 16, 30); q.med([120, 260], 1, 90, 110, 18, 30);
+        q.u([80, 180], -1); q.med([120, 260], -1, 30, 55, 16, 30); q.med(W.second, -1, 80, 110, 45, 70); q.u([60, 150], 1); q.fast([150, 300], 1);
+        q.med([250, 430], 1, 70, 90, 90, 110); q.ess([100, 220], -1, 3 + q.b(1), q.b(2));
       },
       dunes(q, W) {
-        q.u(MAIN3, 1); q.med([150, 320], -1, 50, 80); q.u([120, 260], -1); q.fast([150, 320], 1); q.med([200, 400], 1, 80, 105, 70, 100); q.med([150, 320], 1, 80, 100, 35, 50);
-        q.med([150, 320], -1, 90, 110, 30, 45); q.car([150, 300], 1, 110, 150, 45, 60); q.chic(W.second, 1); q.car([200, 400], 1, 100, 140, 70, 100);
+        q.u(MAIN3, 1); q.med([150, 320], -1, 50, 80, 25, 60); q.u([120, 260], -1); q.fast([150, 320], 1); q.med([200, 400], 1, 80, 105, 45, 75); q.med([150, 320], 1, 80, 100, 20, 32);
+        q.med([150, 320], -1, 90, 110, 22, 38); q.car([150, 300], 1, 110, 150, 45, 60); q.chic(W.second, 1); q.car([200, 400], 1, 100, 140, 70, 100);
       },
       catalunya(q, W) {
-        q.med(MAIN3, 1, 70, 90, 50, 70); q.med([30, 70], -1, 40, 60, 50, 80); q.car([60, 160], 1, 150, 185, 75, 105); q.fast([200, 380], -1); q.med([150, 300], 1, 50, 80, 45, 60);
-        q.sq([150, 300], -1, 70, 100); q.med(W.second, 1, 60, 90, 90, 110); q.sq([200, 400], -1, 60, 90); q.u([120, 260], 1); q.fast([150, 300], q.s()); q.med([150, 300], 1, 70, 100, 60, 90);
+        if (q.b(0)) q.med(MAIN3, 1, 70, 90, 50, 70); else q.sq(MAIN3, 1, 75, 100, 20, 32);
+        q.med([30, 70], -1, 40, 60, 50, 80); q.car([60, 160], 1, 150, 185, 75, 105); q.fast([200, 380], -1); q.med([150, 300], 1, 50, 80, 45, 60);
+        q.med([150, 300], -1, 60, 95, 45, 70); q.med(W.second, 1, 60, 90, 90, 110); q.sq([200, 400], -1, 70, 100, 16, 28);
+        if (q.b(1)) q.u([120, 260], 1); else q.car([120, 260], 1, 150, 180, 80, 110);
+        q.fast([150, 300], q.s()); q.med([150, 300], 1, 70, 100, 40, 70);
       },
     },
   };
-  // (Barcelona is a long band, its fold on one side only)
+  // (Barcelona is a long band, its fold on one side only; Albert Park is a loop round a lake;
+  // the Red Bull Ring a plain ring; a marina circuit a strip of straights side by side)
   RECIPES3.classic.catalunya.gate = { fold: 1.1, solid: 0.8, near: 0.05, aspect: [1.9, 3.6] };
+  RECIPES3.park.lakeside.gate = { fold: 1.04, solid: 0.8, near: 0, aspect: [1.7, 2.8] };
+  RECIPES3.park.lakeside.main = [640, 760];
+  RECIPES3.mountain.ring.gate = { fold: 1.05, solid: 0.9, near: 0, aspect: [1.3, 3.2] };
+  RECIPES3.modern.marina.gate = { fold: 1.3, solid: 0.74, near: 0.16, aspect: [2.1, 3.2] };
   function walkLayout3(r, style, st) {
     const W = WALK3[style], D2R = Math.PI / 180, R = (a, b) => a + (b - a) * r();
     const names = Object.keys(RECIPES3[style]);
     const dir = r() < W.cw ? 1 : -1;   // (on the map y points down, so a positive turn is clockwise)
-    const h0 = R(0, 2 * Math.PI), pick = Math.floor(r() * names.length);
+    // (the recipe from the draw's low bits: its top bits lean to one side on seeds a step apart)
+    const h0 = R(0, 2 * Math.PI), pick = Math.floor(r() * 4096) % names.length, coins = Math.floor(r() * 4096), open = r();
     for (let tries = 0; tries < 2700; tries++) {
       // the lap's corners in order: clear straight before it (and its limits), turn in degrees
       // (positive the way the lap goes round), radius
-      const ks = [], name = names[(pick + Math.floor(tries / 900)) % names.length];
+      const ks = [], name = names[(pick + Math.floor(tries / 900)) % names.length], RC = RECIPES3[style][name], mainR = RC.main || W.main;
       const K = (lead, a, rad, o) => {
-        const k = lead === MAIN3 ? { l: R(W.main[0], W.main[1]), lmin: W.main[0], lmax: W.main[1], main: true } : { l: R(lead[0], lead[1]), lmin: lead[0] * 0.4, lmax: lead === W.second ? lead[1] : Math.min(lead[1] * 2.2, W.rest) };
+        let k;
+        // (the main straight keeps the length drawn for it, within 4 percent, so the closing
+        // solve cannot push every lap's to one end of the range)
+        if (lead === MAIN3) { const l = R(mainR[0], mainR[1]); k = { l, lmin: l * 0.96, lmax: l * 1.04, main: true }; }
+        else k = { l: R(lead[0], lead[1]), lmin: lead[0] * 0.4, lmax: lead === W.second ? lead[1] : Math.min(lead[1] * 2.2, W.rest) };
         k.a = a; k.rad = rad;
         if (o) Object.assign(k, o);
         ks.push(k);
       };
       const q = {
-        s: () => (r() < 0.5 ? -1 : 1), n: m => Math.floor(r() * m),
+        s: () => (r() < 0.5 ? -1 : 1), n: m => Math.floor(r() * m), b: i => (coins >> i) & 1,
         // a tight hairpin; a slow square corner; a medium corner; a flat out kink; a bend in a run
-        hair: (lead, s, lo = 142, hi = 162) => K(lead, s * R(lo, hi), R(12, 20), { fixA: 1 }),
-        sq: (lead, s, lo = 78, hi = 112) => K(lead, s * R(lo, hi), R(14, 30)),
+        hair: (lead, s, lo = 142, hi = 162, r0 = 12, r1 = 20) => K(lead, s * R(lo, hi), R(r0, r1), { fixA: 1 }),
+        sq: (lead, s, lo = 78, hi = 112, r0 = W.sq[0], r1 = W.sq[1]) => K(lead, s * R(lo, hi), R(r0, r1)),
         med: (lead, s, lo = 55, hi = 110, r0 = 35, r1 = 100) => K(lead, s * R(lo, hi), R(r0, r1)),
         fast: (lead, s) => K(lead, s * R(22, 44), R(110, 190)),
         bend: (lead, s, lo = 10, hi = 28) => K(lead, s * R(lo, hi), R(260, 440)),
         // a long corner held at one radius; a U turn whose legs run side by side; a long corner
-        // that tightens or opens
+        // that tightens or opens; one that goes on round for two thirds of a circle and more,
+        // tightening, with a slow corner the other way straight after it (Shanghai's first four)
         car: (lead, s, lo = 115, hi = 185, r0 = 45, r1 = 90) => K(lead, s * R(lo, hi), R(r0, r1), { fixA: 1 }),
         u: (lead, s) => K(lead, s * R(168, 186), R(38, 54), { fixA: 1 }),
+        u2: (lead, s) => K(lead, s * R(166, 184), R(41, 47), { fixA: 1 }),
         multi: (lead, s) => { const a = R(55, 85), b = a * R(0.45, 0.7), t = r() < 0.7; K(lead, s * R(165, 250), t ? a : b, { fixA: 1, rad2: t ? b : a }); },
-        // esses (fast ones swing less at a wider radius); a chicane; a winding infield
-        ess: (lead, s, m, fst) => { for (let j = 0; j < m; j++) { K(j ? [45, 100] : lead, s * (fst ? R(40, 65) : R(48, 78)), fst ? R(80, 130) : R(50, 105)); s = -s; } },
-        chic: (lead, s) => { const a = R(42, 68); K(lead, s * a, R(13, 22)); K([25, 48], -s * a * R(0.9, 1.1), R(13, 22), { lmin: 20, lmax: 55 }); },
-        tech: (lead, s, m) => { for (let j = 0; j < m; j++) { K(j ? [70, 180] : lead, s * R(50, 115), R(16, 42)); if (r() < 0.7) s = -s; } },
+        snail: (lead, s) => { K(lead, s * R(235, 285), R(105, 140), { fixA: 1, rad2: R(30, 38), sig: 'snail' }); K([20, 50], -s * R(80, 120), R(20, 30), { lmin: 20, lmax: 60, fixA: 1 }); },
+        // esses (fast ones swing less at a wider radius); a chicane, of two parts or of three;
+        // a winding infield
+        ess: (lead, s, m, fst) => { for (let j = 0; j < m; j++) { K(j ? [45, 100] : lead, s * (fst ? R(40, 65) : R(48, 78)), fst ? R(80, 130) : R(50, 105), m > 2 && !j ? { sig: 'esses' } : null); s = -s; } },
+        chic: (lead, s) => {
+          const C = W.chic, a = R(C[0], C[1]);
+          if (r() < C[2]) { K(lead, s * R(60, 75), R(13, 20), { sig: 'three part chicane' }); K([20, 40], -s * R(80, 95), R(13, 20), { lmin: 20, lmax: 45 }); K([20, 40], s * R(40, 52), R(13, 20), { lmin: 20, lmax: 45 }); }
+          else { K(lead, s * a, R(13, 22), { sig: 'chicane' }); K([25, 48], -s * a * R(0.9, 1.1), R(13, 22), { lmin: 20, lmax: 55 }); }
+        },
+        tech: (lead, s, m, r0 = 16, r1 = 42) => { for (let j = 0; j < m; j++) { K(j ? [70, 180] : lead, s * R(50, 115), R(r0, r1)); if (r() < 0.7) s = -s; } },
         // a finger toward the inside of the lap (s = 1) or out of it: in, a U turn, back out
         fing: (lead, s, wide, d0 = 180, d1 = 400) => {
           const d = R(d0, d1);
@@ -446,18 +510,45 @@
           else K([d * 0.8, d], -s * R(142, 160), R(12, 20), { fixA: 1 });
           K([d * 0.6, d * 0.95], s * R(55, 95), R(28, 70), wide === 2 ? { lmax: d * 1.1 } : null);
         },
+        // how a modern lap's main straight ends: the needle of Yas Marina's hairpin one time in
+        // four; else Sakhir's first three corners, a U turn wide enough for the straight out of
+        // it to run beside the one into it (Shanghai's last) or one medium corner (Lusail's first)
+        open: W => {
+          if (open < 0.25) { q.hair(MAIN3, 1, 140, 158, 18, 30); q.med(W.second, -1, 45, 75, 30, 60); }
+          else if (open < 0.55) { q.sq(MAIN3, 1, 95, 120, 16, 24); K([40, 80], -R(40, 60), R(35, 60), { lmin: 30, lmax: 110 }); K([60, 100], R(30, 50), R(45, 80), { lmin: 40, lmax: 140 }); q.fast(W.second, -1); }
+          else if (open < 0.7) { q.u2(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); }
+          else { q.med(MAIN3, 1, 80, 110, 45, 70); q.fast(W.second, q.s()); }
+        },
       };
-      RECIPES3[style][name](q, W);
+      RC(q, W);
       // Real corners come in groups with short runs between them, not one at the end of every
       // straight: a run of 260 m or more (the main and second straights apart) is as often as
-      // not broken by an S bend, the way a real lap fills its middle length straights
+      // not broken by an S bend, the way a real lap fills its middle length straights. Its
+      // kind is drawn for each run: a tight S, a faster one, or a single kink
       {
         const all = ks.splice(0), S3 = W.s;
         for (const k of all) {
           if (k.main || k.l < 260 || k.lmax > W.rest || r() > S3[0]) { ks.push(k); continue; }
-          const a = R(S3[1], S3[2]), rad = R(S3[3], S3[4]), s = r() < 0.5 ? -1 : 1, l1 = k.l * R(0.3, 0.6);
-          ks.push({ l: l1, lmin: 30, lmax: k.lmax, a: s * a, rad }, { l: R(35, 80), lmin: 25, lmax: 110, a: -s * a * R(0.9, 1.1), rad });
+          let x = r(), kd = S3[1];
+          for (let j = 1; j < S3.length; j++) { kd = S3[j]; if (x < kd[0]) break; x -= kd[0]; }
+          const a = R(kd[1], kd[2]), rad = R(kd[3], kd[4]), s = r() < 0.5 ? -1 : 1, l1 = k.l * R(0.3, 0.6);
+          ks.push({ l: l1, lmin: 30, lmax: k.lmax, a: s * a, rad });
+          if (!kd[5]) ks.push({ l: R(35, 80), lmin: 25, lmax: 110, a: -s * a * R(0.9, 1.1), rad });
           k.l -= l1; k.lmin = Math.min(k.lmin, 40);
+          ks.push(k);
+        }
+      }
+      // A road is seldom dead straight for long. Most runs of 200 m or more but the main
+      // straight get a bend of 8 to 22 degrees part way along it, two times in three bulging
+      // outward (the way a road goes round a lake or a hill); its radius is set once the walk
+      // has closed, so that its arc fills most of the run however long that came out
+      {
+        const all = ks.splice(0);
+        for (const k of all) {
+          if (k.main || k.l < 200 || r() > W.bow[2]) { ks.push(k); continue; }
+          const f = R(0.4, 0.6), a = R(8, 22) * (r() < 0.67 ? 1 : -1);
+          ks.push({ l: k.l * f, lmin: Math.max(45, k.lmin * f), lmax: Math.max(70, k.lmax * f), a, rad: W.bow[0], bow: 1 });
+          k.l *= 1 - f; k.lmin = Math.max(45, k.lmin * (1 - f)); k.lmax = Math.max(70, k.lmax * (1 - f));
           ks.push(k);
         }
       }
@@ -474,7 +565,9 @@
         const m = Math.max(1, Math.ceil(Math.abs(k.a) / 78));
         for (let j = 0; j < m; j++) {
           const rad = k.rad2 && m > 1 ? k.rad + (k.rad2 - k.rad) * j / (m - 1) : k.rad, th = dir * k.a / m * D2R;
-          cs.push(j ? { th, rad, t: rad * Math.tan(Math.abs(th) / 2), link: true } : { th, rad, t: rad * Math.tan(Math.abs(th) / 2), l: k.l, lmin: k.lmin, lmax: k.lmax, main: k.main });
+          // (a run's bend takes no room until its radius is known)
+          const t = k.bow ? 0 : rad * Math.tan(Math.abs(th) / 2);
+          cs.push(j ? { th, rad, t, link: true } : { th, rad, t, l: k.l, lmin: k.lmin, lmax: k.lmax, main: k.main, bow: k.bow });
         }
       }
       const n = cs.length, ux = [], uy = [], len = [], lo = [], hi = [], fixed = [];
@@ -509,18 +602,33 @@
       let L = 0;
       for (let i = 0; i < n; i++) L += len[i];
       if (L < W.len[0] || L > W.len[1]) continue;
-      // the main straight is the longest by a clear margin
-      const clear = i => len[i] - cs[(i - 1 + n) % n].t - cs[i].t;
-      let second = 0;
-      for (let i = 1; i < n; i++) second = Math.max(second, clear(i));
-      if (second > clear(0) * (W.dom || 0.85)) continue;
+      // the curve of each long run, now its length is known: an arc over three quarters of the
+      // shorter of its two halves, at a radius inside the style's range where that fits
+      for (let i = 0; i < n; i++) {
+        const c = cs[i];
+        if (!c.bow) continue;
+        const room = Math.min(len[i] - cs[(i - 1 + n) % n].t, len[(i + 1) % n] - cs[(i + 1) % n].t), tn = Math.tan(Math.abs(c.th) / 2);
+        c.rad = Math.max(Math.min(0.76 * room / tn, W.bow[1]), Math.min(W.bow[0], (room - 8) / tn));
+        c.t = c.rad * tn;
+      }
+      // the main straight is the longest by a clear margin (a run whose bend is wide enough to
+      // count as straight is measured whole)
+      let second = 0, run = 0;
+      for (let i = 1; i < n; i++) {
+        const p = cs[i - 1];
+        run = p.bow && p.rad >= 480 ? run + len[i] : len[i] - p.t;
+        if (!(cs[i].bow && cs[i].rad >= 480)) second = Math.max(second, run - cs[i].t);
+      }
+      if (second > (len[0] - cs[n - 1].t - cs[0].t) * (W.dom || 0.85)) continue;
       const v = [];
       let x = 0, y = 0;
       for (let i = 0; i < n; i++) { x += len[i] * ux[i]; y += len[i] * uy[i]; v.push([x, y, cs[i].rad]); }
       if (segsCross(v)) continue;
-      const sh = lapShape(v, cs, ux, uy, st.sep + 3), G = RECIPES3[style][name].gate || W;
+      const sh = lapShape(v, cs, ux, uy, st.sep + 3), G = RC.gate || W;
       if (!sh || sh.fold < G.fold || sh.solid > G.solid || sh.near < G.near || sh.aspect < G.aspect[0] || sh.aspect > G.aspect[1]) continue;
+      // what marks the lap: its recipe, then its set pieces
       const feat = [name];
+      for (const k of ks) if (k.sig && !feat.includes(k.sig)) feat.push(k.sig);
       for (const k of ks) { if (k.rad2) feat.push('tightening corner'); else if (k.fixA && k.rad > 30 && Math.abs(k.a) > 165) feat.push('u turn'); else if (k.fixA && k.rad > 30) feat.push('long corner'); }
       const rd = p => Math.round(p * 10) / 10;
       return { v: v.map(p => [rd(p[0]), rd(p[1]), rd(p[2])]), pitSides: [1, -1], features: feat, shape: sh, tries: tries + 1 };
@@ -620,13 +728,15 @@
   const pseg = (x, y, a, b) => { const vx = b[0] - a[0], vy = b[1] - a[1], l2 = vx * vx + vy * vy || 1, t = U.clamp(((x - a[0]) * vx + (y - a[1]) * vy) / l2, 0, 1); return Math.hypot(x - a[0] - vx * t, y - a[1] - vy * t); };
   // the steepest a street climbs over any 40 m of it
   // the site: the coastline, distance inland and the ground, on a 5 m raster
-  function cityTerrain(r) {
+  function cityTerrain(r, lv) {
     const L = (a, b) => a + (b - a) * r(), s = 1 + Math.floor(r() * 1e6);
     const D = L(500, 600), Wb = L(330, 470), th = L(0.25, 0.6), Wr = L(180, 520), Hr = r() < 0.6 ? L(120, 320) : 0, hTilt = L(-0.45, 0.45);   // a rocky headland across the basin's mouth, or open sea
     // the side quay leans off square to the head quay, as real basins' quays do
     const sx = Math.tan(L(8, 22) * Math.PI / 180);
     const pr = { x: Wb + L(10, 60), w: L(80, 120), d: L(40, 60) };
-    const flat = L(30, 55), slope = L(0.17, 0.27), xv = -L(260, 420), vs = L(0.06, 0.1), rockH = L(48, 62);
+    // (version 3, ids ending -3: the town stands on a coastal plain a few blocks deep before the
+    // hill begins, as Baku, Jeddah and Miami do, so its avenues and cross streets can be level)
+    const flat = lv >= 3 ? L(260, 380) : L(30, 55), slope = L(0.17, 0.27), xv = -L(260, 420), vs = L(0.06, 0.1), rockH = L(48, 62);
     // ravines down the hillside to the sea, 20 to 60 m deep: the contours, and the roads on
     // them, bend deep into them and out round the spurs between
     const rav = [];
@@ -1388,7 +1498,7 @@
   // climb across the slope as steeply as a road may, with smaller streets filling the blocks.
   // Each new street ends where it meets another, so the result is a graph of real junctions:
   // nodes { x, y, e: edges }, edges { a, b, pts, w, cls } (cls 0 arterial, 1 collector, 2 local).
-  function roadSystem(T, r) {
+  function roadSystem(T, r, lv) {
     const L = (a, b) => a + (b - a) * r(), s = 1 + Math.floor(r() * 1e5);
     const cx = T.Wb * 0.5, cy = -T.D * 0.3, reach = 1250;
     const nodes = [], edges = [], CELL = 24, grid = new Map(), STEP = 8;
@@ -1503,11 +1613,46 @@
         return unit(t[0] + n[0] * e, t[1] + n[1] * e);
       };
       const x0 = QP(T.Wb * 0.5), y0 = QP(T.cl(x0) + off), w = Math.round(L(11, 14) * 2) / 2, o = { max: 3200, gmax: 0.17, hit: 0, shore: 14, clear: 1e9, turn: 0.22 };
-      const a = trace([x0, y0], 0, follow, o), b = trace([x0, y0], Math.PI, follow, o);
+      let a;
+      if (lv >= 3) {
+        // Version 3 (ids ending -3): east of the basin the seafront is a boulevard, not a road
+        // that keeps to every turn of the shore. It is the line of the open coast a little
+        // further back, eased over a quarter of a kilometre, so it bends no tighter than a
+        // boulevard does and passes behind the promontory, as Baku's and Jeddah's do
+        const ys = [];
+        for (let k = 0; x0 + k * 4 < T.X1; k++) ys.push(T.cl(x0 + k * 4) + off + 34 * U.smooth(k * 4 / 150));
+        for (let pass = 0; pass < 2; pass++) {
+          const src = ys.slice();
+          for (let i = 1; i < src.length - 1; i++) { const h = Math.min(30, i, src.length - 1 - i); let t = 0; for (let q = -h; q <= h; q++) t += src[i + q]; ys[i] = t / (2 * h + 1); }
+        }
+        // (and a boulevard is straight between its bends: the eased line is drawn again as a few
+        // straights that keep within 14 m of it, joined by curves of about 620 m radius)
+        const pl = ys.map((y, k) => [x0 + k * 4, y]), keep = [0, pl.length - 1];
+        const dp = (i0, i1) => {
+          let best = -1, bd = 14;
+          const ax = pl[i0][0], ay = pl[i0][1], bx = pl[i1][0], by = pl[i1][1], l = Math.hypot(bx - ax, by - ay) || 1;
+          for (let i = i0 + 1; i < i1; i++) { const d = Math.abs((pl[i][0] - ax) * (by - ay) - (pl[i][1] - ay) * (bx - ax)) / l; if (d > bd) { bd = d; best = i; } }
+          if (best > 0) { keep.push(best); dp(i0, best); dp(best, i1); }
+        };
+        dp(0, pl.length - 1);
+        const vs = keep.sort((p, q) => p - q).map(i => pl[i]), eased = [vs[0]];
+        for (let j = 1; j < vs.length - 1; j++) {
+          const p = vs[j - 1], c = vs[j], n = vs[j + 1], l1 = Math.hypot(c[0] - p[0], c[1] - p[1]), l2 = Math.hypot(n[0] - c[0], n[1] - c[1]);
+          const th = Math.abs(U.wrapAngle(Math.atan2(n[1] - c[1], n[0] - c[0]) - Math.atan2(c[1] - p[1], c[0] - p[0])));
+          const t = Math.min(620 * Math.tan(th / 2), 0.45 * Math.min(l1, l2)), m = Math.max(2, Math.ceil(2 * t / STEP));
+          const a = [c[0] - (c[0] - p[0]) / l1 * t, c[1] - (c[1] - p[1]) / l1 * t], b2 = [c[0] + (n[0] - c[0]) / l2 * t, c[1] + (n[1] - c[1]) / l2 * t];
+          for (let q = 0; q <= m; q++) { const s = q / m; eased.push([(1 - s) * (1 - s) * a[0] + 2 * s * (1 - s) * c[0] + s * s * b2[0], (1 - s) * (1 - s) * a[1] + 2 * s * (1 - s) * c[1] + s * s * b2[1]]); }
+        }
+        eased.push(vs[vs.length - 1]);
+        const line = resample(eased, STEP), pts = [[x0, y0]];
+        for (let k = 1; k < line.length; k++) { const x = QP(line[k][0]), y = QP(line[k][1]); if (!land(x, y, 20)) break; pts.push([x, y]); }
+        a = { pts };
+      } else a = trace([x0, y0], 0, follow, o);
+      const b = trace([x0, y0], Math.PI, follow, o);
       const pts = b.pts.slice().reverse().concat(a.pts.slice(1));
       if (pts.length < 40) return null;
       const na = addNode(pts[0][0], pts[0][1]), nb = addNode(pts[pts.length - 1][0], pts[pts.length - 1][1]);
-      addEdge(na, nb, pts, w, 0, 'coast');
+      addEdge(na, nb, pts, lv >= 3 ? Math.max(w, 12) : w, 0, 'coast');
     }
     // long roads along the slope, in rows up the hill: every road offers a place for the next row
     // a street's distance to each side of it, so the town grows outward until the ground runs out
@@ -1689,8 +1834,8 @@
   // The roads wide enough to race on, as a planar map: its faces are the big blocks between them,
   // and the boundary of any solid group of faces is a loop along streets that never crosses or
   // touches itself. That is what a lap of a town is. Half edges keep their face on the left.
-  function raceMap(net) {
-    const alive = new Set(net.edges.filter(e => e.w >= 7.9));
+  function raceMap(net, minW = 7.9) {
+    const alive = new Set(net.edges.filter(e => e.w >= minW));
     for (let again = true; again;) {
       again = false;
       for (const e of alive) {
@@ -1786,6 +1931,165 @@
 for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) continue; seen.add(k); best.push(f.lp); if (best.length >= 6) break; }
     return best;
   }
+  // Version 3 of the town's lap (ids ending -3). Held against the real street circuits (Baku,
+  // Jeddah, Marina Bay, Miami, Las Vegas, Madrid, Monaco) the first choice's laps were half
+  // their length and ringed a few blocks, out and back like the teeth of a comb. Organisers
+  // string a seafront and an avenue together instead. So this lap is laid, not searched for: it
+  // takes the seafront for a kilometre and a half or more (the quays round the basin and the
+  // boulevard along the open coast) and comes back the cheapest way through the streets behind,
+  // where a metre of narrow or winding street costs more than a metre of avenue, a turn at a
+  // junction costs as much as a block, and the streets right behind the seafront are left
+  // alone. Some laps are sent up through a point in the old streets on the hill on the way
+  // back, which gives the cluster of tight corners every real one has. The laps found are
+  // scored as drives: length, a long unbroken run, about three and a half corners a kilometre,
+  // few U turns.
+  function lapsOf3(net, T, r, st) {
+    // (the streets a lap takes are widened for it, so every street but a lane may carry it: the
+    // wide ones behind the seafront are often not joined to each other except by narrower ones)
+    const M = raceMap(net, 5), out = new Map(), found = [];
+    for (const h of M.hs) { let a = out.get(h.from); if (!a) out.set(h.from, a = []); a.push(h); }
+    // the seafront in order, west to east (the coast road was laid that way and only cut since)
+    const fw = new Map(), tos = new Set();
+    for (const h of M.hs) if (h.e.kind === 'coast' && h.pts === h.e.pts && h.from !== h.to) { fw.set(h.from, h); tos.add(h.to); }
+    let chain = [];
+    for (const [n0, h0] of fw) {
+      if (tos.has(n0)) continue;
+      const c = [];
+      for (let h = h0, guard = 0; h && guard < 600; h = fw.get(h.to), guard++) c.push(h);
+      if (c.length > chain.length) chain = c;
+    }
+    if (chain.length < 3) return found;
+    const hd = (p, q) => Math.atan2(q[1] - p[1], q[0] - p[0]);
+    const cost = new Map();
+    for (const h of M.hs) {
+      if (cost.has(h.e)) continue;
+      const P = h.e.pts, l = polyLen(P), mid = P[P.length >> 1], inl = T.inland(mid[0], mid[1]);
+      let tw = 0;
+      for (let k = 2; k < P.length; k++) tw += Math.abs(U.wrapAngle(hd(P[k - 1], P[k]) - hd(P[k - 2], P[k - 1])));
+      cost.set(h.e, l * (1 + (h.e.w < 7.9 ? 0.9 : h.e.w < 9 ? 0.3 : 0) - (h.e.cls === 0 ? 0.2 : 0) + (inl < 120 ? 2 : 0) + (inl > 460 ? 1 : 0)) + 70 * tw);
+    }
+    const turn = (a, b) => { const p = a.pts[Math.max(0, a.pts.length - 3)], q = a.pts[a.pts.length - 1], c = b.pts[Math.min(2, b.pts.length - 1)]; return Math.abs(U.wrapAngle(hd(q, c) - hd(p, q))); };
+    const tc = t => (t < 0.3 ? 0 : 80 + 180 * Math.min(1, t / 1.6));
+    // the cheapest way from the end of `first` to `dst`, entering no node of `ban`, such that
+    // the lap can turn onto `after` there (Dijkstra over the streets as driven, so turns count)
+    const route = (first, dst, ban, after) => {
+      const dist = new Map(), prev = new Map(), heap = [];
+      const push = (d, h) => { heap.push([d, h]); for (let i = heap.length - 1; i > 0;) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; const t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p; } };
+      const pop = () => {
+        const top = heap[0], last = heap.pop();
+        if (heap.length) { heap[0] = last; for (let i = 0; ;) { const l = 2 * i + 1, q = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (q < heap.length && heap[q][0] < heap[m][0]) m = q; if (m === i) break; const t = heap[m]; heap[m] = heap[i]; heap[i] = t; i = m; } }
+        return top;
+      };
+      const step = (d, h) => {
+        for (const g of out.get(h.to) || []) {
+          if (g === h.twin || ban.has(g.to) || g.to === h.to) continue;
+          const t = turn(h, g);
+          if (t > 2.6) continue;
+          const nd = d + cost.get(g.e) + tc(t);
+          if (!(nd >= dist.get(g))) { dist.set(g, nd); prev.set(g, h); push(nd, g); }
+        }
+      };
+      step(0, first);
+      while (heap.length) {
+        const top = pop(), d = top[0], h = top[1];
+        if (d > dist.get(h)) continue;
+        if (h.to === dst) {
+          if (after && turn(h, after) > 2.6) continue;
+          const path = [];
+          for (let q = h; q && q !== first; q = prev.get(q)) path.push(q);
+          return path.reverse();
+        }
+        step(d, h);
+      }
+      return null;
+    };
+    // the score of a lap as a drive (its heading read every 16 m, so a bend inside a street
+    // counts as much as a turn at a junction)
+    const judge = lp => {
+      if (lp.len < Math.max(st.len[0], 3400) || lp.len > st.len[1]) return -1;
+      let zmin = Infinity, zmax = -Infinity;
+      for (const h of lp.hs) { const q = h.pts[h.pts.length - 1], z = T.H(q[0], q[1]); zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
+      const P = lp.pts, sx = [], sy = [];
+      let left = 0;
+      for (let i = 1; i < P.length; i++) {
+        const dx = P[i][0] - P[i - 1][0], dy = P[i][1] - P[i - 1][1], l = Math.hypot(dx, dy);
+        for (; left < l; left += 16) { sx.push(P[i - 1][0] + dx * left / l); sy.push(P[i - 1][1] + dy * left / l); }
+        left -= l;
+      }
+      const m = sx.length, tn = new Float64Array(m);
+      let ph = Math.atan2(sy[0] - sy[m - 1], sx[0] - sx[m - 1]);
+      for (let i = 0; i < m; i++) { const j = (i + 1) % m, h = Math.atan2(sy[j] - sy[i], sx[j] - sx[i]); tn[i] = U.wrapAngle(h - ph); ph = h; }
+      // corners: runs of samples turning the same way, the walk started where the road is straight
+      let st0 = 0;
+      for (let i = 0; i < m; i++) if (Math.abs(tn[i]) < 0.05) { st0 = i; break; }
+      const cor = [];
+      let cur = null;
+      for (let q = 0; q <= m; q++) {
+        const t = q < m ? tn[(st0 + q) % m] : 0;
+        if (Math.abs(t) > 0.1 && cur && Math.sign(t) === cur.sg) { cur.a += t; cur.e = q; }
+        else { if (cur) cor.push(cur); cur = Math.abs(t) > 0.1 ? { sg: Math.sign(t), a: t, s: q, e: q } : null; }
+      }
+      let turns = 0, uturns = 0, longest = 0, last = null, first = null, prev = null;
+      for (const c of cor) {
+        const a = Math.abs(c.a);
+        if (a > 0.5) turns++;
+        if (a > 0.52) { if (last != null) longest = Math.max(longest, (c.s - last) * 16); else first = c.s; last = c.e; }
+        if (a > 2.6) uturns++;
+        else if (a > 1.22) { if (prev && prev.sg === c.sg && (c.s - prev.e) * 16 < 150) { uturns++; prev = null; } else prev = c; }
+        else if (a > 0.5) prev = null;
+      }
+      if (last != null) longest = Math.max(longest, (first + m - last) * 16);
+      if (turns < 7 || uturns > 3) return -1;
+      const perKm = turns / (lp.len / 1000);
+      return 2 * Math.min(1, (zmax - zmin) / 40) - Math.abs(perKm - 3.5) * 0.5 - Math.max(0, uturns - 2) * 1.2 + 2.5 * Math.min(1, longest / 800) + 2 * U.clamp((lp.len - 3400) / 1200, 0, 1) + 4;
+    };
+    const nodes = [chain[0].from].concat(chain.map(h => h.to)), cum = [0];
+    for (const h of chain) cum.push(cum[cum.length - 1] + polyLen(h.pts));
+    const m = chain.length, inl = n => T.inland(n.x, n.y);
+    // points in the old streets on the hill a lap may be sent through
+    const vias = [...out.keys()].filter(n => { const u = inl(n); return u > 240 && u < 470; });
+    // the seafront from its east end, or a junction or two short of it, back to each junction
+    // west of there in turn that leaves 1200 m of it or more: the longest first, and once one
+    // has a way back the next is taken 350 m shorter, three for each east end
+    for (const jb of [m, m - 1, m - 2]) for (let ia = 0, got = 0, next = Infinity; ia < jb && got < 3; ia++) {
+      const fl = cum[jb] - cum[ia];
+      if (fl < 1200) break;
+      if (fl > 2800 || fl > next) continue;
+      const A = nodes[ia], B = nodes[jb], front = chain.slice(ia, jb), ban = new Set(nodes.slice(ia, jb + 1));
+      ban.delete(A);
+      const back = [];
+      { const p = route(front[front.length - 1], A, ban, front[0]); if (!p) continue; back.push(p); got++; next = fl - 350; }
+      // (through the old streets: up to a point well away from both ends, then down again by
+      // streets the way up did not use)
+      const far = vias.filter(n => Math.hypot(n.x - A.x, n.y - A.y) > 350 && Math.hypot(n.x - B.x, n.y - B.y) > 350);
+      for (let k = 0; k < 1 && far.length; k++) {
+        const V = far[Math.floor(r() * far.length)], ban1 = new Set(ban);
+        ban1.add(A);
+        const up = route(front[front.length - 1], V, ban1, null);
+        if (!up || !up.length) continue;
+        const ban2 = new Set(ban);
+        for (const h of up) ban2.add(h.from);
+        const down = route(up[up.length - 1], A, ban2, front[0]);
+        if (down) back.push(up.concat(down));
+      }
+      for (const p of back) {
+        // one simple loop: no junction met twice
+        const hs = front.concat(p), at = new Set();
+        let simple = true;
+        for (const h of hs) { if (at.has(h.to)) { simple = false; break; } at.add(h.to); }
+        if (!simple) continue;
+        const pts = [];
+        for (const q of hs) for (let k = 0; k < q.pts.length - 1; k++) pts.push(q.pts[k]);
+        pts.push(pts[0]);
+        const lp = { hs, pts, len: polyLen(pts) }, sc = judge(lp);
+        if (sc > 0) found.push({ lp, sc });
+      }
+    }
+    found.sort((p, q) => q.sc - p.sc);
+    const lens = new Set(), best = [];
+    for (const f of found) { const k = Math.round(f.lp.len); if (lens.has(k)) continue; lens.add(k); best.push(f.lp); if (best.length >= 6) break; }
+    return best;
+  }
   // A lap's corners, for the track builder: each junction's radius is what fits inside the
   // streets that meet there, so the racing road stays on the road.
   function lapVertices(lp) {
@@ -1848,14 +2152,15 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
   }
 
   // ---------- one candidate ----------
+  const CITY3_MAX = 1650;
   function candidate(r, seed, style, lv) {
     const st = STYLES[style];
     let lay, s0, town = null, m = 1, xf = null;
     if (style === 'city') {
-      const T = cityTerrain(r), net = roadSystem(T, r);
+      const T = cityTerrain(r, lv), net = roadSystem(T, r, lv);
       if (!net) return { fail: 'shore road' };
       roadMarks(net, T.s + 77);
-      const laps = lapsOf(net, T, r, st);
+      const laps = lv >= 3 ? lapsOf3(net, T, r, st) : lapsOf(net, T, r, st);
       if (!laps.length) return { fail: 'no lap in the streets' };
       m = r() < 0.5 ? 1 : -1;
       const ang = r() * 2 * Math.PI, ca = Math.cos(ang), sa = Math.sin(ang);
@@ -1937,7 +2242,7 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
     }
     if (!tr) return { fail: why };
     {
-      const g = verify({ tr, st, style, geomOnly: true });
+      const g = verify({ tr, st, style, lv, geomOnly: true });
       if (!g.ok) return { fail: g.fails[0].split(':')[0], detail: g.fails.join(' | ') };
     }
     // the circuit is the streets it runs on: the town's kerbs are its limits
@@ -1967,6 +2272,12 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
     const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed, lv, features: lay.features || [] };
     if (city) {
       res.city = { buildings: F1.roadOnly ? [] : cityBuildings(r, tr, s0), roads: s0.roads };
+      // (version 3: no more buildings than the towns of the first version ever had; the ones
+      // farthest from the lap go)
+      if (lv >= 3 && res.city.buildings.length > CITY3_MAX) {
+        const far = b => { let d = Infinity; for (let i = 0; i < tr.N; i += 8) d = Math.min(d, (tr.x[i] - b.poly[0][0]) ** 2 + (tr.y[i] - b.poly[0][1]) ** 2); return d; };
+        res.city.buildings = res.city.buildings.map(b => [far(b), b]).sort((p, q) => p[0] - q[0]).slice(0, CITY3_MAX).map(p => p[1]);
+      }
       // (after the buildings: the tunnel draws no dice, so a circuit's town stays as it was)
       const tunnel = cityTunnel(tr, s0);
       if (tunnel) for (let i = tunnel.i0; i <= tunnel.i1; i++) role[((i % tr.N) + tr.N) % tr.N] = 'tunnel';
@@ -2085,7 +2396,8 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
     const nc = tr.apexes.length;
     const geomOnly = res.geomOnly;
     info.corners = nc;
-    if (nc < st.corners[0] || nc > st.corners[1]) fail('corners', String(nc));
+    // (a version 3 town's lap is half as long again as the first version's, so it may have more)
+    if (nc < st.corners[0] || nc > st.corners[1] + (style === 'city' && res.lv >= 3 ? 8 : 0)) fail('corners', String(nc));
     let slow = 0, fast = 0;
     for (const a of tr.apexes) { const R = 1 / Math.abs(a.k); if (R < 35) slow++; else if (R > (style === 'city' ? 45 : 90)) fast++; }
     if (style !== 'city' && (!slow || !fast)) fail('variety');
@@ -2164,7 +2476,7 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
   // order and on any number of threads (js/gen2pool.js, tools/gen2batch.js): the circuit for a
   // seed is always its lowest-numbered candidate that passes every check.
   const MAX_TRIES = 800;
-  const LV = 3;   // the layout new open circuits are made with (see walkLayout3)
+  const LV = 3;   // the layout new circuits are made with (see walkLayout3, and lapsOf3 for a town)
   const normSeed = seed => Math.max(1, Math.floor(Math.abs(seed)) % 1000000);
   function stream(seed, k) {
     const r = U.rng(((Math.imul(seed, 2654435761) ^ Math.imul(k + 7, 0x9e3779b1)) >>> 0) || 1);
@@ -2175,7 +2487,7 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
   // one candidate, built and verified: { ok, res, rep } or { ok: false, why: [reasons] }
   function attempt(seed, style, k, lv) {
     seed = normSeed(seed); style = styleOf(seed, style);
-    if (lv == null) lv = style === 'city' ? 1 : LV;
+    if (lv == null) lv = LV;
     if (style === 'classic' && lv < 3) lv = 3;   // (the style came with the third layout)
     let res;
     try { res = candidate(stream(seed, k), seed, style, lv); } catch (e) { res = { fail: 'exception: ' + e.message }; }
@@ -2212,8 +2524,9 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
     classic: { suf: ['Circuit', 'Ring', 'Raceway', 'Motor Circuit'], regions: ['Midland Downs', 'Northern Isles', 'Low Country', 'Upper Plains'], kind: 'Classic circuit' },
   };
   // (an open circuit laid out by the second layout, walkLayout, carries -2 on the end, one by the
-  // third, walkLayout3, carries -3; ids without a number rebuild with the first, so circuits
-  // saved before a layout came stay as they were)
+  // third, walkLayout3, carries -3, and so does a town with the boulevard lap, lapsOf3; ids
+  // without a number rebuild with the first, so circuits saved before a layout came stay as
+  // they were)
   const idOf = (style, seed, cand, lv) => 'gen2-' + style + '-' + seed + '-' + cand + (lv >= 2 ? '-' + lv : '');
   const parseId = id => { const m = /^gen2-(city|park|mountain|modern|classic)-(\d+)-(\d+)(?:-(\d+))?$/.exec(id || ''); return m ? { style: m[1], seed: +m[2], cand: +m[3], lv: m[4] ? +m[4] : 1 } : null; };
   const defs = new Map(), fresh = new Map();
@@ -2253,5 +2566,5 @@ for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) contin
     return rebuild(id).tr;
   }
 
-  F1.TrackGen2 = { _city: { cityTerrain, citySite, cityBuildings, routeVertices, roadSystem, raceMap, lapsOf }, _walk3: walkLayout3, LV, idOf, parseId, adopt, defById, trackById, present, layoutStats, make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
+  F1.TrackGen2 = { _city: { cityTerrain, citySite, cityBuildings, routeVertices, roadSystem, raceMap, lapsOf, lapsOf3 }, _walk3: walkLayout3, LV, idOf, parseId, adopt, defById, trackById, present, layoutStats, make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
 })(typeof window !== 'undefined' ? window : globalThis);
