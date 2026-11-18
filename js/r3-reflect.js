@@ -24,7 +24,7 @@
   'use strict';
   const F1 = window.F1 || (window.F1 = {}), THREE = window.THREE, G = window;
   if (!THREE) return;
-  const VERSION = 3, TILE = 150;
+  const VERSION = 4, TILE = 150;
 
   // ---------- the worker: vertex clustering ----------
   // A job: meshes (local positions, index, world matrix, a colour and glow per mesh, optional
@@ -364,22 +364,31 @@
       q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
     });
   }
+  // A copy is some 20 MB of arrays. Written as one record it was copied whole on the page's own
+  // thread at the moment the race began (up to 0.8 s of stall the first time a circuit loaded). So
+  // it is kept as a small header and one record per tile, and the tiles are written one at a time
+  // with a pause between: a few milliseconds each, spread over the race's first seconds.
   async function load(key) {
     try {
       const d = await db();
-      return await new Promise(res => { const q = d.transaction(STORE).objectStore(STORE).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+      const get = k => new Promise(res => { const q = d.transaction(STORE).objectStore(STORE).get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+      const head = await get(key);
+      if (!head || head.v !== VERSION || !(head.n > 0)) return null;
+      const tiles = await Promise.all(Array.from({ length: head.n }, (_, i) => get(key + '#' + i)));
+      if (tiles.some(t => !t)) return null; // (a save that was cut short: built again)
+      return { v: head.v, stats: head.stats, tiles };
     } catch (e) { return null; }
   }
   async function save(key, data) {
     try {
-      const d = await db();
-      await new Promise(res => {
-        const tx = d.transaction(STORE, 'readwrite'), st = tx.objectStore(STORE);
-        // (one copy per circuit and level: older builds' copies go)
-        const c = st.openCursor();
-        c.onsuccess = () => { const cur = c.result; if (!cur) { st.put(data, key); return; } if (String(cur.key).split('|')[0] === key.split('|')[0] && cur.key !== key) cur.delete(); cur.continue(); };
-        tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
-      });
+      const d = await db(), track = key.split('|')[0];
+      const run = fn => new Promise(res => { const tx = d.transaction(STORE, 'readwrite'); fn(tx.objectStore(STORE)); tx.oncomplete = res; tx.onerror = res; tx.onabort = res; });
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      // (one copy per circuit: an older build's, or another level's, goes first)
+      await run(st => { const c = st.openKeyCursor(); c.onsuccess = () => { const cur = c.result; if (!cur) return; const k = String(cur.key); if (k.split('|')[0] === track) st.delete(cur.key); cur.continue(); }; });
+      for (let i = 0; i < data.tiles.length; i++) { await run(st => st.put(data.tiles[i], key + '#' + i)); await wait(120); }
+      // (the header last: a copy without it is not there)
+      await run(st => st.put({ v: data.v, n: data.tiles.length, stats: data.stats || null }, key));
     } catch (e) { /* no storage: built again next time */ }
   }
 
