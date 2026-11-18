@@ -1254,7 +1254,7 @@
     ['carSelfShade', 'Car self-shade', 'The car’s own shade in its recesses, traced once while loading. Applies on the next circuit', [true, false], onOffF],
     ['roadShade', 'Road shade', 'Shade on the road from walls, stands and buildings, traced while the circuit loads. Applies on the next circuit', [true, false], onOffF],
     ['carShade', 'Car shade', 'The shade under the cars. Traced works it out live from the car\u2019s shape; Baked uses the same trace made once while loading', ['traced', 'baked', 'boxes'], v => v.toUpperCase()],
-    ['liveRefl', 'Live reflections', 'The cars reflect what is round them, tunnels and buildings included. Fast redraws it twice as often', [0, 1, 2], v => (v ? (v >= 2 ? 'FAST' : 'ON') : 'OFF')],
+    ['liveRefl', 'Live reflections', 'The cars reflect the scenery round them, tunnels and buildings included, every frame. Fine uses a more detailed copy of the scenery', [0, 1, 2], v => (v ? (v >= 2 ? 'FINE' : 'ON') : 'OFF')],
     ['aoSamples', 'Occlusion quality', 'Samples per pixel', [6, 8, 10, 16, 24], v => v + ' SAMPLES'],
     ['aoStrength', 'Occlusion strength', '', [0.5, 0.7, 0.85, 1, 1.2], pctF],
     ['POST-PROCESSING'],

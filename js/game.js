@@ -62,8 +62,8 @@
   //   carShade    the shade the cars cast from the sky (js/r3-carshade.js): 'traced' live from
   //               the car's real shape, 'baked' the same trace once per model, 'boxes' the old
   //               box stand-ins
-  //   liveRefl    live reflections on the cars: steps a frame of redrawing the cube round the
-  //               followed car (js/render3d.js probeStep), 0 for the sky map alone
+  //   liveRefl    live reflections on the cars, redrawn every frame from the circuit's reflection
+  //               copy (js/r3-reflect.js): 1 its 1.5 m grid, 2 a finer 1 m grid, 0 the sky map alone
   //   drs         dynamic resolution: the render scale drops a little (to 67% at most) to hold
   //               the frame rate target before Auto quality turns anything off
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
@@ -1502,7 +1502,11 @@
             else if (race.mode === 'tt') HUD.message('TIME TRIAL', 'blue', race.ghost ? 'GHOST ' + U.fmtTime(race.ghost.t) : 'SET A BENCHMARK LAP', 3);
           }, 380);
         };
-        setTimeout(goRace, 300); // straight on as soon as everything is loaded
+        // the circuit's reflection copy (js/r3-reflect.js: made once, then kept by the browser), then
+        // straight on as soon as everything is loaded
+        const el = document.querySelector('#scr-loading .ld-learn');
+        const shown = p => { if (!el) return; el.style.setProperty('--p', p); el.textContent = `PREPARING REFLECTIONS  ${Math.round(p * 100)}%`; el.classList.toggle('on', p < 1); };
+        Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {}).then(() => { shown(1); setTimeout(goRace, 300); });
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
       // so nobody ever races the unlearned AI
