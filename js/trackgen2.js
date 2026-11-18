@@ -42,6 +42,9 @@
     park: { width: [14, 15], len: [4300, 5800], gMax: 0.11, gCorner: 0.08, gHair: 0.05, gGrid: 0.02, minR: 10, sep: 58, range: [8, 60], slope: 0.55, corners: [8, 22], looks: ['kestrel', 'varenna', 'hakone'] },
     mountain: { width: [13, 14], len: [4300, 6200], gMax: 0.17, gCorner: 0.12, gHair: 0.06, gGrid: 0.025, minR: 10, sep: 58, range: [35, 170], slope: 1.3, walls: 0.02, corners: [8, 22], looks: ['sierra', 'hakone'] },
     modern: { width: [15, 15], len: [4400, 5900], gMax: 0.11, gCorner: 0.08, gHair: 0.05, gGrid: 0.015, minR: 10, sep: 62, range: [3, 35], slope: 0.45, corners: [8, 22], looks: ['rimal', 'lonestar'] },
+    // (the classic permanent circuit, laid out by the third layout only: Silverstone, Zandvoort,
+    // Barcelona; ground and elevation as a parkland circuit's)
+    classic: { width: [14, 15], len: [4300, 5900], gMax: 0.11, gCorner: 0.08, gHair: 0.05, gGrid: 0.02, minR: 10, sep: 58, range: [8, 60], slope: 0.55, corners: [8, 22], looks: ['kestrel', 'varenna'] },
   };
   const STYLE_LIST = ['city', 'park', 'mountain', 'modern'];
   // <layout> (written by tools/f1layout_prep.js from the real centrelines; do not edit by hand)
@@ -291,7 +294,296 @@
     }
     return { fail: 'no closed walk' };
   }
+  // ---------- layout version 3 (ids ending -3) ----------
+  // Held against the real circuits of each type (the 24 of the 2026 season drawn as plain
+  // outlines), the second layout's laps read as rings: irregular polygons with ripples along
+  // their edges and five or six straights of much the same length. A real lap is a ribbon folded
+  // on itself round one or two set pieces, with one main straight. So a version 3 lap is walked
+  // from a recipe for its type, a short list of sections in the order a real circuit of that
+  // kind has them:
+  //   Modern Autodrome  a straight of a kilometre into a hairpin and a second straight leaving
+  //                     it at an acute angle (the wedge of Sakhir and Yas Marina), the rest
+  //                     folded past the open end of the wedge: an infield of slow corners and a
+  //                     finger, a long corner that tightens, or a row of U turn legs;
+  //   Mountain Pass     out along one side of a valley and back along the other, a hairpin at
+  //                     one end and long corners at the other (Spa), the same the other way
+  //                     round, or a ring with a loop folded into its middle (the Red Bull Ring,
+  //                     Interlagos); its runs bend at 260 to 440 m radius, as a road along a
+  //                     hillside does;
+  //   Parkland          a thin band round a lake or an island: two long sides of straights ended
+  //                     by chicanes and a tight end (Montreal, Monza, Albert Park);
+  //   Classic Layout    one main straight, long constant radius corners, U turns of 40 to 50 m,
+  //                     fast esses and a loop inside the outline (Silverstone, Zandvoort), or a
+  //                     long band with its fold on one side (Barcelona).
+  // The sections are the second layout's, with three more: a long corner held at one radius
+  // through 110 to 190 degrees (drawn as two or three vertices whose arcs meet, the way its
+  // hairpin is), a U turn wide enough for its two legs to run side by side, and a finger: the
+  // lap turns in, runs to a U turn and comes back beside itself. Lengths here are the clear
+  // straight between two corners' arcs, so a corner keeps the radius it is given. The walk is
+  // closed as before, now to a lap length drawn for it as well, the main straight kept within
+  // its own range and every other straight under the style's limit, so one straight is the
+  // main one. Then the lap is sampled as it will be driven and thrown away unless it is folded
+  // enough for its type (its length over the perimeter of its convex hull, its area over the
+  // hull's, the share of it that runs beside another part of itself, its box's aspect) and no
+  // two parts of it come closer than the style's clearance. All of it is geometry on a few
+  // dozen points, before anything is built.
+  // (per style: lap length, main straight, second straights, the longest any other straight may
+  // be, the share of laps that run clockwise, the gates, and the S bend that breaks a middle
+  // length run: how often, its angle and its radius)
+  const WALK3 = {
+    mountain: { len: [4500, 6100], main: [690, 820], second: [380, 540], rest: 480, cw: 0.66, fold: 1.23, solid: 0.76, near: 0.1, aspect: [1.15, 3.4], s: [0.42, 55, 85, 28, 75] },
+    park: { len: [4400, 5800], main: [820, 1150], second: [450, 800], rest: 800, dom: 0.95, cw: 0.8, fold: 1.0, solid: 1, near: 0, aspect: [2.25, 4.0], s: [0.3, 40, 62, 14, 24] },
+    modern: { len: [5200, 5650], main: [1000, 1200], second: [550, 750], rest: 450, cw: 0.5, fold: 1.32, solid: 0.74, near: 0.16, aspect: [1.2, 3.6], s: [0.6, 45, 80, 22, 55] },
+    classic: { len: [4400, 5900], main: [680, 1150], second: [400, 620], rest: 430, cw: 0.8, fold: 1.22, solid: 0.78, near: 0.08, aspect: [1.0, 3.6], s: [0.55, 40, 70, 25, 60] },
+  };
+  const MAIN3 = [0, 0];
+  // (q: the sections; a sign of 1 turns the way the lap goes round, -1 against it; W: the style)
+  const RECIPES3 = {
+    modern: {
+      wedge(q, W) {
+        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.tech([100, 220], 1, 3); q.fing([150, 300], q.s()); q.fast([180, 380], -1);
+        q.car([150, 330], 1, 120, 175); q.med([200, 420], 1); q.sq([180, 400], 1);
+      },
+      snail(q, W) {
+        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.tech([100, 220], 1, 2); q.multi([150, 330], 1); q.fast([180, 380], -1);
+        q.fing([150, 300], q.s()); q.med([200, 420], 1); q.sq([180, 400], 1);
+      },
+      stadium(q, W) {
+        q.hair(MAIN3, 1); q.med(W.second, -1, 45, 75, 30, 60); q.u([150, 300], 1); q.u([200, 360], -1); q.fast([150, 300], q.s());
+        q.car([200, 380], 1, 120, 170); q.tech([120, 260], 1, 3); q.med([200, 420], 1, 40, 65);
+      },
+    },
+    mountain: {
+      valley(q, W) {
+        q.hair(MAIN3, 1, 146, 164); q.bend([200, 380], -1); q.ess([180, 380], q.s(), 3); q.fast([280, 470], q.s()); q.med([220, 430], 1, 60, 100, 60, 110);
+        q.car([150, 320], 1, 150, 188); q.med([150, 320], -1, 50, 85); q.car([200, 400], -1, 110, 150); q.bend([250, 450], q.s());
+        q.car([200, 420], 1, 120, 160, 60, 100); q.bend([280, 460], -1); q.bend([280, 460], -1); q.chic([280, 470], 1);
+        // (a kink between the chicane and the start straight: the pit lane leaves the road 400 m
+        // before the line, and must not leave it inside the chicane)
+        q.fast([170, 320], 1);
+      },
+      infield(q, W) {
+        q.sq(MAIN3, 1, 85, 115); q.bend([260, 450], q.s()); q.car(W.second, 1, 105, 140, 35, 60); q.bend([240, 420], q.s());
+        q.fing([120, 260], 1, 2, 360, 540); q.car([140, 300], 1, 110, 160); q.ess([120, 260], -1, 2); q.fast([220, 400], q.s()); q.med([200, 400], 1, 70, 105);
+      },
+      spoon(q, W) {
+        q.chic(MAIN3, 1); q.bend([280, 460], -1); q.bend([280, 460], -1); q.car([200, 420], 1, 120, 160, 60, 100); q.bend([250, 450], q.s());
+        q.car([200, 400], -1, 110, 150); q.med([150, 320], -1, 50, 85); q.car([150, 320], 1, 150, 188); q.med([220, 430], 1, 60, 100, 60, 110);
+        q.fast([280, 470], q.s()); q.ess([180, 380], q.s(), 3); q.bend([200, 380], -1); q.hair([200, 380], 1, 146, 164);
+      },
+    },
+    park: {
+      island(q, W) {
+        q.chic(MAIN3, -1); q.bend(W.second, 1); q.chic(W.second, 1); q.hair(W.second, 1); q.fast(W.second, q.s()); q.chic(W.second, q.s());
+        q.sq(W.second, 1); q.med([150, 320], 1, 60, 95, 60, 110);
+      },
+      royal(q, W) {
+        q.chic(MAIN3, 1); q.bend([300, 600], 1, 45, 80); q.chic([250, 500], -1); q.med([300, 600], 1, 55, 80, 55, 90); q.med([150, 280], 1, 55, 80, 55, 90);
+        q.bend(W.second, -1); q.ess(W.second, -1, 3, 1); q.car(W.second, 1, 150, 185, 70, 110);
+      },
+      lake(q, W) {
+        q.sq(MAIN3, 1); q.med([60, 150], -1, 40, 70); q.sq([200, 420], 1); q.bend(W.second, 1); q.fast(W.second, -1); q.chic(W.second, 1); q.bend(W.second, 1);
+        q.sq([300, 600], 1); q.sq([200, 420], 1); q.med([150, 320], -1, 40, 70); q.fast([300, 600], 1);
+      },
+    },
+    classic: {
+      airfield(q, W) {
+        q.med(MAIN3, 1, 70, 100, 80, 110); q.sq([120, 260], -1, 70, 100); q.car([100, 220], 1, 130, 170, 45, 70); q.fast([200, 400], 1); q.med([120, 260], 1, 90, 110, 25, 40);
+        q.u([80, 180], -1); q.fast([120, 260], -1); q.med(W.second, -1, 80, 110, 45, 70); q.u([60, 150], 1); q.fast([150, 300], 1);
+        q.med([250, 430], 1, 70, 90, 90, 110); q.ess([100, 220], -1, 4, 1);
+      },
+      dunes(q, W) {
+        q.u(MAIN3, 1); q.med([150, 320], -1, 50, 80); q.u([120, 260], -1); q.fast([150, 320], 1); q.med([200, 400], 1, 80, 105, 70, 100); q.med([150, 320], 1, 80, 100, 35, 50);
+        q.med([150, 320], -1, 90, 110, 30, 45); q.car([150, 300], 1, 110, 150, 45, 60); q.chic(W.second, 1); q.car([200, 400], 1, 100, 140, 70, 100);
+      },
+      catalunya(q, W) {
+        q.med(MAIN3, 1, 70, 90, 50, 70); q.med([30, 70], -1, 40, 60, 50, 80); q.car([60, 160], 1, 150, 185, 75, 105); q.fast([200, 380], -1); q.med([150, 300], 1, 50, 80, 45, 60);
+        q.sq([150, 300], -1, 70, 100); q.med(W.second, 1, 60, 90, 90, 110); q.sq([200, 400], -1, 60, 90); q.u([120, 260], 1); q.fast([150, 300], q.s()); q.med([150, 300], 1, 70, 100, 60, 90);
+      },
+    },
+  };
+  // (Barcelona is a long band, its fold on one side only)
+  RECIPES3.classic.catalunya.gate = { fold: 1.1, solid: 0.8, near: 0.05, aspect: [1.9, 3.6] };
+  function walkLayout3(r, style, st) {
+    const W = WALK3[style], D2R = Math.PI / 180, R = (a, b) => a + (b - a) * r();
+    const names = Object.keys(RECIPES3[style]);
+    const dir = r() < W.cw ? 1 : -1;   // (on the map y points down, so a positive turn is clockwise)
+    const h0 = R(0, 2 * Math.PI), pick = Math.floor(r() * names.length);
+    for (let tries = 0; tries < 2700; tries++) {
+      // the lap's corners in order: clear straight before it (and its limits), turn in degrees
+      // (positive the way the lap goes round), radius
+      const ks = [], name = names[(pick + Math.floor(tries / 900)) % names.length];
+      const K = (lead, a, rad, o) => {
+        const k = lead === MAIN3 ? { l: R(W.main[0], W.main[1]), lmin: W.main[0], lmax: W.main[1], main: true } : { l: R(lead[0], lead[1]), lmin: lead[0] * 0.4, lmax: lead === W.second ? lead[1] : Math.min(lead[1] * 2.2, W.rest) };
+        k.a = a; k.rad = rad;
+        if (o) Object.assign(k, o);
+        ks.push(k);
+      };
+      const q = {
+        s: () => (r() < 0.5 ? -1 : 1), n: m => Math.floor(r() * m),
+        // a tight hairpin; a slow square corner; a medium corner; a flat out kink; a bend in a run
+        hair: (lead, s, lo = 142, hi = 162) => K(lead, s * R(lo, hi), R(12, 20), { fixA: 1 }),
+        sq: (lead, s, lo = 78, hi = 112) => K(lead, s * R(lo, hi), R(14, 30)),
+        med: (lead, s, lo = 55, hi = 110, r0 = 35, r1 = 100) => K(lead, s * R(lo, hi), R(r0, r1)),
+        fast: (lead, s) => K(lead, s * R(22, 44), R(110, 190)),
+        bend: (lead, s, lo = 10, hi = 28) => K(lead, s * R(lo, hi), R(260, 440)),
+        // a long corner held at one radius; a U turn whose legs run side by side; a long corner
+        // that tightens or opens
+        car: (lead, s, lo = 115, hi = 185, r0 = 45, r1 = 90) => K(lead, s * R(lo, hi), R(r0, r1), { fixA: 1 }),
+        u: (lead, s) => K(lead, s * R(168, 186), R(38, 54), { fixA: 1 }),
+        multi: (lead, s) => { const a = R(55, 85), b = a * R(0.45, 0.7), t = r() < 0.7; K(lead, s * R(165, 250), t ? a : b, { fixA: 1, rad2: t ? b : a }); },
+        // esses (fast ones swing less at a wider radius); a chicane; a winding infield
+        ess: (lead, s, m, fst) => { for (let j = 0; j < m; j++) { K(j ? [45, 100] : lead, s * (fst ? R(40, 65) : R(48, 78)), fst ? R(80, 130) : R(50, 105)); s = -s; } },
+        chic: (lead, s) => { const a = R(42, 68); K(lead, s * a, R(13, 22)); K([25, 48], -s * a * R(0.9, 1.1), R(13, 22), { lmin: 20, lmax: 55 }); },
+        tech: (lead, s, m) => { for (let j = 0; j < m; j++) { K(j ? [70, 180] : lead, s * R(50, 115), R(16, 42)); if (r() < 0.7) s = -s; } },
+        // a finger toward the inside of the lap (s = 1) or out of it: in, a U turn, back out
+        fing: (lead, s, wide, d0 = 180, d1 = 400) => {
+          const d = R(d0, d1);
+          K(lead, s * R(68, 100), R(25, 55));
+          // (its end a U turn, a hairpin or, wide, a loop of 190 to 220 degrees the legs close in from)
+          if (wide === 2) K([d * 0.8, d], -s * R(190, 220), R(52, 78), { fixA: 1, lmax: d * 1.2 });
+          else if (wide || r() < 0.5) K([d * 0.8, d], -s * R(168, 186), R(38, 54), { fixA: 1 });
+          else K([d * 0.8, d], -s * R(142, 160), R(12, 20), { fixA: 1 });
+          K([d * 0.6, d * 0.95], s * R(55, 95), R(28, 70), wide === 2 ? { lmax: d * 1.1 } : null);
+        },
+      };
+      RECIPES3[style][name](q, W);
+      // Real corners come in groups with short runs between them, not one at the end of every
+      // straight: a run of 260 m or more (the main and second straights apart) is as often as
+      // not broken by an S bend, the way a real lap fills its middle length straights
+      {
+        const all = ks.splice(0), S3 = W.s;
+        for (const k of all) {
+          if (k.main || k.l < 260 || k.lmax > W.rest || r() > S3[0]) { ks.push(k); continue; }
+          const a = R(S3[1], S3[2]), rad = R(S3[3], S3[4]), s = r() < 0.5 ? -1 : 1, l1 = k.l * R(0.3, 0.6);
+          ks.push({ l: l1, lmin: 30, lmax: k.lmax, a: s * a, rad }, { l: R(35, 80), lmin: 25, lmax: 110, a: -s * a * R(0.9, 1.1), rad });
+          k.l -= l1; k.lmin = Math.min(k.lmin, 40);
+          ks.push(k);
+        }
+      }
+      // the turns add up to one full turn round, the difference taken from every corner but the
+      // long ones in proportion
+      let S = 0, wsum = 0;
+      for (const k of ks) { S += k.a; if (!k.fixA) wsum += Math.abs(k.a); }
+      const need = 360 - S;
+      if (Math.abs(need) > 0.5 * wsum) continue;
+      for (const k of ks) if (!k.fixA) k.a += need * Math.abs(k.a) / wsum;
+      // the vertices: a corner of more than 78 degrees is two or more, their arcs meeting
+      const cs = [];
+      for (const k of ks) {
+        const m = Math.max(1, Math.ceil(Math.abs(k.a) / 78));
+        for (let j = 0; j < m; j++) {
+          const rad = k.rad2 && m > 1 ? k.rad + (k.rad2 - k.rad) * j / (m - 1) : k.rad, th = dir * k.a / m * D2R;
+          cs.push(j ? { th, rad, t: rad * Math.tan(Math.abs(th) / 2), link: true } : { th, rad, t: rad * Math.tan(Math.abs(th) / 2), l: k.l, lmin: k.lmin, lmax: k.lmax, main: k.main });
+        }
+      }
+      const n = cs.length, ux = [], uy = [], len = [], lo = [], hi = [], fixed = [];
+      let h = h0;
+      for (let i = 0; i < n; i++) {
+        const c = cs[i], T = cs[(i - 1 + n) % n].t + c.t;
+        ux.push(Math.cos(h)); uy.push(Math.sin(h)); h += c.th;
+        if (c.link) { len.push(T * 1.022 + 1); lo.push(0); hi.push(0); fixed.push(true); }
+        else { len.push(c.l + T); lo.push(Math.max(c.lmin, 25) + T); hi.push(c.lmax + T); fixed.push(false); }
+      }
+      // close the walk at a length drawn for it: the least weighted change of the straights that
+      // brings it home and to that length (longer straights give more), each kept within its
+      // limits (one that reaches a limit is held there and the rest solved again)
+      const want = R(W.len[0], W.len[1]);
+      let okc = false;
+      for (let it = 0; it < 24; it++) {
+        let ex = 0, ey = 0, el = -want;
+        for (let i = 0; i < n; i++) { ex += len[i] * ux[i]; ey += len[i] * uy[i]; el += len[i]; }
+        if (Math.hypot(ex, ey) < 0.5 && Math.abs(el) < 40) { okc = true; break; }
+        let a = 0, b = 0, c = 0, d = 0, f = 0, g = 0;
+        for (let i = 0; i < n; i++) if (!fixed[i]) { const w = len[i]; a += w * ux[i] * ux[i]; b += w * ux[i] * uy[i]; c += w * ux[i]; d += w * uy[i] * uy[i]; f += w * uy[i]; g += w; }
+        // (the three by three system [a b c; b d f; c f g] by its cofactors)
+        const A = d * g - f * f, B = c * f - b * g, C = b * f - c * d, det = a * A + b * B + c * C;
+        if (Math.abs(det) < 1e-3) break;
+        const lx = (A * ex + B * ey + C * el) / det, ly = (B * ex + (a * g - c * c) * ey + (b * c - a * f) * el) / det, ll = (C * ex + (b * c - a * f) * ey + (a * d - b * b) * el) / det;
+        for (let i = 0; i < n; i++) if (!fixed[i]) {
+          len[i] -= len[i] * (ux[i] * lx + uy[i] * ly + ll);
+          if (len[i] < lo[i]) { len[i] = lo[i]; fixed[i] = true; } else if (len[i] > hi[i]) { len[i] = hi[i]; fixed[i] = true; }
+        }
+      }
+      if (!okc) continue;
+      let L = 0;
+      for (let i = 0; i < n; i++) L += len[i];
+      if (L < W.len[0] || L > W.len[1]) continue;
+      // the main straight is the longest by a clear margin
+      const clear = i => len[i] - cs[(i - 1 + n) % n].t - cs[i].t;
+      let second = 0;
+      for (let i = 1; i < n; i++) second = Math.max(second, clear(i));
+      if (second > clear(0) * (W.dom || 0.85)) continue;
+      const v = [];
+      let x = 0, y = 0;
+      for (let i = 0; i < n; i++) { x += len[i] * ux[i]; y += len[i] * uy[i]; v.push([x, y, cs[i].rad]); }
+      if (segsCross(v)) continue;
+      const sh = lapShape(v, cs, ux, uy, st.sep + 3), G = RECIPES3[style][name].gate || W;
+      if (!sh || sh.fold < G.fold || sh.solid > G.solid || sh.near < G.near || sh.aspect < G.aspect[0] || sh.aspect > G.aspect[1]) continue;
+      const feat = [name];
+      for (const k of ks) { if (k.rad2) feat.push('tightening corner'); else if (k.fixA && k.rad > 30 && Math.abs(k.a) > 165) feat.push('u turn'); else if (k.fixA && k.rad > 30) feat.push('long corner'); }
+      const rd = p => Math.round(p * 10) / 10;
+      return { v: v.map(p => [rd(p[0]), rd(p[1]), rd(p[2])]), pitSides: [1, -1], features: feat, shape: sh, tries: tries + 1 };
+    }
+    return { fail: 'no closed walk' };
+  }
+  // The lap a vertex list will be built into (straights and the arcs between them), sampled about
+  // every 20 m, and its shape: null when two parts of it more than 300 m apart along the lap
+  // come within `sep`; otherwise its length over the perimeter of its convex hull (fold), its
+  // area over the hull's (solid), the share of it with another part of the lap (more than 400 m
+  // away along it) within 150 m (near) and the aspect of the smallest box round it.
+  function lapShape(v, cs, ux, uy, sep) {
+    const n = v.length, px = [], py = [], ps = [];
+    let s = 0;
+    const put = (x, y) => { const m = px.length; if (m) s += Math.hypot(x - px[m - 1], y - py[m - 1]); px.push(x); py.push(y); ps.push(s); };
+    for (let i = 0; i < n; i++) {
+      const p = v[(i - 1 + n) % n], c = cs[i], tp = cs[(i - 1 + n) % n].t;
+      const ax = p[0] + ux[i] * tp, ay = p[1] + uy[i] * tp, bx = v[i][0] - ux[i] * c.t, by = v[i][1] - uy[i] * c.t;
+      const d = Math.hypot(bx - ax, by - ay), m = Math.max(1, Math.round(d / 20));
+      for (let k = 0; k < m; k++) put(ax + (bx - ax) * k / m, ay + (by - ay) * k / m);
+      const sg = Math.sign(c.th) || 1, hh = Math.atan2(uy[i], ux[i]), cx = bx - Math.sin(hh) * c.rad * sg, cy = by + Math.cos(hh) * c.rad * sg;
+      const ma = Math.max(1, Math.round(Math.abs(c.th) * c.rad / 20));
+      for (let k = 0; k < ma; k++) { const a = hh + c.th * k / ma; put(cx + Math.sin(a) * c.rad * sg, cy - Math.cos(a) * c.rad * sg); }
+    }
+    const m = px.length, L = s + Math.hypot(px[0] - px[m - 1], py[0] - py[m - 1]);
+    // clearance, and the share of the lap that runs beside another part of it
+    const s2 = sep * sep, beside = new Uint8Array(m);
+    for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) {
+      let al = ps[j] - ps[i]; al = Math.min(al, L - al);
+      if (al < 300) continue;
+      const dx = px[i] - px[j], dy = py[i] - py[j], d2 = dx * dx + dy * dy;
+      if (d2 < s2) return null;
+      if (d2 < 22500 && al > 400) beside[i] = beside[j] = 1;
+    }
+    let near = 0, area = 0;
+    for (let i = 0; i < m; i++) { near += beside[i]; const j = (i + 1) % m; area += px[i] * py[j] - px[j] * py[i]; }
+    // the convex hull (monotone chain)
+    const id = Array.from({ length: m }, (_, k) => k).sort((a, b) => px[a] - px[b] || py[a] - py[b]), hull = [];
+    const cr = (o, a, b) => (px[a] - px[o]) * (py[b] - py[o]) - (py[a] - py[o]) * (px[b] - px[o]);
+    for (let pass = 0; pass < 2; pass++) {
+      const base = hull.length;
+      for (let k = 0; k < m; k++) {
+        const p = id[pass ? m - 1 - k : k];
+        while (hull.length >= base + 2 && cr(hull[hull.length - 2], hull[hull.length - 1], p) <= 0) hull.pop();
+        hull.push(p);
+      }
+      hull.pop();
+    }
+    let hp = 0, ha = 0, box = Infinity, aspect = 1;
+    const hn = hull.length;
+    for (let k = 0; k < hn; k++) {
+      const a = hull[k], b = hull[(k + 1) % hn], ex = px[b] - px[a], ey = py[b] - py[a], el = Math.hypot(ex, ey) || 1;
+      hp += el; ha += px[a] * py[b] - px[b] * py[a];
+      // the box with a side along this edge of the hull
+      let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity;
+      for (const p of hull) { const u = (px[p] * ex + py[p] * ey) / el, w = (py[p] * ex - px[p] * ey) / el; u0 = Math.min(u0, u); u1 = Math.max(u1, u); w0 = Math.min(w0, w); w1 = Math.max(w1, w); }
+      const A = (u1 - u0) * (w1 - w0);
+      if (A < box) { box = A; aspect = Math.max(u1 - u0, w1 - w0) / Math.max(1, Math.min(u1 - u0, w1 - w0)); }
+    }
+    return { L, fold: L / hp, solid: Math.abs(area) / Math.abs(ha), near: near / m, aspect };
+  }
   function openLayout(r, style, st, lv) {
+    if (lv >= 3) return walkLayout3(r, style, st);
     if (lv >= 2) return walkLayout(r, style, st);
     const TG = F1.TrackGen;
     const vs = TG._layout(r, { len: st.len, clear: st.sep, street: false });
@@ -1043,7 +1335,7 @@
     return { range, ascent, ratio: ascent / Math.max(1, range), g100: g100 * 100, share4: steep / n * 100, climbs: Math.max(1, Math.round(climbs / 2)), crestR: 1 / Math.max(1e-6, -zpp) };
   }
   function realism(tr, style) {
-    const R = REAL[style], m = realStats(tr), out = [];
+    const R = REAL[style] || REAL.park, m = realStats(tr), out = [];
     if (m.range < R.range[0] || m.range > R.range[1]) out.push('climb ' + m.range.toFixed(0) + ' m');
     if (m.g100 > R.g100[1] || m.g100 < R.g100[0]) out.push('steepest ' + m.g100.toFixed(1) + ' %');
     if (m.share4 < R.share4[0] || m.share4 > R.share4[1]) out.push('steep share ' + m.share4.toFixed(0) + ' %');
@@ -1491,7 +1783,7 @@
     }
     found.sort((p, q) => q.sc - p.sc);
     const seen = new Set(), best = [];
-    for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) continue; seen.add(k); best.push(f.lp); if (best.length >= 6) break; }
+for (const f of found) { const k = Math.round(f.lp.len); if (seen.has(k)) continue; seen.add(k); best.push(f.lp); if (best.length >= 6) break; }
     return best;
   }
   // A lap's corners, for the track builder: each junction's radius is what fits inside the
@@ -1629,7 +1921,7 @@
     const look = st.looks[Math.floor(r() * st.looks.length)];
     const city = style === 'city';
     const def = {
-      id: 'gen2-' + style + '-' + seed, gen2: true, seed: seed % 100000 + 101, gen: seed, style: city ? 'street' : style === 'mountain' ? 'park' : style,
+      id: 'gen2-' + style + '-' + seed, gen2: true, seed: seed % 100000 + 101, gen: seed, style: city ? 'street' : style === 'mountain' || style === 'classic' ? 'park' : style,
       style2: style, name: F1.TrackGen._word(r) + ' ' + (city ? 'Harbour Circuit' : style === 'mountain' ? 'Mountain Circuit' : style === 'modern' ? 'Grand Prix Circuit' : 'Park'),
       width, look, startAt: city ? +lay.startAt.toFixed(3) : 0.55, v: lay.v,
       pit: city ? { side: 1, entry: -200, exit: 140, offset: 15, lane: 9 } : { side: 1, entry: -400, exit: 240, offset: 22, lane: 12 },
@@ -1672,7 +1964,7 @@
     tr.H2 = groundFn(tr, s0.H, st.slope);
     tr.H = s0.H;          // the natural ground (the renderer's outer terrain)
     tr.waterY = null;     // a town's sea comes from its coastline, not the first generator's harbour
-    const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed, lv };
+    const res = { def, tr, style, st, site: s0, raw, gl: gr.gl, speed: gr.v, seed, lv, features: lay.features || [] };
     if (city) {
       res.city = { buildings: F1.roadOnly ? [] : cityBuildings(r, tr, s0), roads: s0.roads };
       // (after the buildings: the tunnel draws no dice, so a circuit's town stays as it was)
@@ -1872,7 +2164,7 @@
   // order and on any number of threads (js/gen2pool.js, tools/gen2batch.js): the circuit for a
   // seed is always its lowest-numbered candidate that passes every check.
   const MAX_TRIES = 800;
-  const LV = 2;   // the layout new open circuits are made with (see walkLayout)
+  const LV = 3;   // the layout new open circuits are made with (see walkLayout3)
   const normSeed = seed => Math.max(1, Math.floor(Math.abs(seed)) % 1000000);
   function stream(seed, k) {
     const r = U.rng(((Math.imul(seed, 2654435761) ^ Math.imul(k + 7, 0x9e3779b1)) >>> 0) || 1);
@@ -1884,6 +2176,7 @@
   function attempt(seed, style, k, lv) {
     seed = normSeed(seed); style = styleOf(seed, style);
     if (lv == null) lv = style === 'city' ? 1 : LV;
+    if (style === 'classic' && lv < 3) lv = 3;   // (the style came with the third layout)
     let res;
     try { res = candidate(stream(seed, k), seed, style, lv); } catch (e) { res = { fail: 'exception: ' + e.message }; }
     if (res.fail) return { ok: false, why: [res.fail], detail: res.detail };
@@ -1916,11 +2209,13 @@
     park: { suf: ['Park', 'Ring', 'Circuit', 'Raceway'], regions: ['Northern Isles', 'Midland Downs', 'Lakeland', 'Upper Plains'], kind: 'Parkland circuit' },
     mountain: { suf: ['Mountain Circuit', 'Ring', 'Hill Circuit'], regions: ['Highland Pass', 'Cedar Valley', 'Mountain Province'], kind: 'Mountain circuit' },
     modern: { suf: ['International Circuit', 'Autodrome', 'Grand Prix Circuit'], regions: ['Desert Gulf', 'Salt Plains', 'Coastal Plain'], kind: 'Modern circuit' },
+    classic: { suf: ['Circuit', 'Ring', 'Raceway', 'Motor Circuit'], regions: ['Midland Downs', 'Northern Isles', 'Low Country', 'Upper Plains'], kind: 'Classic circuit' },
   };
-  // (an open circuit laid out by the second layout, walkLayout, carries -2 on the end; ids
-  // without it rebuild with the first, so circuits saved before it stay as they were)
+  // (an open circuit laid out by the second layout, walkLayout, carries -2 on the end, one by the
+  // third, walkLayout3, carries -3; ids without a number rebuild with the first, so circuits
+  // saved before a layout came stay as they were)
   const idOf = (style, seed, cand, lv) => 'gen2-' + style + '-' + seed + '-' + cand + (lv >= 2 ? '-' + lv : '');
-  const parseId = id => { const m = /^gen2-(city|park|mountain|modern)-(\d+)-(\d+)(?:-(\d+))?$/.exec(id || ''); return m ? { style: m[1], seed: +m[2], cand: +m[3], lv: m[4] ? +m[4] : 1 } : null; };
+  const parseId = id => { const m = /^gen2-(city|park|mountain|modern|classic)-(\d+)-(\d+)(?:-(\d+))?$/.exec(id || ''); return m ? { style: m[1], seed: +m[2], cand: +m[3], lv: m[4] ? +m[4] : 1 } : null; };
   const defs = new Map(), fresh = new Map();
   // the game's definition for a finished circuit: name, country, flag and blurb, its id, and the
   // fields the track list and the AI learning look for
@@ -1958,5 +2253,5 @@
     return rebuild(id).tr;
   }
 
-  F1.TrackGen2 = { _city: { cityTerrain, citySite, cityBuildings, routeVertices, roadSystem, raceMap, lapsOf }, idOf, parseId, adopt, defById, trackById, present, layoutStats, make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
+  F1.TrackGen2 = { _city: { cityTerrain, citySite, cityBuildings, routeVertices, roadSystem, raceMap, lapsOf }, _walk3: walkLayout3, LV, idOf, parseId, adopt, defById, trackById, present, layoutStats, make, attempt, styleOf, MAX_TRIES, verify, STYLES, STYLE_LIST, REAL: () => REAL, realStats, gradeLimit, smoothLoop, loads };
 })(typeof window !== 'undefined' ? window : globalThis);
