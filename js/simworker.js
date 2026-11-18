@@ -176,6 +176,9 @@
           F1.Limits = F1.Limits || { stride: m.limStride };
           if (m.limits) { F1.Limits.stride = m.limStride; F1.Limits[m.cfg.track] = m.limits; }
           Object.assign(R.THINK, m.think);
+          // (data files the page loads that are not sim modules: the grip model's trees, the AI's seed memory)
+          if (m.grip) F1.GripModelData = m.grip;
+          if (m.aimem) F1.AIMem = m.aimem;
           race = R.create(m.cfg);
           race.thinkPage = false;
           race.thinkPool = F1.ThinkPool ? F1.ThinkPool.forRace(race) : null;
@@ -233,7 +236,8 @@
       const id = race.cfg.track;
       const plain = o => { const r = {}; for (const k in o) if (typeof o[k] !== 'function') r[k] = o[k]; return r; };
       this.w.postMessage({ k: 'init', gen: this.gen, cfg: JSON.parse(JSON.stringify(race.cfg)), think: plain(F1.Race.THINK),
-        line: F1.Lines && F1.Lines[id] || null, lineStride: F1.Lines && F1.Lines.stride, limits: F1.Limits && F1.Limits[id] || null, limStride: F1.Limits && F1.Limits.stride });
+        line: F1.Lines && F1.Lines[id] || null, lineStride: F1.Lines && F1.Lines.stride, limits: F1.Limits && F1.Limits[id] || null, limStride: F1.Limits && F1.Limits.stride,
+        grip: F1.GripModelData || null, aimem: F1.AIMem || null });
     }
     onMessage(m) {
       if (m.gen !== this.gen || this.dead) return;
