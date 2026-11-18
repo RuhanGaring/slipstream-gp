@@ -1365,6 +1365,11 @@
         while (d < 40 && inside(tr.x[i] + tr.nx[i] * sg * d, tr.y[i] + tr.ny[i] * sg * d)) d += 0.3;
         b[i] = Math.max(tr.hw + 0.3, d - 0.7);
       }
+      // on the inside of a tight bend the wall may not stand out past two thirds of the bend's
+      // radius: beyond its centre the offset line folds back on itself, and the wall, its kerb and
+      // the pavement behind it would be drawn as a crumpled loop (a junction's mouth at a hairpin)
+      const fold = i => { let c = 0; for (let q = -3; q <= 3; q++) c = Math.max(c, tr.kap[(i + q + N) % N] * sg); return c > 1e-4 ? Math.max(tr.hw + 0.3, 0.65 / c) : 1e9; };
+      const lim = new Float64Array(N); for (let i = 0; i < N; i++) { lim[i] = fold(i); b[i] = Math.min(b[i], lim[i]); }
       // the wall has no steps: it closes in on the road no faster than it can bend, both ways round
       for (let pass = 0; pass < 2; pass++) {
         for (let i = 0; i < N; i++) b[(i + 1) % N] = Math.min(b[(i + 1) % N], b[i] + 0.45 * tr.ds);
@@ -1374,7 +1379,7 @@
       // a light smoothing; the pit lane's opening is left as built
       for (let i = 0; i < N; i++) {
         let m = 0; for (let q = -2; q <= 2; q++) m += b[(i + q + N) % N];
-        const v = m / 5;
+        const v = Math.min(m / 5, lim[i]);
         if (isNaN(tr.pit.off[i])) { tr.barr[side][i] = v; tr.runT[side][i] = F1.SURF.TARMAC; tr.runW[side][i] = Math.max(0, v - tr.hw); }
       }
     }

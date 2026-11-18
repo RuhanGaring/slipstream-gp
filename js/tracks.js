@@ -335,6 +335,24 @@
       else if (u > pit.len - blend) o = U.lerp(pit.offset, hw - 1, U.smooth((u - (pit.len - blend)) / blend));
       pitOff[i] = o * pit.side;
     }
+    // (where the lane joins or leaves on the inside of a tight bend it may not run out towards the
+    // bend's centre, or the lane, its walls and kerbs fold back over themselves: there it joins sooner)
+    const insideK = (i, sg) => { let c = 0; for (let q = -3; q <= 3; q++) c = Math.max(c, kap[(i + q + N) % N] * sg); return c; };
+    {
+      let cut = false;
+      for (let i = 0; i < N; i++) {
+        if (isNaN(pitOff[i])) continue;
+        const u = (i * ds - pit.sIn + L) % L;
+        if (u >= blend && u <= pit.len - blend) continue;
+        const c = insideK(i, pit.side);
+        if (c > 1e-4) { const lim = Math.max(hw - 1, 0.8 / c - pit.lane / 2 - 1); if (Math.abs(pitOff[i]) > lim) { pitOff[i] = lim * pit.side; cut = true; } }
+      }
+      // (and eases to that: no faster than 0.3 m sideways a metre)
+      if (cut) for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < N; i++) { const j = (i + 1) % N; if (!isNaN(pitOff[i]) && !isNaN(pitOff[j]) && Math.abs(pitOff[j]) > Math.abs(pitOff[i]) + 0.3 * ds) pitOff[j] = (Math.abs(pitOff[i]) + 0.3 * ds) * pit.side; }
+        for (let i = N - 1; i >= 0; i--) { const j = (i + 1) % N; if (!isNaN(pitOff[i]) && !isNaN(pitOff[j]) && Math.abs(pitOff[i]) > Math.abs(pitOff[j]) + 0.3 * ds) pitOff[i] = (Math.abs(pitOff[j]) + 0.3 * ds) * pit.side; }
+      }
+    }
     pit.off = pitOff;
     pit.limit = 80 / 3.6;
     pit.limitIn = (pit.sIn + blend * 0.7) % L; pit.limitOut = (pit.sOut - blend * 0.6 + L) % L;
@@ -376,6 +394,19 @@
         });
         barr[side][i] = lim;
         runW[side][i] = Math.min(runW[side][i], lim - hw - 0.5);
+      }
+    }
+    // --- on the inside of a tight bend no wall stands out past two thirds of its radius ---
+    // (beyond the bend's centre an offset line folds back on itself: the wall, its kerb and its
+    // run-off would be drawn as a crumpled loop; the pit lane keeps the room it needs)
+    for (let side = 0; side < 2; side++) {
+      const sgn = side ? 1 : -1;
+      for (let i = 0; i < N; i++) {
+        const c = insideK(i, sgn);
+        if (c <= 1e-4) continue;
+        const need = side === ps && !isNaN(pitOff[i]) ? Math.abs(pitOff[i]) + pit.lane / 2 + 0.3 : hw + 0.3;
+        const lim = Math.max(need, 0.65 / c);
+        if (barr[side][i] > lim) { barr[side][i] = lim; runW[side][i] = Math.min(runW[side][i], lim - hw - 0.5); }
       }
     }
 
