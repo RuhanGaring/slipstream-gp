@@ -119,32 +119,79 @@
     const t = tex(c); return t;
   });
   T.crowd = () => get('crowd', () => {
-    // spectators on stepped seating: each row a band of people (shoulders and a head) over
-    // the seat backs, in the muted clothing of a real crowd with the odd team colour, and gaps
-    // where seats are empty. Shaded under each row so the steps read.
+    // spectators on stepped seating, as a photograph of a full stand shows them: a dark, uneven
+    // mass (most people wear navy, black and grey), pale faces and caps as specks, the odd bright
+    // jacket or team shirt, empty seats in ones and in clumps, two stair aisles and a rail along
+    // the front. The rows under the roof are in its shade (the top of the canvas is the back of
+    // the stand); the front rows stand in the open.
     const c = cv(1024, 512), g = c.getContext('2d'), r = U.rng(17);
-    g.fillStyle = '#3c4148'; g.fillRect(0, 0, 1024, 512);
-    // (a summer crowd: mostly white, pale and faded clothes, a few team shirts)
-    const cloth = ['#f2f2ef', '#e8e4da', '#f0f0ee', '#d9d6cf', '#c9d3dc', '#aab6c2', '#2a2d33', '#3a4250', '#1d2a44', '#5d6670', '#8c8f94', '#e3d3a8', '#b5462f', '#2b5fa8', '#d6dde3', '#9a2a24'];
-    const skin = ['#e3bf9e', '#c99a73', '#a5714c', '#7a4f33', '#f0d0b4'];
-    for (let y = 0; y < 512; y += 24) {
-      g.fillStyle = '#596370'; g.fillRect(0, y + 17, 1024, 4); // seat backs
-      g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, y + 21, 1024, 3); // the step's shadow
-      let x = r() * 4;
+    g.fillStyle = '#2a2e33'; g.fillRect(0, 0, 1024, 512);
+    const pick = a => a[Math.floor(r() * a.length)];
+    const dark = ['#1b2030', '#141518', '#23262b', '#1d2a44', '#2b2f36', '#30343c', '#1f2c26', '#33291f', '#272c3f', '#3a3f48', '#151a24'];
+    const mid = ['#586270', '#4a566b', '#6b6f72', '#5a6352', '#6a4a44', '#4d5f7a', '#7a756a', '#544a5e'];
+    const pale = ['#d8d6cf', '#c9cdd2', '#e4e2dc', '#b9c4cf', '#cfc6b0'];
+    const loud = ['#b8322a', '#d2691e', '#c9a227', '#1f6f5c', '#2b5fa8', '#a02040', '#e07a1f'];
+    const skin = ['#d9b08c', '#c4946c', '#a5714c', '#7a4f33', '#e6c3a3', '#b98a63'];
+    const hair = ['#17130f', '#2a2019', '#3b2c1e', '#5a4630', '#8a8478', '#c9c2b4', '#101012'];
+    const caps = ['#15171a', '#e9e7e0', '#b8322a', '#1d2a44', '#d2691e', '#3a3f48', '#1f6f5c'];
+    const seat = ['#4f5a5c', '#566163', '#4a5557'];
+    // where a block of seats is empty: a slow random field, so empties come in clumps
+    const gw = 26, gh = 22, fld = new Float32Array(gw * gh); for (let k = 0; k < fld.length; k++) fld[k] = r();
+    const empty = (x, row) => { const fx = x / 1024 * (gw - 1), i = Math.floor(fx), t = fx - i; return fld[row * gw + i] * (1 - t) + fld[row * gw + Math.min(gw - 1, i + 1)] * t; };
+    const aisle = x => (x > 142 && x < 166) || (x > 449 && x < 473) || (x > 756 && x < 780);
+    let row = 0;
+    for (let y = 0; y < 512; y += 24, row++) {
+      // the step: its tread in front of the row and the dark riser under the seats
+      g.fillStyle = '#3a3f44'; g.fillRect(0, y + 18, 1024, 3);
+      g.fillStyle = '#15171a'; g.fillRect(0, y + 21, 1024, 3);
+      let x = r() * 5;
       while (x < 1024) {
-        const w = 8 + r() * 4;
-        if (r() > 0.16) {
-          const cx = x + w / 2, top = y + 3 + r() * 3;
-          g.fillStyle = cloth[Math.floor(r() * cloth.length)];
-          g.beginPath(); g.ellipse(cx, top + 11, w * 0.5, 7, 0, Math.PI, 0); g.fill();
-          g.fillRect(cx - w * 0.5, top + 11, w, 6);
-          g.fillStyle = skin[Math.floor(r() * skin.length)];
-          g.beginPath(); g.arc(cx, top + 3, 2.6 + r() * 0.6, 0, 6.283); g.fill();
-          if (r() < 0.3) { g.fillStyle = r() < 0.5 ? '#1b1b1d' : cloth[Math.floor(r() * cloth.length)]; g.fillRect(cx - 3, top - 0.5, 6, 2.2); } // caps
+        const w = 8.5 + r() * 3.5, cx = x + w / 2;
+        if (aisle(cx)) { x += w; continue; }
+        const e = empty(cx, row);
+        if (e < 0.2 || r() < 0.07) {
+          // an empty seat: its back and the tipped-up squab
+          g.fillStyle = pick(seat); g.fillRect(x + 1, y + 7, w - 2, 9);
+          g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x + 1, y + 14, w - 2, 2);
+        } else {
+          const q = r(), body = q < 0.6 ? pick(dark) : q < 0.8 ? pick(mid) : q < 0.92 ? pick(pale) : pick(loud);
+          const lean = (r() - 0.5) * 2.4, top = y + 1 + r() * 4, hw = 2.1 + r() * 0.6, hh = 3.1 + r() * 0.7, sw = w * (0.42 + r() * 0.1);
+          // shoulders and chest, sloping from the neck, down to the seat in front
+          g.fillStyle = body;
+          g.beginPath(); g.moveTo(cx - sw, y + 21); g.lineTo(cx - sw, top + hh * 2 + 3); g.quadraticCurveTo(cx - sw * 0.7, top + hh * 2 - 0.5, cx + lean * 0.4, top + hh * 2 - 1);
+          g.quadraticCurveTo(cx + sw * 0.7, top + hh * 2 - 0.5, cx + sw, top + hh * 2 + 3); g.lineTo(cx + sw, y + 21); g.closePath(); g.fill();
+          // a fold of shade down one side, so a body is not a flat patch
+          g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(cx + (lean > 0 ? -sw : sw * 0.35), top + hh * 2 + 2, sw * 0.65, y + 19 - top - hh * 2);
+          // head, then hair or a cap over its upper half
+          g.fillStyle = pick(skin);
+          g.beginPath(); g.ellipse(cx + lean, top + hh, hw, hh, 0, 0, 6.283); g.fill();
+          const hq = r();
+          g.fillStyle = hq < 0.36 ? pick(caps) : pick(hair);
+          if (hq < 0.9) { g.beginPath(); g.ellipse(cx + lean, top + hh * 0.72, hw * 1.05, hh * 0.78, 0, Math.PI, 0); g.fill(); }
+          if (hq < 0.12) g.fillRect(cx + lean - hw * 1.5, top + hh * 0.7, hw * 3, 1.1);   // (a brim)
+          // forearms or hands in the lap on some
+          if (r() < 0.28) { g.fillStyle = pick(skin); g.fillRect(cx - 1.5 + lean, y + 15 + r() * 2, 3 + r() * 2, 1.6); }
         }
-        x += w + r() * 2;
+        x += w + r() * 1.6;
+      }
+      // the stair aisles: concrete steps with a painted nosing
+      for (const ax of [142, 449, 756]) {
+        g.fillStyle = '#7c8083'; g.fillRect(ax, y, 24, 24);
+        g.fillStyle = '#5c6063'; g.fillRect(ax, y + 9, 24, 3); g.fillRect(ax, y + 21, 24, 3);
+        g.fillStyle = '#b9a23c'; g.fillRect(ax, y + 7, 24, 1.5); g.fillRect(ax, y + 19, 24, 1.5);
       }
     }
+    // a little dirt over everything, so no two patches of one colour are the same
+    speckle(g, 1024, 512, 5000, ['rgba(0,0,0,0.16)', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.1)'], 1, 3, r);
+    // the roof's shade: all but the front quarter of the rows, cooler and far darker than the open
+    g.globalCompositeOperation = 'multiply';
+    const sh = g.createLinearGradient(0, 0, 0, 512);
+    sh.addColorStop(0, 'rgb(148,158,176)'); sh.addColorStop(0.7, 'rgb(164,172,186)'); sh.addColorStop(0.8, 'rgb(255,255,255)'); sh.addColorStop(1, 'rgb(255,255,255)');
+    g.fillStyle = sh; g.fillRect(0, 0, 1024, 512);
+    g.globalCompositeOperation = 'source-over';
+    // the rail along the front
+    g.fillStyle = '#9aa0a4'; g.fillRect(0, 505, 1024, 2);
+    g.fillStyle = 'rgba(160,166,170,0.8)'; for (let x = 0; x < 1024; x += 44) g.fillRect(x, 494, 1.5, 12);
     return tex(c);
   });
   T.windows = () => get('windows', () => {

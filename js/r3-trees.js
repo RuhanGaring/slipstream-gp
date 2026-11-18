@@ -51,12 +51,13 @@
     '  if (fract(tPos.x * 0.137 + tPos.z * 0.211) < uTDead) vTTint = vec3(1.45, 0.95, 0.6);   // here and there a dead one',
   ].join('\n');
   const FRAG_PARS = [
-    'uniform sampler2D uTNrm; uniform vec2 uTCrown; uniform float uTSkirt;',
+    'uniform sampler2D uTNrm; uniform vec2 uTCrown; uniform float uTSkirt; uniform float uTGain;',
     'varying vec2 vTUv0; varying vec2 vTUv1; varying float vTBl; varying vec2 vTAng; varying vec2 vTLoc;',
     'varying vec3 vTRight; varying vec3 vTFwd; varying vec3 vTTint;',
   ].join('\n');
   // (alpha from a softer level: at close range an atlas texel is several pixels and the 0.5 test
-  // would show it as a staircase along every branch)
+  // would show it as a staircase along every branch; softer still and cut a little higher, a lone
+  // leaf or two away from the crown falls under the cut instead of floating in the sky as a speck)
   // (the colour: the atlas is black wherever it is clear, so a pixel the softer alpha let through
   // but whose own texels were half gap drew as a dark rim against the sky, and the deep holes in a
   // crown as black flecks. The colour is divided by its own coverage, down to a half and no further
@@ -64,7 +65,7 @@
   // dark green of leaves in shade. The same two lookups as before.)
   // (nor under three quarters of the leaves round it: the softer lookup made for the alpha carries
   // their colour too, so a clear texel inside the outline takes its neighbours' green)
-  const FRAG_COLOR = '  { vec4 tC = mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl), tS = mix(texture2D(map, vTUv0, 1.5), texture2D(map, vTUv1, 1.5), vTBl); diffuseColor.rgb *= max(max(tC.rgb / clamp(tC.a, 0.5, 1.0), tS.rgb / clamp(tS.a, 0.45, 1.0) * 0.75), vec3(0.028, 0.034, 0.012)); diffuseColor.a = smoothstep(0.22, 0.52, tS.a); } if (uTSkirt > 0.5) diffuseColor.a *= mix(1.0 - smoothstep(0.06, 0.12, abs(vTLoc.x - 0.5)), 1.0, smoothstep(0.015, 0.075, vTLoc.y));';
+  const FRAG_COLOR = '  { vec4 tC = mix(texture2D(map, vTUv0), texture2D(map, vTUv1), vTBl), tS = mix(texture2D(map, vTUv0, 2.2), texture2D(map, vTUv1, 2.2), vTBl); diffuseColor.rgb *= max(max(tC.rgb / clamp(tC.a, 0.5, 1.0), tS.rgb / clamp(tS.a, 0.45, 1.0) * 0.75), vec3(0.028, 0.034, 0.012)); diffuseColor.a = smoothstep(0.3, 0.58, tS.a); } if (uTSkirt > 0.5) diffuseColor.a *= mix(1.0 - smoothstep(0.06, 0.12, abs(vTLoc.x - 0.5)), 1.0, smoothstep(0.015, 0.075, vTLoc.y));';
   const FRAG_NORMAL = [
     '  vec3 tR0 = texture2D(uTNrm, vTUv0).xyz, tR1 = texture2D(uTNrm, vTUv1).xyz, tN0 = tR0 * 2.0 - 1.0, tN1 = tR1 * 2.0 - 1.0;',
     // a baked view-space normal back to world space: x along that view's right, z toward it
@@ -82,17 +83,22 @@
     '  { vec3 tRs = mix(tR0, tR1, vTBl); tNw = normalize(mix(tNw, tSn, max(0.55 * tCw, 1.0 - smoothstep(0.9, 1.5, tRs.x + tRs.y + tRs.z)))); }',
     '  normal = normalize((viewMatrix * vec4(tNw, 0.0)).xyz);',
   ].join('\n');
-  // sunlight through the leaves toward the eye
+  // sunlight through the leaves toward the eye, and the sky's fill on the side the sun does not
+  // reach: the venue's haze colour pulled toward blue, in proportion to the leaf's brightness, so
+  // the shaded side of a tree is a dark blue green and not a black cut-out against the sky
+  // (0.6 of it on a broadleaf, 0.8 on a fir, whose bake is the darker)
   const FRAG_TRANS = [
     '  float tTr = pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 4.0);',
-    '  totalEmissiveRadiance += diffuseColor.rgb * (uSunCol * tTr * 0.42 * smoothstep(uTCrown.x - uTCrown.y, uTCrown.x, vTLoc.y) + vec3(0.085, 0.115, 0.09));',
+    '  float tSh = 1.0 - smoothstep(-0.25, 0.45, dot(tNw, uSunDir));',
+    '  vec3 tSky = mix(uFogCol, dot(uFogCol, vec3(0.2126, 0.7152, 0.0722)) * vec3(0.2, 0.85, 1.9), 0.75);',
+    '  totalEmissiveRadiance += diffuseColor.rgb * (uSunCol * tTr * 0.42 * smoothstep(uTCrown.x - uTCrown.y, uTCrown.x, vTLoc.y) + vec3(0.085, 0.115, 0.09)) + dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)) * tSky * tSh * (0.2 + 0.4 * uTGain);',
   ].join('\n');
 
   function patchLit(sh, u) {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = VERT_PARS + '\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT);
     sh.fragmentShader = FRAG_PARS + '\n' + sh.fragmentShader
-      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.86, 1.0, 0.86), vec3(1.6, 1.5, 0.82), smoothstep(0.02, 0.17, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
+      .replace('#include <map_fragment>', FRAG_COLOR + '\n  diffuseColor.rgb *= vTTint * uTGain * mix(0.3, 1.0, smoothstep(0.0, 0.04, vTLoc.y));\n  { float tL = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1)); diffuseColor.rgb *= mix(vec3(0.86, 1.0, 0.86), vec3(1.6, 1.5, 0.82), smoothstep(0.02, 0.17, tL)) * mix(0.72, 1.3, smoothstep(0.3, 0.95, vTLoc.y)); }')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + FRAG_NORMAL)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + FRAG_TRANS);
   }
@@ -116,7 +122,9 @@
       return t;
     };
     const color = load(s.color, true), nrm = load(s.normal, false);
-    const u = { uTAspect: { value: s.W / s.H }, uTNrm: { value: nrm }, uTCrown: { value: new THREE.Vector2(CROWN[0], CROWN[1]) }, uTSkirt: { value: /^fir/.test(name) ? 1 : 0 }, uTDead: { value: /^fir/.test(name) ? 0.03 : 0.008 } };
+    const u = { uTAspect: { value: s.W / s.H }, uTNrm: { value: nrm }, uTCrown: { value: new THREE.Vector2(CROWN[0], CROWN[1]) }, uTSkirt: { value: /^fir/.test(name) ? 1 : 0 }, uTDead: { value: /^fir/.test(name) ? 0.03 : 0.008 },
+      // (the baked firs are half as bright as the broadleaves: under the same sun they came out black)
+      uTGain: { value: /^fir/.test(name) ? 1.5 : 1 } };
     const lit = new THREE.MeshStandardMaterial({ map: color, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75, metalness: 0 });
     lit.userData.patchExtra = sh => { patchLit(sh, u); sharpAlpha(sh); };
     lit.userData.patchKey = 'tree';
@@ -208,7 +216,10 @@
       }
       map.needsUpdate = nrm.needsUpdate = true;
     });
-    const lit = new THREE.MeshStandardMaterial({ map, normalMap: nrm, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, color: '#8f9484' });
+    // (colour: the stamped firs are the dark bake again, darkened row by row, so the wall is lifted
+    // as the trees in front of it are (their gain, and more for the rows' darkening), or it stood
+    // black behind them; emissive: the sky's fill in the depth of the wood, as on those trees)
+    const lit = new THREE.MeshStandardMaterial({ map, normalMap: nrm, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, color: new THREE.Color(1.5, 1.55, 1.38), emissiveMap: map, emissive: new THREE.Color(0.45, 1.0, 1.5) });
     return (shellMats = { lit });
   }
 

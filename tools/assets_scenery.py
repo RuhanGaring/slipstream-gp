@@ -40,7 +40,15 @@ from PIL import ImageFilter
 d, aid, S = SRC / 'Fence003', 'Fence003', 1024
 rgb = Image.open(d / f'{aid}_1K-JPG_Color.jpg').convert('RGB').resize((S, S), Image.LANCZOS)
 a = Image.open(d / f'{aid}_1K-JPG_Opacity.jpg').convert('L').resize((S, S), Image.LANCZOS).filter(ImageFilter.MaxFilter(3))
-la = rgb.convert('L'); la.putalpha(a); la.save(OUT / 'scn_fence.png', optimize=True)  # grey wire: luminance + alpha keeps it small
+la = rgb.convert('L'); la.putalpha(a)  # grey wire: luminance + alpha keeps it small
+# one tension cable across each tile (the tile is drawn 1.1 m high, so a cable every 1.1 m up the
+# fence): 11 px, 12 mm of steel rope, lit on top and darker underneath, a soft row either side
+_px = la.load()
+for _k in range(-1, 12):
+    for _x in range(S):
+        _l, _a = _px[_x, 506 + _k]
+        _px[_x, 506 + _k] = (_l, max(_a, 120)) if _k in (-1, 11) else (int(175 - 7 * _k), 255)
+la.save(OUT / 'scn_fence.png', optimize=True)
 Image.open(d / f'{aid}_1K-JPG_NormalGL.jpg').convert('RGB').resize((512, 512), Image.LANCZOS).save(OUT / 'scn_fence_n.jpg', quality=88, optimize=True)
 keys['fence'] = OUT / 'scn_fence.png'; keys['fence_n'] = OUT / 'scn_fence_n.jpg'
 

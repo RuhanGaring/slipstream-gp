@@ -9,7 +9,7 @@
 
   // Per-venue light: sun position (degrees), sky gradient, fog, horizon backdrop.
   const LOOKS = {
-    kestrel: { roadSky: 1.5, sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, fogK: 0.72, shaftK: 0.1, skyK: 2.7, expK: 1.25, exag: 4.2, lawnDesat: 0.42, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
+    kestrel: { roadSky: 1.5, sunEl: 40, sunAz: 130, sun: '#fff0dc', sunI: 2.4, top: '#6c8db5', hor: '#d5dde6', bot: '#8f9a86', fog: '#c8d1da', fogN: 420, fogF: 2900, fogK: 0.72, hazeK: 0.58, shaftK: 0.1, skyK: 3.0, expK: 1.25, exag: 4.2, lawnDesat: 0.42, cloud: 0.62, haze: 0.6, exp: 1.3, env: 0.9, bg: 1.5,
       ridge: ['#6f7f55', '#55703f', '#42602f'], ridgeH: 90, jag: 5 },
     varenna: { sunEl: 21, sunAz: 235, sun: '#ffcf96', sunI: 3.2, top: '#3f78c0', hor: '#f1d4ab', bot: '#8d8a6a', fog: '#e3d2b6', fogN: 500, fogF: 4800, cloud: 0.32, haze: 1.2, exp: 0.95, env: 0.85,
       ridge: ['#9c9a7a', '#6f7a52', '#515f3c'], ridgeH: 110, jag: 7 },
@@ -28,7 +28,10 @@
       ridge: ['#86997a', '#6a7f62', '#556b4f'], ridgeH: 240, jag: 12 },
     nordwald: { sunEl: 32, sunAz: 120, sun: '#f2f0ea', sunI: 1.8, top: '#7f90a3', hor: '#cfd5da', bot: '#5f6b58', fog: '#b9c2c7', fogN: 240, fogF: 4600, fogK: 0.32, shaftK: 0.4, cloud: 0.8, haze: 0.5, exp: 1.05, env: 0.95,
       ridge: ['#5d6f58', '#4a5c47', '#3b4b39'], ridgeH: 150, jag: 9 },
-    lonestar: { sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
+    // (hazeK, fogSun, shaftK: into the low sun the haze, its sun lobe and the shafts buried the frame in
+    // white, and the far ground ended in a band paler than the sky; roadGlare: and the road was one
+    // sheet of glare as bright as the sky)
+    lonestar: { hazeK: 0.42, fogSun: 0.04, shaftK: 0.12, roadSky: 3.5, roadGlare: 0.25, sunEl: 16, sunAz: 240, sun: '#ffcf96', sunI: 3.0, top: '#4a7cc0', hor: '#efd8b6', bot: '#a08a64', fog: '#e2cfae', fogN: 600, fogF: 6000, cloud: 0.2, haze: 1.2, exp: 1.0, env: 0.85,
       ridge: ['#b3a07c', '#9a8a68', '#7f7258'], ridgeH: 45, jag: 3 },
   };
 
@@ -268,6 +271,45 @@
     }
   }
 
+  // Sponsor boards along an offset path. Every board is about 4 m long and shows one slot of the
+  // hoarding atlas (eight sponsors side by side); a sponsor holds a run of 4 to 8 boards, as boards
+  // are sold, and a circuit hangs only the few sponsors in pal. Each road step carries its own piece
+  // of its board on vertices of its own (the same triangles as wallRun, no shared edges), so a slot
+  // can repeat down the wall. back: the far face shows the boards too (a pit wall), else it is plain.
+  function boardRun(acc, tr, i0, i1, df, y0, y1, vLen, thick, pal, rnd, back) {
+    const N = tr.N, nb = Math.max(1, Math.round(4 / tr.ds)), lo = y0 <= 0 ? 0.25 : 0, v1 = (y1 - y0) / vLen;
+    const pt = i => { const k = mod(i, N), d = df(k), sg = d >= 0 ? 1 : -1; return { sg, x: tr.x[k] + tr.nx[k] * d, z: tr.y[k] + tr.ny[k] * d, nx: -tr.nx[k] * sg, nz: -tr.ny[k] * sg, ox: tr.nx[k] * sg * thick, oz: tr.ny[k] * sg * thick, g: Tracks.surfZ(tr, k, d) }; };
+    let slot = pal[Math.floor(rnd() * pal.length)], left = 4 + Math.floor(rnd() * 5), A = pt(i0);
+    for (let i = i0; i < i1; i++) {
+      const B = pt(i + 1), q = (i - i0) % nb;
+      if (q === 0 && i > i0 && --left <= 0) { const was = slot; for (let t = 0; t < 6 && slot === was && pal.length > 1; t++) slot = pal[Math.floor(rnd() * pal.length)]; left = 4 + Math.floor(rnd() * 5); }
+      // a board reads left to right from the track on either side; 3 per cent of the slot is left
+      // out at each end, so the next sponsor's colour does not bleed in when the board is far off
+      const fa = A.sg > 0 ? 1 - q / nb : q / nb, fb = A.sg > 0 ? 1 - (q + 1) / nb : (q + 1) / nb;
+      const u0 = (slot + 0.03 + 0.94 * fa) / 8, u1 = (slot + 0.03 + 0.94 * fb) / 8;
+      const a = acc.v(A.x, y0 + A.g - lo, A.z, A.nx, 0, A.nz, u0, 0);
+      acc.v(A.x, y1 + A.g, A.z, A.nx, 0, A.nz, u0, v1);
+      acc.v(B.x, y0 + B.g - lo, B.z, B.nx, 0, B.nz, u1, 0);
+      acc.v(B.x, y1 + B.g, B.z, B.nx, 0, B.nz, u1, v1);
+      acc.t(a, a + 1, a + 2); acc.t(a + 1, a + 3, a + 2);
+      if (thick) {
+        // top, then the far face (read from behind, so its board runs the other way)
+        const b = acc.v(A.x, y1 + A.g, A.z, 0, 1, 0, 0.01, 0.02);
+        acc.v(A.x + A.ox, y1 + A.g, A.z + A.oz, 0, 1, 0, 0.01, 0.02);
+        acc.v(B.x, y1 + B.g, B.z, 0, 1, 0, 0.01, 0.02);
+        acc.v(B.x + B.ox, y1 + B.g, B.z + B.oz, 0, 1, 0, 0.01, 0.02);
+        acc.t(b, b + 1, b + 2); acc.t(b + 1, b + 3, b + 2);
+        const w0 = back ? (slot + 0.97 - 0.94 * fa) / 8 : 0.01, w1 = back ? (slot + 0.97 - 0.94 * fb) / 8 : 0.01, vb = back ? v1 : 0.02;
+        const c = acc.v(A.x + A.ox, y1 + A.g, A.z + A.oz, -A.nx, 0, -A.nz, w0, vb);
+        acc.v(A.x + A.ox, y0 + A.g - lo, A.z + A.oz, -A.nx, 0, -A.nz, w0, back ? 0 : 0.02);
+        acc.v(B.x + B.ox, y1 + B.g, B.z + B.oz, -B.nx, 0, -B.nz, w1, vb);
+        acc.v(B.x + B.ox, y0 + B.g - lo, B.z + B.oz, -B.nx, 0, -B.nz, w1, back ? 0 : 0.02);
+        acc.t(c, c + 1, c + 2); acc.t(c + 1, c + 3, c + 2);
+      }
+      A = B;
+    }
+  }
+
   // ---------- materials ----------
   const MATS = {};
   function std(o) { return new THREE.MeshStandardMaterial(o); }
@@ -297,17 +339,20 @@
       // lifted to a used circuit's mid grey and worn in by F1.R3S.wear.asphalt
       MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 2, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
       MATS.pitlane = macro(pbr('pitlane', 9 / 3, { color: '#dedede' }), 50, 0.07);
-      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#f4ecdf' }), 45, 0.2);
+      // (the colour of a used trap, 169, 155, 143 in the photographs; and the stones' relief half as strong again)
+      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#dcc9bc' }), 45, 0.2);
+      MATS.gravel.normalScale.set(1.5, 1.5);
     } else {
       MATS.asphalt = std({ map: T.asphalt(), roughness: 0.88 });
       MATS.pitlane = std({ map: T.asphalt(), color: '#e3e3e6', roughness: 0.82 });
       MATS.gravel = std({ map: T.gravel(), roughness: 1 });
     }
-    // (asphalt stays near grey under a low coloured sun: it scatters more sky than the eye expects)
+    // (asphalt stays near grey under a low coloured sun: it scatters more sky than the eye expects;
+    // uRoadGlare rolls the mirrored sun and sky off to a ceiling where a look asks for it)
     if (ph) {
       const m = MATS.asphalt, prev = m.userData.patchExtra || null;
       m.userData.patchKey = (m.userData.patchKey || '') + '_neut';
-      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.uniforms.uRoadSky = F1.R3S.U.uRoadSky; sh.fragmentShader = 'uniform float uRoadSky;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= uRoadSky;').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
+      m.userData.patchExtra = sh => { if (prev) prev(sh); sh.uniforms.uRoadSky = F1.R3S.U.uRoadSky; sh.fragmentShader = 'uniform float uRoadSky; uniform float uRoadGlare;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse *= uRoadSky;\n  if (uRoadGlare < 50.0) { vec3 rgS = reflectedLight.directSpecular + reflectedLight.indirectSpecular; float rgL = max(rgS.r, max(rgS.g, rgS.b)), rgK = uRoadGlare * (1.0 - exp(-rgL / uRoadGlare)) / max(rgL, 1e-4); reflectedLight.directSpecular *= rgK; reflectedLight.indirectSpecular *= rgK; }').replace('#include <opaque_fragment>', 'outgoingLight = mix(vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))), outgoingLight, 0.5);\n#include <opaque_fragment>'); };
     }
     const aN = ph ? T.photo('asphalt_n', 9 / 2, false) : null;
     // kerbs: painted concrete; UVs run 1.5 m along and across the kerb
@@ -336,7 +381,7 @@
     // chain-link catch fence: a scanned galvanised wire mesh (ambientCG Fence003, drawn 1.1 m a
     // tile so the wire still reads from the car) blended by its own opacity (crisp wire up close, a fine grey veil far off, as a real fence);
     // wall runs give 1.6 m a UV unit
-    MATS.fence = T.has('fence') ? std({ map: T.photo('fence', 1.6 / 1.1), normalMap: T.photo('fence_n', 1.6 / 1.1, false), transparent: true, alphaTest: 0.03, depthWrite: false, side: THREE.DoubleSide, roughness: 0.42, metalness: 0.9, color: '#c9ced3' })
+    MATS.fence = T.has('fence') ? std({ map: T.photo('fence', 1.6 / 1.1), normalMap: T.photo('fence_n', 1.6 / 1.1, false), transparent: true, alphaTest: 0.03, depthWrite: false, side: THREE.DoubleSide, roughness: 0.8, metalness: 0.15, color: '#c9ced3' })
       : std({ map: T.fence(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.45, metalness: 1, color: '#a7adb3' });
     MATS.steel = ph ? pbr('metal', 1, { metalness: 1, color: '#c4c9ce' }) : std({ color: '#5b6067', roughness: 0.45, metalness: 0.7 });
     // the metal photo's mean luminance (linear) is 0.0347; times each material's colour
@@ -365,6 +410,16 @@
     MATS.shadowBlob = new THREE.MeshBasicMaterial({ alphaMap: T.softA(), color: '#000000', transparent: true, opacity: 0.55, depthWrite: false });
     MATS.ghost = new THREE.MeshBasicMaterial({ color: '#8fd0ff', transparent: true, opacity: 0.32, depthWrite: false });
     return MATS;
+  }
+
+  // A glazed face turned to a low sun mirrors it along its whole length, and the frame clips to
+  // white over the building: the mirrored light (sun and sky) is rolled off to a ceiling, so a
+  // glint stays a glint.
+  function capGlare(m, cap) {
+    const prev = m.userData.patchExtra || null;
+    m.userData.patchKey = (m.userData.patchKey || '') + '_cap' + cap;
+    m.userData.patchExtra = sh => { if (prev) prev(sh); sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  { vec3 cgS = reflectedLight.directSpecular + reflectedLight.indirectSpecular; float cgL = max(cgS.r, max(cgS.g, cgS.b)), cgK = ' + cap.toFixed(2) + ' * (1.0 - exp(-cgL / ' + cap.toFixed(2) + ')) / max(cgL, 1e-4); reflectedLight.directSpecular *= cgK; reflectedLight.indirectSpecular *= cgK; }'); };
+    return m;
   }
 
   // (the one look with English field boundaries)
@@ -484,8 +539,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!M.fence) return null;
     if (!M.fenceFar) {
       const m = M.fenceFar = M.fence.clone();
-      m.color.set('#6a6e73'); if (W2.town) m.opacity = 0.42;
-      m.userData = { wetK: M.fence.userData.wetK, patchKey: 'fenceFar', patchExtra: sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', 'diffuseColor.a *= smoothstep(240.0, 70.0, length(vFogWorld - cameraPosition));\n#include <alphatest_fragment>'); } };
+      // (weathered zinc, lit as a dull grey: as bright metal the far mesh mirrored the sky at a glancing
+      // angle and stood as a milky pane, or a black one where it mirrored the trees. Small on screen
+      // the mesh is a veil: it holds back a steady quarter to a third of what is behind it; and it is
+      // lit as a matt surface only, what a sheet of wire mirrors at a glancing angle being what made
+      // the pane)
+      m.color.set('#a9aeb0'); if (W2.town) m.opacity = 0.42;
+      m.userData = { wetK: M.fence.userData.wetK, patchKey: 'fenceFar', patchExtra: sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', '{ vec2 fSz = vec2(textureSize(map, 0)); vec2 fDx = dFdx(vMapUv * fSz), fDy = dFdy(vMapUv * fSz); float fVeil = smoothstep(1.5, 4.0, max(0.0, 0.5 * log2(max(dot(fDx, fDx), dot(fDy, fDy))))); diffuseColor.a = mix(diffuseColor.a, clamp(diffuseColor.a * 1.65, 0.24, 0.34), fVeil); }\ndiffuseColor.a *= smoothstep(240.0, 70.0, length(vFogWorld - cameraPosition));\n#include <alphatest_fragment>').replace('#include <opaque_fragment>', 'outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;\n#include <opaque_fragment>'); } };
     }
     return M.fenceFar;
   }
@@ -550,15 +610,20 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const t1 = new THREE.CanvasTexture(c); t1.colorSpace = THREE.SRGBColorSpace; t1.wrapS = t1.wrapT = THREE.RepeatWrapping; t1.anisotropy = 8;
       return t1;
     }
+    // The atlas of the permanent circuits' boards (boardRun): printed vinyl a season old, so deep
+    // and dull colours, no lime, no pure red; a slot is hung 4 m long by 1.1 m high, so the
+    // lettering is set narrow here and comes out in proportion on the wall.
+    const dull = { 'FERRO CORSA': ['#8f1d2a', '#f1ede4'], MERIDIAN: ['#1d615d', '#ece9e0'], HALCYON: ['#1b2646', '#d98a45'], 'GRAND PRIX': ['#dedbd3', '#8f1d2a'], KODIAK: ['#22346f', '#dcc05a'], AUREX: ['#1d5c37', '#f4f1e6'], SLIPSTREAM: ['#0b1f3a', '#ece9e0'] };
     ads.forEach(([t, bg, fg], k) => {
+      if (dull[t]) [bg, fg] = dull[t];
       g.fillStyle = bg; g.fillRect(k * 256, 0, 256, 128);
-      g.fillStyle = fg; g.font = 'italic 900 46px Titillium Web, Segoe UI, sans-serif';
+      g.fillStyle = fg; g.font = 'italic 900 62px Titillium Web, Segoe UI, sans-serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(t, k * 256 + 128, 70, 236);
+      g.save(); g.translate(k * 256 + 128, 66); g.scale(0.56, 1); g.fillText(t, 0, 0, 400); g.restore();
       g.fillStyle = 'rgba(0,0,0,0.2)'; g.fillRect(k * 256, 0, 3, 128);
     });
     g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 118, 2048, 10);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 16;
     return t;
   }
 
@@ -966,6 +1031,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     scene.fog = new THREE.FogExp2(L.fog, fogD);
     renderer.toneMappingExposure = L.exp;
     const S3 = F1.R3S.U;
+    S3.uFogSun.value = L.fogSun != null ? L.fogSun : 0.12;
     S3.uFogCol.value.set(L.fog); S3.uFogDensity.value = fogD; S3.uFogFalloff.value = id === 'hakone' || id === 'sierra' ? 1 / 260 : 1 / 420;
     if (envRT) envRT.dispose();
     envRT = null;
@@ -988,7 +1054,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (L.sunNeutral) sun.color.lerp(new THREE.Color(1, 1, 1), L.sunNeutral);
       hemi.intensity = 0;
       // (fogK: a probe whose horizon is bright cloud would turn the whole venue milky)
-      const fk = L.fogK || 1; scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
+      // (hazeK: the haze alone, darker than the probe's horizon where the far ground stood as a pale
+      // band under a darker sky; the sky's fill light, which is this colour too, is left as it was)
+      const fk = (L.fogK || 1) * (L.hazeK || 1); scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
       state.exposure = { kestrel: 1.06, bahia: 1.22, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
@@ -1007,7 +1075,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (rivi) { state.exposure *= 1.12; sun.intensity *= 1.36; sun.color.multiply(RIVI_SUN); } else state.exposure *= L.expK || 1.15;
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
-    S3.uRoadSky.value = L.roadSky || 3.2;
+    S3.uRoadSky.value = L.roadSky || 3.2; S3.uRoadGlare.value = L.roadGlare || 100;
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
@@ -1064,13 +1132,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
     // (a harbour town's shade is filled by its pale sky and by the sun thrown back off stucco and
     // paving, warm from below: with the haze's blue-grey and the lake venue's ground it stood blue-black)
-    if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value); hemi.groundColor.set(L.bot || '#777777'); }
+    if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value).multiplyScalar(1 / (L.hazeK || 1)); hemi.groundColor.set(L.bot || '#777777'); }
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
     const tk = state.tunApplied || 0;
     if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.75 / (1 + tunOpen()) - hemi.intensity) * tk; }
-    if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
+    if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36 / (L.hazeK || 1)).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== oc) { F1.R3Shadow.setSoften(1 + 4 * oc); state.ocS = oc; }
     if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(1 - 0.88 * oc);
     S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
@@ -1223,7 +1291,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     { const RS = built.roadSky, S3 = F1.R3S.U; S3.uRoadShadeOn.value = RS ? 1 : 0; if (RS) { S3.uRoadShade.value = RS.tex; S3.uRoadShadeP.value.set(RS.L, RS.d0, RS.dw); }
       // (a harbour town's circuit is its own streets: as light as the side streets beside it, its
       // racing line only faintly rubbered; the barriers alone mark it out)
-      const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0; }
+      const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0;
+      // (cast ridges on a circuit's kerbs; a town's kerbs are flat painted aprons and dressed stone)
+      S3.uKerbRidge.value = city || tr.def.style === 'street' || tr.def.style2 === 'city' ? 0 : 1; }
     state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null;
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
@@ -1564,11 +1634,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         for (let q = 0; q <= n; q++) {
           const t = q / n, sq = s0 + t * len, d = U.clamp(dOf(t), -hwm, hwm), k = Math.round(((sq % tr.L) + tr.L) % tr.L / tr.ds) % N;
           const al = U.clamp(alphaOf(t), 0, 1);
+          // (a mark narrows to a point at both ends, as a tyre comes on to and off its edge: at full
+          // width to the last point they ended in a square cut, like a stamp)
+          const wq = W2.town ? w : w * (0.25 + 0.75 * U.smooth(Math.min(t, 1 - t) / 0.16));
           // two points across; the shader softens the edges (crisp middle, a soft rim)
           for (const sd of [-1, 1]) {
-            const [x, z] = Tracks.pointAt(tr, sq, d + sd * w / 2);
+            const [x, z] = Tracks.pointAt(tr, sq, d + sd * wq / 2);
             const nearL = W2.townLineDist ? U.smooth((W2.townLineDist(x, z) - 0.2) / 1.3) : 1;
-            mk.p.push(x, Tracks.surfZ(tr, k, d + sd * w / 2) + 0.014, z); mk.c.push(255, 255, 255, Math.round(al * nearL * 255)); mk.a.push(sd);
+            mk.p.push(x, Tracks.surfZ(tr, k, d + sd * wq / 2) + 0.014, z); mk.c.push(255, 255, 255, Math.round(al * nearL * 255)); mk.a.push(sd);
           }
           if (q) { const a0 = base + (q - 1) * 2, b0 = base + q * 2; mk.ix.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0); }
         }
@@ -1600,17 +1673,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // lock-ups: into a braking zone (where a sharp bend lies ahead), straight and black
           let k = Math.floor(r() * N); for (let q = 0; q < 40 && kapAhead[k] < 0.012; q++) k = Math.floor(r() * N);
           const len = 8 + r() * 30, d0 = lineAt(k) + (r() - 0.5) * 4, drift = (r() - 0.5) * 1.6, a0 = 0.32 + r() * 0.3;
-          pair(k * tr.ds, len, t => d0 + drift * t * t, 0.3, t => a0 * fade(t, 0.06, 0.35) * (0.8 + 0.2 * brk(ph, 60)(t)), 1.6, r() < 0.35 ? one() : 0);
+          pair(k * tr.ds, len, t => d0 + drift * t * t, W2.town ? 0.3 : 0.2 + 0.24 * ((ph * 7.13) % 1), t => a0 * fade(t, W2.town ? 0.06 : 0.14, 0.35) * (0.8 + 0.2 * brk(ph, 60)(t)), 1.6, r() < 0.35 ? one() : 0);
         } else if (kind < 0.84) {
           // wheelspin: out of a slow corner (a sharp bend just behind), snaking, darkest at the start
           let k = Math.floor(r() * N); for (let q = 0; q < 40 && kapBehind[k] < 0.014; q++) k = Math.floor(r() * N);
           const len = 14 + r() * 40, d0 = lineAt(k) + (r() - 0.5) * 5, wav = 0.2 + r() * 0.5, per = 4 + r() * 5, a0 = 0.28 + r() * 0.3;
-          pair(k * tr.ds, len, t => d0 + Math.sin(t * len / per * 6.283 + ph) * wav * (1 - t), 0.3, t => a0 * U.smooth(t / 0.04) * Math.pow(1 - t, 1.3));
+          pair(k * tr.ds, len, t => d0 + Math.sin(t * len / per * 6.283 + ph) * wav * (1 - t), W2.town ? 0.3 : 0.22 + 0.22 * ((ph * 3.71) % 1), t => a0 * U.smooth(t / (W2.town ? 0.04 : 0.12)) * Math.pow(1 - t, 1.3));
         } else if (kind < 0.95) {
           // long faint pairs wandering anywhere on the lap
           const k0 = Math.floor(r() * N), len = 60 + r() * 220, d0 = lineAt(k0) + (r() + r() + r() - 1.5) * hw * 0.8, A1 = 0.6 + r() * 2.2, f1 = 0.6 + r() * 1.8, drift = (r() - 0.5) * hw;
           const a0 = 0.07 + r() * 0.14, b = brk(ph, 30 + r() * 30);
-          pair(k0 * tr.ds, len, t => d0 + drift * t + A1 * Math.sin(t * f1 * 6.283 + ph), 0.26, t => a0 * fade(t, 0.15, 0.2) * b(t));
+          pair(k0 * tr.ds, len, t => d0 + drift * t + A1 * Math.sin(t * f1 * 6.283 + ph), W2.town ? 0.26 : 0.2 + 0.2 * ((ph * 5.3) % 1), t => a0 * fade(t, 0.15, 0.2) * b(t));
         } else {
           // short smudges anywhere
           const len = 2 + r() * 7, d0 = (r() * 2 - 1) * hwm, a0 = 0.12 + r() * 0.22;
@@ -1757,7 +1830,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const n = Math.max(1, Math.ceil((s1 - s0) / STEP));
         let prev = -1, lastB = null;
         for (let q = 0; q <= n; q++) {
-          const sq = s0 + (s1 - s0) * q / n, k = Math.floor(((sq % tr.L) + tr.L) % tr.L / tr.ds) % N, e = Math.min(sq - s0, s1 - sq), t = ease ? U.smooth(Math.min(1, e / ease)) : 1, bId = Math.floor(sq / blk), c = bId % 2 ? red : wht;
+          const sq = s0 + (s1 - s0) * q / n, k = Math.floor(((sq % tr.L) + tr.L) % tr.L / tr.ds) % N, e = Math.min(sq - s0, s1 - sq), t = ease ? U.smooth(Math.min(1, e / ease)) : 1, bId = Math.floor(sq / blk + 1e-6), c = bId % 2 ? red : wht;
           const row = [], base = kb.k;
           const hard = lastB != null && bId !== lastB;
           for (let copy = 0; copy < (hard ? 2 : 1); copy++) {
@@ -1789,7 +1862,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const on = k => arr[k] && (!W2.town || (tr.kap[k] * sg > 1 / 45 && !folds(side, k, () => hw + kw, false)));
         for (const [i0, i1] of runs(N, on)) {
           if ((i1 - i0) * tr.ds < 6) continue;
-          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 2 * tr.ds, W2.town ? 5 : 9);
+          sweep(i0 * tr.ds, i1 * tr.ds, (u, t, k) => { const wd = kw * (W2.town ? 0.25 + 0.75 * t : t), e0 = hw; return sg * (e0 + (u < 0 ? u : u * wd)); }, apron, W2.town ? 1.8 : 0.75 * tr.ds, W2.town ? 5 : 9);   // (blocks of 1.5 m, as cast kerbs are; they were 4 m)
         }
         // a town's narrow painted kerb, 28 cm wide and 12 high, standing at the foot of the barrier
         if (W2.town) {
@@ -1818,6 +1891,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const fenceH = 4.2;
       // (in a town each sponsor buys a sector of 150 to 350 m of wall)
       const adRuns = W2.town ? [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Acc()) : null, rnA = U.rng(911 + (tr.def.seed || 1));
+      // (a circuit hangs four of the eight sponsors, the first of them along its pit wall)
+      const rnB = U.rng(4243 + [...String(tr.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 9973, 7)), adPal = [0, 1, 2, 3, 4, 5, 6, 7];
+      for (let k = 7; k > 0; k--) { const j = Math.floor(rnB() * (k + 1)); [adPal[k], adPal[j]] = [adPal[j], adPal[k]]; }
+      adPal.length = 4;
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         const skip = k => side === ps && garageZone(k);
@@ -1847,10 +1924,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           } else if (style === 'modern') {
             for (let i = i0; i < i1;) {
               const j = Math.min(i1, i + Math.round((90 + rnA() * 140) / tr.ds)), bought = mainStraight(i) || rnA() < 0.34;
-              wallRun(bought ? ad : conc, tr, i, j, d, -0.07, 1.05, bought ? 14 : 8, 1.12, 0.55, undefined, bought);
+              if (bought) boardRun(ad, tr, i, j, d, -0.07, 1.05, 1.12, 0.55, adPal, rnB); else wallRun(conc, tr, i, j, d, -0.07, 1.05, 8, 1.12, 0.55);
               i = j;
             }
-          } else wallRun(style === 'park' ? conc : ad, tr, i0, i1, d, -0.07, 1.05, style === 'park' ? 8 : 14, 1.12, 0.55, undefined, style !== 'park');
+          } else if (style === 'park') wallRun(conc, tr, i0, i1, d, -0.07, 1.05, 8, 1.12, 0.55);
+          else boardRun(ad, tr, i0, i1, d, -0.07, 1.05, 1.12, 0.55, adPal, rnB);
           if (!Tg2) {
             wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fenceH, 1.6, 1.6, 0);
             for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 0.5; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 1.05 + (fenceH - 1.05) / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH - 1.05, 1)); }
@@ -1886,7 +1964,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const boardOn = k => { const c = Math.floor(k * tr.ds / 120); return ((c * 7 + side * 3 + (tr.def.seed || 1)) % 5) < 3; };
           for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] !== SURF.GRAVEL && boardOn(k))) {
             if (i1 - i0 < 6) continue;
-            wallRun(hoard, tr, i0, i1, k => d(k) + sg * 0.9, 0.12, 1.12, 9, 1.12, 0.05, undefined, true);
+            boardRun(hoard, tr, i0, i1, k => d(k) + sg * 0.9, 0.12, 1.12, 1.12, 0.05, adPal, rnB);
             for (let i = i0; i <= i1; i += 4) { const k = mod(i, N), dd = d(k) + sg * 0.98; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 0.55, tr.y[k] + tr.ny[k] * dd, 0, 0.7, 1.1, 0.7)); }
           }
           // catch fence: behind gravel traps, and behind the hoardings everywhere else
@@ -1905,7 +1983,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // pit wall with fence
       for (const [i0, i1] of runs(N, k => !isNaN(pit.wall[k]))) {
         const d = k => pit.side * (pit.wall[k] + 0.1);
-        wallRun(adRuns ? adRuns[0] : ad, tr, i0, i1 - 1, d, -0.07, 1.1, adRuns ? 4.4 : 14, 1.12, 0.6);
+        if (adRuns) wallRun(adRuns[0], tr, i0, i1 - 1, d, -0.07, 1.1, 4.4, 1.12, 0.6); else boardRun(ad, tr, i0, i1 - 1, d, -0.07, 1.1, 1.12, 0.6, [adPal[0]], rnB, true);
         wallRun(fen, tr, i0, i1 - 1, k => d(k) + pit.side * 0.3, 1.1, 3.6, 1.6, 1.6, 0);
       }
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
@@ -1986,7 +2064,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const g = new THREE.ExtrudeGeometry(sh, { depth: hgt, bevelEnabled: false });
         g.rotateX(-Math.PI / 2);
         // roof: painted metal deck; sides: glass curtain wall (dielectric, near-mirror)
-        const m = [std({ color: '#c9cdd2', roughness: 0.45, metalness: 0 }), (M.pitGlaze || (M.pitGlaze = (() => { const t = pitTex('band').clone(); t.repeat.set(1 / 12, 1 / 3.6); t.needsUpdate = true; return std({ map: t, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.3 }); })())) || std({ map: repTex(T.windows(), 1 / 30, 1 / 26), roughness: 0.08, metalness: 0, envMapIntensity: 1.4 })];
+        const m = [std({ color: '#c9cdd2', roughness: 0.45, metalness: 0 }), (M.pitGlaze || (M.pitGlaze = (() => { const t = pitTex('band').clone(); t.repeat.set(1 / 12, 1 / 3.6); t.needsUpdate = true; return capGlare(std({ map: t, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.3 }), 0.9); })())) || std({ map: repTex(T.windows(), 1 / 30, 1 / 26), roughness: 0.08, metalness: 0, envMapIntensity: 1.4 })];
         const mesh = new THREE.Mesh(g, m);
         mesh.castShadow = true; mesh.receiveShadow = true;
         mesh.position.y = Tracks.groundAt(tr, it.x, it.y) - 1.5; // sunk so it meets sloping ground
@@ -2014,7 +2092,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
       const col0 = new THREE.CylinderGeometry(0.18, 0.18, 1, 6);
-      const ads = ['#c8102e', '#0b1f3a', '#0e8f86', '#16224a', '#f2c230'];
+      // (roof edges: weathered off-white and galvanised grey sheet, one dull green among them; the
+      // pure red, yellow, teal and navy they had are colours a stand roof does not come in)
+      const ads = ['#cfcdc4', '#aeb3b5', '#d6d4cc', '#5f7468', '#b9bcbd'];
       let n = 0;
       for (const it of W2.decor) {
         if (it.type !== 'stand') continue;
@@ -3474,8 +3554,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       g.position.set(x, gy, y); g.rotation.y = -hh;
       const deck = new THREE.BoxGeometry(2.8, 2.4, span);
       const uv = deck.attributes.uv, p = deck.attributes.position, n = deck.attributes.normal;
-      for (let k = 0; k < uv.count; k++) if (Math.abs(n.getX(k)) > 0.5) uv.setXY(k, (p.getZ(k) + span / 2) / 30, (p.getY(k) + 1.2) / 2.4);
-      const dm = new THREE.Mesh(deck, M.adwall); dm.position.y = 8.6; dm.castShadow = true; dm.receiveShadow = true; g.add(dm);
+      // (one name across the gantry, the series' own, on boards 9.6 m long: it carried all eight)
+      for (let k = 0; k < uv.count; k++) if (Math.abs(n.getX(k)) > 0.5) uv.setXY(k, (p.getZ(k) + span / 2) / 9.6, (p.getY(k) + 1.2) / 2.4);
+      const dkM = M.adwall0 || (M.adwall0 = F1.R3S.wear.barrier(std({ map: adTexture(0), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap })));
+      dkM.normalScale.copy(M.adwall.normalScale);
+      const dm = new THREE.Mesh(deck, dkM); dm.position.y = 8.6; dm.castShadow = true; dm.receiveShadow = true; g.add(dm);
       const rail = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.12, span + 0.2), M.steel); rail.position.y = 9.85; g.add(rail);
       for (const z of [dl - (dl + dr) / 2 - 1.8, dr - (dl + dr) / 2 + 1.8]) {
         const tw = new THREE.Mesh(facadeBox(3.6, 9.8, 3.6, 3, 3), VMt.clad); tw.position.set(0, 4.9, z); tw.castShadow = true; tw.receiveShadow = true; g.add(tw);
@@ -3486,7 +3569,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     }
     const addB = (b, m) => { const geo = b.geo(); if (!geo) return; const mesh = new THREE.Mesh(geo, m); mesh.castShadow = true; mesh.receiveShadow = true; root.add(mesh); };
     addB(lit, VMt.lit); addB(glass, VMt.glass); addB(office, VMt.office); addB(roof, VMt.roof); addB(clad, VMt.clad); if (VMt.brick) addB(brick, VMt.brick);
-    addB(pitBand, M.pitBand || (M.pitBand = std({ map: pitTex('band'), roughness: 0.25, metalness: 0.4, envMapIntensity: 1.3 })));
+    addB(pitBand, M.pitBand || (M.pitBand = capGlare(std({ map: pitTex('band'), roughness: 0.25, metalness: 0.4, envMapIntensity: 1.3 }), 0.9)));
     return foot;
   }
 
@@ -3712,7 +3795,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     root.userData.foot = { x: bd.cx, z: bd.cz, r: Ri, on: S3Low.value > 0 ? (C.woods ? 1 : 0.5) : 0, t: C.footT || [1.02, 1, 0.92] };
     const hz = {
       uHaze: S3.uFogCol, uSunDir: S3.uSunDir, uSunCol: S3.uSunCol, uAmb: { value: new THREE.Color() },
-      uFootHaze: S3Low, uFootT: S3.uFootT, uScrub: { value: C.scrub || 0 }, uCrest: { value: C.crest || 0 }, uWarm: { value: C.warm || 0 }, uAmbK: { value: C.amb || 1 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
+      uFootHaze: S3Low, uFootT: S3.uFootT, uScrub: { value: C.scrub || 0 }, uCrest: { value: C.crest || 0 }, uWarm: { value: C.warm || 0 }, uAmbK: { value: C.amb || 1 }, uFogD: S3.uFogDensity, uFogK: S3.uFogFalloff, uFogSun: S3.uFogSun, uBase: { value: gC }, uSoft: { value: new THREE.Vector2(C.soft || 0.03, C.gully == null ? 0.1 : C.gully) }, uCrown: { value: crownTex() },
       uHazeD: { value: 7800 }, uHazeH: { value: Math.max(300, peak * 0.9) },
       uBump: { value: C.bump || (desert ? 0.42 : arid ? 1.15 : 1) }, uGully: { value: desert ? 0.3 : 0.62 },
       uRock: { value: C.rk ? new THREE.Vector3(...C.rk) : new THREE.Vector3(arid ? 0.12 : 0.3, arid ? 0.32 : 0.56, desert ? 0.5 : arid ? 0.85 : 0.7) },
@@ -3737,7 +3820,7 @@ void main() {
       fragmentShader: `#include <common>
 #include <logdepthbuf_pars_fragment>
 varying vec3 vW, vN, vC; varying float vS, vLand, vH;
-uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFootHaze, uAmbK, uScrub, uCrest, uWarm; uniform vec3 uFootT; uniform sampler2D uE, uCrown;
+uniform vec3 uHaze, uSunDir, uSunCol, uAmb, uRock, uForA, uForB, uForC, uFootC, uMeadow, uRockA, uRockB, uScree, uTint; uniform vec4 uCover, uRing; uniform vec2 uSoft; uniform float uHazeD, uHazeH, uBump, uGully, uBase, uFogD, uFogK, uFogSun, uFootHaze, uAmbK, uScrub, uCrest, uWarm; uniform vec3 uFootT; uniform sampler2D uE, uCrown;
 const mat2 R1 = mat2(0.8, 0.6, -0.6, 0.8), R2 = mat2(0.28, -0.96, 0.96, 0.28);
 void main() {
   #include <logdepthbuf_fragment>
@@ -3803,7 +3886,7 @@ void main() {
   // and the same valley fog as the plain in front, so no land is ever clearer than what is nearer
   float fk = uFogK * (vW.y - cameraPosition.y), fLine = abs(fk) > 1e-4 ? (1.0 - exp(-fk)) / fk : 1.0;
   float fHi = smoothstep(20.0, 260.0, vH), fSun = pow(max(dot(normalize(vW - cameraPosition), uSunDir), 0.0), 6.0);
-  gl_FragColor = vec4(mix(col, uHaze * mix(vec3(1.0), vec3(0.86, 0.94, 1.06), fHi * smoothstep(1500.0, 6000.0, d)) + uSunCol * fSun * 0.12, clamp(1.0 - exp(-uFogD * exp(-uFogK * cameraPosition.y) * d * fLine * mix(1.0, 0.5, fHi)), 0.0, 1.0)), 1.0);
+  gl_FragColor = vec4(mix(col, uHaze * mix(vec3(1.0), vec3(0.86, 0.94, 1.06), fHi * smoothstep(1500.0, 6000.0, d)) + uSunCol * fSun * uFogSun, clamp(1.0 - exp(-uFogD * exp(-uFogK * cameraPosition.y) * d * fLine * mix(1.0, 0.5, fHi)), 0.0, 1.0)), 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`,

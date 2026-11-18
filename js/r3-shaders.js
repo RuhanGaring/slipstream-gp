@@ -15,11 +15,15 @@
     // circuit is its public streets: it looks like the side streets, only its barriers mark it), and
     // the tunnel's lamps (render3d tunnelLight: the floor the road's shade cannot go under there)
     uRoadShadeK: { value: 1 }, uRubK: { value: 1 }, uTunLamp: { value: 0 },
+    uKerbRidge: { value: 1 }, // the cast ridges across a circuit's kerbs, 0 on a town's flat ones
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
     uFogDensity: { value: 0.0003 },
     uFogFalloff: { value: 0.004 },
+    // how much of the sun's colour the haze scatters toward the eye when looking at the sun (a venue
+    // under a low sun in thick haze sets it lower: at 0.12 the whole frame went white there)
+    uFogSun: { value: 0.12 },
     macroMap: { value: null },
     // lawn: xy the direction the mower laid the stripes, z stripe width (m), w stripe strength
     uLawn: { value: new THREE.Vector4(1, 0, 10, 0) },
@@ -40,6 +44,9 @@
     uLodJit: { value: 0 },
     uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
+    // ceiling on the light the road mirrors (sun and sky together), for a venue whose low sun turned
+    // half the road into one white sheet; 50 or more leaves the road as it is
+    uRoadGlare: { value: 100 },
     // the 3D grass map (js/r3-grass.js), so the ground can wear where the turf meets other surfaces
     uGrassMask: { value: null }, uGrassMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
   };
@@ -185,7 +192,7 @@
     '#else',
     '  vFogWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;',
     '#endif'].join('\n');
-  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff;\n';
+  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogSun;\n';
   // Exponential height fog: density(y) = d * exp(-k * y), integrated analytically along the
   // view ray. Inscattered light is the horizon colour plus a forward-scattering sun lobe.
   const FOG_FRAG = [
@@ -197,7 +204,7 @@
     '  float fAmt = 1.0 - exp(-uFogDensity * exp(-uFogFalloff * cameraPosition.y) * fDist * fLine);',
     '  vec3 fDir = fRay / max(fDist, 1e-3);',
     '  float fSun = pow(max(dot(fDir, uSunDir), 0.0), 6.0);',
-    '  vec3 fCol = uFogCol + uSunCol * fSun * 0.12;',
+    '  vec3 fCol = uFogCol + uSunCol * fSun * uFogSun;',
     '  gl_FragColor.rgb = mix(gl_FragColor.rgb, fCol, clamp(fAmt, 0.0, 1.0));',
     '#endif'].join('\n');
 
@@ -551,7 +558,11 @@
           '  float aSkid = smoothstep(0.72, 0.95, wNoise(vec2(vTrk.y * 3.2, vTrk.x * 0.03) + 41.0)) * aW * aWide;',
           // many separate tyre-track pairs, each a car's own path, baked (tools/rubber_bake.py)
           '  float aMany = texture2D(uRubber, vec2(vTrk.x / 512.0, clamp(aL / 20.0 + 0.5, 0.01, 0.99))).r * 0.5;',
-          '  float aRub = aTr * aBreak * (0.28 + 0.5 * aLoad) + aBand * 0.14 * aLoad + aWide * 0.1 + aWider * 0.05 + aSkid * 0.35 + aMany * (0.5 + 0.5 * aLoad);',
+          // (aCirc: 1 on a circuit, 0 on a town's streets, which keep the faint rubber they had. On a
+          // circuit the line is rubbered down the straights too: a band darker than the road, where it
+          // was a paler one, the polished strip mirroring the sky more than the rubber darkened it)
+          '  float aCirc = clamp((uRubK - 0.3) / 0.7, 0.0, 1.0);',
+          '  float aRub = aTr * aBreak * (0.28 + 0.5 * aLoad) + aBand * (0.14 * aLoad + 0.08 * aCirc) + aWide * (0.1 + 0.05 * aCirc) + aWider * 0.05 + aSkid * 0.35 + aMany * (0.5 + 0.5 * aLoad);',
           '  diffuseColor.rgb *= (1.0 - clamp(aRub * uRubK, 0.0, 0.5));',
           '  float aMar = smoothstep(2.4, 4.5, abs(aL)) * (1.0 - smoothstep(0.0, 1.3, min(abs(vTrk.y) - 0.0, 20.0) * 0.0)) * (0.35 + 0.65 * aW) * smoothstep(0.45, 0.85, wNoise(vec2(vTrk.y * 5.0, vTrk.x * 0.35) + 3.0));',
           '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.33, 0.32) * dot(diffuseColor.rgb, vec3(0.333)) * 3.0, aMar * 0.28 * uRubK);',
@@ -566,26 +577,37 @@
           '  diffuseColor.rgb *= mix(1.0, 0.82 + 0.08 * wNoise(pW * 0.35 + 3.0), pIn) * (1.0 - 0.45 * pSeal);',
           '  diffuseColor.rgb *= 0.94 + 0.12 * wNoise(pW * 0.012 + 11.0);',
         ].join('\n'))
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= (1.0 - 0.28 * aBand * uRubK) * (1.0 - 0.12 * pIn + 0.1 * pSeal);');
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= (1.0 - (0.28 - 0.18 * aCirc) * aBand * uRubK) * (1.0 - 0.12 * pIn + 0.1 * pSeal);');
     });
   }
   // Kerbs: paint chipped back to concrete in patches, black tyre rubber smeared along the
   // kerb (uv.x runs along it), and grime.
   function kerbWear(m) {
     return ext(m, 'kerb', sh => {
-      sh.fragmentShader = NOISE + '\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n' + FAR_AVG).replace('#include <color_fragment>', [
+      // (uRoadGlare: the kerb beside a road whose glare is rolled off takes the same ceiling)
+      sh.fragmentShader = 'uniform float uKerbRidge; uniform float uRoadGlare;\n' + NOISE + '\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n' + FAR_AVG).replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  if (uRoadGlare < 50.0) { vec3 kgS = reflectedLight.directSpecular + reflectedLight.indirectSpecular; float kgL = max(kgS.r, max(kgS.g, kgS.b)), kgK = uRoadGlare * (1.0 - exp(-kgL / uRoadGlare)) / max(kgL, 1e-4); reflectedLight.directSpecular *= kgK; reflectedLight.indirectSpecular *= kgK; }').replace('#include <color_fragment>', [
         '#include <color_fragment>',
         '  vec2 kW = vFogWorld.xz;',
-        '  float kN = wNoise(kW * 1.4) * 0.6 + wNoise(kW * 6.0) * 0.4;',
-        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.29, 0.27), smoothstep(0.64, 0.8, kN) * 0.75);',
+        // (flakes a hand wide: as blotches half a metre across they read as airbrush smudges)
+        '  float kN = wNoise(kW * 2.6) * 0.55 + wNoise(kW * 9.0) * 0.45;',
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.29, 0.27), smoothstep(0.66, 0.8, kN) * 0.5);',
         '#if defined( USE_NORMALMAP )',
         '  vec2 kU = vNormalMapUv;',
         '#else',
         '  vec2 kU = kW;',
         '#endif',
-        '  float kS = wNoise(vec2(kU.y * 11.0, kU.x * 0.5)) * 0.65 + wNoise(vec2(kU.y * 31.0, kU.x * 1.3)) * 0.35;',
-        '  diffuseColor.rgb *= 1.0 - (smoothstep(0.42, 0.85, kS) * 0.6 + 0.1);',
-        '  diffuseColor.rgb *= mix(0.82, 1.0, wNoise(kW * 0.35));',
+        // the cast ridges across the kerb, four to a 1.5 m block: each a step with a dark foot and a
+        // tread that lightens toward the next one; left out where a pixel cannot hold a ridge
+        '  float kRf = fwidth(kU.x * 4.0), kRp = fract(kU.x * 4.0), kRk = uKerbRidge * (1.0 - smoothstep(0.25, 0.7, kRf));',
+        '  diffuseColor.rgb *= 1.0 - 0.55 * kRk * (1.0 - smoothstep(0.0, 0.1 + kRf, min(kRp, 1.0 - kRp)));',
+        '  diffuseColor.rgb *= 1.0 + 0.16 * kRk * (smoothstep(0.15, 1.0, kRp) - 0.5);',
+        // tyre rubber: thin black streaks along the direction of travel, gathered in bands a tyre
+        // wide, heaviest on the third of the kerb next to the road (uv.y is 0 at the road's edge)
+        '  float kNear = 1.0 - smoothstep(0.12, 0.5, kU.y);',
+        '  float kBand = smoothstep(0.5, 0.72, wNoise(vec2(kU.y * 9.0, kU.x * 0.11) + 3.0));',
+        '  float kS = wNoise(vec2(kU.y * 70.0, kU.x * 0.3)) * 0.6 + wNoise(vec2(kU.y * 170.0, kU.x * 0.9)) * 0.4;',
+        '  diffuseColor.rgb *= 1.0 - (kBand * (0.35 + 0.65 * kNear) * smoothstep(0.3, 0.7, kS) * 0.62 + 0.08 + 0.1 * kNear);',
+        '  diffuseColor.rgb *= mix(0.86, 1.0, wNoise(kW * 0.35));',
       ].join('\n'));
     });
   }
