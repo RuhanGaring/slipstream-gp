@@ -62,14 +62,16 @@
   //   carShade    the shade the cars cast from the sky (js/r3-carshade.js): 'traced' live from
   //               the car's real shape, 'baked' the same trace once per model, 'boxes' the old
   //               box stand-ins
+  //   liveRefl    live reflections on the cars: steps a frame of redrawing the cube round the
+  //               followed car (js/render3d.js probeStep), 0 for the sky map alone
   //   drs         dynamic resolution: the render scale drops a little (to 67% at most) to hold
   //               the frame rate target before Auto quality turns anything off
   const ADV = { dprCap: 2, fpsCap: 0, aniso: 8, shadowRes: 1, shadowDist: 1, shadowSoft: 1, aoSamples: 10, aoStrength: 0.85, bloomK: 0.06, shaftK: 0.45, shutter: 180, grain: true,
     trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 34, carFar: 130, carDraw: 0, dispHz: 12,
-    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, carShade: 'baked', lensRain: true, wheelBlur: true, carSelfShade: true, roadShade: true };
+    particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, carShade: 'baked', lensRain: true, wheelBlur: true, carSelfShade: true, roadShade: true, liveRefl: 0 };
   const ADV_P = {
-    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17 },
-    high: {},
+    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17, liveRefl: 2 },
+    high: { liveRefl: 1 },
     medium: { aoSamples: 8, grassDensity: 0.6, grassDist: 70, grassLod: 9 },
     low: { dprCap: 1, aniso: 4, grass: false, trees: 0.6, carNear: 22, carFar: 90, particles: 500, skids: 4500, dispHz: 8 },
     potato: { dprCap: 1, aniso: 2, grass: false, trees: 0.33, boards: false, viewDist: 3000, carNear: 12, carFar: 40, carDraw: 350, particles: 300, skids: 3000, debris: 20, dispHz: 6, catchup: 8 },

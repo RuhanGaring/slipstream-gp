@@ -733,6 +733,19 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // js/vendor/three.min.js (WebGLUniforms.upload, patched): a tagged value is skipped when that
     // program last took this same value object in this render call. Samplers are never skipped
     // (their texture units are handed out per draw). Values must not change during a render call.
+    // Live reflections (probeStep): the cars' materials (lodFade, js/r3-car.js) take the probe's
+    // map as their environment, everything else keeps the sky's. three reads the environment per
+    // draw from the scene it is handed, so it is swapped in round each car draw.
+    {
+      const rbd = renderer.renderBufferDirect.bind(renderer);
+      renderer.renderBufferDirect = (cam, sc, geo, mat, obj, grp) => {
+        const env = LP.ready && sc && mat.userData.lodFade ? LP.out.texture : null;
+        if (!env) return rbd(cam, sc, geo, mat, obj, grp);
+        const was = sc.environment;
+        sc.environment = env;
+        try { rbd(cam, sc, geo, mat, obj, grp); } finally { sc.environment = was; }
+      };
+    }
     {
       const EPOCH = { v: 0 }, rr = renderer.render.bind(renderer);
       for (const k in F1.R3S.U) F1.R3S.U[k].r3s = EPOCH;
@@ -4518,6 +4531,91 @@ void main() {
     return Promise.all([p.catch(() => {}), F1.R3Post.Q.on ? F1.R3Post.precompile() : null]).then(() => rt.dispose());
   }
 
+  // Live reflections (GFX.liveRefl: steps a frame, 1 on High, 2 on Ultra, 0 off). The cars otherwise
+  // reflect the circuit's sky map, made once at load: in a tunnel, under a bridge or between
+  // buildings they went on mirroring open sky. A cube camera at the followed car draws its
+  // surroundings (the larger scenery under the same sky, which stands behind it as the background;
+  // no cars, no grass) after the frame itself, and once all six faces are new the cube is filtered
+  // into the map the cars' materials read (renderBufferDirect above). Nothing else changes: the
+  // shadow maps are not redrawn for it, and the scenery keeps the sky's map.
+  // The cost is draw calls (some 25 us each on this engine): a face is a hundred or more of them on
+  // a town circuit, most of it the circuit-wide merged scenery, which every face sees. So the
+  // scenery is dealt into three groups (layers), each frame draws one group into the current face
+  // over what the last left, and the filter takes a step of its own: the work is the same every
+  // frame, a full cube every 19 steps (a third of a second on High at 60 fps), with no spike.
+  // (The cube is the sky map's size: three keys a program on the map's size, so a different one
+  // would compile every car program afresh the first time it showed, mid-race.)
+  const PROBE_LAYERS = [3, 4, 5], LP_STEPS = 6 * PROBE_LAYERS.length + 1;
+  const LP = { size: 0, rt: null, out: null, cam: null, step: 0, ready: false, root: null, pos: new THREE.Vector3(), hid: [] };
+  function probeInit(n) {
+    if (LP.rt) LP.rt.dispose();
+    if (LP.out) LP.out.dispose();
+    LP.rt = LP.out = LP.cam = null; LP.ready = false; LP.step = 0; LP.size = n;
+    if (!n) return;
+    LP.rt = new THREE.WebGLCubeRenderTarget(n, { type: THREE.HalfFloatType, generateMipmaps: false });
+    // (the fog has most of the scenery by 250 m, and the sky behind takes over there)
+    LP.cam = new THREE.CubeCamera(0.25, 250, LP.rt);
+    LP.root = null;
+  }
+  // What the cube draws: the circuit's meshes some 6 m across or more (the merged scenery, walls,
+  // stands, buildings, the tunnel), tagged once per circuit, in turn, with one of the probe's
+  // layers. The props, cones, marshals and signs are too small to tell apart in a blurred reflection.
+  const _ps = new THREE.Vector3(), _pp = new THREE.Vector3(), _pq = new THREE.Quaternion();
+  function probeTag(root) {
+    root.updateMatrixWorld(true);
+    let k = 0;
+    root.traverse(o => {
+      if (!o.isMesh || !o.geometry || !o.layers.test(camera.layers)) return;
+      const g = o.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      if (!g.boundingSphere) return;
+      o.matrixWorld.decompose(_pp, _pq, _ps);
+      const r = (o.isInstancedMesh && o.boundingSphere ? o.boundingSphere.radius : g.boundingSphere.radius) * Math.max(_ps.x, _ps.y, _ps.z);
+      if (r >= 3) o.layers.enable(PROBE_LAYERS[k++ % PROBE_LAYERS.length]);
+    });
+    LP.root = root;
+  }
+  function probeStep(focus) {
+    const per = Math.min(LP_STEPS, Math.max(0, Math.round(+GFX.liveRefl || 0))), n = per && envRT ? Math.round(envRT.texture.image.height / 4) : 0;
+    if (n !== LP.size) probeInit(n);
+    if (!n || !state.root || compiling) return;
+    if (LP.root !== state.root) probeTag(state.root);
+    const cc = LP.cam, prev = renderer.getRenderTarget();
+    for (let k = 0; k < per; k++) {
+      if (LP.step === LP_STEPS - 1) { // the filter
+        LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out);
+        LP.ready = true; LP.step = 0;
+        continue;
+      }
+      if (LP.step === 0) {
+        // (where the followed car is now, a metre up: the whole cube is drawn from here)
+        const m = focus && live.get(focus);
+        if (m && m.visible !== false) LP.pos.set(m.position.x, m.position.y + 0.9, m.position.z); else LP.pos.copy(camera.position);
+        if (cc.coordinateSystem !== renderer.coordinateSystem) { cc.coordinateSystem = renderer.coordinateSystem; cc.updateCoordinateSystem(); }
+        cc.position.copy(LP.pos); cc.updateMatrixWorld(true);
+      }
+      const face = Math.floor(LP.step / PROBE_LAYERS.length), grp = LP.step % PROBE_LAYERS.length, cam = cc.children[face];
+      const hid = LP.hid;
+      // (the cars, the sky dome and anything else not tagged stay out by layer; the grass is under the
+      // circuit's root, and its shells are cut-outs too fine for a reflection)
+      if (state.grass && state.grass.visible) { state.grass.visible = false; hid.push(state.grass); }
+      const bg = scene.background, au = scene.matrixWorldAutoUpdate, ac = renderer.autoClear, tm = renderer.toneMapping;
+      // (the first group clears the face and lays the sky behind; the others draw over it, against its depth)
+      scene.background = grp === 0 ? envRT.texture : null; renderer.autoClear = grp === 0;
+      scene.matrixWorldAutoUpdate = false; renderer.toneMapping = THREE.NoToneMapping;
+      cam.layers.set(PROBE_LAYERS[grp]);
+      try {
+        renderer.setRenderTarget(LP.rt, face);
+        renderer.render(scene, cam);
+      } finally {
+        for (const o of hid) o.visible = true;
+        hid.length = 0;
+        scene.background = bg; scene.matrixWorldAutoUpdate = au; renderer.autoClear = ac; renderer.toneMapping = tm;
+      }
+      LP.step++;
+    }
+    renderer.setRenderTarget(prev);
+  }
   // In the tunnel (js/trackgen2.js cityTunnel): the roof's shadow takes the sun, but the sky's light
   // (the environment map and the hemisphere) would still light everything as in the open. With the
   // camera inside, that sky light is turned down to the lamps' level and the exposure opens up, as a
@@ -4638,6 +4736,7 @@ void main() {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
     }
+    probeStep(o.focus);
   }
 
   // Spinning wheels for the motion blur (js/r3-post.js): the wheels of the two cars nearest the
