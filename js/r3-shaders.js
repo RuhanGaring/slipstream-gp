@@ -18,6 +18,7 @@
     uKerbRidge: { value: 1 }, // the cast ridges across a circuit's kerbs, 0 on a town's flat ones
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
+    uAmbK: { value: 1.4 }, uAmbAdd: { value: 0 }, // (the shade light's strength and a lift, SCENE below)
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
     uFogDensity: { value: 0.0003 },
     uFogFalloff: { value: 0.004 },
@@ -232,6 +233,11 @@
 
   function patchShader(sh, mac, liv, ao, wk, opaque) {
     Object.assign(sh.uniforms, U);
+    // Ambient (shade) light, for every lit surface: the sky's and the bounce light, which is what a
+    // surface in shade, and a car under a building, is lit by. uAmbK scales it, uAmbAdd lifts it
+    // by a share of the surface's own colour (js/r3-tyretune.js has the sliders).
+    if (sh.fragmentShader.includes('#include <lights_fragment_end>') && !/uAmbK/.test(sh.fragmentShader))
+      sh.fragmentShader = 'uniform float uAmbK; uniform float uAmbAdd;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * uAmbK + diffuseColor.rgb * uAmbAdd;'); // (r3Amb)
     // the sun's shadow from the cascades; opaque surfaces also write how much sun reaches them
     // into the scene's alpha, for the ambient occlusion pass
     if (F1.R3Shadow && sh.fragmentShader.includes('#include <lights_fragment_begin>')) {

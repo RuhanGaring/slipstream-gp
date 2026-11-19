@@ -10,14 +10,22 @@
   const F1 = G.F1, KEY = 'slip_tyretune';
   let panel = null;
   const T = () => F1.R3Tyre;
-  const baseOf = () => JSON.stringify(T().DEFAULTS);
-  const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values })); } catch (e) {} };
+  // The scene's own values (not the tyres'): the ambient (shade) light every lit surface takes, a
+  // multiplier on the sky and bounce light, and a lift added by a share of the surface's colour.
+  const SC_SCHEMA = [
+    { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 1.4, u: 'uAmbK' },
+    { group: 'Scene lighting', key: 'ambAdd', label: 'Ambient lift (x colour)', type: 'f', min: 0, max: 1, step: 0.005, def: 0, u: 'uAmbAdd' },
+  ];
+  const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
+    set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && U[d.u]) U[d.u].value = this.values[d.key]; } } };
+  const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
+  const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
   function restore() {
     if (!T()) return;
     try {
       const o = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (o && o.base === baseOf() && o.values) T().set(o.values);
+      if (o && o.base === baseOf() && o.values) { T().set(o.values); SC.set(o.scene); }
     } catch (e) {}
   }
 
@@ -57,7 +65,7 @@
     const bar = head.querySelector('.tt-bar'), msg = head.querySelector('.tt-msg');
     const say = t => { msg.textContent = t; clearTimeout(say.t); say.t = setTimeout(() => { msg.textContent = ''; }, 4000); };
     const btn = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; bar.appendChild(b); return b; };
-    const file = () => JSON.stringify({ kind: 'slipstream-tyre-shader', version: 1, saved: new Date().toISOString(), values: T().values }, null, 2);
+    const file = () => JSON.stringify({ kind: 'slipstream-shader-tuning', version: 2, saved: new Date().toISOString(), values: T().values, scene: SC.values }, null, 2);
     btn('Save file', () => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([file()], { type: 'application/json' }));
@@ -68,13 +76,13 @@
     const pick = document.createElement('input'); pick.type = 'file'; pick.accept = '.json,application/json'; pick.style.display = 'none';
     pick.onchange = () => {
       const f = pick.files && pick.files[0]; if (!f) return;
-      f.text().then(t => { const o = JSON.parse(t); T().set(o.values || o); store(); refresh(); say('Loaded ' + f.name + '.'); }).catch(() => say('That file could not be read.'));
+      f.text().then(t => { const o = JSON.parse(t); T().set(o.values || o); if (o.scene) SC.set(o.scene); store(); refresh(); say('Loaded ' + f.name + '.'); }).catch(() => say('That file could not be read.'));
       pick.value = '';
     };
     head.appendChild(pick);
     btn('Load file', () => pick.click());
     btn('Copy', () => { navigator.clipboard.writeText(file()).then(() => say('Copied the values.'), () => say('Copy was blocked; use Save file.')); });
-    btn('Reset all', () => { T().set(T().DEFAULTS); store(); refresh(); say('Back to the defaults.'); });
+    btn('Reset all', () => { T().set(T().DEFAULTS); SC.set(SC.DEFAULTS); store(); refresh(); say('Back to the defaults.'); });
     panel.appendChild(head);
 
     // preview: wear, compound, freeze
@@ -108,7 +116,7 @@
     // the values, by group
     const inputs = [];
     const groups = new Map();
-    for (const d of T().SCHEMA) {
+    for (const [A, d] of SC_SCHEMA.map(x => [SC, x]).concat(T().SCHEMA.map(x => [T(), x]))) {
       if (!groups.has(d.group)) {
         const g = document.createElement('details'); g.open = groups.size < 2;
         g.innerHTML = `<summary>${d.group}</summary><div class="tt-rows"></div>`;
@@ -117,21 +125,21 @@
       const row = document.createElement('div'); row.className = 'tt-row' + (d.type === 'c' ? ' tt-c' : '');
       const lab = document.createElement('label'); lab.textContent = d.label; lab.title = d.key + ' (double-click: default ' + d.def + ')';
       row.appendChild(lab);
-      const put = v => { T().set({ [d.key]: v }); store(); show(); };
+      const put = v => { A.set({ [d.key]: v }); store(); show(); };
       let show;
       if (d.type === 'c') {
         const col = document.createElement('input'); col.type = 'color';
         const hex = document.createElement('input'); hex.type = 'text'; hex.spellcheck = false;
         col.oninput = () => put(col.value);
         hex.onchange = () => { const v = hex.value.trim(); if (/^#?[0-9a-f]{6}$/i.test(v)) put(v[0] === '#' ? v : '#' + v); else show(); };
-        show = () => { const v = T().values[d.key]; col.value = v; hex.value = v; lab.classList.toggle('tt-chg', v.toLowerCase() !== String(d.def).toLowerCase()); };
+        show = () => { const v = A.values[d.key]; col.value = v; hex.value = v; lab.classList.toggle('tt-chg', v.toLowerCase() !== String(d.def).toLowerCase()); };
         row.append(col, hex);
       } else {
         const rg = document.createElement('input'); rg.type = 'range'; rg.min = d.min; rg.max = d.max; rg.step = d.step;
         const nb = document.createElement('input'); nb.type = 'number'; nb.step = d.step;
         rg.oninput = () => put(+rg.value);
         nb.onchange = () => { if (nb.value !== '' && isFinite(+nb.value)) put(+nb.value); else show(); };
-        show = () => { const v = T().values[d.key]; rg.value = v; nb.value = +(+v).toFixed(5); lab.classList.toggle('tt-chg', Math.abs(v - d.def) > 1e-9); };
+        show = () => { const v = A.values[d.key]; rg.value = v; nb.value = +(+v).toFixed(5); lab.classList.toggle('tt-chg', Math.abs(v - d.def) > 1e-9); };
         row.append(rg, nb);
       }
       lab.ondblclick = () => put(d.def);
