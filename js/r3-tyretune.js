@@ -13,10 +13,10 @@
   // The scene's own values (not the tyres'): the ambient (shade) light every lit surface takes, a
   // multiplier on the sky and bounce light, and a lift added by a share of the surface's colour.
   const SC_SCHEMA = [
-    { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 1.4, u: 'uAmbK' },
+    { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53, u: 'uAmbK' },
     { group: 'Scene lighting', key: 'ambAdd', label: 'Ambient lift (x colour)', type: 'f', min: 0, max: 1, step: 0.005, def: 0, u: 'uAmbAdd' },
     // the darks: what shades a car and the road round it
-    { group: 'Shade and darks', key: 'carShadeAmt', label: 'Shadow under the car (strength)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, post: 'a' },
+    { group: 'Shade and darks', key: 'carShadeAmt', label: 'Shadow under the car (strength)', type: 'f', min: 0, max: 1, step: 0.01, def: 1, post: 'a' },
     { group: 'Shade and darks', key: 'carShadeFloor', label: 'Shadow under the car (lightest it gets to black)', type: 'f', min: 0, max: 0.6, step: 0.005, def: 0.03, post: 'f' },
     { group: 'Shade and darks', key: 'carSelf', label: 'Car self-shade (its own sky cover)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, u: 'uCarSelfK' },
     { group: 'Shade and darks', key: 'carAO', label: 'Car ground occlusion (darkening low on the car)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.7, u: 'uCarAOK' },
@@ -28,7 +28,7 @@
     { group: 'Auto exposure', key: 'aeSpeed', label: 'Adapt speed', type: 'f', min: 0.1, max: 6, step: 0.05, def: 1.2, q: 'aeSpeed' },
     { group: 'Auto exposure', key: 'aeCenter', label: 'Weight to the middle of the picture', type: 'f', min: 0, max: 1, step: 0.01, def: 0.6, q: 'aeCenter' },
     { group: 'Shade and darks', key: 'blackLift', label: 'Shadow lift (the darkest values come up)', type: 'f', min: 0, max: 0.12, step: 0.001, def: 0.04, post: 'bl' },
-    { group: 'Picture', key: 'contrast', label: 'Contrast', type: 'f', min: 0.7, max: 1.6, step: 0.01, def: 1.15, post: 'ct' },
+    { group: 'Picture', key: 'contrast', label: 'Contrast', type: 'f', min: 0.7, max: 1.6, step: 0.01, def: 1.36, post: 'ct' },
     { group: 'Picture', key: 'pivot', label: 'Contrast pivot (what stays put)', type: 'f', min: 0.05, max: 0.8, step: 0.01, def: 0.3, post: 'pv' },
     { group: 'Shade and darks', key: 'ckAlb', label: 'Cockpit interior brightness', type: 'f', min: 0.005, max: 0.2, step: 0.001, def: 0.014, u: 'uCkAlb' },
     { group: 'Shade and darks', key: 'ckAO', label: 'Cockpit well darkness', type: 'f', min: 0, max: 1, step: 0.01, def: 0.72, u: 'uCkAO' },

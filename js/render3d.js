@@ -5032,6 +5032,7 @@ void main() {
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     const tunK = tunnelLight(dt);
     const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (1 + tunOpen() * tunK);
+    if (F1.R3Tyre && F1.R3Tyre.setIris) F1.R3Tyre.setIris(1 / (1 + tunOpen() * tunK));
     F1.R3Shadow.U.r3SunA.value = F1.R3Post.Q.on ? 1 : 0;
     if (F1.R3Post.Q.on) {
       renderer.toneMapping = THREE.NoToneMapping;
@@ -5042,9 +5043,11 @@ void main() {
         vel: G.__noVel ? null : velMovers(o.cars || []),
         staticNear: mode === 'cockpit' || mode === 'helmet' ? 1.3 : 0, // (the tub and the hands move with the eye)
         mode, // (a change of camera is a cut for the motion blur and the TAA history)
-        // a filmic grade on the harbour towns: a little contrast, a touch of saturation and a real black point
-        // (and the muted colour of a broadcast camera: the saturated version read as a toy town)
-        grade: state.tr && state.tr.gen2 && state.tr.gen2.city ? [0.24, 0.9, 0.012] : null,
+        // a filmic grade on every circuit: a little S-curve contrast and a real black point (it was the
+        // harbour towns' alone, so the picture's contrast setting, tuned there, read flat everywhere
+        // else); the towns also keep the muted colour of a broadcast camera (the saturated version read
+        // as a toy town)
+        grade: [0.24, state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.9 : 1, 0.012],
         wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || []),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),

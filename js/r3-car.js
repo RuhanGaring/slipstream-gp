@@ -1122,7 +1122,9 @@
     root.add(cockpit.group);
     // T-cam mount points: the camera is bolted to the pod, so it moves only with the chassis
     const tcamEye = new THREE.Object3D(), tcamLook = new THREE.Object3D();
-    tcamEye.position.set(-0.44, 1.255, 0); tcamLook.position.set(30, -0.6, 0);
+    // (without a pod of its own (fw48, vf26) the camera goes where the other models' pods put it: at
+    // -0.44 it sat inside the airbox, whose glossy inside, mirroring the sky, filled the cockpit)
+    tcamEye.position.set(0.05, 1.215, 0); tcamLook.position.set(30, -0.6, 0);
     // the model has its own T-cam pod (the part in the driver's colour): the camera sits on its nose
     {
       const pod = MD.lods[0].body.find(p => /driver_?colou?r|colordriver|_color(\.|$)/i.test(MD.mats[p.m].name));

@@ -184,27 +184,27 @@
   // each is one shared uniform, so every car's tyres take it at once.
   const lin = (r, g, b) => '#' + new THREE.Color().setRGB(r, g, b).getHexString();
   const SCHEMA = [
-    ['Surface', 'rough', 'Roughness, new tread', 0.2, 1, 0.01, 0.3],
+    ['Surface', 'rough', 'Roughness, new tread', 0.2, 1, 0.01, 0.48],
     ['Surface', 'roughSide', 'Sidewall: rougher by', -0.2, 0.4, 0.01, 0.1],
     ['Surface', 'roughDust', 'Sidewall dust: rougher by', 0, 0.4, 0.01, 0.1],
-    ['Surface', 'spec', 'Specular strength (F0 x)', 0, 2, 0.01, 0.93],
-    ['Surface', 'envSpec', 'Sky reflection', 0, 3, 0.01, 0.23],
-    ['Surface', 'envDiff', 'Sky light (diffuse)', 0, 3, 0.01, 0.08],
-    ['Surface', 'sheen', 'Grazing sheen', 0, 2, 0.01, 0.23],
-    ['Surface', 'sheenPow', 'Grazing sheen tightness', 0.5, 12, 0.1, 1],
+    ['Surface', 'spec', 'Specular strength (F0 x)', 0, 2, 0.01, 0.87],
+    ['Surface', 'envSpec', 'Sky reflection', 0, 3, 0.01, 0.4],
+    ['Surface', 'envDiff', 'Sky light (diffuse)', 0, 3, 0.01, 0.15],
+    ['Surface', 'sheen', 'Grazing sheen', 0, 2, 0.01, 0],
+    ['Surface', 'sheenPow', 'Grazing sheen tightness', 0.5, 12, 0.1, 0.5],
     // the tyre in shade (under a building, the car's own shadow): its own copies of the car's shade values
-    ['Shade', 'ao', 'Ground occlusion on the tyre', 0, 1.5, 0.01, 0.5],
-    ['Shade', 'self', 'Tyre self-shade (the car covering its sky)', 0, 1, 0.01, 0.7],
-    ['Shade', 'fill', 'Light floor in shade (added)', 0, 0.3, 0.002, 0.03],
+    ['Shade', 'ao', 'Ground occlusion on the tyre', 0, 1.5, 0.01, 0.58],
+    ['Shade', 'self', 'Tyre self-shade (the car covering its sky)', 0, 1, 0.01, 1],
+    ['Shade', 'fill', 'Light floor in shade (added)', 0, 0.3, 0.002, 0.01],
     ['Surface', 'sideLo', 'Tread/sidewall split from', 0, 1, 0.01, 0.5],
     ['Surface', 'sideHi', 'Tread/sidewall split to', 0, 1, 0.01, 0.85],
-    ['Rubber colour', 'treadNew', 'Tread, new', 'c', 0, 0, '#444445'],
-    ['Rubber colour', 'treadWorn', 'Tread, worn', 'c', 0, 0, '#454544'],
+    ['Rubber colour', 'treadNew', 'Tread, new', 'c', 0, 0, '#0f0f0f'],
+    ['Rubber colour', 'treadWorn', 'Tread, worn', 'c', 0, 0, '#121212'],
     ['Rubber colour', 'side', 'Sidewall', 'c', 0, 0, '#3c3c3d'],
     ['Rubber colour', 'dust', 'Sidewall dust (added)', 'c', 0, 0, '#181715'],
     ['Rubber colour', 'dustNew', 'Dust on a new tyre (share)', 0, 1, 0.01, 0.26],
-    ['Wear', 'band', 'Scuffed bands', 0, 1.5, 0.01, 0.81],
-    ['Wear', 'grain', 'Graining', 0, 1, 0.01, 1],
+    ['Wear', 'band', 'Scuffed bands', 0, 1.5, 0.01, 0.23],
+    ['Wear', 'grain', 'Graining', 0, 1, 0.01, 0.18],
     ['Wear', 'pick', 'Picked-up rubber', 0, 1, 0.01, 1],
     ['Wear', 'pickFrom', 'Picked-up rubber: coverage (lower more)', 0.4, 0.95, 0.01, 0.74],
     ['Wear', 'wRoughOfs', 'Worn tread: roughness offset', -0.4, 0.4, 0.01, 0.09],
@@ -237,7 +237,10 @@
       if (d.type === 'c') U['uT_' + d.key].value.set(values[d.key]); else U['uT_' + d.key].value = values[d.key];
     }
   }
-  const DECL = SCHEMA.map(d => `uniform ${d.type === 'c' ? 'vec3' : 'float'} uT_${d.key};`).join(' ');
+  // (the exposure the tunnel adds, undone for the fill: in there the lamps' light is opened up about
+  // fourfold past the open air's, and the fill rode up with it; render3d sets it each frame)
+  U.uT_fillIris = { value: 1 };
+  const DECL = SCHEMA.map(d => `uniform ${d.type === 'c' ? 'vec3' : 'float'} uT_${d.key};`).join(' ') + ' uniform float uT_fillIris;';
 
   const COMP = { S: 0xff2d2d, M: 0xffd400, H: 0xf2f2f2 };
   const compColor = id => new THREE.Color(COMP[id] || COMP.M);
@@ -295,8 +298,17 @@
         '  roughnessFactor = clamp(mix(roughnessFactor, uT_paintRough, clamp(tyA.r + tyA.g, 0.0, 1.0)) - uT_embossRough * tyA.b, 0.04, 1.0);',
       ].join('\n'))
       // (a floor of light, added last, after the car's shade and occlusion: the rubber is near black,
-      // and under a building the wheel went pitch black while the paint round it did not)
-      .replace('#include <opaque_fragment>', '  { float tyU = dot(normalize(normal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)) * 0.5 + 0.5; outgoingLight += uT_fill * vec3(0.9, 0.93, 1.0) * (0.45 + 0.55 * tyU); }\n#include <opaque_fragment>')
+      // and under a building the wheel went pitch black while the paint round it did not. It is a
+      // share of the light the place has (the hemisphere: sky and ground, or a tunnel's lamps), set
+      // so that in daylight it is what the slider says; as a fixed amount it glowed white in a
+      // tunnel, where the exposure opens about sevenfold)
+      .replace('#include <opaque_fragment>', [
+        '  { vec3 tyFi = vec3(0.9, 0.93, 1.0);',
+        '#if NUM_HEMI_LIGHTS > 0',
+        '    tyFi = getHemisphereLightIrradiance(hemisphereLights[0], normalize(normal)) * 3.4;',
+        '#endif',
+        '    outgoingLight += uT_fill * uT_fillIris * tyFi; }',
+        '#include <opaque_fragment>'].join('\n'))
       // (rubber is a plain dielectric: F0 about 0.04, scaled here)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.specularColor *= uT_spec; material.specularF90 *= uT_spec;')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#ifdef RE_IndirectSpecular\n  radiance *= uT_envSpec;\n#endif\n  iblIrradiance *= uT_envDiff;')
@@ -315,5 +327,5 @@
     return m;
   }
 
-  F1.R3Tyre = { SIZE, geometry, texture, material, patch, compColor, SCHEMA, DEFAULTS, values, set };
+  F1.R3Tyre = { SIZE, geometry, texture, material, patch, compColor, SCHEMA, DEFAULTS, values, set, setIris: k => { U.uT_fillIris.value = k; } };
 })(window);
