@@ -192,6 +192,10 @@
     ['Surface', 'envDiff', 'Sky light (diffuse)', 0, 3, 0.01, 0.08],
     ['Surface', 'sheen', 'Grazing sheen', 0, 2, 0.01, 0.23],
     ['Surface', 'sheenPow', 'Grazing sheen tightness', 0.5, 12, 0.1, 1],
+    // the tyre in shade (under a building, the car's own shadow): its own copies of the car's shade values
+    ['Shade', 'ao', 'Ground occlusion on the tyre', 0, 1.5, 0.01, 0.5],
+    ['Shade', 'self', 'Tyre self-shade (the car covering its sky)', 0, 1, 0.01, 0.7],
+    ['Shade', 'fill', 'Light floor in shade (added)', 0, 0.3, 0.002, 0.03],
     ['Surface', 'sideLo', 'Tread/sidewall split from', 0, 1, 0.01, 0.5],
     ['Surface', 'sideHi', 'Tread/sidewall split to', 0, 1, 0.01, 0.85],
     ['Rubber colour', 'treadNew', 'Tread, new', 'c', 0, 0, '#444445'],
@@ -243,6 +247,8 @@
     sh.uniforms.uTyWear = wear || TY_NEW;
     sh.uniforms.uTyComp = comp || TY_COMP;
     Object.assign(sh.uniforms, U);
+    // (the car's shade values, for this material alone: its shader reads them by these names)
+    sh.uniforms.uCarAOK = U.uT_ao; sh.uniforms.uCarSelfK = U.uT_self;
     sh.vertexShader = 'attribute vec3 aWc; attribute float aWi; attribute vec2 aTyS; varying vec3 vTyP; varying vec3 vTyN; varying float vTyWi; varying vec2 vTyS;\n'
       + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vTyP = position - aWc; vTyN = normal; vTyWi = aWi; vTyS = aTyS;');
     sh.fragmentShader = [
@@ -288,6 +294,9 @@
         '  roughnessFactor = mix(uT_rough + uT_roughSide + uT_roughDust * tyDust, mix(uT_rough, uT_rough + uT_wRoughOfs + uT_wRoughBand * tyBand + uT_wRoughPick * tyPick, tyW), tyTread);',
         '  roughnessFactor = clamp(mix(roughnessFactor, uT_paintRough, clamp(tyA.r + tyA.g, 0.0, 1.0)) - uT_embossRough * tyA.b, 0.04, 1.0);',
       ].join('\n'))
+      // (a floor of light, added last, after the car's shade and occlusion: the rubber is near black,
+      // and under a building the wheel went pitch black while the paint round it did not)
+      .replace('#include <opaque_fragment>', '  { float tyU = dot(normalize(normal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)) * 0.5 + 0.5; outgoingLight += uT_fill * vec3(0.9, 0.93, 1.0) * (0.45 + 0.55 * tyU); }\n#include <opaque_fragment>')
       // (rubber is a plain dielectric: F0 about 0.04, scaled here)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.specularColor *= uT_spec; material.specularF90 *= uT_spec;')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#ifdef RE_IndirectSpecular\n  radiance *= uT_envSpec;\n#endif\n  iblIrradiance *= uT_envDiff;')
