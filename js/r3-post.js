@@ -483,7 +483,7 @@
     // (uShadeAmt: how much of the shade under a car shows; uShadeFloor: the least light it leaves)
     '  return mix(1.0, uShadeFloor + (1.0 - uShadeFloor) * k, uShadeAmt);',
     '}',
-    'uniform sampler2D tAE; uniform float uAE; uniform float uBlackLift; uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
+    'uniform sampler2D tAE; uniform float uAE; uniform float uBlackLift; uniform float uContrast; uniform float uPivot; uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain; uniform vec3 uGrade;',
     // The AO target is half size. Read plainly (bilinear), along a silhouette it mixes the near
     // surface's value into the far one's: the road beside a car took the car's own (unoccluded)
@@ -598,6 +598,8 @@
     '  c = max(c - uGrade.z, 0.0) / (1.0 - uGrade.z);',
     '  { float gL = dot(c, vec3(0.2126, 0.7152, 0.0722)); c = max(gL + uGrade.y * (c - gL), 0.0); }',
     '  c = toSRGB(c);',
+    // contrast about a low pivot (display values), so the lifted shadows stay lifted and the mids and highlights open up
+    '  c = clamp((c - uPivot) * uContrast + uPivot, 0.0, 1.0);',
     '  c = mix(c, c * c * (3.0 - 2.0 * c), uGrade.x);',
     // grain doubles as dither, which also hides 8-bit banding in skies and fog
     '  float g = hash(vUv * uRes + fract(uTime) * 61.0) - 0.5;',
@@ -610,7 +612,7 @@
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
     uShadeAmt: { value: 0.7 }, uShadeFloor: { value: 0.03 },
-    tAE: { value: null }, uAE: { value: 0 }, uBlackLift: { value: 0.04 }, uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
+    tAE: { value: null }, uAE: { value: 0 }, uBlackLift: { value: 0.04 }, uContrast: { value: 1.15 }, uPivot: { value: 0.3 }, uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() }, uGrade: { value: new THREE.Vector3(0, 1, 0) },
   });
 
@@ -864,7 +866,7 @@
   }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
-  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
+  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setContrast: (k, p) => { if (k != null) compMat.uniforms.uContrast.value = k; if (p != null) compMat.uniforms.uPivot.value = p; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
     // the scene's own HDR target (made if need be), for a warm-up draw off screen (js/render3d.js precompile)
     sceneTarget: () => { if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; } return RT.scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);
