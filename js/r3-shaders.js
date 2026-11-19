@@ -307,7 +307,7 @@
         // the car's own shade: the sky light, and the sky's reflection a little more (a reflection
         // comes from one direction, more often a hidden one where the surface is shut in)
         '    float sk = clamp(vSky, 0.0, 1.0);',
-        '    reflectedLight.indirectDiffuse *= sk; reflectedLight.indirectSpecular *= sk * sqrt(sk);',
+        '    reflectedLight.indirectDiffuse *= sk; reflectedLight.indirectSpecular *= sk * sqrt(sk) * 0.85;',
         // a fill under the shade: the hemisphere light's colour (sky above, ground bounce below)
         // added after it, so a car in a building's shade is not crushed to black: what the road and
         // buildings round it show there is bounced light the sky map does not have
