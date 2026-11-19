@@ -18,6 +18,7 @@
     uKerbRidge: { value: 1 }, // the cast ridges across a circuit's kerbs, 0 on a town's flat ones
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
+    uCarSelfK: { value: 0.7 }, uCarAOK: { value: 0.7 }, // (how much of a car's own shade and of the road's occlusion on it shows)
     uAmbK: { value: 1.4 }, uAmbAdd: { value: 0 }, // (the shade light's strength and a lift, SCENE below)
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
     uFogDensity: { value: 0.0003 },
@@ -302,16 +303,16 @@
       // sits at the car's ground, or at the wheel centre for tyres, hence ao.lift)
       // (plus the car's own shade, traced once per model: aSky, js/r3-carshade.js; 1 where a mesh has none)
       sh.vertexShader = 'varying float vAOh; attribute float aSky; varying float vSky;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSky = aSky;\n  vAOh = (modelMatrix * vec4(transformed, 1.0)).y - modelMatrix[3].y + ' + ao.lift.toFixed(3) + ';');
-      sh.fragmentShader = 'varying float vAOh; varying float vSky;\n' + sh.fragmentShader.replace('#include <aomap_fragment>', [
+      sh.fragmentShader = 'varying float vAOh; varying float vSky; uniform float uCarSelfK; uniform float uCarAOK;\n' + sh.fragmentShader.replace('#include <aomap_fragment>', [
         '#include <aomap_fragment>',
         '  {',
         '    float aoUp = dot(normalize(normal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));',
         '    float aoAmt = 0.6 + 0.4 * (1.0 - clamp(aoUp, 0.0, 1.0));', // surfaces that face up still see the sky
-        '    float aoG = 1.0 - aoAmt * ' + ao.k.toFixed(2) + ' * (1.0 - smoothstep(0.0, 0.8, vAOh));',
+        '    float aoG = 1.0 - aoAmt * ' + ao.k.toFixed(2) + ' * uCarAOK * (1.0 - smoothstep(0.0, 0.8, vAOh));',
         '    reflectedLight.indirectDiffuse *= aoG; reflectedLight.indirectSpecular *= aoG;',
         // the car's own shade: the sky light, and the sky's reflection a little more (a reflection
         // comes from one direction, more often a hidden one where the surface is shut in)
-        '    float sk = clamp(vSky, 0.0, 1.0);',
+        '    float sk = mix(1.0, clamp(vSky, 0.0, 1.0), uCarSelfK);',
         '    reflectedLight.indirectDiffuse *= sk; reflectedLight.indirectSpecular *= sk * sqrt(sk);',
         '  }'].join('\n'));
     }

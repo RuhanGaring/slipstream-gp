@@ -15,9 +15,16 @@
   const SC_SCHEMA = [
     { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 1.4, u: 'uAmbK' },
     { group: 'Scene lighting', key: 'ambAdd', label: 'Ambient lift (x colour)', type: 'f', min: 0, max: 1, step: 0.005, def: 0, u: 'uAmbAdd' },
+    // the darks: what shades a car and the road round it
+    { group: 'Shade and darks', key: 'carShadeAmt', label: 'Shadow under the car (strength)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, post: 'a' },
+    { group: 'Shade and darks', key: 'carShadeFloor', label: 'Shadow under the car (lightest it gets to black)', type: 'f', min: 0, max: 0.6, step: 0.005, def: 0.03, post: 'f' },
+    { group: 'Shade and darks', key: 'carSelf', label: 'Car self-shade (its own sky cover)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, u: 'uCarSelfK' },
+    { group: 'Shade and darks', key: 'carAO', label: 'Car ground occlusion (darkening low on the car)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.7, u: 'uCarAOK' },
+    { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
   ];
   const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
-    set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && U[d.u]) U[d.u].value = this.values[d.key]; } } };
+    set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && d.u && U[d.u]) U[d.u].value = this.values[d.key]; }
+      const P = F1.R3Post; if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.Q) P.Q.aoK = this.values.ssao; } } };
   const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
@@ -160,6 +167,10 @@
   }
 
   G.addEventListener('keydown', e => { if (e.code === 'F7' && !e.repeat) { e.preventDefault(); toggle(); } });
+  // (the post stack's occlusion strength is also set from the game's own Occlusion strength setting
+  // each time the quality is applied: the panel's value is applied after that, so it stands)
+  { const P = F1.R3Post; if (P && P.setQuality) { const sq = P.setQuality; P.setQuality = function () { const r = sq.apply(this, arguments); if (P.Q) P.Q.aoK = SC.values.ssao; return r; }; } }
+  SC.set(SC.DEFAULTS); // (defaults applied: the post stack's and the shade's values live outside this file)
   restore();
   F1.TyreTune = { toggle, restore };
 })(window);
