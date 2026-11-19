@@ -3414,7 +3414,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     let mtLeaf = null;
     if (MT) {
       const li = T.has('leaves') ? T.photo('leaves').image : null;
-      mtLeaf = std({ map: MT.texture(li), alphaTest: 0.32, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, vertexColors: true });
+      mtLeaf = std({ map: MT.texture(li), alphaTest: 0.26, side: THREE.DoubleSide, roughness: 0.92, envMapIntensity: 0.35, metalness: 0, vertexColors: true });
       mtLeaf.userData.patchExtra = MT.leafPatch; mtLeaf.userData.patchKey = 'mtree';
       if (!M.bark.map && T.has('bark')) { M.bark.map = T.photo('bark', [1, 3]); M.bark.color.set('#b7a894'); M.bark.needsUpdate = true; }
     }
@@ -3433,7 +3433,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         if (loc.i == null || loc.i < 0) continue;
         const s = loc.d >= 0 ? 1 : -1, nx = tr.nx[loc.i] * s, nz = tr.ny[loc.i] * s, tx = -nz, tz = nx, ad = Math.abs(loc.d);
         const wall = (tr.barr && tr.barr[loc.d >= 0 ? 1 : 0] ? tr.barr[loc.d >= 0 ? 1 : 0][loc.i] : 12) + 4;
-        if (near(it) >= 2) for (let k = 0; k < (conifer ? 3 : 2); k++) { const o = (conifer ? 3 + rr() * 5 + k * 4.5 : 5 + rr() * 9 + k * 7), l = (rr() - 0.5) * 10; add.push({ type: 'tree', x: it.x + nx * o + tx * l, y: it.y + nz * o + tz * l, r: it.r * (0.7 + rr() * 0.6) }); }
+        if (conifer || near(it) >= 2) for (let k = 0; k < 2; k++) { const o = (conifer ? 2.5 + rr() * 2.5 + k * 3.8 : 5 + rr() * 9 + k * 7), l = (rr() - 0.5) * 10; add.push({ type: 'tree', x: it.x + nx * o + tx * l, y: it.y + nz * o + tz * l, r: it.r * (0.7 + rr() * 0.6) }); }
         for (let k = 0; k < 5; k++) { const o = k < 3 ? -(0.5 + rr() * 4) : 1 + rr() * 6, l = (rr() - 0.5) * 11; if (ad + o > wall) add.push({ type: 'tree', shrub: true, x: it.x + nx * o + tx * l, y: it.y + nz * o + tz * l, r: 1 }); }
       }
       items = items.concat(add);
@@ -3467,8 +3467,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             tmp.position.set(it.x, gy - 0.15, it.y); tmp.rotation.set((rnd() - 0.5) * 0.04, rnd() * 6.28, (rnd() - 0.5) * 0.04); tmp.scale.set(H * wk, H, H * wk); tmp.updateMatrix();
             leaves.setMatrixAt(k, tmp.matrix); leavesF.setMatrixAt(k, tmp.matrix);
             // per tree colour: spruce near-black blue-green; broadleaf from yellow-green to deep green, a few copper or pale ones
-            if (conifer && !it.shrub) c.setHSL(0.42 + (rnd() - 0.5) * 0.045, 0.22 + rnd() * 0.12, 0.48 + (rnd() - 0.5) * 0.18);
-            else { const q = rnd(); c.setHSL(q < 0.05 ? 0.04 : q < 0.13 ? 0.19 : 0.28 + (rnd() - 0.5) * 0.06, q < 0.05 ? 0.35 : 0.14 + rnd() * 0.22, q < 0.05 ? 0.55 : 0.66 + (rnd() - 0.5) * 0.34); }
+            if (conifer && !it.shrub) c.setHSL(0.36 + rnd() * 0.08, 0.2 + rnd() * 0.14, 0.56 + (rnd() - 0.5) * 0.16);
+            else { const q = rnd(); c.setHSL(q < 0.05 ? 0.04 : q < 0.13 ? 0.19 : 0.28 + (rnd() - 0.5) * 0.06, q < 0.05 ? 0.35 : 0.1 + rnd() * 0.18, q < 0.05 ? 0.55 : 0.66 + (rnd() - 0.5) * 0.34); }
             leaves.setColorAt(k, c); leavesF.setColorAt(k, c);
           });
           for (const m of [leaves, leavesF]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.dens = g.length; root.add(m); }

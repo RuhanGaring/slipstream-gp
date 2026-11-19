@@ -100,12 +100,12 @@
   function conifer(seed) {
     const rnd = rngOf(seed), leaf = new Acc(), bark = new Acc();
     const base = 0.06 + rnd() * 0.05, R0 = 0.18 + rnd() * 0.04;
-    tube(bark, [V(0, -0.02, 0), V(0, 0.5, 0), V(0, 0.98, 0)], 0.018, 0.005, 6, 0.85);
+    tube(bark, [V(0, -0.02, 0), V(0, 0.42, 0), V(0, 0.78, 0)], 0.018, 0.006, 6, 0.85);
     const trunkN = bark.i.length;
     const rad = y => R0 * Math.pow(Math.max(0, (1 - y) / (1 - base)), 0.95) + 0.01;
     // inner cone (opaque-ish fill: the dense dark core between the branches)
     {
-      const sides = 8, y0 = base + 0.02, y1 = 0.985, b0 = leaf.p.length / 3;
+      const sides = 8, y0 = base + 0.02, y1 = 0.9, b0 = leaf.p.length / 3;
       for (let j = 0; j <= sides; j++) {
         const a = j / sides * Math.PI * 2, r = rad(y0) * 0.92, nx = Math.cos(a), nz = Math.sin(a);
         leaf.v(nx * r, y0, nz * r, nx * 0.8, 0.6, nz * 0.8, 0.02 + 0.06 * j / sides, 0.03, 0.3, 1e9);
@@ -115,7 +115,7 @@
     }
     const tiers = 13 + Math.floor(rnd() * 3);
     for (let t = 0; t < tiers; t++) {
-      const y = base + (0.96 - base) * Math.pow(t / (tiers - 1), 0.92) + (rnd() - 0.5) * 0.015, R = rad(y), nb = 10 + Math.floor(rnd() * 2) - (t > tiers - 4 ? 4 : 0);
+      const y = base + (0.84 - base) * Math.pow(t / (tiers - 1), 0.92) + (rnd() - 0.5) * 0.015, R = rad(y), nb = 6 + Math.floor(rnd() * 2) - (t > tiers - 4 ? 2 : 0);
       for (let k = 0; k < nb; k++) {
         const a = (k + rnd() * 0.5) / nb * Math.PI * 2 + t * 1.3, dx = Math.cos(a), dz = Math.sin(a);
         const L = R * (0.95 + rnd() * 0.25), d1 = 0.18 + rnd() * 0.1, d2 = 0.5 + rnd() * 0.25;
@@ -125,19 +125,32 @@
         const across = V(-dz, 0, dx);
         const ao = 0.55 + 0.3 * (t / tiers) + 0.15 * (k % 2);
         const nbv = V(dx, 0.45, dz).normalize();
-        const lod = k % 4 === 0 || t > tiers - 3 ? 1e9 : k % 4 === 2 ? 150 : 60;
+        const lod = k % 2 === 0 || t > tiers - 3 ? 1e9 : 120;
         const p0 = V(dx * 0.012, y, dz * 0.012), dirA = V(dx, -d1, dz).normalize(), p1 = p0.clone().add(dirA.clone().multiplyScalar(L * 0.5));
         const dirB = V(dx, -d2, dz).normalize(), p2 = p1.clone().add(dirB.clone().multiplyScalar(L * 0.55));
         const n = nbv;
-        for (const [a, b, v0, v1, w0, w1, o] of [[p0, p1, 0, 0.5, 0.55, 0.95, ao * 0.85], [p1, p2, 0.5, 1, 0.95, 0.7, ao]]) {
+        // each half is a crossed pair: the flat card and one turned on edge (narrower), so a branch
+        // has volume from every side and the tiers close up
+        const down = V(dx, -d1, dz).normalize().cross(across).normalize();
+        for (const [a, b, v0, v1, w0, w1, o, ax] of [[p0, p1, 0, 0.5, 0.55, 0.95, ao * 0.85, across], [p1, p2, 0.5, 1, 0.95, 0.7, ao, across], [p0, p1, 0, 0.5, 0.35, 0.6, ao * 0.75, down], [p1, p2, 0.5, 1, 0.6, 0.45, ao * 0.9, down]]) {
           const b0 = leaf.p.length / 3;
           for (const [sa, end, u] of [[-1, 0, 0], [1, 0, 1], [1, 1, 1], [-1, 1, 0]]) {
-            const q = (end ? b : a).clone().add(across.clone().multiplyScalar(sa * L * (end ? w1 : w0) * 0.5)), v = end ? v1 : v0;
-            leaf.v(q.x, q.y, q.z, n.x, n.y, n.z, 0.5 + u * 0.5, v, Math.min(1, o), lod);
+            const q = (end ? b : a).clone().add(ax.clone().multiplyScalar(sa * L * (end ? w1 : w0) * 0.5)), v = end ? v1 : v0;
+            leaf.v(q.x, q.y, q.z, n.x, n.y, n.z, 0.5 + u * 0.5, v, Math.min(1, o), ax === down ? Math.min(lod, 110) : lod);
           }
           leaf.t(b0, b0 + 1, b0 + 2); leaf.t(b0, b0 + 2, b0 + 3);
         }
       }
+    }
+    // the leader: the top of a spruce is a narrow spire of young shoots on the stem, three crossed
+    // upright cards from inside the last whorl to the tip (no separate flakes above the crown)
+    for (let k = 0; k < 3; k++) {
+      const a = k * Math.PI / 3 + rnd() * 0.3, ax = V(Math.cos(a), 0, Math.sin(a)), y0 = 0.76, y1 = 1.0, w0 = rad(y0) * 1.5, b0 = leaf.p.length / 3, n = V(Math.sin(a), 0.5, -Math.cos(a)).normalize();
+      for (const [sa, end, u] of [[-1, 0, 0], [1, 0, 1], [1, 1, 1], [-1, 1, 0]]) {
+        const w = end ? 0.012 : w0 * 0.5, y = end ? y1 : y0;
+        leaf.v(ax.x * sa * w, y, ax.z * sa * w, n.x, n.y, n.z, 0.5 + u * 0.5, end ? 1 : 0, 0.85, 1e9);
+      }
+      leaf.t(b0, b0 + 1, b0 + 2); leaf.t(b0, b0 + 2, b0 + 3);
     }
     return { leaf: leaf.geo(), bark: bark.geo(), trunkN };
   }
@@ -151,15 +164,15 @@
     const x = cv.getContext('2d'), rnd = rngOf(77);
     // left: a leaf clump as twigs, each a spray of small leaves, with sky between them (about half
     // the card is leaf); an irregular outline so no card edge reads as a circle
-    for (let k = 0; k < 110; k++) {
-      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * 205, tx = 256 + Math.cos(a) * r, ty = 256 + Math.sin(a) * r * 0.9;
+    for (let k = 0; k < 170; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.pow(rnd(), 0.62) * 205, tx = 256 + Math.cos(a) * r, ty = 256 + Math.sin(a) * r * 0.9;
       const da = a + (rnd() - 0.5) * 1.2, len = 30 + rnd() * 50;
       x.strokeStyle = 'rgba(60,48,34,0.9)'; x.lineWidth = 2; x.beginPath(); x.moveTo(tx, ty); x.lineTo(tx + Math.cos(da) * len, ty + Math.sin(da) * len); x.stroke();
       const nl = 16 + Math.floor(rnd() * 10), cd = 0.62 + 0.38 * Math.min(1, r / 200);
       for (let j = 0; j < nl; j++) {
         const q = rnd(), px = tx + Math.cos(da) * len * q + (rnd() - 0.5) * 22, py = ty + Math.sin(da) * len * q + (rnd() - 0.5) * 22;
         const g = (0.7 + rnd() * 0.5) * cd, yel = rnd() * 0.2;
-        x.fillStyle = 'rgb(' + Math.round((92 + yel * 90) * g) + ',' + Math.round(138 * g) + ',' + Math.round(62 * g) + ')';
+        x.fillStyle = 'rgb(' + Math.round((96 + yel * 80) * g) + ',' + Math.round(128 * g) + ',' + Math.round(70 * g) + ')';
         x.save(); x.translate(px, py); x.rotate(rnd() * 6.3); x.beginPath(); x.ellipse(0, 0, 6 + rnd() * 4, 3 + rnd() * 1.6, 0, 0, Math.PI * 2); x.fill(); x.restore();
       }
     }
@@ -233,7 +246,7 @@
       remapUv(m.leaf, kind === 'fir' ? 1 : 0);
       // the far model: the crown's main cards (those drawn at any distance) and the trunk without its limbs
       m.leafFar = sub(m.leaf, (I, k) => { const L = m.leaf.attributes.aLod.array; return L[I[k]] >= 1e8 && L[I[k + 1]] >= 1e8 && L[I[k + 2]] >= 1e8; });
-      m.barkFar = sub(m.bark, (I, k) => k < m.trunkN);
+      m.barkFar = sub(m.bark, (I, k) => kind !== 'fir' && k < m.trunkN); // (a far spruce shows no pole)
       barkUv(m.bark);
       m.full = merge(m.leaf, m.bark); m.far = merge(m.leafFar, m.barkFar);
       out.push(m);
@@ -251,15 +264,15 @@
     // a little light into the shade sides (sky and grass bounce: a crown's shade is never black),
     // and aerial perspective: distant woods fade toward the haze
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <opaque_fragment>', '  outgoingLight += diffuseColor.rgb * 0.05;\n#include <opaque_fragment>')
-      .replace('#include <dithering_fragment>', '#ifdef USE_FOG\n  gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, (1.0 - exp(-distance(vFogWorld, cameraPosition) / 1400.0)) * 0.75);\n#endif\n#include <dithering_fragment>');
+      .replace('#include <opaque_fragment>', '  outgoingLight += diffuseColor.rgb * 0.05;\n#ifdef USE_FOG\n  { float bl = pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 6.0); outgoingLight += diffuseColor.rgb * uSunCol * bl * 0.35; }\n#endif\n#include <opaque_fragment>')
+      .replace('#include <dithering_fragment>', '#ifdef USE_FOG\n  gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, (1.0 - exp(-distance(vFogWorld, cameraPosition) / 1400.0)) * 0.75 * (1.0 - 0.6 * pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 4.0)));\n#endif\n#include <dithering_fragment>');
   }
   // the leaves' shadow: only each crown's main cards cast (a third of them: the shade of a crown
   // is its mass, not its every clump), with the same cut-out
   let depthMat = null;
   function depth(map) {
     if (depthMat) return depthMat;
-    depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.32, side: THREE.DoubleSide });
+    depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.26, side: THREE.DoubleSide });
     depthMat.onBeforeCompile = sh => { sh.vertexShader = 'attribute float aLod;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  if (aLod < 1e8) transformed = vec3(0.0);'); };
     depthMat.customProgramCacheKey = () => 'mtreeDepth';
     return depthMat;
