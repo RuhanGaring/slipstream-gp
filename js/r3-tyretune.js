@@ -30,6 +30,11 @@
     { group: 'Shade and darks', key: 'blackLift', label: 'Shadow lift (the darkest values come up)', type: 'f', min: 0, max: 0.12, step: 0.001, def: 0.04, post: 'bl' },
     { group: 'Picture', key: 'contrast', label: 'Contrast', type: 'f', min: 0.7, max: 1.6, step: 0.01, def: 1.12, post: 'ct' },
     { group: 'Picture', key: 'pivot', label: 'Contrast pivot (what stays put)', type: 'f', min: 0.05, max: 0.8, step: 0.01, def: 0.43, post: 'pv' },
+    // luminance-saturation curve: colour fades as brightness falls (and a little at the very top)
+    { group: 'Lum-sat curve', key: 'lsDark', label: 'Saturation lost at black', type: 'f', min: 0, max: 1, step: 0.01, def: 0.45, post: 'ls' },
+    { group: 'Lum-sat curve', key: 'lsKnee', label: 'Full colour from (brightness)', type: 'f', min: 0.05, max: 0.9, step: 0.01, def: 0.42, post: 'ls' },
+    { group: 'Lum-sat curve', key: 'lsHigh', label: 'Saturation lost at white', type: 'f', min: 0, max: 1, step: 0.01, def: 0.15, post: 'ls' },
+    { group: 'Lum-sat curve', key: 'lsHiStart', label: 'Highlight roll-off starts at', type: 'f', min: 0.4, max: 0.99, step: 0.01, def: 0.8, post: 'ls' },
     { group: 'Shade and darks', key: 'ckAlb', label: 'Cockpit interior brightness', type: 'f', min: 0.005, max: 0.2, step: 0.001, def: 0.014, u: 'uCkAlb' },
     { group: 'Shade and darks', key: 'ckAO', label: 'Cockpit well darkness', type: 'f', min: 0, max: 1, step: 0.01, def: 0.72, u: 'uCkAO' },
     { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
@@ -62,7 +67,7 @@
         const uu = U && d.u && U[d.u]; if (!uu) continue;
         if (d.type === 'c') uu.value.set(this.values[d.key]); else if (d.c != null) uu.value.setComponent(d.c, this.values[d.key]); else uu.value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
-      if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.Q) P.Q.aoK = this.values.ssao; } } };
+      if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.setLumSat) P.setLumSat(this.values.lsDark, this.values.lsKnee, this.values.lsHigh, this.values.lsHiStart); if (P.Q) P.Q.aoK = this.values.ssao; } } };
   const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
