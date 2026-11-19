@@ -57,7 +57,7 @@
     // condition (drought stress, wear by the track, the worn edge strip, the field's big patches);
     // uGAlgC sizes and stripes (clump size x, yellow patch size x, mowing stripes, overall variation);
     // uGFar the field seen from afar (tuft contrast, wind gust bands, low-sun sheen, moisture swing)
-    uGHue: { value: new THREE.Vector4(0, 1, 1, 0) }, uGTint: { value: new THREE.Color(1, 1, 1) },
+    uGHue: { value: new THREE.Vector4(0, 1, 1, 0) }, uGSatTrk: { value: 1 }, uGTint: { value: new THREE.Color(1, 1, 1) },
     uGAlgA: { value: new THREE.Vector4(1, 1, 1, 1) }, uGAlgB: { value: new THREE.Vector4(1, 1, 1, 1) },
     uGAlgC: { value: new THREE.Vector4(1, 1, 1, 1) }, uGFar: { value: new THREE.Vector4(1, 1, 1, 1) },
     uGrassMask: { value: null }, uGrassMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
@@ -110,14 +110,14 @@
   // 3.2 m tile stops repeating visibly across a field.
   const LAWN_ROUGH = 0.78;
   const LAWN = [
-    'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB; uniform vec4 uGHue; uniform vec3 uGTint; uniform vec4 uGAlgA; uniform vec4 uGAlgB; uniform vec4 uGAlgC; uniform vec4 uGFar;',
+    'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB; uniform vec4 uGHue; uniform float uGSatTrk; uniform vec3 uGTint; uniform vec4 uGAlgA; uniform vec4 uGAlgB; uniform vec4 uGAlgC; uniform vec4 uGFar;',
     'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex; uniform vec4 uRingH; uniform vec3 uFootT; uniform float uFieldK;',
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
     'vec3 lawnTune(vec3 c) { const vec3 LW = vec3(0.2126, 0.7152, 0.0722); float l;',
     // (the tuning: warmth keeps the brightness, the hue turns in YIQ, which keeps it too)
     '  l = dot(c, LW); vec3 cw = c * vec3(1.0 + 0.18 * uGHue.w, 1.0 + 0.02 * uGHue.w, 1.0 - 0.45 * uGHue.w); c = max(cw * l / max(dot(cw, LW), 1e-5), 0.0);',
     '  { float a = radians(uGHue.x), cs = cos(a), sn = sin(a); vec3 q = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312) * c;',
-    '    q.yz = vec2(q.y * cs - q.z * sn, q.y * sn + q.z * cs) * uGHue.y; c = max(mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * q, 0.0); }',
+    '    q.yz = vec2(q.y * cs - q.z * sn, q.y * sn + q.z * cs) * uGHue.y * uGSatTrk; c = max(mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * q, 0.0); }',
     '  return c * uGTint * uGHue.z; }',
     'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return lawnTune(mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w)); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
