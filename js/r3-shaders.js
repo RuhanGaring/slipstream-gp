@@ -19,6 +19,7 @@
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
     uCarSelfK: { value: 0.7 }, uCarAOK: { value: 0.7 }, // (how much of a car's own shade and of the road's occlusion on it shows)
+    uCkAlb: { value: 0.014 }, uCkAO: { value: 0.72 }, // (the cockpit well's paint brightness and how much of its light the well takes away, js/r3-car.js)
     uAmbK: { value: 1.4 }, uAmbAdd: { value: 0 }, // (the shade light's strength and a lift, SCENE below)
     uFogCol: { value: new THREE.Color(0.5, 0.5, 0.5) },
     uFogDensity: { value: 0.0003 },

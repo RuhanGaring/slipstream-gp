@@ -27,12 +27,15 @@
     { group: 'Auto exposure', key: 'aeMax', label: 'Brightest it may go (x)', type: 'f', min: 1, max: 4, step: 0.01, def: 2.2, q: 'aeMax' },
     { group: 'Auto exposure', key: 'aeSpeed', label: 'Adapt speed', type: 'f', min: 0.1, max: 6, step: 0.05, def: 1.2, q: 'aeSpeed' },
     { group: 'Auto exposure', key: 'aeCenter', label: 'Weight to the middle of the picture', type: 'f', min: 0, max: 1, step: 0.01, def: 0.6, q: 'aeCenter' },
+    { group: 'Shade and darks', key: 'blackLift', label: 'Shadow lift (the darkest values come up)', type: 'f', min: 0, max: 0.12, step: 0.001, def: 0.04, post: 'bl' },
+    { group: 'Shade and darks', key: 'ckAlb', label: 'Cockpit interior brightness', type: 'f', min: 0.005, max: 0.2, step: 0.001, def: 0.014, u: 'uCkAlb' },
+    { group: 'Shade and darks', key: 'ckAO', label: 'Cockpit well darkness', type: 'f', min: 0, max: 1, step: 0.01, def: 0.72, u: 'uCkAO' },
     { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
   ];
   const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
     set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && d.u && U[d.u]) U[d.u].value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
-      if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.Q) P.Q.aoK = this.values.ssao; } } };
+      if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.Q) P.Q.aoK = this.values.ssao; } } };
   const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since

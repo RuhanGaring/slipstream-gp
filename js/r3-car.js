@@ -460,18 +460,18 @@
   const CK_REGION = 'step(-0.12, cP.x) * step(cP.x, 1.15) * step(abs(cP.z), 0.34) * step(0.16, cP.y) * step(cP.y, 0.83)';
   function cockpitPatch(sh, paint) {
     sh.vertexShader = 'varying vec3 cP; varying vec3 cN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  cP = position; cN = normal;');
-    sh.fragmentShader = 'varying vec3 cP; varying vec3 cN;\n' + sh.fragmentShader;
+    sh.fragmentShader = 'varying vec3 cP; varying vec3 cN; uniform float uCkAlb; uniform float uCkAO;\n' + sh.fragmentShader;
     if (paint) sh.fragmentShader = sh.fragmentShader
       .replace('#include <color_fragment>', [
         '#include <color_fragment>',
         '  float ckIn = ' + CK_REGION + ' * step(normalize(cN).z * sign(cP.z), 0.25);',
-        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.014, 0.015, 0.017), ckIn);'].join('\n'))
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(uCkAlb, uCkAlb * 1.07, uCkAlb * 1.21), ckIn);'].join('\n'))
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.6, ckIn);')
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= 1.0 - ckIn;\n#endif');
     sh.fragmentShader = sh.fragmentShader.replace('#include <aomap_fragment>', [
       '#include <aomap_fragment>',
       '  { float ckWell = ' + CK_REGION + ' * smoothstep(0.83, 0.4, cP.y);',
-      '    float ckAO = 1.0 - 0.72 * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
+      '    float ckAO = 1.0 - uCkAO * ckWell; reflectedLight.indirectDiffuse *= ckAO; reflectedLight.indirectSpecular *= ckAO; }'].join('\n'));
   }
   // Thumb holes placed by hand where the finder cannot see them: on the W17 the shift paddle sits
   // right behind the opening, so seen through the wheel the opening looks filled. [x, y, w, h] in
