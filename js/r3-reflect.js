@@ -434,15 +434,41 @@
     });
   }
   // the meshes for a built copy (a scene of their own, no lights: the material does the lighting)
+  // The copy as meshes: its tiles joined in blocks of BLOCK by BLOCK (450 m a side), one mesh a
+  // block. The whole copy is some 300 thousand triangles, so a draw costs the page far more than
+  // its triangles cost the GPU: tile by tile a cube face drew a dozen meshes (and three walked,
+  // culled and sorted sixty to a hundred and fifty of them six times a frame); in blocks it draws
+  // three or four of a dozen.
+  const BLOCK = 3;
   function meshes(data, mat) {
     const sc = new THREE.Scene();
     sc.matrixAutoUpdate = false; sc.matrixWorldAutoUpdate = true;
+    const by = new Map();
     for (const t of data.tiles) {
+      if (!t.idx.length) continue;
+      // (a tile holds the triangles whose centres lie in its cell: the first one's names the cell)
+      const a = t.idx[0] * 3, b = t.idx[1] * 3, c = t.idx[2] * 3;
+      const x = (t.pos[a] + t.pos[b] + t.pos[c]) / 3, z = (t.pos[a + 2] + t.pos[b + 2] + t.pos[c + 2]) / 3;
+      const key = Math.floor(Math.floor(x / TILE) / BLOCK) * 100000 + Math.floor(Math.floor(z / TILE) / BLOCK);
+      let L = by.get(key);
+      if (!L) by.set(key, (L = []));
+      L.push(t);
+    }
+    for (const L of by.values()) {
+      let nv = 0, ni = 0;
+      for (const t of L) { nv += t.pos.length / 3; ni += t.idx.length; }
+      const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), em = new Float32Array(nv * 3), idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      let v = 0, n = 0;
+      for (const t of L) {
+        pos.set(t.pos, v * 3); col.set(t.col, v * 3); em.set(t.em, v * 3);
+        for (let i = 0; i < t.idx.length; i++) idx[n++] = t.idx[i] + v;
+        v += t.pos.length / 3;
+      }
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(t.pos, 3));
-      g.setAttribute('color', new THREE.BufferAttribute(t.col, 3));
-      g.setAttribute('aEm', new THREE.BufferAttribute(t.em, 3));
-      g.setIndex(new THREE.BufferAttribute(t.idx, 1));
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.setAttribute('aEm', new THREE.BufferAttribute(em, 3));
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
       g.computeVertexNormals(); g.computeBoundingSphere();
       const m = new THREE.Mesh(g, mat);
       m.matrixAutoUpdate = false;

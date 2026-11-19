@@ -232,6 +232,9 @@
     constructor(race) {
       this.race = race; this.gen = ++gens; this.ok = false; this.dead = false; this.held = true; this.wait = null; this.rid = 0;
       this.acts = []; this.inbox = null; this.ms = 0; this.lag = 0;
+      // steps asked for since the race last went live, the count at the request now out, and the
+      // count the page's copy stands at (see drawAt)
+      this.sent = 0; this.reqSent = 0; this.have = 0; this.vPrev = null; this.behind = null;
       Link.last = this; // (debug and tests)
       this.w = new Worker(blobUrl());
       this.w.onmessage = e => this.onMessage(e.data);
@@ -273,6 +276,7 @@
       const cars = race.cars.map(c => K.encCar(race, c, X, big, false));
       this.w.postMessage({ k: 'sync', gen: this.gen, cars, race: K.encRace(race, X, st, false), auto: !!race.autoPlayer, physLod: !!race.physLod, physLodDist: race.physLodDist });
       this.held = false; this.inbox = null; this.wait = null; this.acts.length = 0;
+      this.sent = this.reqSent = this.have = 0; this.vPrev = null; this.behind = null;
     }
     // the race stops running live: the page's copy is the race from now (an answer still on its way
     // is dropped: the page has drawn what it has)
@@ -282,16 +286,36 @@
     frame(n, ctls) {
       const race = this.race;
       let took = 0;
-      if (this.inbox) { took = this.take(this.inbox); this.inbox = null; }
+      if (this.inbox) { took = this.take(this.inbox); this.inbox = null; this.have = this.reqSent; }
       if (this.wait == null) {
         if (n > 0 || this.acts.length) {
           const fo = race.lodFocus || race.player;
           this.wait = ++this.rid;
+          this.sent += n; this.reqSent = this.sent;
           this.w.postMessage({ k: 'step', gen: this.gen, rid: this.rid, n, ctl: ctls, auto: !!race.autoPlayer, focus: fo ? race.cars.indexOf(fo) : -1, acts: this.acts.splice(0) });
           return { sent: n, took };
         }
       }
       return { sent: -1, took }; // (still waiting: the steps are owed to the next request)
+    }
+    // Where between the page's last two steps this frame is drawn (0 the step before the last, 1 the
+    // last, over 1 past it), given what is left of this frame's time after its request (left, in
+    // steps). The page's copy is the answer to an earlier frame, so the cars are drawn a fixed time
+    // behind the page's clock (the steps asked for so far plus what is left): about a frame, held
+    // steady, following the frame rate only slowly. Each frame then moves the cars by that frame's
+    // own time, whatever the copy on hand: between its last two steps when it is fresh, carried on
+    // along its last step when the answer is late or the frame was long. Drawn with this frame's
+    // leftover against the last answer, as it was, each frame's motion was out by up to a step
+    // either way (a quarter of a frame's travel at 60 fps), and a late answer stood the cars still
+    // for a frame and then moved them two.
+    drawAt(left) {
+      const v = this.sent + left, was = this.vPrev;
+      this.vPrev = v;
+      if (was == null) { this.behind = null; return 1; }
+      const d = Math.max(0, v - was); // this frame's time, in steps
+      // (a hitch does not move it: a frame over twice or under half the usual counts as that much)
+      this.behind = this.behind == null ? d : this.behind + (Math.max(this.behind * 0.5, Math.min(this.behind * 2, d)) - this.behind) * 0.05;
+      return Math.max(0, Math.min(12, v - (this.behind - 0.5) - this.have));
     }
     take(m) {
       const race = this.race;

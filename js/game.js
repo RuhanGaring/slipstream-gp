@@ -1902,9 +1902,10 @@
   function snapPoses(race) {
     for (const c of race.cars) { const q = c._pp || (c._pp = {}); for (const k of POSE) q[k] = c[k]; }
   }
-  function blendPoses(race, a) {
+  // (max over 1: the poses carried on past the last step, while the sim's thread's answer is on its way)
+  function blendPoses(race, a, max = 1) {
     if (window.__noInterp) return;
-    a = Math.max(0, Math.min(1, a));
+    a = Math.max(0, Math.min(max, a));
     for (const c of race.cars) {
       const q = c._pp; if (!q || (c.x - q.x) ** 2 + (c.y - q.y) ** 2 > 25) { c._real = null; continue; } // teleported: no blend
       const r = c._real || (c._real = {});
@@ -2065,7 +2066,9 @@
       // draw the cars where they are between the last two fixed physics steps, not where the
       // last step left them: the number of steps per frame varies, and so would the motion
       const live = race && (Game.state === 'race' && !Game.paused || Game.state === 'menu');
-      if (live) blendPoses(race, acc / DT);
+      // (on the sim's own thread the copy drawn is the frame before's: js/simworker.js drawAt)
+      const WD = live && Game.state === 'race' && simLink && simLink.race === race && simLink.usable && !simLink.held ? simLink : null;
+      if (live) { if (WD) blendPoses(race, WD.drawAt(acc / DT), 12); else blendPoses(race, acc / DT); }
       const viewing = Game.state === 'replay' || (Game.state === 'race' && Game.spectate);
       render(race, Game.state === 'replay' ? (Game.replay.playing ? dt * Math.abs(Game.replay.rate) : 0) : dt, Game.state === 'menu' ? (Game.show ? 'show' : 'tv') : viewing ? 'view' : 'chase');
       if (live) restorePoses(race);

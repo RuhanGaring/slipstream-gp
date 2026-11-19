@@ -4802,13 +4802,13 @@ void main() {
   // a face on a town circuit. Nothing else changes: the scenery keeps the sky's map.
   // (The cube is the sky map's size: three keys a program on the map's size, so a different one
   // would compile every car program afresh the first time it showed, mid-race.)
-  const LP = { size: 0, rt: null, out: null, cam: null, ready: false };
+  const LP = { size: 0, rt: null, out: null, cam: null, ready: false, whole: false, turn: 0 };
   // the circuit's copy: built (or read from the browser's storage) once per circuit and level
   const PX = { root: null, key: '', scene: null, mat: null, busy: null, prog: null, stats: null };
   function probeInit(n) {
     if (LP.rt) LP.rt.dispose();
     if (LP.out) LP.out.dispose();
-    LP.rt = LP.out = null; LP.ready = false; LP.size = n;
+    LP.rt = LP.out = null; LP.ready = false; LP.size = n; LP.whole = false;
     if (!n) return;
     LP.rt = new THREE.WebGLCubeRenderTarget(n, { type: THREE.HalfFloatType, generateMipmaps: false });
     // (the fog has most of the scenery by 300 m, and the sky behind takes over there)
@@ -4910,7 +4910,14 @@ void main() {
     try {
       for (let f = 0; f < 6; f++) { renderer.setRenderTarget(LP.rt, f); renderer.render(PX.scene, cc.children[f]); }
     } finally { renderer.toneMapping = tm; renderer.setRenderTarget(prev); }
-    LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out);
+    // The filter: the sharp levels (the first three blurs, what a clear coat mirrors: the lamps
+    // that slide along the car) every frame, the six broad ones (rough paint, carbon, rubber: soft
+    // light with no detail to see move) two a frame in turn, so each is three frames old at most.
+    // The first filter after a change of size is whole. (js/vendor/three.min.js _applyPMREM, patched)
+    const ph = LP.turn = ((LP.turn | 0) + 1) % 3;
+    pmrem._r3skip = LP.whole ? (e => e > 3 && (e - 4) % 3 !== ph) : null;
+    try { LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out); } finally { pmrem._r3skip = null; }
+    LP.whole = true;
     LP.ready = true;
     renderer.setRenderTarget(prev);
     if (G.__lpT) G.__lpT.push(performance.now() - t0); // (debug: the step's main-thread time)
