@@ -961,6 +961,19 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // empty is not drawn at all); the trackside boards go below Reduced and the distant hills
   // in Rock, where they would lie beyond the far plane anyway.
   const DENS = { full: 1, reduced: 0.6, sparse: 0.33, minimal: 0.12 };
+  // the modelled trees' detail by tile (js/r3-modeltree.js): the full model within about 80 m of a
+  // tile's nearest tree, the light one beyond (a little hysteresis, so a tile does not flicker)
+  function treeLod() {
+    const L = state.root && state.root.userData.treeLod; if (!L || !camera) return;
+    const p = camera.position;
+    for (const e of L) {
+      const d = Math.max(0, p.distanceTo(e.c) - e.r), want = e.isNear ? d < 140 : d < 120;
+      if (want === e.isNear) continue;
+      e.isNear = want;
+      for (const m of e.near) m.visible = want && m.userData.on !== false;
+      for (const m of e.far) m.visible = !want && m.userData.on !== false;
+    }
+  }
   function applyScenery() {
     const root = state.root;
     if (!root) return;
@@ -976,6 +989,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       if (o.userData.cat === 'boards') o.visible = GFX.boards !== false;
     }
+    if (root.userData.treeLod) for (const e of root.userData.treeLod) e.isNear = null; // (treeLod sets them again)
     if (root.userData.backdropMesh) root.userData.backdropMesh.visible = GFX.backdrop !== false && camera.far > root.userData.backdrop.R + 200;
   }
 
@@ -3396,15 +3410,41 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       return b.geo();
     })();
+    const MT = F1.R3ModelTree || null;
+    let mtLeaf = null;
+    if (MT) {
+      const li = T.has('leaves') ? T.photo('leaves').image : null;
+      mtLeaf = std({ map: MT.texture(li), alphaTest: 0.32, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, vertexColors: true });
+      mtLeaf.userData.patchExtra = MT.leafPatch; mtLeaf.userData.patchKey = 'mtree';
+      if (!M.bark.map && T.has('bark')) { M.bark.map = T.photo('bark', [1, 3]); M.bark.color.set('#b7a894'); M.bark.needsUpdate = true; }
+    }
     const tiles = new Map();
     let items = W2.decor.filter(it => it.type === 'tree' || it.type === 'palm');
+    // forests as masses, not rows: a tree inside a stand (two or more others within 15 m) gets two
+    // more behind it, away from the track, and the edge facing the track a skirt of shrubs and saplings
+    // (kept clear of the barrier)
+    if (MT) {
+      const trs = items.filter(it => it.type === 'tree'), grid = new Map(), C = 15;
+      for (const it of trs) { const k = Math.floor(it.x / C) + ',' + Math.floor(it.y / C); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(it); }
+      const near = it => { let n = 0; const gx = Math.floor(it.x / C), gz = Math.floor(it.y / C); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const l = grid.get((gx + a) + ',' + (gz + b)); if (l) for (const o of l) if (o !== it && Math.hypot(o.x - it.x, o.y - it.y) < C) n++; } return n; };
+      const loc = { i: -1 }, rr = U.rng(5), add = [];
+      for (const it of trs) {
+        Tracks.locate(tr, it.x, it.y, null, loc);
+        if (loc.i == null || loc.i < 0) continue;
+        const s = loc.d >= 0 ? 1 : -1, nx = tr.nx[loc.i] * s, nz = tr.ny[loc.i] * s, tx = -nz, tz = nx, ad = Math.abs(loc.d);
+        const wall = (tr.barr && tr.barr[loc.d >= 0 ? 1 : 0] ? tr.barr[loc.d >= 0 ? 1 : 0][loc.i] : 12) + 4;
+        if (near(it) >= 2) for (let k = 0; k < (conifer ? 3 : 2); k++) { const o = (conifer ? 3 + rr() * 5 + k * 4.5 : 5 + rr() * 9 + k * 7), l = (rr() - 0.5) * 10; add.push({ type: 'tree', x: it.x + nx * o + tx * l, y: it.y + nz * o + tz * l, r: it.r * (0.7 + rr() * 0.6) }); }
+        for (let k = 0; k < 5; k++) { const o = k < 3 ? -(0.5 + rr() * 4) : 1 + rr() * 6, l = (rr() - 0.5) * 11; if (ad + o > wall) add.push({ type: 'tree', shrub: true, x: it.x + nx * o + tx * l, y: it.y + nz * o + tz * l, r: 1 }); }
+      }
+      items = items.concat(add);
+    }
     // (the scanned-model impostors of js/r3-trees.js, flat pictures turned to face the camera, and
     // their painted forest walls are off, at the owner's request: every tree is modelled below)
-    const step = Math.max(1, Math.ceil(items.length / 9000));
+    const step = Math.max(1, Math.ceil(items.length / (MT ? 16000 : 9000)));
     const rnd = U.rng(91);
     for (let n = 0; n < items.length; n += step) {
       const it = items[n];
-      const key = Math.floor(it.x / 450) + ',' + Math.floor(it.y / 450);
+      const TS = 450, key = Math.floor(it.x / TS) + ',' + Math.floor(it.y / TS);
       let t = tiles.get(key); if (!t) tiles.set(key, t = []);
       t.push(it);
     }
@@ -3413,7 +3453,29 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // shuffled, so a thinned tile (scenery setting) keeps a random share spread over it
       for (let k = list.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [list[k], list[j]] = [list[j], list[k]]; }
       const trees = list.filter(i => i.type === 'tree'), palms = list.filter(i => i.type === 'palm');
-      if (trees.length) {
+      if (trees.length && MT) {
+        // modelled trees (js/r3-modeltree.js): one leaf mesh and one bark mesh per variant
+        const VA = MT.variants(conifer ? 'fir' : 'broad'), groups = VA.map(() => []);
+        trees.forEach(it => groups[Math.floor(rnd() * VA.length)].push(it));
+        groups.forEach((g, vi) => {
+          if (!g.length) return;
+          const leaves = new THREE.InstancedMesh(VA[vi].full, mtLeaf, g.length); leaves.customDepthMaterial = MT.depth(mtLeaf.map);
+          const leavesF = new THREE.InstancedMesh(VA[vi].far, mtLeaf, g.length); leavesF.customDepthMaterial = leaves.customDepthMaterial;
+          g.forEach((it, k) => {
+            const H = it.shrub ? 1.5 + rnd() * 3 : (conifer ? 6 + it.r * 2.1 : 5 + it.r * 1.55) * (conifer ? 0.65 + rnd() * 0.7 : 0.6 + rnd() * 0.8), wk = it.shrub ? 1.3 + rnd() * 0.9 : conifer ? 0.9 + rnd() * 0.25 : 0.85 + rnd() * 0.35;
+            const gy = Tracks.groundAt(tr, it.x, it.y);
+            tmp.position.set(it.x, gy - 0.15, it.y); tmp.rotation.set((rnd() - 0.5) * 0.04, rnd() * 6.28, (rnd() - 0.5) * 0.04); tmp.scale.set(H * wk, H, H * wk); tmp.updateMatrix();
+            leaves.setMatrixAt(k, tmp.matrix); leavesF.setMatrixAt(k, tmp.matrix);
+            // per tree colour: spruce near-black blue-green; broadleaf from yellow-green to deep green, a few copper or pale ones
+            if (conifer && !it.shrub) c.setHSL(0.42 + (rnd() - 0.5) * 0.045, 0.22 + rnd() * 0.12, 0.48 + (rnd() - 0.5) * 0.18);
+            else { const q = rnd(); c.setHSL(q < 0.05 ? 0.04 : q < 0.13 ? 0.19 : 0.28 + (rnd() - 0.5) * 0.06, q < 0.05 ? 0.35 : 0.14 + rnd() * 0.22, q < 0.05 ? 0.55 : 0.66 + (rnd() - 0.5) * 0.34); }
+            leaves.setColorAt(k, c); leavesF.setColorAt(k, c);
+          });
+          for (const m of [leaves, leavesF]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.dens = g.length; root.add(m); }
+          // near and far models of this tile, switched by the camera's distance each frame (treeLod)
+          const bs = leaves.boundingSphere; (root.userData.treeLod || (root.userData.treeLod = [])).push({ c: bs.center.clone(), r: bs.radius, near: [leaves], far: [leavesF], isNear: null });
+        });
+      } else if (trees.length) {
         const trunks = new THREE.InstancedMesh(trunkG, M.bark, trees.length);
         const crowns = new THREE.InstancedMesh(conifer ? coneG : crownCards || crownG, conifer ? coneMat : crownMat, trees.length);
         trees.forEach((it, k) => {
@@ -5034,6 +5096,7 @@ void main() {
       carShade(G.__noCarOcc ? [] : near.slice(0, 8));
     }
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
+    treeLod();
     const tunK = tunnelLight(dt);
     const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (1 + tunOpen() * tunK);
     if (F1.R3Tyre && F1.R3Tyre.setIris) F1.R3Tyre.setIris(1 / (1 + tunOpen() * tunK));
