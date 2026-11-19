@@ -23,7 +23,7 @@
   const F1 = G.F1;
 
   let R = null, W = 2, H = 2;
-  const Q = { on: true, taa: true, fxaa: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx' };
+  const Q = { on: true, taa: true, fxaa: true, scale: 1, msaa: 4, ssao: true, aoSamples: 12, aoK: 0.85, bloom: true, bloomK: 0.06, shafts: true, shaftK: 0.45, motion: true, shutter: 180, lens: true, grain: true, tone: 'agx', autoExp: 0.6, aeKey: 0.2, aeMin: 0.6, aeMax: 2.2, aeSpeed: 1.2, aeCenter: 0.6 };
   const RT = {};
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quadGeo = new THREE.BufferGeometry();
@@ -419,6 +419,30 @@
   }
 
   // ---------- composite ----------
+  // ---------- auto exposure ----------
+  // One pass into a 1x1 target, ping-ponged: it takes a grid of samples of the scene (before
+  // exposure), the log-average of their brightness, weighted toward the middle of the picture and
+  // with very bright spots (sun, sky) held to 8 so they do not steer it, works out the multiplier
+  // that would bring that average to aeKey, limits it to [aeMin, aeMax] and moves the stored value
+  // toward it (rate: blend per frame, from the frame's time). The composite reads the stored value.
+  // No readback: it stays on the GPU. (Q.autoExp is the strength, 0 off.)
+  const aeMat = mk([
+    'varying vec2 vUv; uniform sampler2D tScene; uniform sampler2D tPrev; uniform float uKey; uniform float uMin; uniform float uMax; uniform float uRate; uniform float uBase; uniform float uCenter;',
+    'void main() {',
+    '  float sum = 0.0, wsum = 0.0;',
+    '  for (int j = 0; j < 9; j++) for (int i = 0; i < 16; i++) {',
+    '    vec2 uv = (vec2(float(i), float(j)) + 0.5) / vec2(16.0, 9.0);',
+    '    vec2 d = (uv - 0.5) * vec2(1.0, 0.7);',
+    '    float w = mix(1.0, exp(-dot(d, d) * 9.0), uCenter);',
+    '    vec3 c = texture2D(tScene, uv).rgb;',
+    '    float l = min(dot(c, vec3(0.2126, 0.7152, 0.0722)), 8.0);',
+    '    sum += w * log2(l + 0.002); wsum += w;',
+    '  }',
+    '  float avg = exp2(sum / wsum) * uBase;',
+    '  float k = clamp(uKey / max(avg, 1e-4), uMin, uMax);',
+    '  float prev = max(texture2D(tPrev, vec2(0.5)).r, 0.05);',
+    '  gl_FragColor = vec4(exp2(mix(log2(prev), log2(k), uRate)), avg, k, 1.0);',
+    '}'].join('\n'), { tScene: { value: null }, tPrev: { value: null }, uKey: { value: 0.2 }, uMin: { value: 0.6 }, uMax: { value: 2.2 }, uRate: { value: 0 }, uBase: { value: 1 }, uCenter: { value: 0.6 } });
   const compMat = mk([
     'varying vec2 vUv;', DEPTH,
     'uniform sampler2D tScene; uniform sampler2D tAO; uniform sampler2D tBloom; uniform sampler2D tShaft; uniform sampler2D tSun;',
@@ -459,7 +483,7 @@
     // (uShadeAmt: how much of the shade under a car shows; uShadeFloor: the least light it leaves)
     '  return mix(1.0, uShadeFloor + (1.0 - uShadeFloor) * k, uShadeAmt);',
     '}',
-    'uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
+    'uniform sampler2D tAE; uniform float uAE; uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain; uniform vec3 uGrade;',
     // The AO target is half size. Read plainly (bilinear), along a silhouette it mixes the near
     // surface's value into the far one's: the road beside a car took the car's own (unoccluded)
@@ -563,7 +587,8 @@
     '  { float dirS = clamp(texture2D(tSun, vUv).a, 0.0, 1.0) * uSunK; vec2 o = aoUp(vUv); c *= dirS + (1.0 - dirS) * mix(1.0, max(o.r, 0.2), uAO) * carSky(vUv, uSrcTexel); }',
     '  c += texture2D(tBloom, vUv).rgb * uBloom;',
     '  c += texture2D(tShaft, vUv).rgb * uShaftCol * uShaft;',
-    '  c *= uExposure;',
+    // (auto exposure: the multiplier the measuring pass has eased to, mixed in by its strength)
+    '  c *= uExposure * mix(1.0, texture2D(tAE, vec2(0.5)).r, uAE);',
     '  if (uLens > 0.5) c *= mix(1.0, smoothstep(1.0, 0.3, length(d * vec2(1.0, 0.8))), 0.18);', // optical vignetting
     '  c = uTone == 1 ? aces(c) : agx(c);',
     // a circuit's own grade (Q.grade, off by default): the black point set a little deeper,
@@ -583,13 +608,14 @@
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
     uShadeAmt: { value: 0.7 }, uShadeFloor: { value: 0.03 },
-    uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
+    tAE: { value: null }, uAE: { value: 0 }, uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() }, uGrade: { value: new THREE.Vector3(0, 1, 0) },
   });
 
   // ---------- targets ----------
   const black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); black.needsUpdate = true;
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.needsUpdate = true;
+  let aeI = 0;
   function target(w, h, o = {}) {
     return new THREE.WebGLRenderTarget(Math.max(1, w), Math.max(1, h), Object.assign({ type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false }, o));
   }
@@ -607,6 +633,8 @@
     RT.shaftA = target(w >> 2, h >> 2); RT.shaftB = target(w >> 2, h >> 2);
     RT.taa = Q.taa ? [target(w, h), target(w, h)] : [];
     RT.aoH = Q.taa ? [target(w >> 1, h >> 1), target(w >> 1, h >> 1)] : []; // (half float: b holds the depth)
+    RT.ae = [target(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }), target(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter })]; aeI = 0;
+    clearTo(RT.ae[0], 0xff0000); clearTo(RT.ae[1], 0xff0000); // (1: no change, until it has measured)
     RT.w = w; RT.h = h;
   }
 
@@ -759,8 +787,17 @@
         }
       }
     }
+    // 5b. auto exposure: measure, then ease the stored multiplier toward the target
+    let aeOn = 0;
+    if (Q.autoExp > 0 && RT.ae && !aeMat.userData.broken) {
+      const a = aeMat.uniforms, speed = view.dt > 0 ? 1 - Math.exp(-Math.min(view.dt, 0.1) * Q.aeSpeed) : 0;
+      a.tScene.value = src; a.tPrev.value = RT.ae[aeI].texture; a.uKey.value = Q.aeKey; a.uMin.value = Q.aeMin; a.uMax.value = Math.max(Q.aeMax, Q.aeMin);
+      a.uRate.value = speed; a.uBase.value = view.exposure; a.uCenter.value = Q.aeCenter;
+      pass(aeMat, RT.ae[1 - aeI]); aeI = 1 - aeI; aeOn = Math.min(1, Q.autoExp);
+    }
     // 6. composite to the canvas
     const u = compMat.uniforms;
+    u.tAE.value = RT.ae ? RT.ae[aeI].texture : null; u.uAE.value = aeOn;
     setDepth(compMat); u.uAOSize.value.set(RT.ao.width, RT.ao.height);
     u.tScene.value = src; u.tAO.value = ao; u.tBloom.value = bloom; u.tShaft.value = shaft; u.tSun.value = RT.scene.texture;
     u.uDbg.value = G.__postDbg || 0; u.uInvView.value.copy(camera.matrixWorld);
@@ -825,7 +862,7 @@
   }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
-  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
+  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
     // the scene's own HDR target (made if need be), for a warm-up draw off screen (js/render3d.js precompile)
     sceneTarget: () => { if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; } return RT.scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

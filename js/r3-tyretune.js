@@ -20,11 +20,19 @@
     { group: 'Shade and darks', key: 'carShadeFloor', label: 'Shadow under the car (lightest it gets to black)', type: 'f', min: 0, max: 0.6, step: 0.005, def: 0.03, post: 'f' },
     { group: 'Shade and darks', key: 'carSelf', label: 'Car self-shade (its own sky cover)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, u: 'uCarSelfK' },
     { group: 'Shade and darks', key: 'carAO', label: 'Car ground occlusion (darkening low on the car)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.7, u: 'uCarAOK' },
+    // auto exposure: the picture's brightness measured and eased toward a target, no part left too dark or bright
+    { group: 'Auto exposure', key: 'autoExp', label: 'Strength (0 off)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.6, q: 'autoExp' },
+    { group: 'Auto exposure', key: 'aeKey', label: 'Target brightness', type: 'f', min: 0.05, max: 0.6, step: 0.005, def: 0.2, q: 'aeKey' },
+    { group: 'Auto exposure', key: 'aeMin', label: 'Darkest it may go (x)', type: 'f', min: 0.2, max: 1, step: 0.01, def: 0.6, q: 'aeMin' },
+    { group: 'Auto exposure', key: 'aeMax', label: 'Brightest it may go (x)', type: 'f', min: 1, max: 4, step: 0.01, def: 2.2, q: 'aeMax' },
+    { group: 'Auto exposure', key: 'aeSpeed', label: 'Adapt speed', type: 'f', min: 0.1, max: 6, step: 0.05, def: 1.2, q: 'aeSpeed' },
+    { group: 'Auto exposure', key: 'aeCenter', label: 'Weight to the middle of the picture', type: 'f', min: 0, max: 1, step: 0.01, def: 0.6, q: 'aeCenter' },
     { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
   ];
   const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
     set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && d.u && U[d.u]) U[d.u].value = this.values[d.key]; }
-      const P = F1.R3Post; if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.Q) P.Q.aoK = this.values.ssao; } } };
+      const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
+      if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.Q) P.Q.aoK = this.values.ssao; } } };
   const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
