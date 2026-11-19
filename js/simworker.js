@@ -130,9 +130,18 @@
         else o[k] = dec(x, race);
       }
     }
+    // The parts a car has lost, as a set of keys (dm.off): put() writes keys that are in the source
+    // and never takes one away, so a part that came off before a flashback stayed in the other
+    // side's copy, and came back from it as soon as the race ran again: the wheels went again
+    // right after the rewind. Keys the source no longer has are taken away here.
+    function exactOff(c, e) {
+      const d = c.dm, s = e.s && e.s.dm;
+      if (d && d.off && s && s.off && typeof s.off === 'object') for (const k in d.off) if (!(k in s.off)) delete d.off[k];
+    }
     function applyCar(race, c, e) {
       if (!race._carSetW) { race._carSetW = new Set(race.cars); race._fromW = new WeakSet(); }
       put(c, e.s, race);
+      exactOff(c, e);
       if (e.rng != null && c.brain && c.brain.rng && c.brain.rng.set) c.brain.rng.set(e.rng);
     }
     function applyRace(race, e) {
