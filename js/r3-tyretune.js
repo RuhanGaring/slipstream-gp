@@ -33,9 +33,34 @@
     { group: 'Shade and darks', key: 'ckAlb', label: 'Cockpit interior brightness', type: 'f', min: 0.005, max: 0.2, step: 0.001, def: 0.014, u: 'uCkAlb' },
     { group: 'Shade and darks', key: 'ckAO', label: 'Cockpit well darkness', type: 'f', min: 0, max: 1, step: 0.01, def: 0.72, u: 'uCkAO' },
     { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
+    // the grass (ground and blades alike, js/r3-shaders.js LAWN): its colour, then the patterns that vary it.
+    // (defaults: a less saturated, slightly warm green; the old one read as a painted lawn)
+    { group: 'Grass colour', key: 'gHue', label: 'Hue turn (- yellower, + bluer)', type: 'f', min: -40, max: 40, step: 0.5, def: -6, u: 'uGHue', c: 0 },
+    { group: 'Grass colour', key: 'gSat', label: 'Saturation', type: 'f', min: 0, max: 2, step: 0.01, def: 0.78, u: 'uGHue', c: 1 },
+    { group: 'Grass colour', key: 'gBright', label: 'Brightness', type: 'f', min: 0.3, max: 2, step: 0.01, def: 0.97, u: 'uGHue', c: 2 },
+    { group: 'Grass colour', key: 'gWarm', label: 'Warmth (dry, sun-bleached)', type: 'f', min: -1, max: 1.5, step: 0.01, def: 0.3, u: 'uGHue', c: 3 },
+    { group: 'Grass colour', key: 'gTint', label: 'Tint (multiplies)', type: 'c', def: '#ffffff', u: 'uGTint' },
+    { group: 'Grass patterns', key: 'gPoa', label: 'Meadow grass clumps (paler, yellower)', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgA', c: 0 },
+    { group: 'Grass patterns', key: 'gFescue', label: 'Fescue clumps (finer, blue-green)', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgA', c: 1 },
+    { group: 'Grass patterns', key: 'gClover', label: 'Clover and weed spots', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgA', c: 2 },
+    { group: 'Grass patterns', key: 'gYellow', label: 'Yellow dry patches', type: 'f', min: 0, max: 1.1, step: 0.01, def: 1, u: 'uGAlgA', c: 3 },
+    { group: 'Grass patterns', key: 'gDrought', label: 'Drought stress (crests, slopes go straw)', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgB', c: 0 },
+    { group: 'Grass patterns', key: 'gWear', label: 'Wear beside the track (toward soil)', type: 'f', min: 0, max: 2.2, step: 0.01, def: 1, u: 'uGAlgB', c: 1 },
+    { group: 'Grass patterns', key: 'gEdge', label: 'Worn strip at the tarmac edge', type: 'f', min: 0, max: 1.33, step: 0.01, def: 1, u: 'uGAlgB', c: 2 },
+    { group: 'Grass patterns', key: 'gField', label: 'Field patchwork (big uneven patches)', type: 'f', min: 0, max: 2, step: 0.01, def: 1, u: 'uGAlgB', c: 3 },
+    { group: 'Grass patterns', key: 'gClump', label: 'Clump size (x)', type: 'f', min: 0.2, max: 5, step: 0.05, def: 1, u: 'uGAlgC', c: 0 },
+    { group: 'Grass patterns', key: 'gYSize', label: 'Yellow patch size (x)', type: 'f', min: 0.2, max: 5, step: 0.05, def: 1, u: 'uGAlgC', c: 1 },
+    { group: 'Grass patterns', key: 'gStripes', label: 'Mowing stripes', type: 'f', min: 0, max: 4, step: 0.01, def: 1, u: 'uGAlgC', c: 2 },
+    { group: 'Grass patterns', key: 'gVar', label: 'All variation (x)', type: 'f', min: 0, max: 2, step: 0.01, def: 1, u: 'uGAlgC', c: 3 },
+    { group: 'Grass from afar', key: 'gTuft', label: 'Tuft light and dark', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGFar', c: 0 },
+    { group: 'Grass from afar', key: 'gGust', label: 'Wind gust bands', type: 'f', min: 0, max: 5, step: 0.01, def: 1, u: 'uGFar', c: 1 },
+    { group: 'Grass from afar', key: 'gSheen', label: 'Low-sun sheen', type: 'f', min: 0, max: 5, step: 0.01, def: 1, u: 'uGFar', c: 2 },
+    { group: 'Grass from afar', key: 'gMoist', label: 'Wet and dry ground swing', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGFar', c: 3 },
   ];
   const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
-    set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = +o[d.key]; if (U && d.u && U[d.u]) U[d.u].value = this.values[d.key]; }
+    set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = d.type === 'c' ? String(o[d.key]) : +o[d.key];
+        const uu = U && d.u && U[d.u]; if (!uu) continue;
+        if (d.type === 'c') uu.value.set(this.values[d.key]); else if (d.c != null) uu.value.setComponent(d.c, this.values[d.key]); else uu.value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
       if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.Q) P.Q.aoK = this.values.ssao; } } };
   const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);

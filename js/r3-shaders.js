@@ -51,6 +51,15 @@
     // half the road into one white sheet; 50 or more leaves the road as it is
     uRoadGlare: { value: 100 },
     // the 3D grass map (js/r3-grass.js), so the ground can wear where the turf meets other surfaces
+    // grass tuning (F7, js/r3-tyretune.js): uGHue x hue turn (degrees, + toward blue-green, - toward
+    // yellow), y saturation, z brightness, w warmth (toward a dry, yellowed green); uGTint a colour
+    // multiplier; uGAlgA species and spots (meadow grass, fescue, clover, yellow patches); uGAlgB
+    // condition (drought stress, wear by the track, the worn edge strip, the field's big patches);
+    // uGAlgC sizes and stripes (clump size x, yellow patch size x, mowing stripes, overall variation);
+    // uGFar the field seen from afar (tuft contrast, wind gust bands, low-sun sheen, moisture swing)
+    uGHue: { value: new THREE.Vector4(0, 1, 1, 0) }, uGTint: { value: new THREE.Color(1, 1, 1) },
+    uGAlgA: { value: new THREE.Vector4(1, 1, 1, 1) }, uGAlgB: { value: new THREE.Vector4(1, 1, 1, 1) },
+    uGAlgC: { value: new THREE.Vector4(1, 1, 1, 1) }, uGFar: { value: new THREE.Vector4(1, 1, 1, 1) },
     uGrassMask: { value: null }, uGrassMaskB: { value: new THREE.Vector4(0, 0, 1, 1) }, // strength of the lawn colour variation (debug: larger exaggerates it to inspect the pattern)
   };
   { const t = new THREE.DataTexture(new Uint8Array([128, 0, 0, 255]), 1, 1); t.needsUpdate = true; U.uTurf.value = t; }
@@ -101,10 +110,16 @@
   // 3.2 m tile stops repeating visibly across a field.
   const LAWN_ROUGH = 0.78;
   const LAWN = [
-    'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB;',
+    'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB; uniform vec4 uGHue; uniform vec3 uGTint; uniform vec4 uGAlgA; uniform vec4 uGAlgB; uniform vec4 uGAlgC; uniform vec4 uGFar;',
     'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex; uniform vec4 uRingH; uniform vec3 uFootT; uniform float uFieldK;',
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
-    'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w); }',
+    'vec3 lawnTune(vec3 c) { const vec3 LW = vec3(0.2126, 0.7152, 0.0722); float l;',
+    // (the tuning: warmth keeps the brightness, the hue turns in YIQ, which keeps it too)
+    '  l = dot(c, LW); vec3 cw = c * vec3(1.0 + 0.18 * uGHue.w, 1.0 + 0.02 * uGHue.w, 1.0 - 0.45 * uGHue.w); c = max(cw * l / max(dot(cw, LW), 1e-5), 0.0);',
+    '  { float a = radians(uGHue.x), cs = cos(a), sn = sin(a); vec3 q = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312) * c;',
+    '    q.yz = vec2(q.y * cs - q.z * sn, q.y * sn + q.z * cs) * uGHue.y; c = max(mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * q, 0.0); }',
+    '  return c * uGTint * uGHue.z; }',
+    'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return lawnTune(mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w)); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
     'uniform sampler2D uTfTex;',
     'float tfN(vec2 p) { return texture2D(uTfTex, p / 256.0).r; }',
@@ -113,59 +128,59 @@
     'float lawnTuft(vec2 w) { return tfN(w * 1.7) * 0.4 + tfN(w * 3.9 + 2.0) * 0.35 + tfN(w * 8.3 + 5.1) * 0.25; }',
     'vec3 lawnFar(vec2 w, vec3 wp, vec3 eye, vec3 sunDir) {',
     '  float k = lawnFarK(wp, eye), graze = 1.0 - clamp(normalize(eye - wp).y, 0.0, 1.0);',
-    '  float tf = mix(0.86, 1.1, lawnTuft(w));',
+    '  float tf = mix(1.0, mix(0.86, 1.1, lawnTuft(w)), uGFar.x);',
     // the gusts that bend the 3D grass, seen from afar as lighter bands rolling across the field
     '  vec2 gd = vec2(0.8, 0.6); float gg = 0.5 + 0.5 * sin(dot(w, gd) * 0.16 - uWindT * 2.1 + sin(dot(w, vec2(-gd.y, gd.x)) * 0.05 + uWindT * 0.3) * 2.4);',
     // and the pale sheen of the blades looking toward the sun at a low angle
     '  vec3 v = normalize(wp - eye); float sh = pow(clamp(dot(v, sunDir), 0.0, 1.0), 2.0) * pow(graze, 3.0);',
-    '  return mix(vec3(1.0), tf * (1.0 + 0.06 * gg * graze + 0.12 * sh) * mix(vec3(1.0), vec3(1.05, 1.08, 0.93), graze), k);',
+    '  return mix(vec3(1.0), tf * (1.0 + 0.06 * uGFar.y * gg * graze + 0.12 * uGFar.z * sh) * mix(vec3(1.0), vec3(1.05, 1.08, 0.93), graze), k);',
     '}',
     'vec3 lawnTint(sampler2D mm, vec2 w, vec3 eye) {',
     '  vec4 site = texture2D(uTurf, clamp((w - uTurfB.xy) / uTurfB.zw, 0.0, 1.0));',
     // water: drainage of the site plus warped soil variation (positive wet, negative dry)
     '  vec2 wq = w + (vec2(tfN(w / 37.0), tfN(w / 37.0 + 5.2)) - 0.5) * 22.0;',
-    '  float moist = (0.5 - site.r) * 1.6 + (tfF(wq / 26.0) - 0.5) * 1.5;',
+    '  float moist = (0.5 - site.r) * 1.6 + (tfF(wq / 26.0) - 0.5) * 1.5 * uGFar.w;',
     '  float wet = clamp(moist, 0.0, 1.0), dry = clamp(-moist, 0.0, 1.0);',
     // species clumps: warped, then cut at thresholds so each clump has an edge
-    '  vec2 sq = w / 1.7 + (vec2(tfN(w / 5.3), tfN(w / 5.3 + 9.7)) - 0.5) * 2.4;',
+    '  vec2 sq = w / (1.7 * uGAlgC.x) + (vec2(tfN(w / 5.3), tfN(w / 5.3 + 9.7)) - 0.5) * 2.4;',
     '  float sp = tfF(sq);',
     '  float poa = smoothstep(0.63, 0.67, sp) * (0.6 + 0.4 * tfN(w / 23.0));',
     '  float fes = 1.0 - smoothstep(0.31, 0.35, sp);',
     '  float clov = smoothstep(0.80, 0.83, tfN(w * 2.1 + 3.0)) * smoothstep(0.45, 0.7, tfN(w / 9.0 + 1.7));',
     '  vec3 c = vec3(1.0);',
-    '  c *= mix(vec3(1.0), vec3(1.09, 1.06, 0.80), poa);',
-    '  c *= mix(vec3(1.0), vec3(0.88, 0.95, 1.03), fes);',
-    '  c *= mix(vec3(1.0), vec3(0.96, 1.07, 0.93), clov);',
+    '  c *= mix(vec3(1.0), vec3(1.09, 1.06, 0.80), clamp(poa * uGAlgA.x, 0.0, 1.0));',
+    '  c *= mix(vec3(1.0), vec3(0.88, 0.95, 1.03), clamp(fes * uGAlgA.y, 0.0, 1.0));',
+    '  c *= mix(vec3(1.0), vec3(0.96, 1.07, 0.93), clamp(clov * uGAlgA.z, 0.0, 1.0));',
     '  c *= mix(vec3(1.0), vec3(0.95, 0.97, 0.96), wet * 0.35);',
     '  vec3 stress = mix(vec3(1.10, 1.05, 0.76), vec3(1.32, 1.12, 0.62), smoothstep(0.55, 1.0, dry));',
-    '  c *= mix(vec3(1.0), stress, smoothstep(0.12, 0.75, dry));',
+    '  c *= mix(vec3(1.0), stress, clamp(smoothstep(0.12, 0.75, dry) * uGAlgB.x, 0.0, 1.0));',
     // yellow patches: warped cells of about 6 m, only the highest few percent, and only where a
     // coarser field allows (so they cluster in some areas and are absent from others)
-    '  vec2 yq = w / 3.2 + (vec2(tfN(w / 1.7 + 2.0), tfN(w / 1.7 + 6.3)) - 0.5) * 1.4;',
+    '  vec2 yq = w / (3.2 * uGAlgC.y) + (vec2(tfN(w / 1.7 + 2.0), tfN(w / 1.7 + 6.3)) - 0.5) * 1.4;',
     '  float yv = tfN(yq) * 0.7 + tfN(yq * 2.6 + 1.9) * 0.3;',
     '  float ya = smoothstep(0.25, 0.6, tfN(w / 45.0 + 3.7));',
     // the patch is broken up by green growing through it, at a few centimetres
     '  float ybr = smoothstep(0.3, 0.62, tfN(w * 4.3 + 1.1) * 0.6 + tfN(w * 11.0) * 0.4);',
     '  float yp = smoothstep(0.66, 0.70, yv) * ya * ybr;',
-    '  c *= mix(vec3(1.0), vec3(1.22, 1.02, 0.56), yp * 0.9);',
+    '  c *= mix(vec3(1.0), vec3(1.22, 1.02, 0.56), clamp(yp * 0.9 * uGAlgA.w, 0.0, 1.0));',
     // wear beside the track: patchy, toward bare soil
     '  float wr = site.g * smoothstep(0.4, 0.75, tfF(w / 1.3 + 4.4));',
-    '  c *= mix(vec3(1.0), vec3(0.98, 0.86, 0.64), wr * 0.45);',
+    '  c *= mix(vec3(1.0), vec3(0.98, 0.86, 0.64), clamp(wr * 0.45 * uGAlgB.y, 0.0, 1.0));',
     // the worn strip at the edge of the track: wheels running wide and the mower turning there
     // leave a ragged band, under a metre to two wide, of thin tired grass over sandy soil
     '  float sdE = site.b * 63.75;',
     '  float ew = (1.0 - smoothstep(0.1, 1.4 + 1.6 * tfN(w * 0.45 + 8.0), sdE)) * smoothstep(0.3, 0.62, tfN(w * 2.7 + 1.3) * 0.6 + tfN(w * 9.0) * 0.4 + 0.12);',
-    '  c *= mix(vec3(1.0), vec3(1.04, 0.86, 0.58), ew * 0.75);',
+    '  c *= mix(vec3(1.0), vec3(1.04, 0.86, 0.58), clamp(ew * 0.75 * uGAlgB.z, 0.0, 1.0));',
     '  { float rg = smoothstep(14.0, 34.0, site.b * 63.75 + (tfN(w / 11.0) - 0.5) * 12.0);',
     '    c *= mix(vec3(1.0), mix(vec3(1.12, 1.02, 0.74), vec3(0.94, 0.95, 0.8), tfN(w / 6.0)), rg * 0.8); }',
     '  c *= mix(vec3(0.9, 0.93, 0.92), vec3(1.1, 1.06, 0.98), tfN(w / 90.0) * 0.6 + tfN(w / 37.0) * 0.4);',
-    '  c = max(mix(vec3(1.0), c, uLawnK), vec3(0.05));',
+    '  c = max(mix(vec3(1.0), c, uLawnK * uGAlgC.w), vec3(0.05));',
     // mowing stripes: the mower runs alongside the track, so the bands lie at constant distances
     // from its edge (site.b, quarter metres from the tarmac up to 63 m), 4 m wide, fading out past 40 m; light along the
     // lay, dark against it, strongest seen at a low angle
     '  float sd = site.b * 63.75, sband = smoothstep(-0.25, 0.25, sin(sd * 3.14159 / 4.0)) * 2.0 - 1.0;',
     '  vec2 vd0 = w - eye.xz; float vgl = clamp(length(vd0) / max(abs(eye.y - 0.0) + 1.0, 1.0), 0.0, 6.0);',
-    '  { float sk = sband * step(sd, 60.0) * smoothstep(0.0, 1.2, sd) * (1.0 - smoothstep(40.0, 60.0, sd)); c *= 1.0 + sk * vec3(0.11, 0.1, 0.06); }',
+    '  { float sk = sband * step(sd, 60.0) * smoothstep(0.0, 1.2, sd) * (1.0 - smoothstep(40.0, 60.0, sd)); c *= 1.0 + sk * uGAlgC.z * vec3(0.11, 0.1, 0.06); }',
     '  vec2 perp = vec2(-uLawn.y, uLawn.x);',
     '  float band = smoothstep(-0.3, 0.3, sin(dot(w, perp) * 3.14159 / uLawn.z)) * 2.0 - 1.0;',
     '  vec2 vd = w - eye.xz; vd /= max(length(vd), 1e-3);',
@@ -179,7 +194,7 @@
     '  float fCl = tfN(fq / 1.3 + 2.2) * 0.62 + tfN(fq / 0.47 + 5.0) * 0.38;',
     '  fC *= mix(0.66, 1.12, smoothstep(0.3, 0.6, fCl));',
     '  fC = mix(fC, vec3(1.14, 0.94, 0.6), smoothstep(0.6, 0.7, fCl * 0.55 + fMid * 0.5) * smoothstep(0.42, 0.6, fBig) * 0.8);',
-    '  c *= mix(vec3(1.0), fC, uFieldK);',
+    '  c *= mix(vec3(1.0), fC, uFieldK * uGAlgB.w);',
     '  return c * (1.0 + uLawn.w * band * (0.6 * dot(vd, uLawn.xy) + 0.35));',
     '}',
     'float lawnBreak(sampler2D tex, vec2 w) {',
@@ -327,7 +342,7 @@
           (mac.lawn ? '\n  diffuseColor.rgb *= lawnTint(macroMap, vMacroW, cameraPosition) * lawnBreak(map, vMacroW) * lawnFar(vMacroW, vFogWorld, cameraPosition, uSunDir);\n'
             + '  { float gm = texture2D(uGrassMask, (vMacroW - uGrassMaskB.xy) / uGrassMaskB.zw).r;\n'
             + '    diffuseColor.rgb *= mix(vec3(1.0), vec3(0.92, 0.8, 0.62), (1.0 - smoothstep(0.15, 0.75, gm)) * 0.55); }\n'
-            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);\n#ifdef USE_FOG\n  float fFar = smoothstep(110.0, 520.0, length(vFogWorld - cameraPosition));\n  if (fFar > 0.001) {\n    vec2 fW = vFogWorld.xz;\n    float fA = textureLod(uFarTex, fW / 1500.0, 2.0).g, fB = textureLod(uFarTex, fW / 530.0 + 0.4, 1.0).g;\n    vec3 fC = mix(diffuseColor.rgb, uFarLawn.rgb * (0.5 + dot(diffuseColor.rgb, vec3(1.2))), uFarLawn.a);\n    fC *= 0.64 + fA * 0.76 + smoothstep(0.34, 0.16, fB) * 0.08;\n    fC = mix(fC, fC * vec3(1.16, 1.03, 0.72), smoothstep(0.3, 0.6, fB) * uFarLawn.a);\n    fC = mix(fC, fC * vec3(0.56, 0.6, 0.54), smoothstep(0.34, 0.62, fA * 0.65 + fB * 0.5));\n    fC = mix(fC, vec3(0.74, 0.68, 0.46) * (0.9 + fA * 0.3), smoothstep(650.0, 1500.0, length(vFogWorld - cameraPosition)) * uFarLawn.a * 0.6);\n    diffuseColor.rgb = mix(diffuseColor.rgb, fC, fFar);\n  }\n#endif' : ''))
+            + '  diffuseColor.rgb = lawnGrade(diffuseColor.rgb);\n#ifdef USE_FOG\n  float fFar = smoothstep(110.0, 520.0, length(vFogWorld - cameraPosition));\n  if (fFar > 0.001) {\n    vec2 fW = vFogWorld.xz;\n    float fA = textureLod(uFarTex, fW / 1500.0, 2.0).g, fB = textureLod(uFarTex, fW / 530.0 + 0.4, 1.0).g;\n    vec3 fC = mix(diffuseColor.rgb, lawnTune(uFarLawn.rgb) * (0.5 + dot(diffuseColor.rgb, vec3(1.2))), uFarLawn.a);\n    fC *= 0.64 + fA * 0.76 + smoothstep(0.34, 0.16, fB) * 0.08;\n    fC = mix(fC, fC * vec3(1.16, 1.03, 0.72), smoothstep(0.3, 0.6, fB) * uFarLawn.a);\n    fC = mix(fC, fC * vec3(0.56, 0.6, 0.54), smoothstep(0.34, 0.62, fA * 0.65 + fB * 0.5));\n    fC = mix(fC, vec3(0.74, 0.68, 0.46) * (0.9 + fA * 0.3), smoothstep(650.0, 1500.0, length(vFogWorld - cameraPosition)) * uFarLawn.a * 0.6);\n    diffuseColor.rgb = mix(diffuseColor.rgb, fC, fFar);\n  }\n#endif' : ''))
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' +
           `  roughnessFactor = clamp(roughnessFactor * mix(${f(1 - mac.ramt)}, ${f(1 + mac.ramt)}, 1.0 - mcr), 0.04, 1.0);` +
           // turf is a matte tangle of blades: the photo's own 0.55 left a glassy sky sheen on it

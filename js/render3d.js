@@ -3398,8 +3398,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     })();
     const tiles = new Map();
     let items = W2.decor.filter(it => it.type === 'tree' || it.type === 'palm');
-    // scanned-model impostors (js/r3-trees.js) when their atlases are present
-    if (F1.R3Trees && F1.R3Trees.available() && F1.R3Trees.build(root, tr, items.filter(it => it.type === 'tree'))) items = items.filter(it => it.type === 'palm');
+    // (the scanned-model impostors of js/r3-trees.js, flat pictures turned to face the camera, and
+    // their painted forest walls are off, at the owner's request: every tree is modelled below)
     const step = Math.max(1, Math.ceil(items.length / 9000));
     const rnd = U.rng(91);
     for (let n = 0; n < items.length; n += step) {
