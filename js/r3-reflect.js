@@ -426,7 +426,16 @@
         '    if (!inside) vis = shadowAt(uSh[1], uShM[1], p, inside);',
         '    if (!inside) vis = shadowAt(uSh[2], uShM[2], p, inside); }',
         '  vec3 amb = textureCubeUV(uEnv, n, 1.0).rgb * uEnvK + mix(uGround, uSky, n.y * 0.5 + 0.5) * RECIPROCAL_PI;',
-        '  vec3 c = vCol * (amb + uSunCol * ndl * vis * RECIPROCAL_PI) + vEm;',
+        // The sky mirrored in the surface itself, as the real materials have it (a rough dielectric:
+        // F0 0.04, roughness 0.8, the scenery's 0.82 share of the sky). On the asphalt that is most of
+        // its light: its colour is near black (0.012), and the grey the road shows is the sky in it.
+        // Matte only, the copy's road was a quarter of the real one's brightness, and it fills the
+        // lower half of what every car mirrors: the cars went dark, in the shade most of all.
+        '  vec3 v = normalize(cameraPosition - vW); float nv = clamp(dot(n, v), 0.0, 1.0);',
+        '  vec4 dr = 0.8 * vec4(-1.0, -0.0275, -0.572, 0.022) + vec4(1.0, 0.0425, 1.04, -0.04);',
+        '  vec2 fab = vec2(-1.04, 1.04) * (min(dr.x * dr.x, exp2(-9.28 * nv)) * dr.x + dr.y) + dr.zw;',
+        '  vec3 spec = textureCubeUV(uEnv, reflect(-v, n), 0.8).rgb * uEnvK * (0.04 * fab.x + fab.y) * 0.82;',
+        '  vec3 c = vCol * (amb + uSunCol * ndl * vis * RECIPROCAL_PI) + spec + vEm;',
         '  float d = length(vW - cameraPosition), f = exp(-uFogD * uFogD * d * d);',
         '  gl_FragColor = vec4(mix(uFogCol, c, f), 1.0);',
         '}',

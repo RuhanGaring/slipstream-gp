@@ -4916,7 +4916,12 @@ void main() {
     // The first filter after a change of size is whole. (js/vendor/three.min.js _applyPMREM, patched)
     const ph = LP.turn = ((LP.turn | 0) + 1) % 3;
     pmrem._r3skip = LP.whole ? (e => e > 3 && (e - 4) % 3 !== ph) : null;
-    try { LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out); } finally { pmrem._r3skip = null; }
+    // (nothing is cleared for it: three leaves the map's scissor off after each filter, so the next
+    // one's first draw wiped the whole map, and the levels left for a later frame were black: the
+    // cars lost the broad light the map gives them and went dark, in the shade most of all)
+    const ac = renderer.autoClear;
+    if (LP.whole) renderer.autoClear = false;
+    try { LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out); } finally { pmrem._r3skip = null; renderer.autoClear = ac; }
     LP.whole = true;
     LP.ready = true;
     renderer.setRenderTarget(prev);
