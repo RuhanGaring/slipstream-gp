@@ -184,10 +184,10 @@
   // each is one shared uniform, so every car's tyres take it at once.
   const lin = (r, g, b) => '#' + new THREE.Color().setRGB(r, g, b).getHexString();
   const SCHEMA = [
-    ['Surface', 'rough', 'Roughness, new tread', 0.2, 1, 0.01, 0.48],
+    ['Surface', 'rough', 'Roughness, new tread', 0.2, 1, 0.01, 0.39],
     ['Surface', 'roughSide', 'Sidewall: rougher by', -0.2, 0.4, 0.01, 0.1],
     ['Surface', 'roughDust', 'Sidewall dust: rougher by', 0, 0.4, 0.01, 0.1],
-    ['Surface', 'spec', 'Specular strength (F0 x)', 0, 2, 0.01, 0.87],
+    ['Surface', 'spec', 'Specular strength (F0 x)', 0, 2, 0.01, 2],
     ['Surface', 'envSpec', 'Sky reflection', 0, 3, 0.01, 0.4],
     ['Surface', 'envDiff', 'Sky light (diffuse)', 0, 3, 0.01, 0.15],
     ['Surface', 'sheen', 'Grazing sheen', 0, 2, 0.01, 0],
@@ -195,7 +195,7 @@
     // the tyre in shade (under a building, the car's own shadow): its own copies of the car's shade values
     ['Shade', 'ao', 'Ground occlusion on the tyre', 0, 1.5, 0.01, 0.58],
     ['Shade', 'self', 'Tyre self-shade (the car covering its sky)', 0, 1, 0.01, 1],
-    ['Shade', 'fill', 'Light floor in shade (added)', 0, 0.3, 0.002, 0.01],
+    ['Shade', 'fill', 'Light floor in shade (added)', 0, 0.3, 0.002, 0.004],
     ['Surface', 'sideLo', 'Tread/sidewall split from', 0, 1, 0.01, 0.5],
     ['Surface', 'sideHi', 'Tread/sidewall split to', 0, 1, 0.01, 0.85],
     ['Rubber colour', 'treadNew', 'Tread, new', 'c', 0, 0, '#0f0f0f'],
