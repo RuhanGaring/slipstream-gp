@@ -5055,6 +5055,8 @@ void main() {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
     }
+    // the cars' fill under shade: the hemisphere light's colours, a share of its strength (about 3 times the sky light the car reads, the road and walls round it bounce more than the sky map holds)
+    { const U = F1.R3S.U, k = Math.max(0.3, hemi.intensity) * 3.0; U.uCarFillS.value.copy(hemi.color).multiplyScalar(k); U.uCarFillG.value.copy(hemi.groundColor).multiplyScalar(k * 0.8); }
     probeStep(o.focus);
   }
 
