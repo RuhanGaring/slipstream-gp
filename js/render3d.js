@@ -4149,7 +4149,7 @@ void main() {
   let frameNo = 0;
   const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
   let focusCar = null, camMode = '';
-  function updateCars(cars, dt, hideHelmet) {
+  function updateCars(cars, dt, hideHelmet, buzzCar) {
     frameNo++;
     F1.R3S.U.uLodJit.value = (frameNo % 64) * 5.588238;
     for (const c of cars) {
@@ -4230,7 +4230,8 @@ void main() {
         RC.setLod(body, L, dPx2 < 196 || c === hideHelmet, ride || c === hideHelmet ? 0 : Math.max(dt, 0.004));
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
-        RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.ctl && c.ctl.wheelDeg != null ? c.ctl.wheelDeg * 0.36 / 180 : c.steer, hide ? c : null); // debug: G.__ckSteer pins the wheel; a real wheel turns it by its own angle
+        if (body.userData.cockpit) body.userData.cockpit.buzzK = c === buzzCar ? 2.2 : 1; // (seen from the T-cam pod's distance the buzz needs more swing to read)
+        RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.ctl && c.ctl.wheelDeg != null ? c.ctl.wheelDeg * 0.36 / 180 : c.steer, hide || c === buzzCar ? c : null); // debug: G.__ckSteer pins the wheel; a real wheel turns it by its own angle
         RC.updateHead(body, c, dt);
       }
     }
@@ -5041,7 +5042,7 @@ void main() {
     clock += dt;
     state.lastCars = o.cars;
     focusCar = o.focus || null; camMode = o.mode || '';
-    updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null);
+    updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null, o.mode === 'tcam' ? o.focus : null); // (the T-cam sees the wheel buzz and the hands shake too, the helmet stays shown)
     if (state.root && state.root.userData.farList) {
       const cp = camera.position, lift = 1 + Math.max(0, cp.y - (o.focus ? o.focus.z || 0 : 0)) / 40;
       for (const m of state.root.userData.farList) { const b = m.geometry.boundingSphere, c = b.center, dx = c.x - cp.x, dz = c.z - cp.z, r = m.userData.far * lift + b.radius; m.visible = dx * dx + dz * dz < r * r; }

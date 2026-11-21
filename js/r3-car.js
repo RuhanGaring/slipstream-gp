@@ -2189,7 +2189,7 @@
       const t = performance.now() / 1000, sp = Math.min(1, (car.speed || 0) / 85);
       const rev = car.rpm ? Math.min(1, Math.max(0, (car.rpm - 4000) / 8000)) : 0;
       const kerb = car.onKerb ? Math.min(1, car.onKerb / 2) : 0;
-      const amp = 0.0028 + 0.008 * sp + 0.0035 * rev + 0.022 * kerb;
+      const amp = (0.0028 + 0.008 * sp + 0.0035 * rev + 0.022 * kerb) * (ck.buzzK || 1);
       a += amp * (Math.sin(t * 2 * Math.PI * 13.1) * 0.55 + Math.sin(t * 2 * Math.PI * 21.7 + 1.3) * 0.3 + Math.sin(t * 2 * Math.PI * 7.3 + 0.4) * 0.35);
     } else if (ck.steer !== null && Math.abs(a - ck.steer) < 1e-4) return;
     ck.steer = a;
