@@ -1271,7 +1271,7 @@
   // The onboard eye sits under the halo's top bar, far enough forward that the bar frames
   // the top of the view and the centre pillar runs down to the nose (as on a real onboard);
   // the wheel is about 40 cm ahead and 15 cm below it, with the hands at quarter to three.
-  const EYE = new THREE.Vector3(0.52, 0.81, 0), WHEEL_C = new THREE.Vector3(0.85, 0.68, 0);
+  const EYE = new THREE.Vector3(0.52, 0.81, 0), WHEEL_C = new THREE.Vector3(0.85, 0.68, 0), SW_MIN_Y = 0.70;
   // steering wheel turn per unit of road-wheel angle: an F1 wheel turns about one full turn
   // lock to lock (about +-180 degrees; a little more at Monaco) for some 20 degrees of front
   // wheel, so full lock here (0.36 rad) is half a turn of the wheel
@@ -2071,7 +2071,17 @@
     // converter: 0.60 to 0.68 m up, car by car), not at the one height every car shared: there
     // it sat up to 8 cm above its own dash, and the parts of the wheel the model keeps on its
     // bodywork (the lower dials, the column's boss) hung in the air under it.
-    if (MD && MD.sw && MD.sw.c) pivot.position.set(WHEEL_C.x, MD.sw.c[1], MD.sw.c[2] || 0);
+    // ...but never lower than SW_MIN_Y: the models put their wheels 0.60 to 0.68 m up (the W17's is
+    // 0.60), while the driver sits at one fixed height in every car, and a real F1 wheel stands with
+    // its top about level with the visor line (centre roughly 11 cm under the eyes, so 0.70 m here).
+    // A wheel the model sets lower is lifted to that, with a short column back down to where the
+    // model's own column enters its dash, so it does not float.
+    let colFrom = null;
+    if (MD && MD.sw && MD.sw.c) {
+      const y0 = MD.sw.c[1], y1 = Math.max(y0, SW_MIN_Y);
+      pivot.position.set(WHEEL_C.x, y1, MD.sw.c[2] || 0);
+      if (y1 - y0 > 0.012) colFrom = [y1, y0];
+    }
     // the face stands vertical, square to the car's axis, as an F1 wheel is mounted (no rake back
     // toward the driver); a car model's own wheel keeps the rake its column has
     const zA = new THREE.Vector3(-1, 0, 0), xA = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), zA).normalize(), yA = new THREE.Vector3().crossVectors(zA, xA);
@@ -2090,6 +2100,11 @@
       pivot.add(col);
     }
     group.add(pivot);
+    if (colFrom) {
+      const col = mesh(new THREE.CylinderGeometry(0.02, 0.024, 1, 10), K.M.carbon, false);
+      placeBone(col, new THREE.Vector3(WHEEL_C.x + 0.03, colFrom[0], 0), new THREE.Vector3(WHEEL_C.x + 0.24, colFrom[1] - 0.01, 0));
+      group.add(col);
+    }
     group.add(mesh(tubGeo(), K.tub, false));
     const inner = cockpitInterior(K, mesh);
     group.add(inner.grp);
