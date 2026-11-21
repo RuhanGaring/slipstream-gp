@@ -1272,6 +1272,11 @@
   // the top of the view and the centre pillar runs down to the nose (as on a real onboard);
   // the wheel is about 40 cm ahead and 15 cm below it, with the hands at quarter to three.
   const EYE = new THREE.Vector3(0.52, 0.81, 0), WHEEL_C = new THREE.Vector3(0.85, 0.68, 0), SW_MIN_Y = 0.70;
+  // Wheel centre height per car, so the top of each car's wheel stands 1 inch (2.54 cm) above the top
+  // of its own dashboard. Measured off the converted models: the dash (flat top of the scuttle
+  // ahead of the wheel, off the halo's centre pillar) is 0.707 to 0.770 m up, and the wheel's
+  // half height is 0.081 to 0.088 m, so centre = dash top + 0.0254 - half height.
+  const WHEEL_Y = { amr26: 0.664, fw48: 0.648, vf26: 0.648, mac26: 0.686, mcl40: 0.680, r26: 0.684, rb22: 0.671, sf26: 0.707, w17: 0.688 };
   // steering wheel turn per unit of road-wheel angle: an F1 wheel turns about one full turn
   // lock to lock (about +-180 degrees; a little more at Monaco) for some 20 degrees of front
   // wheel, so full lock here (0.36 rad) is half a turn of the wheel
@@ -2071,14 +2076,13 @@
     // converter: 0.60 to 0.68 m up, car by car), not at the one height every car shared: there
     // it sat up to 8 cm above its own dash, and the parts of the wheel the model keeps on its
     // bodywork (the lower dials, the column's boss) hung in the air under it.
-    // ...but never lower than SW_MIN_Y: the models put their wheels 0.60 to 0.68 m up (the W17's is
-    // 0.60), while the driver sits at one fixed height in every car, and a real F1 wheel stands with
-    // its top about level with the visor line (centre roughly 11 cm under the eyes, so 0.70 m here).
+    // ...but lifted to WHEEL_Y (the models put their wheels 0.60 to 0.68 m up, low against the fixed
+    // driver and the dash: a real F1 wheel's top stands just over the dashboard's).
     // A wheel the model sets lower is lifted to that, with a short column back down to where the
     // model's own column enters its dash, so it does not float.
     let colFrom = null;
     if (MD && MD.sw && MD.sw.c) {
-      const y0 = MD.sw.c[1], y1 = Math.max(y0, SW_MIN_Y);
+      const y0 = MD.sw.c[1], y1 = WHEEL_Y[MD.id] || Math.max(y0, SW_MIN_Y);
       pivot.position.set(WHEEL_C.x, y1, MD.sw.c[2] || 0);
       if (y1 - y0 > 0.012) colFrom = [y1, y0];
     }
