@@ -1195,7 +1195,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // sky, with stars and a moon. The camera opens up as the light goes, as a broadcast camera does (not
   // all the way), and the circuit's floodlights come on before sunset, as at a twilight race: towers
   // along the track, their light on the track and its run-off and gone a hundred metres beyond.
-  const D2R = Math.PI / 180, TOD_EMAX = 62, FLOOD_K = 0.38, FLOOD_LV = 7.4;
+  const D2R = Math.PI / 180, TOD_EMAX = 62, FLOOD_K = 0.38, FLOOD_LV = 8.8;
   const FLOOD_C = new THREE.Color(0.985, 0.99, 1.0); // (metal halide and LED floodlights, about 5000 K)
   const airmass = e => 1 / (Math.sin(Math.max(-1, e) * D2R) + 0.50572 * Math.pow(Math.max(0.01, e + 6.07995), -1.6364));
   const TAU = [0.12, 0.19, 0.36];
@@ -1561,7 +1561,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // exposure), whatever the circuit's photographed day was like: an overcast probe left one circuit's
     // night a fifth as bright as the others. Between the two, by the floodlights' share of the light.)
     const natural = B0.sunI * lr * lim * Math.max(0, Math.sin(e * D2R)) + skyDef * skyR, dayExp = Math.pow(Dr / Math.max(natural, 1e-9), 0.82);
-    const cityK = state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.68 : 1;
+    const cityK = state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.84 : 1;
     const floodExp = FLOOD_LV * cityK / (Fh * T0.exp), w = fl * Fh / (fl * Fh + natural + 1e-9);
     state.todExp = U.clamp(1 / ((1 - w) / dayExp + w / floodExp), 0.33, 60);
     state.todShaft = (I > 0 ? sunI / I : 0) * U.smooth((e - 1) / 6);
@@ -1569,9 +1569,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     S3.uDispK.value = 1 / Math.pow(Math.max(1, state.todExp), 0.85);
     if (fx.assist) fx.assist.material.color.setScalar(S3.uDispK.value);
     const nk = fl * (1 - U.smooth(e / 8));
-    S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
+    S3.uFloodCar.value = 1 + 0.25 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
-    S3.uCarNight.value.set(1 - 0.28 * nk, 1); // (the cars' reflection at its normal level; their diffuse a little under the day's)
+    S3.uCarNight.value.set(1, 1); // (the cars' reflection at its normal level; their diffuse a little under the day's)
     if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * nk); // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
