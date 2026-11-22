@@ -3660,7 +3660,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (!M.tunnelWall) { M.tunnelWall = std({ color: '#d3c3a6', map: tunnelWallTex(), roughness: 0.72, metalness: 0, vertexColors: true, side: THREE.DoubleSide }); M.tunnelWall.color.setRGB(1.3, 1.16, 0.92); M.tunnelWall.userData.noSky = true; M.tunnelWall.userData.patchKey = 'tunWall'; M.tunnelWall.userData.patchExtra = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  float tnUp = step(0.5, inverseTransformDirection(normal, viewMatrix).y); reflectedLight.directDiffuse *= tnUp; reflectedLight.directSpecular *= tnUp;'); tunFlat(sh, 'tnUp'); }; }
       // (the slab is the darkest thing in the pictures of the tunnel: it stood lit beige)
       if (!M.tunnelCeil) { M.tunnelCeil = std({ color: '#3d3a35', emissive: '#080503', roughness: 0.95, metalness: 0, side: THREE.DoubleSide }); M.tunnelCeil.userData.noSky = true; M.tunnelCeil.userData.patchKey = 'tunCeil'; M.tunnelCeil.userData.patchExtra = sh => tunFlat(sh, '0.0'); } // (the lamps' spill: in the slab's own shadow nothing else reaches it)
-      const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) tm.userData.noProxy = true;
+      const tm = add(wl.geo(), M.tunnelWall, { cast: true }); if (tm) { tm.userData.noProxy = true; tm.userData.tunWalls = true; }
       const tc = add(ceil.geo(), M.tunnelCeil, { cast: true }); if (tc) tc.userData.noProxy = true;
       if (rb.k) rail.add(rb.geo(), null);
       add(rail.geo(), M.vcol2 || (M.vcol2 = std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })), { cast: false });
@@ -5423,6 +5423,22 @@ void main() {
         m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 250) * rl);
       }
     }
+    // the tunnel's walls, lit orange by those lamps, as the broad glow the paint and the rubber mirror (with the walls
+    // left out of the copy, the middle of the tunnel showed the cars two thin lines on black and nothing of the glow
+    // that a car near the mouth takes from the lit wall and the daylight beyond it)
+    {
+      const R = state.root;
+      if (R && R.userData.tunWallMesh === undefined) { let f = null; R.traverse(o => { if (!f && o.userData && o.userData.tunWalls) f = o; }); R.userData.tunWallMesh = f; }
+      const src = R && R.userData.tunWallMesh;
+      if (src) {
+        if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; }
+        const m = src.userData.pc;
+        if (m.parent !== PX.scene) PX.scene.add(m);
+        const rl = (state.carLampE || 0) * (state.carRoofE || 0);
+        m.visible = rl > 0.002;
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 8) * rl);
+      }
+    }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
     // the lit track as a pool of light round the car; both only while the floodlights are on
     {
@@ -5465,7 +5481,7 @@ void main() {
       PX.mat.uniforms.uSunCol.value.copy(F1.R3S.U.uSunOnly.value).multiplyScalar(1 - 0.97 * re);
       if (!PX.ceil) { PX.ceil = new THREE.Mesh(new THREE.CircleGeometry(60, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x050403, fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false })); PX.ceil.userData.keep = true; PX.ceil.frustumCulled = false; PX.ceil.renderOrder = -1; }
       if (PX.ceil.parent !== PX.scene) PX.scene.add(PX.ceil);
-      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re;
+      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re; PX.ceil.material.color.copy(TUN_LAMP).multiplyScalar(G.__tunC != null ? G.__tunC : 0.1);
       const fm = focus && live.get(focus); if (fm) PX.ceil.position.set(fm.position.x, fm.position.y + 5.6, fm.position.z);
     }
     // the cube, at the followed car, a metre up
