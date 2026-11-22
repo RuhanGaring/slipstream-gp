@@ -947,6 +947,14 @@
       if (kind === 'weekend') add(optRow('Weekend format', 'Practice is a longer solo session before qualifying', ['full', 'quali'], () => R.wkFmt || 'full', v => { R.wkFmt = v; updSummary(); }, v => FMT[v]));
       if (kind === 'champ') add(optRow('Round format', 'Each round as a race only, or with qualifying for the grid', ['race', 'quali', 'full'], () => R.chFmt || 'race', v => { R.chFmt = v; updSummary(); }, v => FMT[v]));
     }
+    const TOD_H = ['track', 5.5, 7, 9, 12, 15, 17.5, 18.5, 19.5, 21, 23, 0];
+    const hhmm = v => String(Math.floor(v)).padStart(2, '0') + ':' + String(Math.round((v % 1) * 60)).padStart(2, '0');
+    const TOD_NAME = v => v === 'track' ? 'CIRCUIT DEFAULT' : hhmm(v) + ({ 5.5: '  DAWN', 7: '  MORNING', 9: '  MORNING', 12: '  MIDDAY', 15: '  AFTERNOON', 17.5: '  SUNSET', 18.5: '  DUSK', 19.5: '  NIGHT', 21: '  NIGHT', 23: '  NIGHT', 0: '  MIDNIGHT' }[v] || '');
+    const addTod = sec => {
+      add(optRow('Time of day', 'The hour the race starts. At dusk and at night the circuit\'s floodlights are on', TOD_H, () => (R.tod == null ? 'track' : R.tod), v => { R.tod = v; updSummary(); }, TOD_NAME), sec);
+      add(optRow('Time passes', 'How fast the clock runs during the session: a long race can go from sunset into the night', [0, 1, 10, 30, 60], () => +R.todRate || 0, v => { R.todRate = v; updSummary(); }, v => (v ? (v === 1 ? 'REAL TIME' : v + 'x') : 'STOPPED')));
+    };
+    if (!sim) addTod('Conditions');
     if (sim) {
       add(optRow('Starting tyre', 'Auto takes what the engineer would, and rain tyres on a wet grid', ['auto', 'S', 'M', 'H'], () => R.compound, v => { R.compound = v; updSummary(); }, v => (v === 'auto' ? 'AUTO' : F1.Car.COMPOUNDS[v].name)), 'Car');
       if (kind !== 'spectate') {
@@ -954,7 +962,8 @@
         const ed = h('div', 'opt cs-open', '<div class="on">Edit car setup<small>Wings, differential, geometry, suspension, brakes, tyres</small></div><div class="cs-go">OPEN &#9654;</div>');
         add({ el: ed, activate: () => { R.setupOn = true; go('carsetup'); } });
       }
-      if (kind !== 'tt') add(optRow('Weather', 'Dry, light or heavy rain, or a changeable day', ['dry', 'light', 'heavy', 'mixed'], () => R.weather || 'dry', v => { R.weather = v; updSummary(); }, v => v.toUpperCase()), 'Conditions');
+      addTod('Conditions');
+      if (kind !== 'tt') add(optRow('Weather', 'Dry, light or heavy rain, or a changeable day', ['dry', 'light', 'heavy', 'mixed'], () => R.weather || 'dry', v => { R.weather = v; updSummary(); }, v => v.toUpperCase()));
       if (kind !== 'tt') add(optRow('Safety car', 'A crash can bring it out', ['on', 'off', 'always'], () => R.safetyCar || 'on', v => { R.safetyCar = v; }, v => v.toUpperCase()));
       if (kind !== 'tt') add(optRow('Mandatory pit stop', 'Use two compounds in races of 5 laps or more', [true, false], () => R.mandatory !== false, v => { R.mandatory = v; }, v => (v ? 'ON' : 'OFF')));
       if (kind !== 'spectate') add(optRow('ABS', 'Prevents wheel lock under braking', [true, false], () => R.abs, v => { R.abs = v; }, v => (v ? 'ON' : 'OFF')), 'Assists');

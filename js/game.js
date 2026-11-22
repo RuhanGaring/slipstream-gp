@@ -1418,6 +1418,8 @@
     if (!o.spectate) Object.assign(assists, help);
     return {
       mandatory: R.mandatory !== false, weather: sim && o.mode !== 'tt' ? R.weather || 'dry' : 'dry', safetyCar: R.safetyCar || 'on',
+      // the race's clock (js/render3d.js time of day): 'track' the circuit's own light, or an hour; todRate x real time
+      tod: R.tod == null ? 'track' : R.tod, todRate: +R.todRate || 0,
       track: o.track, mode: o.mode === 'tt' ? 'tt' : o.mode, laps: R.laps, difficulty: R.difficulty, team: f.team || 0, driver: f.driver || 0,
       grid: f.kind === 'champ' ? 'random' : (R.grid === 'pole' ? 1 : R.grid), field: R.field, assists,
       // qualifying is run on softs, as the AI's timed laps are, unless a tyre was chosen
@@ -1517,7 +1519,7 @@
         // (and every shader this circuit and its twenty cars use, compiled here and not on the grid:
         // done on first draw, it was a second of stalls in the race's first frames)
         Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {})
-          .then(() => (R3ok ? R3.precompile(race.cars) : null)).catch(() => {})
+          .then(() => (R3ok ? R3.precompile(race.cars, race) : null)).catch(() => {})
           .then(() => { shown(1); setTimeout(goRace, 300); });
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,

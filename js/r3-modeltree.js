@@ -264,7 +264,7 @@
     // a little light into the shade sides (sky and grass bounce: a crown's shade is never black),
     // and aerial perspective: distant woods fade toward the haze
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <opaque_fragment>', '  outgoingLight += diffuseColor.rgb * 0.05;\n#ifdef USE_FOG\n  { float bl = pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 6.0); outgoingLight += diffuseColor.rgb * uSunCol * bl * 0.35; }\n#endif\n#include <opaque_fragment>')
+      .replace('#include <opaque_fragment>', '  outgoingLight += diffuseColor.rgb * 0.05 * (uLiftK + uLiftF * r3FloodM());\n#ifdef USE_FOG\n  { float bl = pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 6.0); outgoingLight += diffuseColor.rgb * uSunCol * bl * 0.35; }\n#endif\n#include <opaque_fragment>')
       .replace('#include <dithering_fragment>', '#ifdef USE_FOG\n  gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, (1.0 - exp(-distance(vFogWorld, cameraPosition) / 1400.0)) * 0.75 * (1.0 - 0.6 * pow(max(dot(normalize(vFogWorld - cameraPosition), uSunDir), 0.0), 4.0)));\n#endif\n#include <dithering_fragment>');
   }
   // the leaves' shadow: only each crown's main cards cast (a third of them: the shade of a crown

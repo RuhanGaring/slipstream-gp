@@ -397,7 +397,7 @@
   function material(defs) {
     const R3S = F1.R3S && F1.R3S.U;
     const U = {
-      uEnv: { value: null }, uEnvK: { value: 1 }, uSunDir: R3S ? R3S.uSunDir : { value: new THREE.Vector3(0, 1, 0) }, uSunCol: R3S ? R3S.uSunCol : { value: new THREE.Color(1, 1, 1) },
+      uEnv: { value: null }, uEnvK: { value: 1 }, uSunDir: R3S ? R3S.uSunDir : { value: new THREE.Vector3(0, 1, 0) }, uSunCol: R3S ? R3S.uSunOnly : { value: new THREE.Color(1, 1, 1) },
       uSky: { value: new THREE.Color() }, uGround: { value: new THREE.Color() }, uFogCol: { value: new THREE.Color() }, uFogD: { value: 0 },
       uSh: { value: [null, null, null] }, uShM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, uShOn: { value: 0 },
     };

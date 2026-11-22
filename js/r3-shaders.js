@@ -17,7 +17,19 @@
     uRoadShadeK: { value: 1 }, uRubK: { value: 1 }, uTunLamp: { value: 0 },
     uKerbRidge: { value: 1 }, // the cast ridges across a circuit's kerbs, 0 on a town's flat ones
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    // Night: the circuit's floodlights (render3d.js time of day). uFloodMap holds, seen from above,
+    // where their light falls (1 on the track and its run-off, fading to 0 beyond); uFloodBox its world
+    // rectangle (x0, z0, 1/width, 1/depth). uFloodOn is the floodlights' share of the key light (the
+    // directional light is the floodlights' key at night, the sun by day): that share of it only lights
+    // where the map says. uFloodAmb is the floodlights' fill from many towers at once, as irradiance.
+    uFloodMap: { value: null }, uFloodBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uFloodOn: { value: 0 }, uFloodAmb: { value: new THREE.Color(0, 0, 0) },
+    uFloodH: { value: new THREE.Vector3(0, 1, 26) }, // (the light map's ground height: lowest, range; and the lamps' height)
+    uFloodEnv: { value: 0 }, uGNight: { value: new THREE.Vector2(1, 0) }, // (night: the probe's light kept to the floodlit area; the grass's brightness and grey)
+    uFloodCar: { value: 1 }, // (night: the cars' share of the floodlights' fill, raised)
+    uDispK: { value: 1 }, // (self-lit screens, js/r3-car.js: held down under the night's exposure)
+    uLiftK: { value: 1 }, uLiftF: { value: 0 }, // (a surface's own light lift, such as the leaves' inside a crown: the sky's share, and the floodlights' where they reach)
     uSunCol: { value: new THREE.Color(1, 1, 1) },
+    uSunOnly: { value: new THREE.Color(1, 1, 1) }, // (the sun's own light, without the night's floodlights: for what lies beyond their reach, the hills and the scenery copy)
     uCarSelfK: { value: 0.7 }, uCarAOK: { value: 0.7 }, // (how much of a car's own shade and of the road's occlusion on it shows)
     uCkAlb: { value: 0.014 }, uCkAO: { value: 0.72 }, // (the cockpit well's paint brightness and how much of its light the well takes away, js/r3-car.js)
     uAmbK: { value: 1.4 }, uAmbAdd: { value: 0 }, // (the shade light's strength and a lift, SCENE below)
@@ -113,12 +125,12 @@
     'uniform sampler2D uGrassMask; uniform vec4 uGrassMaskB; uniform vec4 uGHue; uniform float uGSatTrk; uniform vec3 uGTint; uniform vec4 uGAlgA; uniform vec4 uGAlgB; uniform vec4 uGAlgC; uniform vec4 uGFar;',
     'uniform vec4 uLawn; uniform sampler2D uTurf; uniform vec4 uTurfB; uniform float uLawnK; uniform float uWindT; uniform vec4 uLawnGrade; uniform vec4 uFarLawn; uniform sampler2D uFarTex; uniform vec4 uRingH; uniform vec3 uFootT; uniform float uFieldK;',
     // the venue grade: tint, then part of the way toward a grey olive of the same brightness
-    'vec3 lawnTune(vec3 c) { const vec3 LW = vec3(0.2126, 0.7152, 0.0722); float l;',
+    'uniform vec2 uGNight;\nvec3 lawnTune(vec3 c) { const vec3 LW = vec3(0.2126, 0.7152, 0.0722); float l;',
     // (the tuning: warmth keeps the brightness, the hue turns in YIQ, which keeps it too)
     '  l = dot(c, LW); vec3 cw = c * vec3(1.0 + 0.18 * uGHue.w, 1.0 + 0.02 * uGHue.w, 1.0 - 0.45 * uGHue.w); c = max(cw * l / max(dot(cw, LW), 1e-5), 0.0);',
     '  { float a = radians(uGHue.x), cs = cos(a), sn = sin(a); vec3 q = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312) * c;',
     '    q.yz = vec2(q.y * cs - q.z * sn, q.y * sn + q.z * cs) * uGHue.y * uGSatTrk; c = max(mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * q, 0.0); }',
-    '  return c * uGTint * uGHue.z; }',
+    '  c *= uGTint * uGHue.z; l = dot(c, LW); return mix(c, vec3(l), uGNight.y) * uGNight.x; }',
     'vec3 lawnGrade(vec3 c) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return lawnTune(mix(c * uLawnGrade.rgb, vec3(l) * vec3(0.98, 1.04, 0.80), uLawnGrade.w)); }',
     'float tfH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
     'uniform sampler2D uTfTex;',
@@ -202,15 +214,23 @@
     '  return mix(1.0, dot(s, vec3(0.2126, 0.7152, 0.0722)) / 0.0921, 0.15);',
     '}'].join('\n');
 
-  const FOG_VERT_PARS = 'varying vec3 vFogWorld;\n';
+  const FOG_VERT_PARS = 'varying vec3 vFogWorld;\nuniform float uFloodOn; varying float vFloodM; varying float vFloodG;\n#ifdef R3_FLOOD\nuniform sampler2D uFloodMap; uniform vec4 uFloodBox; uniform vec3 uFloodH;\n#endif\n';
   const FOG_VERT = [
     '#include <fog_vertex>',
     '#ifdef USE_INSTANCING',
     '  vFogWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;',
     '#else',
     '  vFogWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+    '#endif',
+    // (where the floodlights' light falls, read per vertex: the fragment stage has no texture unit to
+    // spare on some materials, and the map is soft over tens of metres)
+    '  vFloodM = 0.0; vFloodG = -1e4;',
+    '#ifdef R3_FLOOD',
+    '  if (uFloodOn > 0.0) { vec2 fq = (vFogWorld.xz - uFloodBox.xy) * uFloodBox.zw; if (fq.x >= 0.0 && fq.y >= 0.0 && fq.x <= 1.0 && fq.y <= 1.0) { vec2 fm = texture2D(uFloodMap, fq).rg; vFloodM = fm.r;',
+    // (fading out above the lamps: their beams are aimed down at the track)
+    '    vFloodG = uFloodH.x + fm.g * uFloodH.y; } }',
     '#endif'].join('\n');
-  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogSun;\n';
+  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nvarying float vFloodM; varying float vFloodG; uniform vec3 uFloodH; uniform float uFloodOn; uniform float uFloodEnv; uniform float uFloodCar; uniform vec3 uFloodAmb; uniform float uLiftK; uniform float uLiftF;\nfloat r3FloodM(){ return vFloodM * max(1.0 - smoothstep(uFloodH.z * 0.7, uFloodH.z * 1.8, vFogWorld.y - vFloodG), 0.06); }\nfloat r3FloodK(){ return uFloodOn > 0.0 ? mix(1.0, r3FloodM(), uFloodOn) : 1.0; }\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogSun;\n';
   // Exponential height fog: density(y) = d * exp(-k * y), integrated analytically along the
   // view ray. Inscattered light is the horizon colour plus a forward-scattering sun lobe.
   const FOG_FRAG = [
@@ -254,7 +274,7 @@
     // surface in shade, and a car under a building, is lit by. uAmbK scales it, uAmbAdd lifts it
     // by a share of the surface's own colour (js/r3-tyretune.js has the sliders).
     if (sh.fragmentShader.includes('#include <lights_fragment_end>') && !/uAmbK/.test(sh.fragmentShader))
-      sh.fragmentShader = 'uniform float uAmbK; uniform float uAmbAdd;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * uAmbK + diffuseColor.rgb * uAmbAdd;'); // (r3Amb)
+      sh.fragmentShader = 'uniform float uAmbK; uniform float uAmbAdd;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * uAmbK + diffuseColor.rgb * uAmbAdd;\n  if (uFloodOn > 0.0) { float r3Fe = mix(1.0, r3FloodM(), uFloodEnv); reflectedLight.indirectDiffuse *= r3Fe; reflectedLight.indirectSpecular *= r3Fe; vec3 r3Nw = inverseTransformDirection(normal, viewMatrix); reflectedLight.indirectDiffuse += uFloodAmb * r3FloodM() * (0.4 + 0.6 * r3Nw.y) * BRDF_Lambert(diffuseColor.rgb); }'); // (r3Amb; and the floodlights' fill at night)
     // the sun's shadow from the cascades; opaque surfaces also write how much sun reaches them
     // into the scene's alpha, for the ambient occlusion pass
     if (F1.R3Shadow && sh.fragmentShader.includes('#include <lights_fragment_begin>')) {
@@ -477,15 +497,23 @@
     if (tyre && !geo.attributes.aTyS) geo.setAttribute('aTyS', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); // (zero: no rounded shoulder)
   }
   // Patch a lit material once. Basic/shader materials (sky, particles, UI decals) keep theirs.
+  const FLOOD = { on: false }, PATCHED = new Set();
+  function setFlood(on) {
+    on = !!on;
+    if (FLOOD.on === on) return;
+    FLOOD.on = on;
+    for (const m of PATCHED) m.needsUpdate = true;
+  }
   function patch(m) {
     if (!m || m.userData.r3s || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return m;
     m.userData.r3s = true;
+    PATCHED.add(m); m.addEventListener('dispose', () => PATCHED.delete(m));
     const mac = m.userData.macro || null, liv = m.userData.livery || null, gr = m.userData.grass || null, ao = m.userData.carAO || null, wk = m.userData.wetK || null;
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
     const opaque = !m.transparent, sf = lf && !!ao;
-    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); if (sf) patchSoft(sh); };
-    m.customProgramCacheKey = () => 'r3s4' + (sf ? 's' : '') +(opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
+    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (ao) sh.fragmentShader = sh.fragmentShader.replace('reflectedLight.indirectDiffuse += uFloodAmb', 'reflectedLight.indirectDiffuse += uFloodCar * uFloodAmb'); if (FLOOD.on) sh.vertexShader = '#define R3_FLOOD\n' + sh.vertexShader; if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); if (sf) patchSoft(sh); };
+    m.customProgramCacheKey = () => 'r3s4' + (FLOOD.on ? 'F' : '') + (sf ? 's' : '') +(opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
     m.needsUpdate = true;
     return m;
   }
@@ -775,5 +803,5 @@
         '#endif'].join('\n'));
     });
   }
-  F1.R3S = { U, SOFT_W, SOFT_H, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone, barrier: barrierWear } };
+  F1.R3S = { setFlood, flood: FLOOD, U, SOFT_W, SOFT_H, patch, patchTree, splitTwoSided, noTile, hdrTexture, LAWN, LAWN_ROUGH, wear: { asphalt: asphaltWear, kerb: kerbWear, paint: paintWear, zinc: zincTone, barrier: barrierWear } };
 })(typeof window !== 'undefined' ? window : globalThis);

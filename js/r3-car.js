@@ -1624,14 +1624,16 @@
   function screenMat(disp) {
     const screen = new THREE.MeshBasicMaterial({ map: disp.t, color: new THREE.Color(1.8, 1.8, 1.8), toneMapped: true });
     screen.onBeforeCompile = sh => {
+      sh.uniforms.uDispK = F1.R3S.U.uDispK;
+      sh.fragmentShader = 'uniform float uDispK;\n' + sh.fragmentShader;
       sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', [
         '  vec4 sampledDiffuseColor = texture2D(map, vMapUv);',
         '  vec3 dS = sampledDiffuseColor.rgb;',
         '  sampledDiffuseColor.rgb = mix(dS / 12.92, pow((dS + 0.055) / 1.055, vec3(2.4)), step(0.04045, dS));',
-        '  diffuseColor *= sampledDiffuseColor;',
+        '  diffuseColor *= sampledDiffuseColor; diffuseColor.rgb *= uDispK;',
       ].join('\n'));
     };
-    screen.customProgramCacheKey = () => 'wheelScreen';
+    screen.customProgramCacheKey = () => 'wheelScreen2';
     return screen;
   }
   // The car model's own steering wheel (every part of it, with its materials), in the wheel's

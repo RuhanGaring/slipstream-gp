@@ -533,10 +533,10 @@
         '#include <lights_fragment_end>',
         // light through the leaf: looking toward the sun, thin blades glow, less near the root
         // and not at all in shadow
-        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * 0.25 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
+        '  reflectedLight.directDiffuse += diffuseColor.rgb * uSunCol * r3SunVis * r3FloodK() * 0.25 * pow(clamp(dot(normalize(vGView), uSunDir), 0.0, 1.0), 3.0) * smoothstep(0.2, 1.0, vBT);',
         // the waxy cuticle: a broad, pale sheen looking toward the sun at a low angle
         '  { vec3 gv = normalize(vGView); float gs = pow(clamp(dot(gv, uSunDir), 0.0, 1.0), 2.0) * pow(1.0 - clamp(-gv.y, 0.0, 1.0), 3.0);',
-        '    reflectedLight.directSpecular = reflectedLight.directSpecular * (0.06 + 0.5 * diffuseColor.rgb) + uSunCol * r3SunVis * 0.05 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
+        '    reflectedLight.directSpecular = reflectedLight.directSpecular * (0.06 + 0.5 * diffuseColor.rgb) + uSunCol * r3SunVis * r3FloodK() * 0.05 * gs * smoothstep(0.3, 1.0, vBT); }'].join('\n'));
   }
 
   F1.R3Grass = { build, update, patchShader, setQuality, surfaceMask };

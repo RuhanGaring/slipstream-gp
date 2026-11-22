@@ -816,7 +816,7 @@
     // lens rain: only cameras on or behind a car get drops on their lens (not the TV cameras)
     u.uRain.value = Q.lensRain === false ? 0 : (view.lensRain || 0); u.uRainV.value = view.speed || 0;
     u.uSharp.value = taa ? (G.__taaSharp != null ? G.__taaSharp : 0.22) : 0; u.uSrcTexel.value.set(1 / w, 1 / h);
-    u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK : 0; u.uBloom.value = Q.bloom ? Q.bloomK : 0;
+    u.uExposure.value = view.exposure; u.uAO.value = Q.ssao ? Q.aoK * (view.aoK != null ? view.aoK : 1) : 0; u.uBloom.value = Q.bloom ? Q.bloomK * (view.bloomK != null ? view.bloomK : 1) : 0;
     u.uShaft.value = shaftK * Q.shaftK * (view.shaftK != null ? view.shaftK : 1); if (view.sunCol) u.uShaftCol.value.copy(view.sunCol);
     u.uGrain.value = view.dt > 0 && Q.grain ? 1 : 0; // no grain on the frozen frame behind the pause menu
     { const gr = view.grade || [0, 1, 0]; u.uGrade.value.set(gr[0], gr[1], gr[2]); }
