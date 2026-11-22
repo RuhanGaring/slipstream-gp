@@ -5420,7 +5420,7 @@ void main() {
         // (the lamps' reflection is the lamps' light times the roof over the car: it peaks inside the tunnel, not where the sky is still half there, and 20 per cent lower than it was)
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar(72 * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 1400) * rl);
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
@@ -5535,7 +5535,7 @@ void main() {
       const ea = G.__easeOff ? 1 : Math.min(1, dt * 40); // (a hair of smoothing, 25 ms: at 80 m/s each 0.1 s of easing was 8 m of lag behind the lighting, which is itself in the place)
       state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
       if (state.carLampE < 0.002) state.carLampE = 0; if (state.carRoofE < 0.002) state.carRoofE = 0; }
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, 0.8 * (state.carLampE || 0) * (state.carRoofE || 0))); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, (G.__tunT != null ? G.__tunT : 4) * (state.carLampE || 0) * (state.carRoofE || 0))); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;
