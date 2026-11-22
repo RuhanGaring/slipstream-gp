@@ -15,9 +15,9 @@
   const SC_SCHEMA = [
     // the tunnel's reflections, as multipliers of the level they stand at now (1 = as it is): the car's paint and the tyres, by day
     // and by night (the two blend with the time of day). The tyres' value is their own brightness, whatever the car's is.
-    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
-    { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
-    { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
+    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53 },
+    { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 2.4 },
+    { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 0.67 },
     { group: 'Tunnel reflections (x current)', key: 'tunWheelNight', label: 'Wheels, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
     { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53, u: 'uAmbK' },
     { group: 'Scene lighting', key: 'ambAdd', label: 'Ambient lift (x colour)', type: 'f', min: 0, max: 1, step: 0.005, def: 0, u: 'uAmbAdd' },
