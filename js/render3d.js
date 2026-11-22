@@ -5454,7 +5454,8 @@ void main() {
     // light with no detail to see move) two a frame in turn, so each is three frames old at most.
     // The first filter after a change of size is whole. (js/vendor/three.min.js _applyPMREM, patched)
     const ph = LP.turn = ((LP.turn | 0) + 1) % 3;
-    pmrem._r3skip = LP.whole ? (e => e > 3 && (e - 4) % 3 !== ph) : null;
+    // (rubber's roughness reads the blur levels 3 to 5 and the paint's 2 to 4: all of them every frame now; only the broadest, which hold no detail, wait their turn. Level 4 was one of three frames, so a tyre's reflection ran at a third of the frame rate)
+    pmrem._r3skip = LP.whole ? (e => e > 6 && (e - 7) % 3 !== ph) : null;
     // (nothing is cleared for it: three leaves the map's scissor off after each filter, so the next
     // one's first draw wiped the whole map, and the levels left for a later frame were black: the
     // cars lost the broad light the map gives them and went dark, in the shade most of all)
