@@ -5401,6 +5401,11 @@ void main() {
     for (const m of PX.scene.children) if (!m.userData.keep && m.material !== PX.mat) m.material = PX.mat;
     return true;
   }
+  // the tunnel's reflection levels from the F7 panel (x current), day and night blended by the time of day
+  function tunRefl() {
+    const s = (F1.TyreTune && F1.TyreTune.sc) || {}, n = Math.max(0, Math.min(1, state.nightK || 0)), mx = (d, k) => (d != null ? d : 1) * (1 - n) + (k != null ? k : 1) * n;
+    return { car: mx(s.tunCarDay, s.tunCarNight), wheel: mx(s.tunWheelDay, s.tunWheelNight) };
+  }
   function probeStep(focus) {
     const n = (GFX.liveRefl | 0) && envRT ? Math.round(envRT.texture.image.height / 4) : 0;
     if (n !== LP.size) probeInit(n);
@@ -5421,7 +5426,7 @@ void main() {
         // (the lamps' reflection is the lamps' light times the roof over the car: it peaks inside the tunnel, not where the sky is still half there, and 20 per cent lower than it was)
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 52.5) * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 52.5) * rl * tunRefl().car);
       }
     }
     // the tunnel's walls, lit orange by those lamps, as the broad glow the paint and the rubber mirror (with the walls
@@ -5437,7 +5442,7 @@ void main() {
         if (m.parent !== PX.scene) PX.scene.add(m);
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 0.525) * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 0.525) * rl * tunRefl().car);
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
@@ -5482,7 +5487,7 @@ void main() {
       PX.mat.uniforms.uSunCol.value.copy(F1.R3S.U.uSunOnly.value).multiplyScalar(1 - 0.97 * re);
       if (!PX.ceil) { PX.ceil = new THREE.Mesh(new THREE.CircleGeometry(60, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x050403, fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false })); PX.ceil.userData.keep = true; PX.ceil.frustumCulled = false; PX.ceil.renderOrder = -1; }
       if (PX.ceil.parent !== PX.scene) PX.scene.add(PX.ceil);
-      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re; PX.ceil.material.color.copy(TUN_LAMP).multiplyScalar(G.__tunC != null ? G.__tunC : 0.021);
+      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re; PX.ceil.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunC != null ? G.__tunC : 0.021) * tunRefl().car);
       const fm = focus && live.get(focus); if (fm) PX.ceil.position.set(fm.position.x, fm.position.y + 5.6, fm.position.z);
     }
     // the cube, at the followed car, a metre up
@@ -5552,7 +5557,7 @@ void main() {
       const ea = G.__easeOff ? 1 : Math.min(1, dt * 40); // (a hair of smoothing, 25 ms: at 80 m/s each 0.1 s of easing was 8 m of lag behind the lighting, which is itself in the place)
       state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
       if (state.carLampE < 0.002) state.carLampE = 0; if (state.carRoofE < 0.002) state.carRoofE = 0; }
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, (G.__tunT != null ? G.__tunT : 1.6) * (state.carLampE || 0) * (state.carRoofE || 0))); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, (G.__tunT != null ? G.__tunT : 1.6) * (state.carLampE || 0) * (state.carRoofE || 0) * tunRefl().wheel / Math.max(0.05, tunRefl().car))); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;

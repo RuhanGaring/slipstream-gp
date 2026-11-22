@@ -13,6 +13,12 @@
   // The scene's own values (not the tyres'): the ambient (shade) light every lit surface takes, a
   // multiplier on the sky and bounce light, and a lift added by a share of the surface's colour.
   const SC_SCHEMA = [
+    // the tunnel's reflections, as multipliers of the level they stand at now (1 = as it is): the car's paint and the tyres, by day
+    // and by night (the two blend with the time of day). The tyres' value is their own brightness, whatever the car's is.
+    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
+    { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
+    { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
+    { group: 'Tunnel reflections (x current)', key: 'tunWheelNight', label: 'Wheels, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
     { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53, u: 'uAmbK' },
     { group: 'Scene lighting', key: 'ambAdd', label: 'Ambient lift (x colour)', type: 'f', min: 0, max: 1, step: 0.005, def: 0, u: 'uAmbAdd' },
     // the darks: what shades a car and the road round it
@@ -68,7 +74,7 @@
         if (d.type === 'c') uu.value.set(this.values[d.key]); else if (d.c != null) uu.value.setComponent(d.c, this.values[d.key]); else uu.value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
       if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.setLumSat) P.setLumSat(this.values.lsDark, this.values.lsKnee, this.values.lsHigh, this.values.lsHiStart); if (P.Q) P.Q.aoK = this.values.ssao; } } };
-  const baseOf = () => JSON.stringify([T().DEFAULTS, SC.DEFAULTS]);
+  const baseOf = () => JSON.stringify([T().DEFAULTS, Object.fromEntries(Object.entries(SC.DEFAULTS).filter(([k]) => !/^tun(Car|Wheel)/.test(k)))]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
   function restore() {
@@ -215,5 +221,5 @@
   { const P = F1.R3Post; if (P && P.setQuality) { const sq = P.setQuality; P.setQuality = function () { const r = sq.apply(this, arguments); if (P.Q) P.Q.aoK = SC.values.ssao; return r; }; } }
   SC.set(SC.DEFAULTS); // (defaults applied: the post stack's and the shade's values live outside this file)
   restore();
-  F1.TyreTune = { toggle, restore };
+  F1.TyreTune = { toggle, restore, sc: SC.values };
 })(window);
