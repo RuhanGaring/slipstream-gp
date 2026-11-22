@@ -1161,14 +1161,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // clear sky (cloud under about 0.45) nothing changes.
     const L = state.look || {}, oc = U.clamp(U.smooth(((L.cloud || 0) - 0.45) / 0.3) + 0.9 * k, 0, 1);
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
-    if (state.todOn) { const fp = (B.floodKey || 0) * (1 - 0.15 * k) * (1 - tk); todKey(sun.intensity, fp); sun.intensity += fp; if (state.tod0 && state.tod0.ambC) S3.uFloodAmb.value.copy(state.tod0.ambC).multiplyScalar(1 - tk); }
+    if (state.todOn) { const fp = (B.floodKey || 0) * (1 - 0.15 * k); todKey(sun.intensity, fp); sun.intensity += fp; }
     // (a harbour town's shade is filled by its pale sky and by the sun thrown back off stucco and
     // paving, warm from below: with the haze's blue-grey and the lake venue's ground it stood blue-black)
     if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value).multiplyScalar(1 / (L.hazeK || 1)); hemi.groundColor.set(L.bot || '#777777'); }
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
-    if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.75 / (1 + tunOpen()) - hemi.intensity) * tk; }
     if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36 / (L.hazeK || 1)).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     { const so = Math.max(oc, state.todSoft || 0); if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== so) { F1.R3Shadow.setSoften(1 + 4 * so); state.ocS = so; } }
     if (F1.R3Post && F1.R3Post.setSunK) F1.R3Post.setSunK(state.todOn && sun.intensity > 0 ? 1 - 0.88 * oc * (1 - F1.R3S.U.uFloodOn.value) : 1 - 0.88 * oc);
@@ -1431,6 +1430,39 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     root.userData.flood = { grp, lamp, lampMat, glareMat, tex, box: new THREE.Vector4(x0, z0, 1 / (cw / k), 1 / (ch / k)), n, hgt: new THREE.Vector3(hmin, hr, city ? 9 : 26), lampK: city ? 9 : 14 };
     return root.userData.flood;
   }
+  // The tunnel as a place: its footprint seen from above (r), full between its mouths and fading over the
+  // 10 m outside each, and the road's height along it (g), for js/r3-shaders.js (vTunK): everything inside
+  // takes the lamps' light, wherever the camera is, so from outside the mouth shows the orange inside and
+  // the camera passing in changes only its iris.
+  function tunMask(tr, T) {
+    const N = tr.N, md = i => ((i % N) + N) % N, ext = Math.ceil(10 / tr.ds), idx = [];
+    for (let i = T.i0 - ext - 2; i <= T.i1 + ext + 2; i++) idx.push(i);
+    let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9, h0 = 1e9, h1 = -1e9;
+    for (const i of idx) { const k = md(i); x0 = Math.min(x0, tr.x[k]); x1 = Math.max(x1, tr.x[k]); z0 = Math.min(z0, tr.y[k]); z1 = Math.max(z1, tr.y[k]); h0 = Math.min(h0, tr.z[k]); h1 = Math.max(h1, tr.z[k]); }
+    const mg = 22; x0 -= mg; z0 -= mg; x1 += mg; z1 += mg;
+    const sc = Math.min(2, 1800 / Math.max(x1 - x0, z1 - z0)), cw = Math.ceil((x1 - x0) * sc), ch = Math.ceil((z1 - z0) * sc), hr = Math.max(1, h1 - h0);
+    const mk = () => { const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch); return [c, g]; };
+    const [c1, g1] = mk(), [c2, g2] = mk();
+    const P = (k, sd, m) => { const d = sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4 + m); return [(tr.x[k] + tr.nx[k] * d - x0) * sc, (tr.y[k] + tr.ny[k] * d - z0) * sc]; };
+    for (let n = 0; n < idx.length - 1; n++) {
+      const ia = idx[n], ib = idx[n + 1], ka = md(ia), kb = md(ib);
+      // (how far in: from 10 m outside a mouth to 30 m in, smoothly: the threshold zone of a real tunnel)
+      const f = i => { const s = Math.max(0, Math.min(1, (Math.min((i - T.i0) * tr.ds, (T.i1 - i) * tr.ds) + 10) / 40)); return s * s * (3 - 2 * s); }, a = Math.max(0, Math.min(1, (f(ia) + f(ib)) / 2));
+      if (a <= 0) continue;
+      // (each piece overlaps its neighbours by half its length: abutting pieces left anti-aliased seams that took a quarter of the value away)
+      const e = (A, B, t) => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], La = P(ka, -1, 0.9), Ra = P(ka, 1, 0.9), Lb = P(kb, -1, 0.9), Rb = P(kb, 1, 0.9);
+      const q = [e(La, Lb, -0.5), e(Ra, Rb, -0.5), e(Ra, Rb, 1.5), e(La, Lb, 1.5)];
+      for (const [g, col] of [[g1, 'rgb(' + Math.round(a * 255) + ',' + Math.round(a * 255) + ',' + Math.round(a * 255) + ')'], [g2, (v => 'rgb(' + v + ',' + v + ',' + v + ')')(Math.round(((tr.z[ka] + tr.z[kb]) / 2 - h0) / hr * 255))]]) {
+        g.fillStyle = col; g.beginPath(); g.moveTo(q[0][0], q[0][1]); for (let j = 1; j < 4; j++) g.lineTo(q[j][0], q[j][1]); g.closePath(); g.fill();
+      }
+    }
+    const A = g1.getImageData(0, 0, cw, ch), B = g2.getImageData(0, 0, cw, ch).data;
+    for (let i = 0; i < A.data.length; i += 4) { A.data[i + 1] = B[i]; A.data[i + 2] = 0; A.data[i + 3] = 255; }
+    g1.putImageData(A, 0, 0);
+    const tex = new THREE.CanvasTexture(c1);
+    tex.flipY = false; tex.colorSpace = THREE.NoColorSpace; tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+    return { tex, box: new THREE.Vector4(x0, z0, 1 / (cw / sc), 1 / (ch / sc)), h0, hr };
+  }
   function todRestore() {
     const T0 = state.tod0, S3 = F1.R3S.U;
     state.todOn = false;
@@ -1691,6 +1723,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
   function dropBuilt(b) {
     if (b.wetMask) { b.wetMask.tex.dispose(); b.wetMask = null; }
+    if (b.tunMask) { b.tunMask.tex.dispose(); b.tunMask = null; }
     if (b.root && b.root.userData.flood) { b.root.userData.flood.tex.dispose(); b.root.userData.flood = null; }
     if (b.roadSky) { b.roadSky.rt.dispose(); b.roadSky = null; }
     const shared = new Set(Object.values(MATS)), mats = new Set(), texs = new Set();
@@ -1725,6 +1758,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // (cast ridges on a circuit's kerbs; a town's kerbs are flat painted aprons and dressed stone)
       S3.uKerbRidge.value = city || tr.def.style === 'street' || tr.def.style2 === 'city' ? 0 : 1; }
     state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null;
+    { const T = tr.gen2 && tr.gen2.tunnel, S3 = F1.R3S.U;
+      if (T) { if (!built.tunMask) built.tunMask = tunMask(tr, T); S3.uTunMap.value = built.tunMask.tex; S3.uTunBox.value.copy(built.tunMask.box); S3.uTunH.value.set(built.tunMask.h0, built.tunMask.hr); }
+      F1.R3S.setTun(!!T); }
     state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
@@ -3624,7 +3660,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const tc = add(ceil.geo(), M.tunnelCeil, { cast: true }); if (tc) tc.userData.noProxy = true;
       if (rb.k) rail.add(rb.geo(), null);
       add(rail.geo(), M.vcol2 || (M.vcol2 = std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })), { cast: false });
-      if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#ffe0b0', emissive: '#ffb668', emissiveIntensity: 1.6, roughness: 0.5 });
+      if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#ffc890', emissive: '#ff9238', emissiveIntensity: 1.9, roughness: 0.5 });
       add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
     }
     // Flags along the seafront, as round Monaco's harbour on a race weekend: a white pole every
@@ -5394,7 +5430,7 @@ void main() {
     // fog and the sun's shadow maps
     const u = PX.mat.uniforms, SH = F1.R3Shadow && F1.R3Shadow.S, tk = state.tunApplied || 0;
     u.uEnv.value = envRT.texture; u.uEnvK.value = 1 - 0.96 * tk;
-    u.uSky.value.copy(hemi.color).multiplyScalar(hemi.intensity); u.uGround.value.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
+    { const tl = 1.75 / (1 + tunOpen()); u.uSky.value.copy(hemi.color).multiplyScalar(hemi.intensity).lerp(_tlC.copy(TUN_LAMP).multiplyScalar(tl), tk); u.uGround.value.copy(hemi.groundColor).multiplyScalar(hemi.intensity).lerp(_tlG.copy(TUN_FLOOR).multiplyScalar(tl), tk); }
     if (scene.fog) { u.uFogCol.value.copy(scene.fog.color); u.uFogD.value = scene.fog.density || 0; }
     let on = 0;
     if (SH && renderer.shadowMap.enabled) for (let k = 0; k < 3; k++) {
@@ -5439,7 +5475,7 @@ void main() {
   // How far the iris opens (the exposure is 1 + this, deep inside), and the lamps' level to go with
   // it. Without live reflections the cars still mirror the open sky in there, so it opens less.
   // (deeper amber, against the pictures: the walls stood pale pinkish beige)
-  const TUN_LAMP = new THREE.Color('#ffa248'), TUN_FLOOR = new THREE.Color('#5a3818'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
+  const _tlC = new THREE.Color(), _tlG = new THREE.Color(), TUN_LAMP = new THREE.Color('#ff9638'), TUN_FLOOR = new THREE.Color('#5a3818'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
   // per-circuit trims: the picture's saturation (post grade) and the grass's own (lawnTune), where
   // measured frames ran hot; ids not listed keep 1
   const SAT_TRIM = { hakone: 0.67, sierra: 0.77, montaurele: 0.65, varenna: 0.85 };
@@ -5457,14 +5493,14 @@ void main() {
       if (Math.abs(loc.d) < wall + 0.3 && cp.y < tr.z[k] + 6.2) {
         const ramp = 25 / tr.ds, before = rel > N / 2 ? N - rel : null;
         if (before != null) want = Math.max(0, 1 - before / ramp) * 0.35;                 // approaching the mouth
-        else if (rel <= len) want = Math.min(1, 0.35 + 0.65 * Math.min(rel, len - rel) / Math.max(1, 12 / tr.ds));
+        else if (rel <= len) want = Math.min(1, 0.35 + 0.65 * Math.min(rel, len - rel) / Math.max(1, 30 / tr.ds));
         else want = Math.max(0, 1 - (rel - len) / ramp) * 0.35;                           // just out
       }
     }
     // (the eye, or the camera's iris, takes a moment)
     state.tunK = (state.tunK || 0) + (want - (state.tunK || 0)) * Math.min(1, dt * 3);
     const k = state.tunK < 0.003 ? 0 : state.tunK;
-    F1.R3S.U.uTunLamp.value = 0.85 * k;
+    F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;
       // (every material of this circuit, with its own level as it stands in the open: a tag left on
