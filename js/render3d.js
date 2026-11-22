@@ -5417,8 +5417,10 @@ void main() {
         if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; }
         const m = src.userData.pc;
         if (m.parent !== PX.scene) PX.scene.add(m);
-        m.visible = (state.carLampE || 0) > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar(90 * (state.carLampE || 0));
+        // (the lamps' reflection is the lamps' light times the roof over the car: it peaks inside the tunnel, not where the sky is still half there, and 20 per cent lower than it was)
+        const rl = (state.carLampE || 0) * (state.carRoofE || 0);
+        m.visible = rl > 0.002;
+        m.material.color.copy(TUN_LAMP).multiplyScalar(72 * rl);
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
@@ -5533,7 +5535,7 @@ void main() {
       const ea = G.__easeOff ? 1 : Math.min(1, dt * 40); // (a hair of smoothing, 25 ms: at 80 m/s each 0.1 s of easing was 8 m of lag behind the lighting, which is itself in the place)
       state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
       if (state.carLampE < 0.002) state.carLampE = 0; if (state.carRoofE < 0.002) state.carRoofE = 0; }
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, state.carLampE || 0)); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, 0.8 * (state.carLampE || 0) * (state.carRoofE || 0))); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;
@@ -5629,7 +5631,7 @@ void main() {
         // (saturation per circuit, from measured frames: most sit at a mean of 0.11 to 0.16; Hakone 0.26,
         // Sierra 0.23 and Mont-Aurele 0.22 read as a postcard, so they come down to about 0.175)
         grade: [0.24, (SAT_TRIM[state.tr && state.tr.id] || (state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.9 : 1)) * (state.todSat || 1), 0.012],
-        wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || []),
+        wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || [], !(o.dt > 0)),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),
       });
@@ -5646,7 +5648,7 @@ void main() {
   // camera within 40 m, each its centre, its axle and how fast it turns (from the physics, or the
   // car's speed over the wheel's radius). Last frame's matrices: a frame behind is no matter here.
   const _whs = Array.from({ length: 8 }, () => ({ c: new THREE.Vector3(), ax: new THREE.Vector3(), r: 0.37, w: 0 })), _whOut = [], _wq = new THREE.Vector3();
-  function wheelsOf(cars) {
+  function wheelsOf(cars, still) {
     _whOut.length = 0;
     const cp = camera.position, list = [];
     for (const c of cars) { const m = live.get(c); if (!m || m.visible === false) continue; const d = (c.x - cp.x) ** 2 + (c.y - cp.z) ** 2; if (d < 1600) list.push([d, c, m]); }
@@ -5659,7 +5661,7 @@ void main() {
         sp.matrixWorld.decompose(e.c, _wQ, _wq);
         e.ax.set(sp.matrixWorld.elements[8], sp.matrixWorld.elements[9], sp.matrixWorld.elements[10]).normalize();
         const pw = c.wheels && c.wheels[k];
-        e.w = pw && pw.omega != null ? pw.omega : (c.speed || 0) / 0.36;
+        e.w = still ? 0 : pw && pw.omega != null ? pw.omega : (c.speed || 0) / 0.36; // (a paused frame, a replay held mid-corner: time stands still, so the blur of a turning wheel goes too)
         _whOut.push(e);
       });
     }
