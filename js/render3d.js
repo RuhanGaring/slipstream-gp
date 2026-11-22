@@ -5421,7 +5421,7 @@ void main() {
         // (the lamps' reflection is the lamps' light times the roof over the car: it peaks inside the tunnel, not where the sky is still half there, and 20 per cent lower than it was)
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 105) * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunL != null ? G.__tunL : 52.5) * rl);
       }
     }
     // the tunnel's walls, lit orange by those lamps, as the broad glow the paint and the rubber mirror (with the walls
@@ -5437,7 +5437,7 @@ void main() {
         if (m.parent !== PX.scene) PX.scene.add(m);
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 1.05) * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 0.525) * rl);
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
@@ -5482,7 +5482,7 @@ void main() {
       PX.mat.uniforms.uSunCol.value.copy(F1.R3S.U.uSunOnly.value).multiplyScalar(1 - 0.97 * re);
       if (!PX.ceil) { PX.ceil = new THREE.Mesh(new THREE.CircleGeometry(60, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x050403, fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false })); PX.ceil.userData.keep = true; PX.ceil.frustumCulled = false; PX.ceil.renderOrder = -1; }
       if (PX.ceil.parent !== PX.scene) PX.scene.add(PX.ceil);
-      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re; PX.ceil.material.color.copy(TUN_LAMP).multiplyScalar(G.__tunC != null ? G.__tunC : 0.042);
+      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re; PX.ceil.material.color.copy(TUN_LAMP).multiplyScalar(G.__tunC != null ? G.__tunC : 0.021);
       const fm = focus && live.get(focus); if (fm) PX.ceil.position.set(fm.position.x, fm.position.y + 5.6, fm.position.z);
     }
     // the cube, at the followed car, a metre up
