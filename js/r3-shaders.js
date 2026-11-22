@@ -25,6 +25,7 @@
     uFloodMap: { value: null }, uFloodBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uFloodOn: { value: 0 }, uFloodAmb: { value: new THREE.Color(0, 0, 0) },
     uFloodH: { value: new THREE.Vector3(0, 1, 26) }, // (the light map's ground height: lowest, range; and the lamps' height)
     uFloodEnv: { value: 0 }, uGNight: { value: new THREE.Vector2(1, 0) }, // (night: the probe's light kept to the floodlit area; the grass's brightness and grey)
+    uCarNight: { value: new THREE.Vector2(1, 1) }, // (night: the cars' diffuse and reflection scales)
     uFloodCar: { value: 1 }, // (night: the cars' share of the floodlights' fill, raised)
     uDispK: { value: 1 }, // (self-lit screens, js/r3-car.js: held down under the night's exposure)
     uLiftK: { value: 1 }, uLiftF: { value: 0 }, // (a surface's own light lift, such as the leaves' inside a crown: the sky's share, and the floodlights' where they reach)
@@ -512,7 +513,7 @@
     if (mac && !U.macroMap.value) U.macroMap.value = F1.R3T.macro();
     const ex = m.userData.patchExtra || null, exKey = m.userData.patchKey || '', lf = !!m.userData.lodFade;
     const opaque = !m.transparent, sf = lf && !!ao;
-    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (ao) sh.fragmentShader = sh.fragmentShader.replace('reflectedLight.indirectDiffuse += uFloodAmb', 'reflectedLight.indirectDiffuse += uFloodCar * uFloodAmb'); if (FLOOD.on) sh.vertexShader = '#define R3_FLOOD\n' + sh.vertexShader; if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); if (sf) patchSoft(sh); };
+    m.onBeforeCompile = sh => { patchShader(sh, mac, liv, ao, wk, opaque); if (ao) sh.fragmentShader = sh.fragmentShader.replace('reflectedLight.indirectDiffuse += uFloodAmb', 'reflectedLight.indirectDiffuse += uFloodCar * uFloodAmb').replace('#include <aomap_fragment>', 'reflectedLight.directDiffuse *= uCarNight.x; reflectedLight.indirectDiffuse *= uCarNight.x; reflectedLight.directSpecular *= uCarNight.y; reflectedLight.indirectSpecular *= uCarNight.y;\n#include <aomap_fragment>').replace('uniform float uAmbK;', 'uniform vec2 uCarNight; uniform float uAmbK;'); if (FLOOD.on) sh.vertexShader = '#define R3_FLOOD\n' + sh.vertexShader; if (gr) F1.R3Grass.patchShader(sh, gr); if (ex) ex(sh); if (lf) patchLodFade(sh); if (sf) patchSoft(sh); };
     m.customProgramCacheKey = () => 'r3s4' + (FLOOD.on ? 'F' : '') + (sf ? 's' : '') +(opaque ? 'o' : 't') + (mac ? '_m' + mac.scale + '_' + mac.amt + '_' + mac.ramt + (mac.lawn ? 'L' : '') : '') + (liv ? '_liv' : '') + (gr ? '_grass' + (gr.uGBlade ? 'B' : '') + (gr.uGShell ? 'S' : '') : '') + (ao ? '_ao' + ao.lift : '') + (wk ? '_wet' : '') + (ex ? '_x' + exKey : '') + (lf ? '_lf' : '');
     m.needsUpdate = true;
     return m;

@@ -1439,7 +1439,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!T0) return;
     Object.assign(state.base, T0.base, { fog: T0.base.fog.clone() });
     sun.color.copy(T0.sunCol); state.sunDir.copy(T0.sd0); S3.uSunDir.value.copy(state.sunDir);
-    todBoards(0); S3.uFloodCar.value = 1; F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
+    todBoards(0); S3.uFloodCar.value = 1; S3.uCarNight.value.set(1, 1); F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
     if (T0.ckAO != null) { S3.uCkAO.value = T0.ckAO; S3.uCkAlb.value = T0.ckAlb; T0.ckAO = null; }
     S3.uFloodOn.value = 0; S3.uFloodAmb.value.setRGB(0, 0, 0); S3.uLiftK.value = 1; S3.uLiftF.value = 0; S3.uDispK.value = 1; S3.uFloodEnv.value = 0; S3.uGNight.value.set(1, 0); if (MATS.gravel && MATS.gravel.userData.col0) MATS.gravel.color.copy(MATS.gravel.userData.col0); if (fx.assist) fx.assist.material.color.setScalar(1); if (fx.smoke) { fx.smoke.material.uniforms.gain.value = 1; fx.sparks.material.uniforms.gain.value = 1; } delete state.base.floodKey;
     if (envRT) envRT.dispose();
@@ -1538,7 +1538,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (fx.assist) fx.assist.material.color.setScalar(S3.uDispK.value);
     const nk = fl * (1 - U.smooth(e / 8));
     S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
-    F1.R3Post.setShadeK(1 - 0.78 * nk); // (many towers light every spot: no one dark box under the car) // (white panels clipped at three times, and at 2.2)
+    F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
+    S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.45 * nk); // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5;
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
