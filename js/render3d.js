@@ -1155,20 +1155,19 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const r = wx ? wx.rain : 0, w = wx ? wx.wet : 0, a = Math.min(1, dt * 1.5);
     state.rainS = (state.rainS || 0) + (r - (state.rainS || 0)) * a;
     state.wetS = (state.wetS || 0) + (w - (state.wetS || 0)) * a;
-    const k = state.rainS, S3 = F1.R3S.U;
+    const k = state.rainS, S3 = F1.R3S.U, tk = state.tunApplied || 0;
     // Overcast: the cloud spreads the sun over the sky, so the direct light (and its hard shadow)
     // fades with the cover and comes back as soft skylight from above; rain adds to it. Under a
     // clear sky (cloud under about 0.45) nothing changes.
     const L = state.look || {}, oc = U.clamp(U.smooth(((L.cloud || 0) - 0.45) / 0.3) + 0.9 * k, 0, 1);
     sun.intensity = B.sunI * (1 - 0.8 * k) * (1 - 0.88 * oc);
-    if (state.todOn) { const fp = (B.floodKey || 0) * (1 - 0.15 * k); todKey(sun.intensity, fp); sun.intensity += fp; }
+    if (state.todOn) { const fp = (B.floodKey || 0) * (1 - 0.15 * k) * (1 - tk); todKey(sun.intensity, fp); sun.intensity += fp; if (state.tod0 && state.tod0.ambC) S3.uFloodAmb.value.copy(state.tod0.ambC).multiplyScalar(1 - tk); }
     // (a harbour town's shade is filled by its pale sky and by the sun thrown back off stucco and
     // paving, warm from below: with the haze's blue-grey and the lake venue's ground it stood blue-black)
     if (B.hemiC) { hemi.color.copy(B.hemiC); hemi.groundColor.copy(B.hemiG); } else { hemi.color.copy(S3.uFogCol.value).multiplyScalar(1 / (L.hazeK || 1)); hemi.groundColor.set(L.bot || '#777777'); }
     hemi.intensity = B.hemi * (1 - 0.3 * k) + B.sunI * 0.5 * oc;
     // in the tunnel the sky light gives way to its lamps: warm light from above, on the road and the
     // cars under them (tunnelLight; the lamps themselves are emissive and light nothing)
-    const tk = state.tunApplied || 0;
     if (tk > 0) { hemi.color.lerp(TUN_LAMP, tk); hemi.groundColor.lerp(TUN_FLOOR, tk); hemi.intensity += (1.75 / (1 + tunOpen()) - hemi.intensity) * tk; }
     if (state.mtnU) state.mtnU.uAmb.value.copy(S3.uFogCol.value).multiplyScalar(0.36 / (L.hazeK || 1)).add(WX_C.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3183));
     { const so = Math.max(oc, state.todSoft || 0); if (F1.R3Shadow && F1.R3Shadow.setSoften && state.ocS !== so) { F1.R3Shadow.setSoften(1 + 4 * so); state.ocS = so; } }
@@ -1429,7 +1428,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     for (const m of G.__noGlare ? [pole, frame, lamp] : [pole, frame, lamp, glare]) { m.frustumCulled = false; m.matrixAutoUpdate = false; m.updateMatrix(); grp.add(m); }
     grp.matrixAutoUpdate = false; grp.updateMatrix();
     root.add(grp); grp.updateMatrixWorld(true);
-    root.userData.flood = { grp, lampMat, glareMat, tex, box: new THREE.Vector4(x0, z0, 1 / (cw / k), 1 / (ch / k)), n, hgt: new THREE.Vector3(hmin, hr, city ? 9 : 26), lampK: city ? 9 : 14 };
+    root.userData.flood = { grp, lamp, lampMat, glareMat, tex, box: new THREE.Vector4(x0, z0, 1 / (cw / k), 1 / (ch / k)), n, hgt: new THREE.Vector3(hmin, hr, city ? 9 : 26), lampK: city ? 9 : 14 };
     return root.userData.flood;
   }
   function todRestore() {
@@ -1510,7 +1509,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // dims only the sun's part under cloud and rain)
     const I = sunI + keyI;
     T0.sd = _sd.clone(); T0.fd = _fd.clone(); T0.sunC = sunC;
-    S3.uFloodAmb.value.copy(FLOOD_C).multiplyScalar(ambI);
+    S3.uFloodAmb.value.copy(FLOOD_C).multiplyScalar(ambI); T0.ambC = FLOOD_C.clone().multiplyScalar(ambI); T0.Fh = Fh;
     // (the leaves' own light inside the crown is the sky's: it goes with the sky, and the floodlights')
     S3.uLiftK.value = Math.min(1, skyR); S3.uLiftF.value = ambI / Math.max(1e-6, skyDef);
     S3.uFloodEnv.value = 1 - U.smooth((e + 8) / 8); // (the probe's light is the venue's, not the sky's: it stays on the circuit)
@@ -1530,7 +1529,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // exposure), whatever the circuit's photographed day was like: an overcast probe left one circuit's
     // night a fifth as bright as the others. Between the two, by the floodlights' share of the light.)
     const natural = B0.sunI * lr * lim * Math.max(0, Math.sin(e * D2R)) + skyDef * skyR, dayExp = Math.pow(Dr / Math.max(natural, 1e-9), 0.82);
-    const floodExp = FLOOD_LV / (Fh * T0.exp), w = fl * Fh / (fl * Fh + natural + 1e-9);
+    const cityK = state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.68 : 1;
+    const floodExp = FLOOD_LV * cityK / (Fh * T0.exp), w = fl * Fh / (fl * Fh + natural + 1e-9);
     state.todExp = U.clamp(1 / ((1 - w) / dayExp + w / floodExp), 0.33, 60);
     state.todShaft = (I > 0 ? sunI / I : 0) * U.smooth((e - 1) / 6);
     // (glowing things lit by themselves, not by the scene: the night's exposure would blow them out)
@@ -1540,7 +1540,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
     S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.45 * nk); // (white panels clipped at three times, and at 2.2)
-    state.todNightEnv = nk > 0.5;
+    state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
     state.todSat = 1 + 0.2 * fl * (1 - U.smooth(e / 8));
@@ -5299,7 +5299,7 @@ void main() {
     return [state.tr.id, GFX.liveRefl | 0, GFX.scenery, GFX.trees, GFX.boards ? 1 : 0, STAMP].join('|');
   }
   function proxyDrop() {
-    if (PX.scene) PX.scene.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+    if (PX.scene) PX.scene.traverse(o => { if (o.isMesh && !o.userData.keep) o.geometry.dispose(); });
     PX.scene = null; PX.stats = null;
   }
   // start (or join) making the copy for the circuit on screen; resolves when it is ready
@@ -5357,7 +5357,7 @@ void main() {
       PX.mat = F1.R3Reflect.material({ CUBEUV_TEXEL_WIDTH: (1 / (3 * Math.max(Math.pow(2, maxMip), 112))).toFixed(8), CUBEUV_TEXEL_HEIGHT: (1 / h).toFixed(8), CUBEUV_MAX_MIP: maxMip.toFixed(1) });
       PX.matH = h;
     }
-    for (const m of PX.scene.children) if (m.material !== PX.mat) m.material = PX.mat;
+    for (const m of PX.scene.children) if (!m.userData.keep && m.material !== PX.mat) m.material = PX.mat;
     return true;
   }
   function probeStep(focus) {
@@ -5367,6 +5367,27 @@ void main() {
     const t0 = G.__lpT ? performance.now() : 0;
     if (PX.root !== state.root || PX.key !== proxyKey()) prepareReflections();
     if (!PX.scene || !proxyLook()) { LP.ready = false; return; }
+    // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
+    // the lit track as a pool of light round the car; both only while the floodlights are on
+    {
+      const FB = state.root.userData.flood, on = !!(FB && FB.grp.visible && state.todOn);
+      if (FB && !FB.pl) {
+        const pm = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide }), fm = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide });
+        const pl = new THREE.InstancedMesh(FB.lamp.geometry, pm, FB.n); pl.instanceMatrix = FB.lamp.instanceMatrix; pl.userData.keep = true; pl.frustumCulled = false;
+        const fl2 = new THREE.Mesh(new THREE.CircleGeometry(70, 40).rotateX(-Math.PI / 2), fm); fl2.userData.keep = true; fl2.frustumCulled = false;
+        FB.pl = pl; FB.plMat = pm; FB.plFloor = fl2; FB.plFloorMat = fm;
+      }
+      if (FB && FB.pl.parent !== PX.scene) { PX.scene.add(FB.pl, FB.plFloor); }
+      if (FB && FB.pl) {
+        FB.pl.visible = FB.plFloor.visible = on;
+        if (on && state.tod0) {
+          const k = U.smooth(Math.max(0, Math.min(1, ((state.tod0.Fh || 0) > 0 ? 1 : 0))));
+          FB.plMat.color.copy(FLOOD_C).multiplyScalar(5 * k);
+          FB.plFloorMat.color.copy(FLOOD_C).multiplyScalar((state.tod0.Fh || 0) * 0.1 / Math.PI * (1 - (state.tunApplied || 0)));
+          const fm2 = focus && live.get(focus); if (fm2) FB.plFloor.position.set(fm2.position.x, fm2.position.y - 0.02, fm2.position.z);
+        }
+      }
+    }
     // the scenery's light this frame: sky probe (dimmed in the tunnel, tunnelLight), hemisphere,
     // fog and the sun's shadow maps
     const u = PX.mat.uniforms, SH = F1.R3Shadow && F1.R3Shadow.S, tk = state.tunApplied || 0;
@@ -5517,7 +5538,7 @@ void main() {
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     treeLod();
     const tunK = tunnelLight(dt);
-    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * (state.todExp || 1) * (state.todOn && camMode === 'cockpit' && (state.todExp || 1) > 2 ? 1.23 : 1) * (1 + tunOpen() * tunK);
+    const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * Math.pow(state.todExp || 1, 1 - tunK) * (state.todOn && camMode === 'cockpit' && (state.todExp || 1) > 2 ? 1.23 : 1) * (1 + tunOpen() * tunK);
     if (F1.R3Tyre && F1.R3Tyre.setIris) F1.R3Tyre.setIris(1 / (1 + tunOpen() * tunK));
     F1.R3Shadow.U.r3SunA.value = F1.R3Post.Q.on ? 1 : 0;
     if (F1.R3Post.Q.on) {
