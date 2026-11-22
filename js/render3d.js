@@ -5529,7 +5529,9 @@ void main() {
     state.tunK = (state.tunK || 0) + (want - (state.tunK || 0)) * Math.min(1, dt * 3);
     const k = state.tunK < 0.003 ? 0 : state.tunK;
     { let lk = 0, rk = 0; if (T && focusCar && focusCar.loc && focusCar.loc.i != null) { const i = focusCar.loc.i, mi = Math.min((i - T.i0) * tr.ds, (T.i1 - i) * tr.ds); lk = U.smooth((mi + 10) / 40); rk = U.smooth((mi + 2) / 22); }
-      const ea = Math.min(1, dt * 5); state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
+      state.carLampK = lk; state.carRoofK = rk; // (what the lighting is where the car is, right now)
+      const ea = G.__easeOff ? 1 : Math.min(1, dt * 40); // (a hair of smoothing, 25 ms: at 80 m/s each 0.1 s of easing was 8 m of lag behind the lighting, which is itself in the place)
+      state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
       if (state.carLampE < 0.002) state.carLampE = 0; if (state.carRoofE < 0.002) state.carRoofE = 0; }
     if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, state.carLampE || 0)); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
