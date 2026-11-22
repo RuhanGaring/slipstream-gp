@@ -42,7 +42,7 @@
     low: { potato: false, rock: false, lite: true, post: false, taa: false, fxaa: false, scale: 0.7, msaa: 0, shadows: 'low', ssao: false, bloom: false, shafts: false, motion: false, lens: false, scenery: 'reduced' },
     medium: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1, msaa: 2, shadows: 'medium', ssao: false, bloom: true, shafts: false, motion: false, lens: true, scenery: 'full' },
     high: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1, msaa: 2, shadows: 'high', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
-    ultra: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1.5, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
+    ultra: { potato: false, rock: false, lite: false, post: true, taa: true, fxaa: true, scale: 1, msaa: 4, shadows: 'ultra', ssao: true, bloom: true, shafts: true, motion: true, lens: true, scenery: 'full' },
   };
   // Advanced graphics (Settings > Advanced graphics): every other knob that trades speed for
   // looks, with each preset's value. A preset sets all of these; touching one makes it CUSTOM.
