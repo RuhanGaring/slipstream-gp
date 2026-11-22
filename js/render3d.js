@@ -1438,7 +1438,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!T0) return;
     Object.assign(state.base, T0.base, { fog: T0.base.fog.clone() });
     sun.color.copy(T0.sunCol); state.sunDir.copy(T0.sd0); S3.uSunDir.value.copy(state.sunDir);
-    todBoards(0); S3.uFloodCar.value = 1; S3.uCarNight.value.set(1, 1); F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
+    todBoards(0); S3.uFloodCar.value = 1; S3.uCarNight.value.set(1, 1); if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1); F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
     if (T0.ckAO != null) { S3.uCkAO.value = T0.ckAO; S3.uCkAlb.value = T0.ckAlb; T0.ckAO = null; }
     S3.uFloodOn.value = 0; S3.uFloodAmb.value.setRGB(0, 0, 0); S3.uLiftK.value = 1; S3.uLiftF.value = 0; S3.uDispK.value = 1; S3.uFloodEnv.value = 0; S3.uGNight.value.set(1, 0); if (MATS.gravel && MATS.gravel.userData.col0) MATS.gravel.color.copy(MATS.gravel.userData.col0); if (fx.assist) fx.assist.material.color.setScalar(1); if (fx.smoke) { fx.smoke.material.uniforms.gain.value = 1; fx.sparks.material.uniforms.gain.value = 1; } delete state.base.floodKey;
     if (envRT) envRT.dispose();
@@ -1539,7 +1539,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const nk = fl * (1 - U.smooth(e / 8));
     S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
-    S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.45 * nk); // (white panels clipped at three times, and at 2.2)
+    S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.3 * nk);
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 3) * nk); // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
@@ -4645,7 +4646,7 @@ void main() {
         RC.setLod(body, L, dPx2 < 196 || c === hideHelmet, ride || c === hideHelmet ? 0 : Math.max(dt, 0.004));
         // car draw distance (potato 350 m, rock 250 m): further cars are a few pixels; skip them
         body.visible = !(GFX.carDraw > 0) || d2 < GFX.carDraw * GFX.carDraw || c === o.focus;
-        if (body.userData.cockpit) body.userData.cockpit.buzzK = c === buzzCar ? 7 : 1; // (from the T-cam pod the wheel is a small shape: 2.2 times gave under 3 pixels at its rim, lost to the blur and the temporal smoothing; 7 gives about 7)
+        if (body.userData.cockpit) body.userData.cockpit.buzzK = c === buzzCar ? 2.2 : 1; // (seen from the T-cam pod's distance the buzz needs more swing to read)
         RC.updateCockpit(body, G.__ckSteer != null ? G.__ckSteer : c.ctl && c.ctl.wheelDeg != null ? c.ctl.wheelDeg * 0.36 / 180 : c.steer, hide || c === buzzCar ? c : null); // debug: G.__ckSteer pins the wheel; a real wheel turns it by its own angle
         RC.updateHead(body, c, dt);
       }
@@ -5373,7 +5374,8 @@ void main() {
       const FB = state.root.userData.flood, on = !!(FB && FB.grp.visible && state.todOn);
       if (FB && !FB.pl) {
         const pm = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide }), fm = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide });
-        const pl = new THREE.InstancedMesh(FB.lamp.geometry, pm, FB.n); pl.instanceMatrix = FB.lamp.instanceMatrix; pl.userData.keep = true; pl.frustumCulled = false;
+        const pl = new THREE.InstancedMesh(FB.lamp.geometry.clone().scale(G.__plS || 1.6, G.__plS || 1.6, 1), pm, FB.n); pl.instanceMatrix = FB.lamp.instanceMatrix; // (larger than life, so the blur that rough rubber and paint take leaves each lamp a highlight)
+         pl.userData.keep = true; pl.frustumCulled = false;
         const fl2 = new THREE.Mesh(new THREE.CircleGeometry(70, 40).rotateX(-Math.PI / 2), fm); fl2.userData.keep = true; fl2.frustumCulled = false;
         FB.pl = pl; FB.plMat = pm; FB.plFloor = fl2; FB.plFloorMat = fm;
       }
@@ -5382,7 +5384,7 @@ void main() {
         FB.pl.visible = FB.plFloor.visible = on;
         if (on && state.tod0) {
           const k = U.smooth(Math.max(0, Math.min(1, ((state.tod0.Fh || 0) > 0 ? 1 : 0))));
-          FB.plMat.color.copy(FLOOD_C).multiplyScalar(5 * k);
+          FB.plMat.color.copy(FLOOD_C).multiplyScalar((G.__plK || 14) * k); // (each head a hard, bright shape: on the tyres and the paint a lamp slides along as a highlight)
           FB.plFloorMat.color.copy(FLOOD_C).multiplyScalar((state.tod0.Fh || 0) * 0.1 / Math.PI * (1 - (state.tunApplied || 0)));
           const fm2 = focus && live.get(focus); if (fm2) FB.plFloor.position.set(fm2.position.x, fm2.position.y - 0.02, fm2.position.z);
         }

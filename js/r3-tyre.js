@@ -239,8 +239,8 @@
   }
   // (the exposure the tunnel adds, undone for the fill: in there the lamps' light is opened up about
   // fourfold past the open air's, and the fill rode up with it; render3d sets it each frame)
-  U.uT_fillIris = { value: 1 };
-  const DECL = SCHEMA.map(d => `uniform ${d.type === 'c' ? 'vec3' : 'float'} uT_${d.key};`).join(' ') + ' uniform float uT_fillIris;';
+  U.uT_fillIris = { value: 1 }; U.uT_envNight = { value: 1 }; // (night: the sky/lamp reflection on rubber, raised so a passing lamp reads)
+  const DECL = SCHEMA.map(d => `uniform ${d.type === 'c' ? 'vec3' : 'float'} uT_${d.key};`).join(' ') + ' uniform float uT_fillIris; uniform float uT_envNight;';
 
   const COMP = { S: 0xff2d2d, M: 0xffd400, H: 0xf2f2f2 };
   const compColor = id => new THREE.Color(COMP[id] || COMP.M);
@@ -311,7 +311,7 @@
         '#include <opaque_fragment>'].join('\n'))
       // (rubber is a plain dielectric: F0 about 0.04, scaled here)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.specularColor *= uT_spec; material.specularF90 *= uT_spec;')
-      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#ifdef RE_IndirectSpecular\n  radiance *= uT_envSpec;\n#endif\n  iblIrradiance *= uT_envDiff;')
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#ifdef RE_IndirectSpecular\n  radiance *= uT_envSpec * uT_envNight;\n#endif\n  iblIrradiance *= uT_envDiff;')
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectSpecular += uT_sheen * pow(1.0 - saturate(dot(geometryNormal, geometryViewDir)), uT_sheenPow) * iblIrradiance * 0.3;');
   }
   // the material every car model's tyres share (each car takes its own copy, for its wear and compound)
@@ -327,5 +327,5 @@
     return m;
   }
 
-  F1.R3Tyre = { SIZE, geometry, texture, material, patch, compColor, SCHEMA, DEFAULTS, values, set, setIris: k => { U.uT_fillIris.value = k; } };
+  F1.R3Tyre = { SIZE, geometry, texture, material, patch, compColor, SCHEMA, DEFAULTS, values, set, setIris: k => { U.uT_fillIris.value = k; }, setNight: k => { U.uT_envNight.value = k; } };
 })(window);
