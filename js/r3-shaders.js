@@ -218,7 +218,7 @@
     '  return mix(1.0, dot(s, vec3(0.2126, 0.7152, 0.0722)) / 0.0921, 0.15);',
     '}'].join('\n');
 
-  const FOG_VERT_PARS = 'varying vec3 vFogWorld; varying float vTunK;\n#ifdef R3_TUN\nuniform sampler2D uTunMap; uniform vec4 uTunBox; uniform vec2 uTunH;\n#endif\nuniform float uFloodOn; varying float vFloodM; varying float vFloodG;\n#ifdef R3_FLOOD\nuniform sampler2D uFloodMap; uniform vec4 uFloodBox; uniform vec3 uFloodH;\n#endif\n';
+  const FOG_VERT_PARS = 'varying vec3 vFogWorld; varying float vTunK; varying float vRoofK;\n#ifdef R3_TUN\nuniform sampler2D uTunMap; uniform vec4 uTunBox; uniform vec2 uTunH;\n#endif\nuniform float uFloodOn; varying float vFloodM; varying float vFloodG;\n#ifdef R3_FLOOD\nuniform sampler2D uFloodMap; uniform vec4 uFloodBox; uniform vec3 uFloodH;\n#endif\n';
   const FOG_VERT = [
     '#include <fog_vertex>',
     '#ifdef USE_INSTANCING',
@@ -235,11 +235,11 @@
     '    vFloodG = uFloodH.x + fm.g * uFloodH.y; } }',
     '#endif',
     // (inside the tunnel: its footprint seen from above, and between its road and its roof)
-    '  vTunK = 0.0;',
+    '  vTunK = 0.0; vRoofK = 0.0;',
     '#ifdef R3_TUN',
-    '  { vec2 tq = (vFogWorld.xz - uTunBox.xy) * uTunBox.zw; if (tq.x >= 0.0 && tq.y >= 0.0 && tq.x <= 1.0 && tq.y <= 1.0) { vec2 tm = texture2D(uTunMap, tq).rg; float gh = uTunH.x + tm.g * uTunH.y; vTunK = clamp((tm.r - 0.1) / 0.8, 0.0, 1.0) * smoothstep(gh - 1.2, gh - 0.4, vFogWorld.y) * (1.0 - smoothstep(6.6, 7.0, vFogWorld.y - gh)); } }',
+    '  { vec2 tq = (vFogWorld.xz - uTunBox.xy) * uTunBox.zw; if (tq.x >= 0.0 && tq.y >= 0.0 && tq.x <= 1.0 && tq.y <= 1.0) { vec3 tm = texture2D(uTunMap, tq).rgb; float gh = uTunH.x + tm.g * uTunH.y; float hf = smoothstep(gh - 1.2, gh - 0.4, vFogWorld.y) * (1.0 - smoothstep(6.6, 7.0, vFogWorld.y - gh)); vTunK = clamp((tm.r - 0.1) / 0.8, 0.0, 1.0) * hf; vRoofK = clamp((tm.b - 0.1) / 0.8, 0.0, 1.0) * hf; } }',
     '#endif'].join('\n');
-  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nvarying float vTunK; uniform vec3 uTunIrr;\nvarying float vFloodM; varying float vFloodG; uniform vec3 uFloodH; uniform float uFloodOn; uniform float uFloodEnv; uniform float uFloodCar; uniform vec3 uFloodAmb; uniform float uLiftK; uniform float uLiftF;\nfloat r3FloodM(){ return (1.0 - vTunK) * vFloodM * max(1.0 - smoothstep(uFloodH.z * 0.7, uFloodH.z * 1.8, vFogWorld.y - vFloodG), 0.06); }\nfloat r3FloodK(){ return uFloodOn > 0.0 ? mix(1.0, r3FloodM(), uFloodOn) : 1.0; }\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogSun;\n';
+  const FOG_FRAG_PARS = 'varying vec3 vFogWorld;\nvarying float vTunK; varying float vRoofK; uniform vec3 uTunIrr;\nvarying float vFloodM; varying float vFloodG; uniform vec3 uFloodH; uniform float uFloodOn; uniform float uFloodEnv; uniform float uFloodCar; uniform vec3 uFloodAmb; uniform float uLiftK; uniform float uLiftF;\nfloat r3FloodM(){ return (1.0 - vRoofK) * vFloodM * max(1.0 - smoothstep(uFloodH.z * 0.7, uFloodH.z * 1.8, vFogWorld.y - vFloodG), 0.06); }\nfloat r3FloodK(){ return uFloodOn > 0.0 ? mix(1.0, r3FloodM(), uFloodOn) : 1.0; }\nuniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uFogCol; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogSun;\n';
   // Exponential height fog: density(y) = d * exp(-k * y), integrated analytically along the
   // view ray. Inscattered light is the horizon colour plus a forward-scattering sun lobe.
   const FOG_FRAG = [
@@ -283,7 +283,7 @@
     // surface in shade, and a car under a building, is lit by. uAmbK scales it, uAmbAdd lifts it
     // by a share of the surface's own colour (js/r3-tyretune.js has the sliders).
     if (sh.fragmentShader.includes('#include <lights_fragment_end>') && !/uAmbK/.test(sh.fragmentShader))
-      sh.fragmentShader = 'uniform float uAmbK; uniform float uAmbAdd;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * uAmbK + diffuseColor.rgb * uAmbAdd;\n  if (uFloodOn > 0.0) { reflectedLight.directSpecular *= 1.0 - 0.97 * uFloodOn; /* (the floodlights are many lamps, not one light overhead: their key gives no highlight; the lamps themselves are in the reflection map) */ float r3Fe = mix(1.0, r3FloodM(), uFloodEnv); reflectedLight.indirectDiffuse *= r3Fe; reflectedLight.indirectSpecular *= r3Fe; vec3 r3Nw = inverseTransformDirection(normal, viewMatrix); reflectedLight.indirectDiffuse += uFloodAmb * r3FloodM() * (0.4 + 0.6 * r3Nw.y) * BRDF_Lambert(diffuseColor.rgb); }\n  if (vTunK > 0.003) { reflectedLight.indirectSpecular *= 1.0 - 0.96 * vTunK; vec3 r3Tn = inverseTransformDirection(normal, viewMatrix); reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, uTunIrr * (0.75 + 1.7 * max(r3Tn.y, 0.0)) * BRDF_Lambert(diffuseColor.rgb), vTunK); }'); // (the tunnel's lamps last, after the night probe's mask; r3Amb; and the floodlights' fill at night)
+      sh.fragmentShader = 'uniform float uAmbK; uniform float uAmbAdd;\n' + sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * uAmbK + diffuseColor.rgb * uAmbAdd;\n  if (uFloodOn > 0.0) { reflectedLight.directSpecular *= 1.0 - 0.97 * uFloodOn; /* (the floodlights are many lamps, not one light overhead: their key gives no highlight; the lamps themselves are in the reflection map) */ float r3Fe = mix(1.0, r3FloodM(), uFloodEnv); reflectedLight.indirectDiffuse *= r3Fe; reflectedLight.indirectSpecular *= r3Fe; vec3 r3Nw = inverseTransformDirection(normal, viewMatrix); reflectedLight.indirectDiffuse += uFloodAmb * r3FloodM() * (0.4 + 0.6 * r3Nw.y) * BRDF_Lambert(diffuseColor.rgb); }\n  if (vTunK > 0.003 || vRoofK > 0.003) { reflectedLight.indirectSpecular *= 1.0 - 0.96 * vRoofK; vec3 r3Tn = inverseTransformDirection(normal, viewMatrix); reflectedLight.indirectDiffuse = reflectedLight.indirectDiffuse * (1.0 - vRoofK) + uTunIrr * (0.75 + 1.7 * max(r3Tn.y, 0.0)) * BRDF_Lambert(diffuseColor.rgb) * vTunK; }'); // (the tunnel's lamps last, after the night probe's mask; r3Amb; and the floodlights' fill at night)
     // the sun's shadow from the cascades; opaque surfaces also write how much sun reaches them
     // into the scene's alpha, for the ambient occlusion pass
     if (F1.R3Shadow && sh.fragmentShader.includes('#include <lights_fragment_begin>')) {

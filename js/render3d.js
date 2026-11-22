@@ -1442,22 +1442,23 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const mg = 22; x0 -= mg; z0 -= mg; x1 += mg; z1 += mg;
     const sc = Math.min(2, 1800 / Math.max(x1 - x0, z1 - z0)), cw = Math.ceil((x1 - x0) * sc), ch = Math.ceil((z1 - z0) * sc), hr = Math.max(1, h1 - h0);
     const mk = () => { const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch); return [c, g]; };
-    const [c1, g1] = mk(), [c2, g2] = mk();
+    const [c1, g1] = mk(), [c2, g2] = mk(), [c3, g3] = mk();
     const P = (k, sd, m) => { const d = sd * ((sd > 0 ? tr.barr[1][k] : tr.barr[0][k]) + 0.4 + m); return [(tr.x[k] + tr.nx[k] * d - x0) * sc, (tr.y[k] + tr.ny[k] * d - z0) * sc]; };
     for (let n = 0; n < idx.length - 1; n++) {
       const ia = idx[n], ib = idx[n + 1], ka = md(ia), kb = md(ib);
       // (how far in: from 10 m outside a mouth to 30 m in, smoothly: the threshold zone of a real tunnel)
-      const f = i => { const s = Math.max(0, Math.min(1, (Math.min((i - T.i0) * tr.ds, (T.i1 - i) * tr.ds) + 10) / 40)); return s * s * (3 - 2 * s); }, a = Math.max(0, Math.min(1, (f(ia) + f(ib)) / 2));
+      const mi = i => Math.min((i - T.i0) * tr.ds, (T.i1 - i) * tr.ds), sm = s => { s = Math.max(0, Math.min(1, s)); return s * s * (3 - 2 * s); };
+      const f = i => sm((mi(i) + 10) / 40), a = Math.max(0, Math.min(1, (f(ia) + f(ib)) / 2)), ar = Math.max(0, Math.min(1, (sm((mi(ia) + 2) / 22) + sm((mi(ib) + 2) / 22)) / 2));
       if (a <= 0) continue;
       // (each piece overlaps its neighbours by half its length: abutting pieces left anti-aliased seams that took a quarter of the value away)
       const e = (A, B, t) => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t], La = P(ka, -1, 0.9), Ra = P(ka, 1, 0.9), Lb = P(kb, -1, 0.9), Rb = P(kb, 1, 0.9);
       const q = [e(La, Lb, -0.5), e(Ra, Rb, -0.5), e(Ra, Rb, 1.5), e(La, Lb, 1.5)];
-      for (const [g, col] of [[g1, 'rgb(' + Math.round(a * 255) + ',' + Math.round(a * 255) + ',' + Math.round(a * 255) + ')'], [g2, (v => 'rgb(' + v + ',' + v + ',' + v + ')')(Math.round(((tr.z[ka] + tr.z[kb]) / 2 - h0) / hr * 255))]]) {
+      for (const [g, col] of [[g3, 'rgb(' + Math.round(ar * 255) + ',' + Math.round(ar * 255) + ',' + Math.round(ar * 255) + ')'], [g1, 'rgb(' + Math.round(a * 255) + ',' + Math.round(a * 255) + ',' + Math.round(a * 255) + ')'], [g2, (v => 'rgb(' + v + ',' + v + ',' + v + ')')(Math.round(((tr.z[ka] + tr.z[kb]) / 2 - h0) / hr * 255))]]) {
         g.fillStyle = col; g.beginPath(); g.moveTo(q[0][0], q[0][1]); for (let j = 1; j < 4; j++) g.lineTo(q[j][0], q[j][1]); g.closePath(); g.fill();
       }
     }
-    const A = g1.getImageData(0, 0, cw, ch), B = g2.getImageData(0, 0, cw, ch).data;
-    for (let i = 0; i < A.data.length; i += 4) { A.data[i + 1] = B[i]; A.data[i + 2] = 0; A.data[i + 3] = 255; }
+    const A = g1.getImageData(0, 0, cw, ch), B = g2.getImageData(0, 0, cw, ch).data, B3 = g3.getImageData(0, 0, cw, ch).data;
+    for (let i = 0; i < A.data.length; i += 4) { A.data[i + 1] = B[i]; A.data[i + 2] = B3[i]; A.data[i + 3] = 255; }
     g1.putImageData(A, 0, 0);
     const tex = new THREE.CanvasTexture(c1);
     tex.flipY = false; tex.colorSpace = THREE.NoColorSpace; tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
@@ -1470,7 +1471,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!T0) return;
     Object.assign(state.base, T0.base, { fog: T0.base.fog.clone() });
     sun.color.copy(T0.sunCol); state.sunDir.copy(T0.sd0); S3.uSunDir.value.copy(state.sunDir);
-    todBoards(0); S3.uFloodCar.value = 1; S3.uCarNight.value.set(1, 1); if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1); F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
+    state.nightK = 0; todBoards(0); S3.uFloodCar.value = 1; S3.uCarNight.value.set(1, 1); F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
     if (T0.ckAO != null) { S3.uCkAO.value = T0.ckAO; S3.uCkAlb.value = T0.ckAlb; T0.ckAO = null; }
     S3.uFloodOn.value = 0; S3.uFloodAmb.value.setRGB(0, 0, 0); S3.uLiftK.value = 1; S3.uLiftF.value = 0; S3.uDispK.value = 1; S3.uFloodEnv.value = 0; S3.uGNight.value.set(1, 0); if (MATS.gravel && MATS.gravel.userData.col0) MATS.gravel.color.copy(MATS.gravel.userData.col0); if (fx.assist) fx.assist.material.color.setScalar(1); if (fx.smoke) { fx.smoke.material.uniforms.gain.value = 1; fx.sparks.material.uniforms.gain.value = 1; } delete state.base.floodKey;
     if (envRT) envRT.dispose();
@@ -1572,7 +1573,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     S3.uFloodCar.value = 1 + 0.08 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
     S3.uCarNight.value.set(1 + 0.03 * nk, 1); // (the cars' reflection at its normal level; the paint lifted so the cars are not darker than the lit track round them)
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * nk); // (white panels clipped at three times, and at 2.2)
+    state.nightK = nk; // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
@@ -3661,7 +3662,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (rb.k) rail.add(rb.geo(), null);
       add(rail.geo(), M.vcol2 || (M.vcol2 = std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })), { cast: false });
       if (!M.tunnelLamp) M.tunnelLamp = new THREE.MeshStandardMaterial({ color: '#ffc890', emissive: '#ff9238', emissiveIntensity: 1.9, roughness: 0.5 });
-      add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false });
+      { const tlm = add(lamps.geo(), M.tunnelLamp, { cast: false, receive: false }); if (tlm) tlm.userData.tunLamps = true; }
     }
     // Flags along the seafront, as round Monaco's harbour on a race weekend: a white pole every
     // 18 m on the water side of the lap, its flag stiff in the sea breeze; and cafe terraces on
@@ -5404,6 +5405,18 @@ void main() {
     const t0 = G.__lpT ? performance.now() : 0;
     if (PX.root !== state.root || PX.key !== proxyKey()) prepareReflections();
     if (!PX.scene || !proxyLook()) { LP.ready = false; return; }
+    // the tunnel's lamps, day or night: orange strips along both walls (the copy of the scenery leaves the tunnel out)
+    {
+      const R = state.root;
+      if (R && R.userData.tunLampMesh === undefined) { let f = null; R.traverse(o => { if (!f && o.userData && o.userData.tunLamps) f = o; }); R.userData.tunLampMesh = f; }
+      const src = R && R.userData.tunLampMesh;
+      if (src) {
+        if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; }
+        const m = src.userData.pc;
+        if (m.parent !== PX.scene) PX.scene.add(m);
+        m.material.color.copy(TUN_LAMP).multiplyScalar(120);
+      }
+    }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
     // the lit track as a pool of light round the car; both only while the floodlights are on
     {
@@ -5501,6 +5514,7 @@ void main() {
     // (the eye, or the camera's iris, takes a moment)
     state.tunK = (state.tunK || 0) + (want - (state.tunK || 0)) * Math.min(1, dt * 3);
     const k = state.tunK < 0.003 ? 0 : state.tunK;
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, k)); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;

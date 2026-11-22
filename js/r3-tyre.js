@@ -309,7 +309,10 @@
         '#endif',
         // (at night the floodlights' fill, where they reach: rubber stood far darker than the lit track round it)
         '    tyFi += uFloodAmb * r3FloodM() * 3.4 * 0.14;',
-        '    outgoingLight += uT_fill * uT_fillIris * tyFi; }',
+        '    tyFi *= uT_fillIris;',
+        // (inside a tunnel the lamps are the light: the rubber's floor of light is theirs, not the open sky's)
+        '    tyFi = mix(tyFi, uTunIrr * 3.4, vRoofK);',
+        '    outgoingLight += uT_fill * tyFi; }',
         '#include <opaque_fragment>'].join('\n'))
       // (rubber is a plain dielectric: F0 about 0.04, scaled here)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.specularColor *= uT_spec; material.specularF90 *= uT_spec;')
