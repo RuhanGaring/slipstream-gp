@@ -1569,9 +1569,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     S3.uDispK.value = 1 / Math.pow(Math.max(1, state.todExp), 0.85);
     if (fx.assist) fx.assist.material.color.setScalar(S3.uDispK.value);
     const nk = fl * (1 - U.smooth(e / 8));
-    S3.uFloodCar.value = 1 + 0.25 * nk; // (the fill that lit the white panels flat is held back a little)
+    S3.uFloodCar.value = 1 + 0.3 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
-    S3.uCarNight.value.set(1, 1); // (the cars' reflection at its normal level; their diffuse a little under the day's)
+    S3.uCarNight.value.set(1 + 0.12 * nk, 1); // (the cars' reflection at its normal level; the paint lifted so the cars are not darker than the lit track round them)
     if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * nk); // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
