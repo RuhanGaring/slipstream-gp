@@ -71,7 +71,7 @@
     trees: 1, treeDist: 0, boards: true, backdrop: true, grass: true, grassDensity: 0.85, grassDist: 120, grassLod: 13, viewDist: 14000, carNear: 34, carFar: 130, carDraw: 0, dispHz: 12,
     particles: 900, skids: 9000, debris: 40, rainK: 1, physLod: false, physLodDist: 150, catchup: 40, drs: true, carShade: 'baked', lensRain: true, wheelBlur: true, carSelfShade: true, roadShade: true, liveRefl: 0, simWorker: true };
   const ADV_P = {
-    ultra: { aniso: 16, aoSamples: 16, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17, liveRefl: 2 },
+    ultra: { aniso: 16, aoSamples: 16, shadowRes: 2, shadowSoft: 1, grassDensity: 1, grassDist: 180, grassLod: 17, liveRefl: 2 },
     high: { liveRefl: 1 },
     medium: { aoSamples: 8, grassDensity: 0.6, grassDist: 70, grassLod: 9 },
     low: { dprCap: 1, aniso: 4, grass: false, trees: 0.6, carNear: 22, carFar: 90, particles: 500, skids: 4500, dispHz: 8 },
