@@ -5406,6 +5406,7 @@ void main() {
     if (n !== LP.size) probeInit(n);
     if (!n || !state.root || !state.tr || compiling) return;
     const t0 = G.__lpT ? performance.now() : 0;
+    G.__lpDbg = { LP, renderer, PX, state }; // (debug: the reflection cube's faces can be read back, see tools)
     if (PX.root !== state.root || PX.key !== proxyKey()) prepareReflections();
     if (!PX.scene || !proxyLook()) { LP.ready = false; return; }
     // the tunnel's lamps, day or night: orange strips along both walls (the copy of the scenery leaves the tunnel out)
@@ -5431,12 +5432,12 @@ void main() {
       if (R && R.userData.tunWallMesh === undefined) { let f = null; R.traverse(o => { if (!f && o.userData && o.userData.tunWalls) f = o; }); R.userData.tunWallMesh = f; }
       const src = R && R.userData.tunWallMesh;
       if (src) {
-        if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; }
+        if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; } // (pulled forward: the copy of the scenery holds this very wall, dark, and the two fought for every pixel)
         const m = src.userData.pc;
         if (m.parent !== PX.scene) PX.scene.add(m);
         const rl = (state.carLampE || 0) * (state.carRoofE || 0);
         m.visible = rl > 0.002;
-        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 8) * rl);
+        m.material.color.copy(TUN_LAMP).multiplyScalar((G.__tunW != null ? G.__tunW : 2.5) * rl);
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
