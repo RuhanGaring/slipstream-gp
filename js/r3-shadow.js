@@ -220,7 +220,7 @@
     '    #if ( UNROLLED_LOOP_INDEX >= NUM_DIR_LIGHT_SHADOWS )',
     '    directionalLight = directionalLights[ i ];',
     '    getDirectionalLightInfo( directionalLight, directLight );',
-    '    directLight.color *= mix(r3SunVis, max(r3SunVis, 0.75), uFloodOn) * r3FloodK();', // (at night the key is the floodlights: it lights only where they reach, and the other towers fill its shadows)
+    '    directLight.color *= mix(r3SunVis, max(r3SunVis, 0.85), uFloodOn) * r3FloodK();', // (at night the key is the floodlights: it lights only where they reach, and the other towers fill its shadows)
     '    RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );',
     '    #endif',
     '  }',

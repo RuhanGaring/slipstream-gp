@@ -454,7 +454,7 @@
     F1.R3Shadow ? F1.R3Shadow.OCC_PARS : 'uniform int uOccN; float r3CarSky(vec3 p, vec3 n) { return 1.0; }',
     'uniform mat4 uInvView;',
     F1.R3CarShade ? F1.R3CarShade.GLSL : 'float r3CarShade(vec3 p, vec3 n) { return 1.0; }',
-    'uniform float uShadeOn; uniform float uShadeAmt; uniform float uShadeFloor;',
+    'uniform float uShadeOn; uniform float uShadeAmt; uniform float uShadeFloor; uniform float uShadeK;',
     // (the traced or baked shade of js/r3-carshade.js; the boxes of js/r3-shadow.js where there is none)
     'float carSky(vec2 uv, vec2 tx) {',
     '  if (uOccN == 0) return 1.0;',
@@ -481,7 +481,7 @@
     '  vec3 f = -fx.z > -fy.z ? fx : fy;',
     '  if (-f.z > w + 0.05 + 0.02 * w) { vec3 fw = (uInvView * vec4(f, 1.0)).xyz; k = min(k, uShadeOn > 0.5 ? r3CarShade(fw, vec3(0.0, 1.0, 0.0)) : r3CarSky(fw, vec3(0.0, 1.0, 0.0))); }',
     // (uShadeAmt: how much of the shade under a car shows; uShadeFloor: the least light it leaves)
-    '  return mix(1.0, uShadeFloor + (1.0 - uShadeFloor) * k, uShadeAmt);',
+    '  return mix(1.0, uShadeFloor + (1.0 - uShadeFloor) * k, uShadeAmt * uShadeK);',
     '}',
     'uniform sampler2D tAE; uniform float uAE; uniform float uBlackLift; uniform float uContrast; uniform float uPivot; uniform float uExposure; uniform float uAO; uniform float uBloom; uniform float uShaft; uniform vec3 uShaftCol; uniform int uDbg;',
     'uniform float uLens; uniform float uTime; uniform int uTone; uniform vec2 uRes; uniform float uGrain; uniform vec3 uGrade; uniform vec4 uLumSat;',
@@ -619,7 +619,7 @@
     tDepth: { value: null }, uLogFar: { value: 1 }, uProj: { value: new THREE.Vector2(1, 1) }, uInvView: { value: new THREE.Matrix4() },
     ...(F1.R3Shadow ? { uOccCar: F1.R3Shadow.U.uOccCar, uOccN: F1.R3Shadow.U.uOccN, uOccSt: F1.R3Shadow.U.uOccSt, uOccBC: F1.R3Shadow.U.uOccBC, uOccBR: F1.R3Shadow.U.uOccBR } : {}),
     ...(F1.R3CarShade ? F1.R3CarShade.U : { uShadeOn: { value: 0 } }),
-    uShadeAmt: { value: 0.7 }, uShadeFloor: { value: 0.03 },
+    uShadeAmt: { value: 0.7 }, uShadeFloor: { value: 0.03 }, uShadeK: { value: 1 },
     tAE: { value: null }, uAE: { value: 0 }, uBlackLift: { value: 0.04 }, uContrast: { value: 1.15 }, uPivot: { value: 0.3 }, uExposure: { value: 1 }, uAO: { value: 0 }, uBloom: { value: 0 }, uShaft: { value: 0 }, uShaftCol: { value: new THREE.Color(1, 1, 1) },
     uLens: { value: 1 }, uGrain: { value: 1 }, uTime: { value: 0 }, uTone: { value: 0 }, uRes: { value: new THREE.Vector2() }, uGrade: { value: new THREE.Vector3(0, 1, 0) }, uLumSat: { value: new THREE.Vector4(0.45, 0.42, 0.15, 0.8) },
   });
@@ -874,7 +874,7 @@
   }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
-  F1.R3Post = { setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setLumSat: (a, k, h, s) => { compMat.uniforms.uLumSat.value.set(a, k, h, s); }, setContrast: (k, p) => { if (k != null) compMat.uniforms.uContrast.value = k; if (p != null) compMat.uniforms.uPivot.value = p; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
+  F1.R3Post = { setShadeK: k => { compMat.uniforms.uShadeK.value = k; }, setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setLumSat: (a, k, h, s) => { compMat.uniforms.uLumSat.value.set(a, k, h, s); }, setContrast: (k, p) => { if (k != null) compMat.uniforms.uContrast.value = k; if (p != null) compMat.uniforms.uPivot.value = p; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
     // the scene's own HDR target (made if need be), for a warm-up draw off screen (js/render3d.js precompile)
     sceneTarget: () => { if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; } return RT.scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

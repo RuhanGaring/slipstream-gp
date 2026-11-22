@@ -1277,8 +1277,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       state.envLamps.children[0].material.color.copy(FLOOD_C).multiplyScalar(keyI * 70);
       { const Fh = keyI * Math.sin(85 * D2R) / 0.4, V = state.envVenue.children;
         V[0].material.color.copy(FLOOD_C).multiplyScalar(Fh * 0.14 / Math.PI); // (lit tarmac, albedo about 0.14)
-        V[1].material.color.copy(FLOOD_C).multiplyScalar(Fh * 0.3 / Math.PI); // (barriers, boards, stands)
-        V[2].material.color.copy(FLOOD_C).multiplyScalar(keyI * 32); V[3].material.color.copy(FLOOD_C).multiplyScalar(keyI * 48); V[4].material.color.copy(FLOOD_C).multiplyScalar(keyI * 40); V[5].material.color.copy(FLOOD_C).multiplyScalar(keyI * 28); }
+        V[1].material.color.copy(FLOOD_C).multiplyScalar(Fh * 0.22 / Math.PI); // (barriers, boards, stands)
+        V[2].material.color.copy(FLOOD_C).multiplyScalar(keyI * 7); V[3].material.color.copy(FLOOD_C).multiplyScalar(keyI * 10); V[4].material.color.copy(FLOOD_C).multiplyScalar(keyI * 8); V[5].material.color.copy(FLOOD_C).multiplyScalar(keyI * 6); }
       const a = skyMat.uniforms.alpha.value; skyMat.uniforms.alpha.value = 1;
       envRT = pmrem.fromScene(envScene, 0.02);
       skyMat.uniforms.alpha.value = a;
@@ -1439,7 +1439,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     if (!T0) return;
     Object.assign(state.base, T0.base, { fog: T0.base.fog.clone() });
     sun.color.copy(T0.sunCol); state.sunDir.copy(T0.sd0); S3.uSunDir.value.copy(state.sunDir);
-    todBoards(0); S3.uFloodCar.value = 1; state.todSat = 1; state.todNightEnv = false;
+    todBoards(0); S3.uFloodCar.value = 1; F1.R3Post.setShadeK(1); state.todSat = 1; state.todNightEnv = false;
     if (T0.ckAO != null) { S3.uCkAO.value = T0.ckAO; S3.uCkAlb.value = T0.ckAlb; T0.ckAO = null; }
     S3.uFloodOn.value = 0; S3.uFloodAmb.value.setRGB(0, 0, 0); S3.uLiftK.value = 1; S3.uLiftF.value = 0; S3.uDispK.value = 1; S3.uFloodEnv.value = 0; S3.uGNight.value.set(1, 0); if (MATS.gravel && MATS.gravel.userData.col0) MATS.gravel.color.copy(MATS.gravel.userData.col0); if (fx.assist) fx.assist.material.color.setScalar(1); if (fx.smoke) { fx.smoke.material.uniforms.gain.value = 1; fx.sparks.material.uniforms.gain.value = 1; } delete state.base.floodKey;
     if (envRT) envRT.dispose();
@@ -1537,7 +1537,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     S3.uDispK.value = 1 / Math.pow(Math.max(1, state.todExp), 0.85);
     if (fx.assist) fx.assist.material.color.setScalar(S3.uDispK.value);
     const nk = fl * (1 - U.smooth(e / 8));
-    S3.uFloodCar.value = 1 + 0.3 * nk; // (white panels clipped at three times, and at 2.2)
+    S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
+    F1.R3Post.setShadeK(1 - 0.78 * nk); // (many towers light every spot: no one dark box under the car) // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5;
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
