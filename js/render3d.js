@@ -2658,7 +2658,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         if (town && it.base == null) {
           const band = col(['#efe7d8', '#e9dfcc', '#f3ede2'][it.seed % 3]);
           relief.add(ub, mat(it.x, gy + 3 + 3.75, it.y, ry, it.w + 0.36, 0.42, it.h + 0.36), band);
-          for (let y = 3 + 3.75 + 6.6; y < hgt + 1.5; y += 6.6) relief.add(ub, mat(it.x, gy + y, it.y, ry, it.w + 0.18, 0.18, it.h + 0.18), band);
+          for (let y = 4 * (tile / 4) + 0.35; y < hgt + 1.5; y += tile) relief.add(ub, mat(it.x, gy + y, it.y, ry, it.w + 0.18, 0.18, it.h + 0.18), band);
         }
         // the blocks facing the circuit get relief that a flat photo cannot give: balconies on
         // the upper floors (their slabs throw a line of shade) and a shopfront level at the street,
@@ -2675,7 +2675,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             relief.add(ub, at(0.14, 3 + 3.45, L + 0.6, 0.5, 0.3), stone);
             if (r() < 0.75) { const [wx, wz] = W2L(fx + sx * 0.75, fz + sz * 0.75); relief.add(ub, mat(wx, gy + 3 + 3.0, wz, ry, rot ? 1.3 : L * 0.8, 0.12, rot ? L * 0.8 : 1.3), col(awn[Math.floor(r() * awn.length)])); }
             if (!balc) continue;
-            for (let y = 3 + 6.6; y < hgt + 1; y += 3.3) {
+            for (let y = 3 * (tile / (town ? 2 : 4)) + 0.35; y < hgt + 1; y += tile / (town ? 2 : 4)) {
               relief.add(ub, at(0.45, y, L, 0.16, 0.9), stone);
               // (a wrought-iron railing, its top rail and bottom bar, not a solid band)
               relief.add(ub, at(0.86, y + 0.95, L, 0.05, 0.05), rail);
