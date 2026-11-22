@@ -1758,7 +1758,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0; S3.uGSatTrk.value = GRASS_SAT_TRIM[tr.id] || 1;
       // (cast ridges on a circuit's kerbs; a town's kerbs are flat painted aprons and dressed stone)
       S3.uKerbRidge.value = city || tr.def.style === 'street' || tr.def.style2 === 'city' ? 0 : 1; }
-    state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null;
+    state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null; state.carLampE = 0; state.carRoofE = 0;
     { const T = tr.gen2 && tr.gen2.tunnel, S3 = F1.R3S.U;
       if (T) { if (!built.tunMask) built.tunMask = tunMask(tr, T); S3.uTunMap.value = built.tunMask.tex; S3.uTunBox.value.copy(built.tunMask.box); S3.uTunH.value.set(built.tunMask.h0, built.tunMask.hr); }
       F1.R3S.setTun(!!T); }
@@ -5417,7 +5417,8 @@ void main() {
         if (!src.userData.pc) { const m = new THREE.Mesh(src.geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, side: THREE.DoubleSide })); m.userData.keep = true; m.frustumCulled = false; src.userData.pc = m; }
         const m = src.userData.pc;
         if (m.parent !== PX.scene) PX.scene.add(m);
-        m.material.color.copy(TUN_LAMP).multiplyScalar(120);
+        m.visible = (state.carLampE || 0) > 0.002;
+        m.material.color.copy(TUN_LAMP).multiplyScalar(90 * (state.carLampE || 0));
       }
     }
     // night: the tower lamps as the bright shapes they are (the heads, from the circuit's own instances), and
@@ -5455,6 +5456,16 @@ void main() {
       u.uSh.value[k] = l.shadow.map.texture; u.uShM.value[k].copy(l.shadow.matrix); on = 1;
     }
     u.uShOn.value = on;
+    {
+      const re = state.carRoofE || 0;
+      PX.scene.backgroundIntensity = 1 - 0.97 * re;
+      if (!PX.mat.userData.sunOwn) { PX.mat.uniforms.uSunCol = { value: new THREE.Color() }; PX.mat.userData.sunOwn = true; }
+      PX.mat.uniforms.uSunCol.value.copy(F1.R3S.U.uSunOnly.value).multiplyScalar(1 - 0.97 * re);
+      if (!PX.ceil) { PX.ceil = new THREE.Mesh(new THREE.CircleGeometry(60, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x050403, fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false })); PX.ceil.userData.keep = true; PX.ceil.frustumCulled = false; PX.ceil.renderOrder = -1; }
+      if (PX.ceil.parent !== PX.scene) PX.scene.add(PX.ceil);
+      PX.ceil.visible = re > 0.01; PX.ceil.material.opacity = re;
+      const fm = focus && live.get(focus); if (fm) PX.ceil.position.set(fm.position.x, fm.position.y + 5.6, fm.position.z);
+    }
     // the cube, at the followed car, a metre up
     const cc = LP.cam, m = focus && live.get(focus), prev = renderer.getRenderTarget(), tm = renderer.toneMapping;
     if (m && m.visible !== false) cc.position.set(m.position.x, m.position.y + 0.9, m.position.z); else cc.position.copy(camera.position);
@@ -5517,7 +5528,10 @@ void main() {
     // (the eye, or the camera's iris, takes a moment)
     state.tunK = (state.tunK || 0) + (want - (state.tunK || 0)) * Math.min(1, dt * 3);
     const k = state.tunK < 0.003 ? 0 : state.tunK;
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, k)); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
+    { let lk = 0, rk = 0; if (T && focusCar && focusCar.loc && focusCar.loc.i != null) { const i = focusCar.loc.i, mi = Math.min((i - T.i0) * tr.ds, (T.i1 - i) * tr.ds); lk = U.smooth((mi + 10) / 40); rk = U.smooth((mi + 2) / 22); }
+      const ea = Math.min(1, dt * 5); state.carLampE = (state.carLampE || 0) + (lk - (state.carLampE || 0)) * ea; state.carRoofE = (state.carRoofE || 0) + (rk - (state.carRoofE || 0)) * ea;
+      if (state.carLampE < 0.002) state.carLampE = 0; if (state.carRoofE < 0.002) state.carRoofE = 0; }
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * Math.max(state.nightK || 0, state.carLampE || 0)); // (rubber mirrors the lamps' light at night and in the tunnel, where they are the light)
     F1.R3S.U.uTunIrr.value.copy(TUN_LAMP).multiplyScalar(1.75 * 1.35 / (1 + tunOpen()) * F1.R3S.U.uAmbK.value * (G.__tunI || 1)); // (sodium orange, a little stronger than the open iris alone would have it: from outside the mouth shows it)
     if (k !== state.tunApplied) {
       state.tunApplied = k;
