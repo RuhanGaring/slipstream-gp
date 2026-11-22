@@ -2634,13 +2634,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         // a generated harbour town's blocks wear its own stucco fronts (shuttered windows, two bays
         // by two floors a 6.4 m tile), the rest the venue's facade
         const town = it.a != null && cityB ? cityB[it.seed % cityB.length] : null, tile = town ? 6.4 : 14;
+        const gy = gmin - 3; // foundations below sloping streets
+        // (the block is stretched to its full height first, and the texture laid on its real size: laid on before the
+        // stretch, the floors came out (height + 3) / height too tall, a different pitch on every block, 3.5 m on a
+        // 30 m one, so no balcony could meet its windows)
+        g.scale(1, (hgt + 3) / hgt, 1);
         for (let k = 0; k < uv.count; k++) {
           const nx = Math.abs(nor.getX(k)), nz = Math.abs(nor.getZ(k));
           const along = nx > 0.5 ? pos.getZ(k) : nz > 0.5 ? pos.getX(k) : pos.getX(k);
-          uv.setXY(k, along / tile + (it.seed % 4) / 4, (pos.getY(k) + hgt / 2) / tile); // 4 bays x 4 floors per 14 m tile
+          uv.setXY(k, along / tile + (it.seed % 4) / 4, (pos.getY(k) + (hgt + 3) / 2) / tile); // 4 bays x 4 floors per 14 m tile, from the foot
         }
-        const gy = gmin - 3; // foundations below sloping streets
-        g.scale(1, (hgt + 3) / hgt, 1);
         // The street's own shade, baked: the lower floors of a street see less sky (the buildings
         // opposite take it) and less bounce, so they sit darker than the upper floors in the same
         // light, the look of a real narrow street. In the vertex colour, so it costs nothing a frame.
