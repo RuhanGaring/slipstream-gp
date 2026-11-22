@@ -1277,7 +1277,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       { const Fh = keyI * Math.sin(85 * D2R) / 0.4, V = state.envVenue.children;
         V[0].material.color.copy(FLOOD_C).multiplyScalar(Fh * 0.14 / Math.PI); // (lit tarmac, albedo about 0.14)
         V[1].material.color.copy(FLOOD_C).multiplyScalar(Fh * 0.22 / Math.PI); // (barriers, boards, stands)
-        V[2].material.color.copy(FLOOD_C).multiplyScalar(keyI * 7); V[3].material.color.copy(FLOOD_C).multiplyScalar(keyI * 10); V[4].material.color.copy(FLOOD_C).multiplyScalar(keyI * 8); V[5].material.color.copy(FLOOD_C).multiplyScalar(keyI * 6); }
+        V[2].material.color.copy(FLOOD_C).multiplyScalar(keyI * 4); V[3].material.color.copy(FLOOD_C).multiplyScalar(keyI * 6); V[4].material.color.copy(FLOOD_C).multiplyScalar(keyI * 5); V[5].material.color.copy(FLOOD_C).multiplyScalar(keyI * 3.5); }
       const a = skyMat.uniforms.alpha.value; skyMat.uniforms.alpha.value = 1;
       envRT = pmrem.fromScene(envScene, 0.02);
       skyMat.uniforms.alpha.value = a;
@@ -1539,8 +1539,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const nk = fl * (1 - U.smooth(e / 8));
     S3.uFloodCar.value = 1 - 0.15 * nk; // (the fill that lit the white panels flat is held back a little)
     F1.R3Post.setShadeK(1 - 0.05 * nk); // (a clear contact shadow under the car, as it always was; the hard rectangle was the floor of it, now left soft)
-    S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.3 * nk);
-    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 3) * nk); // (white panels clipped at three times, and at 2.2)
+    S3.uCarNight.value.set(1 - 0.28 * nk, 1 - 0.55 * nk);
+    if (F1.R3Tyre && F1.R3Tyre.setNight) F1.R3Tyre.setNight(1 + (G.__tyK != null ? G.__tyK : 1.6) * nk); // (white panels clipped at three times, and at 2.2)
     state.todNightEnv = nk > 0.5 && !(GFX.liveRefl | 0); // (with live reflections the cars mirror the real towers: probeStep)
     // the cockpit: its well less dark and its tub a little lighter under the floodlights (it was a flat 20)
     if (S3.uCkAO) { if (T0.ckAO == null) { T0.ckAO = S3.uCkAO.value; T0.ckAlb = S3.uCkAlb.value; } S3.uCkAO.value = T0.ckAO * (1 - 0.75 * nk); S3.uCkAlb.value = T0.ckAlb * (1 + 1.6 * nk); }
@@ -5384,7 +5384,7 @@ void main() {
         FB.pl.visible = FB.plFloor.visible = on;
         if (on && state.tod0) {
           const k = U.smooth(Math.max(0, Math.min(1, ((state.tod0.Fh || 0) > 0 ? 1 : 0))));
-          FB.plMat.color.copy(FLOOD_C).multiplyScalar((G.__plK || 14) * k); // (each head a hard, bright shape: on the tyres and the paint a lamp slides along as a highlight)
+          FB.plMat.color.copy(FLOOD_C).multiplyScalar((G.__plK || 8) * k); // (each head a hard, bright shape: on the tyres and the paint a lamp slides along as a highlight)
           FB.plFloorMat.color.copy(FLOOD_C).multiplyScalar((state.tod0.Fh || 0) * 0.1 / Math.PI * (1 - (state.tunApplied || 0)));
           const fm2 = focus && live.get(focus); if (fm2) FB.plFloor.position.set(fm2.position.x, fm2.position.y - 0.02, fm2.position.z);
         }
