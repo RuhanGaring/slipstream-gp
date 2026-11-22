@@ -308,7 +308,7 @@
         '    tyFi = getHemisphereLightIrradiance(hemisphereLights[0], normalize(normal)) * 3.4;',
         '#endif',
         // (at night the floodlights' fill, where they reach: rubber stood far darker than the lit track round it)
-        '    tyFi += uFloodAmb * r3FloodM() * 3.4 * 0.3;',
+        '    tyFi += uFloodAmb * r3FloodM() * 3.4 * 0.14;',
         '    outgoingLight += uT_fill * uT_fillIris * tyFi; }',
         '#include <opaque_fragment>'].join('\n'))
       // (rubber is a plain dielectric: F0 about 0.04, scaled here)
