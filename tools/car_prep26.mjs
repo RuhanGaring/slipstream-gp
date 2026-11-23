@@ -1,5 +1,6 @@
 // Convert one downloaded 2026 car (GLB from Sketchfab, see CREDITS.md) into the game's car file.
 // usage (from a folder with @gltf-transform/core, /extensions, meshoptimizer and sharp installed):
+//   (copy car_prep26.mjs and car_vis.mjs there; LOWPRIO=1 runs it at idle priority)
 //   node car_prep26.mjs SRC.glb OUT_DIR ID ["Display name"]
 // writes OUT_DIR/ID.car (geometry, materials, layout) and OUT_DIR/tex/<hash>.webp (textures,
 // shared between cars when the source images are the same). OUT_DIR is assets-src/cars; then
@@ -21,11 +22,15 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
+import os from 'node:os';
+import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
+import { visible, join } from './car_vis.mjs';
+
+if (process.env.LOWPRIO) os.setPriority(19); // (leave the machine to whoever is using it)
 
 const [SRC, OUT, ID, NAME] = process.argv.slice(2);
-await MeshoptDecoder.ready; await MeshoptSimplifier.ready;
+await MeshoptDecoder.ready; await MeshoptEncoder.ready; await MeshoptSimplifier.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
 const doc = await io.read(SRC);
 fs.mkdirSync(path.join(OUT, 'tex'), { recursive: true });
@@ -370,36 +375,154 @@ function quant(a, k) {
   const q = Uint16Array.from(a, (x, i) => Math.round((x - lo[i % k]) / sc[i % k]));
   return [...put(q), lo, sc];
 }
-function pack(G, col) {
+// Vertices that are the same once stored (position, normal and UV alike) become one, and the triangles and
+// vertices are put in the order the GPU's caches like: the same picture for less vertex work. The triangles
+// of a blended surface keep their order (it is their drawing order).
+let vBefore = 0, vAfter = 0;
+function tidy(G, blend) {
+  const n = G.pos.length / 3, lo = [1e9, 1e9, 1e9, 1e9, 1e9], hi = lo.map(x => -x);
+  for (let i = 0; i < n; i++) for (let j = 0; j < 5; j++) { const x = j < 3 ? G.pos[i * 3 + j] : G.uv[i * 2 + j - 3]; lo[j] = Math.min(lo[j], x); hi[j] = Math.max(hi[j], x); }
+  const sc = lo.map((l, j) => (hi[j] - l) / 65535 || 1), map = new Map(), to = new Uint32Array(n), first = [];
+  for (let i = 0; i < n; i++) {
+    const k = [0, 1, 2].map(j => Math.round((G.pos[i * 3 + j] - lo[j]) / sc[j])).join() + '|' + [0, 1, 2].map(j => Math.round(Math.max(-1, Math.min(1, G.nor[i * 3 + j])) * 127)).join() + '|' + [0, 1].map(j => Math.round((G.uv[i * 2 + j] - lo[3 + j]) / sc[3 + j])).join();
+    let v = map.get(k);
+    if (v === undefined) { v = first.length; map.set(k, v); first.push(i); }
+    to[i] = v;
+  }
+  let idx = [];
+  for (let t = 0; t < G.idx.length; t += 3) { const a = to[G.idx[t]], b = to[G.idx[t + 1]], c = to[G.idx[t + 2]]; if (a !== b && b !== c && a !== c) idx.push(a, b, c); }
+  idx = Uint32Array.from(idx);
+  // (it puts new numbers in idx and says which old vertex each stands for)
+  let names = null;
+  if (!blend) { const [remap] = MeshoptEncoder.reorderMesh(idx, true, false); names = new Uint32Array(first.length); remap.forEach((to2, from) => { if (to2 !== 0xffffffff) names[to2] = from; }); }
+  const at = new Int32Array(first.length).fill(-1), ord = [];
+  for (const i of idx) if (at[i] < 0) { at[i] = ord.length; ord.push(first[names ? names[i] : i]); }
+  const pick = (a, k) => { const o = new Float32Array(ord.length * k); ord.forEach((i, q) => o.set(a.subarray(i * k, i * k + k), q * k)); return o; };
+  vBefore += n; vAfter += ord.length;
+  return Object.assign({}, G, { pos: pick(G.pos, 3), nor: pick(G.nor, 3), uv: pick(G.uv, 2), idx: Uint32Array.from(idx, i => at[i]) });
+}
+function pack(G, col, asIs) {
+  if (!col && !asIs) G = tidy(G, G.mat && matOut[matIndex.get(G.mat)].a === 'B');
   const r = { m: matIndex.get(G.mat), pos: quant(G.pos, 3), nor: put(Int8Array.from(G.nor, x => Math.round(Math.max(-1, Math.min(1, x)) * 127))), uv: quant(G.uv, 2) };
   r.idx = G.pos.length / 3 > 65535 ? ['u32', ...put(G.idx)] : ['u16', ...put(Uint16Array.from(G.idx))];
   if (col) r.col = put(col);
   return r;
 }
 let triCount = [0, 0, 0, 0];
-function lod(level) {
-  const low = (G, wheel) => (level === 1 ? simplifyLow(G, wheel ? 0.1 : 0.08, wheel ? 0.008 : 0.016) : simplifyLow(G, 0.05, wheel ? 0.014 : 0.022));
-  const body = [];
-  for (const [mat, ix] of parts.body) {
-    if (level > 0 && lowSkip(mname(mat))) continue;
-    const G = level === 0 ? simplify(sub(mat, ix, shiftTf), 0.3, 0.0016, false) : low(sub(mat, ix, shiftTf), false);
-    if (!G) continue;
-    triCount[level] += G.idx.length / 3; body.push(pack(G));
+// The low levels (mid, far). All of a car's surfaces are simplified together, so where paint meets carbon
+// the two move as one and no gap opens; what is never or barely seen from outside goes first (the
+// far level is only ever seen from above the road), and the UVs count in metres of livery slid, not in
+// units of texture (a carbon weave that repeats every few centimetres used to hold every triangle it
+// covered). Tolerances: mid 1.4 cm (at 34 m a pixel is about 4 cm), far 4 cm (at 130 m a pixel is 14 cm).
+// Most of the old levels' dark patches were a shell a millimetre or two under the paint, coming through once the two
+// were simplified: what stands under another surface by 0.8 mm or more counts as unseen, and goes.
+// Decals are simplified apart, and then laid back on the simplified skin under them: left to themselves they sank
+// into it and half a logo was gone.
+const LOWS = { 1: { err: 0.014, wErr: 0.008, hErr: 0.01, hShare: 0.04, dErr: 0.005, lift: 0.004, wn: 0.11, ku: 4, yMin: -0.3, share: 0.005 }, 2: { err: 0.04, wErr: 0.04, hErr: 0.05, hShare: 0.12, dErr: 0.015, lift: 0.008, wn: 0.07, ku: 1.5, yMin: -0.05, share: 0.03 } };
+const blends = G => matOut[matIndex.get(G.mat)].a === 'B';
+// each decal vertex moved onto the skin nearest it (within 5 cm), facing its way, and a few millimetres off it
+function layOn(D, skins, lift) {
+  const C = 0.08, cell = new Map(), key = (x, y, z) => x + ',' + y + ',' + z, T = [];
+  for (const G of skins) for (let t = 0; t < G.idx.length; t += 3) {
+    const p = [0, 1, 2].map(j => [...G.pos.subarray(G.idx[t + j] * 3, G.idx[t + j] * 3 + 3)]), id = T.push(p) - 1;
+    const lo = [0, 1, 2].map(j => Math.floor((Math.min(p[0][j], p[1][j], p[2][j]) - 0.05) / C)), hi = [0, 1, 2].map(j => Math.floor((Math.max(p[0][j], p[1][j], p[2][j]) + 0.05) / C));
+    for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { const k = key(x, y, z), c = cell.get(k); c ? c.push(id) : cell.set(k, [id]); }
   }
-  const W = {};
-  for (const k of ['FL', 'FR', 'RL', 'RR']) {
-    const w = wheels[k], c = [w.c[0] + DX, w.c[1] + DY, w.c[2]];
-    const ps = [];
-    for (const [mat, ix] of parts[k]) {
-      const G = level === 0 ? simplify(sub(mat, ix, wheelTf(w)), 0.45, 0.001, false) : low(sub(mat, ix, wheelTf(w)), true);
-      if (!G) continue;
-      triCount[level] += G.idx.length / 3; ps.push(pack(G));
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], pos = D.pos.slice();
+  for (let i = 0; i < pos.length; i += 3) {
+    const o = [D.pos[i], D.pos[i + 1], D.pos[i + 2]], n = [D.nor[i], D.nor[i + 1], D.nor[i + 2]], l = Math.hypot(...n) || 1, nn = n.map(x => x / l);
+    let best = null;
+    for (const id of cell.get(key(...o.map(x => Math.floor(x / C)))) || []) {
+      // where the line through the vertex along its normal meets the triangle
+      const [a, b, c] = T[id], e1 = sub3(b, a), e2 = sub3(c, a), h = [nn[1] * e2[2] - nn[2] * e2[1], nn[2] * e2[0] - nn[0] * e2[2], nn[0] * e2[1] - nn[1] * e2[0]], det = dot(e1, h);
+      if (Math.abs(det) < 1e-9) continue;
+      const s0 = sub3(o, a), u = dot(s0, h) / det; if (u < -0.02 || u > 1.02) continue;
+      const q = [s0[1] * e1[2] - s0[2] * e1[1], s0[2] * e1[0] - s0[0] * e1[2], s0[0] * e1[1] - s0[1] * e1[0]], v = dot(nn, q) / det; if (v < -0.02 || u + v > 1.02) continue;
+      const t = dot(e2, q) / det;
+      if (Math.abs(t) < 0.05 && (best == null || Math.abs(t) < Math.abs(best))) best = t;
     }
-    const hub = [];
-    for (const [mat, ix] of parts[k + 'h']) {
-      const G = level === 0 ? simplify(sub(mat, ix, hubTf(w)), 0.45, 0.001, false) : low(sub(mat, ix, hubTf(w)), true);
-      if (!G) continue;
-      triCount[level] += G.idx.length / 3; hub.push(pack(G));
+    if (best != null) for (let j = 0; j < 3; j++) pos[i + j] = o[j] + nn[j] * (best + lift);
+  }
+  return Object.assign({}, D, { pos });
+}
+function lowJoint(Gs, occl, L, err) {
+  // (the tail light too: the game finds it by its own material, to flash it)
+  const lamp = G => /rear_light|rtt_light/i.test(mname(G.mat)), decals = Gs.filter(blends), skins = Gs.filter(G => !blends(G) && !lamp(G)), lamps = Gs.filter(G => lamp(G) && !blends(G)), out = lowSkin(skins, occl, L, err).concat(lowSkin(lamps, [], Object.assign({}, L, { keep: true }), Math.min(err, 0.006)));
+  return out.concat(lowSkin(decals, skins.concat(occl), L, Math.min(err, L.dErr)).map(D => layOn(D, out, L.lift)));
+}
+function lowSkin(Gs, occl, L, err) {
+  if (!Gs.length) return [];
+  const list = Gs.map(G => ({ G, occ: matOut[matIndex.get(G.mat)].a === 'O' })), all = list.concat(occl.map(G => ({ G, occ: true })));
+  const keep = visible(all, { px: 0.004, n: 150, yMin: L.yMin, share: blends(Gs[0]) ? L.share : Math.max(L.share, 0.02), eps: blends(Gs[0]) ? 0.004 : 0.0008 }).slice(0, Gs.length);
+  const J = join(Gs, keep);
+  if (!J.idx.length) return [];
+  const ku = L.ku / MeshoptSimplifier.getScale(J.pos, 3);
+  const [out] = MeshoptSimplifier.simplifyWithAttributes(J.idx, J.pos, 3, J.attr, 5, [L.wn, L.wn, L.wn, ku, ku], null, 36, err, L.keep ? ['ErrorAbsolute'] : ['ErrorAbsolute', 'Prune', 'Permissive']);
+  // back to one part per surface. Where a corner has come to rest on the neighbouring surface's vertex, the
+  // triangle goes to the surface two of its corners are on and the third takes that surface's own
+  // texture place there, carried on from its nearest triangle.
+  const near = k => {
+    // this surface's own triangles in 6 cm cells
+    const cell = new Map(), key = (x, y, z) => Math.floor(x / 0.06) + ',' + Math.floor(y / 0.06) + ',' + Math.floor(z / 0.06);
+    for (let t = 0; t < J.idx.length; t += 3) if (J.src[J.idx[t]] === k) for (let j = 0; j < 3; j++) { const i = J.idx[t + j] * 3, q = key(J.pos[i], J.pos[i + 1], J.pos[i + 2]); const c = cell.get(q) || []; cell.set(q, c); if (c[c.length - 1] !== t) c.push(t); }
+    return p => {
+      const c = p.map(x => Math.floor(x / 0.06)); let bd = 1e9, best = -1;
+      for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) for (const t of cell.get((c[0] + x) + ',' + (c[1] + y) + ',' + (c[2] + z)) || []) {
+        let m = 1e9; for (let j = 0; j < 3; j++) { const i = J.idx[t + j] * 3; m = Math.min(m, Math.hypot(J.pos[i] - p[0], J.pos[i + 1] - p[1], J.pos[i + 2] - p[2])); }
+        if (m < bd) { bd = m; best = t; }
+      }
+      return best;
+    };
+  };
+  const res = [];
+  Gs.forEach((G0, k) => {
+    const map = new Map(), pos = [], nor = [], uv = [], idx = []; let find = null;
+    const own = i => {
+      let v = map.get(i);
+      if (v !== undefined) return v;
+      const p = [...J.pos.subarray(i * 3, i * 3 + 3)], nn = [...J.attr.subarray(i * 5, i * 5 + 3)]; let u = [J.uv[i * 2], J.uv[i * 2 + 1]];
+      if (J.src[i] !== k) {
+        mixed++;
+        find = find || near(k);
+        const t = find(p);
+        if (t < 0) return -1;
+        const [a, e, f] = [0, 1, 2].map(j => J.idx[t + j]), A = J.pos.subarray(a * 3, a * 3 + 3), d = (i2) => [0, 1, 2].map(j => J.pos[i2 * 3 + j] - A[j]), e1 = d(e), e2 = d(f), w = p.map((x, j) => x - A[j]), dot = (x, y) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+        const g11 = dot(e1, e1), g12 = dot(e1, e2), g22 = dot(e2, e2), D = g11 * g22 - g12 * g12, cl = x => Math.max(-1, Math.min(2, x));
+        const s1 = D > 1e-14 ? cl((g22 * dot(w, e1) - g12 * dot(w, e2)) / D) : 0, s2 = D > 1e-14 ? cl((g11 * dot(w, e2) - g12 * dot(w, e1)) / D) : 0;
+        u = [0, 1].map(j => J.uv[a * 2 + j] + s1 * (J.uv[e * 2 + j] - J.uv[a * 2 + j]) + s2 * (J.uv[f * 2 + j] - J.uv[a * 2 + j]));
+      }
+      v = pos.length / 3; map.set(i, v); pos.push(...p); nor.push(...nn); uv.push(...u);
+      return v;
+    };
+    for (let t = 0; t < out.length; t += 3) {
+      const [a, e, f] = [J.src[out[t]], J.src[out[t + 1]], J.src[out[t + 2]]], home = a === e || a === f ? a : e === f ? e : a;
+      if (home !== k) continue;
+      const tri = [0, 1, 2].map(j => own(out[t + j]));
+      if (tri.some(v => v < 0)) { lost++; continue; }
+      idx.push(...tri);
+    }
+    if (idx.length) res.push({ mat: G0.mat, pos: Float32Array.from(pos), nor: Float32Array.from(nor), uv: Float32Array.from(uv), idx: Uint32Array.from(idx) });
+  });
+  return res;
+}
+let mixed = 0, lost = 0;
+function lod(level) {
+  const body = [], W = {};
+  const add = (to, G) => { if (!G) return; triCount[level] += G.idx.length / 3; to.push(pack(G)); };
+  if (level === 0) for (const [mat, ix] of parts.body) add(body, simplify(sub(mat, ix, shiftTf), 0.3, 0.0016, false));
+  else for (const G of lowJoint([...parts.body].filter(([m]) => !lowSkip(mname(m))).map(([m, ix]) => sub(m, ix, shiftTf)), [], LOWS[level], LOWS[level].err)) add(body, G);
+  for (const k of ['FL', 'FR', 'RL', 'RR']) {
+    const w = wheels[k], c = [w.c[0] + DX, w.c[1] + DY, w.c[2]], ps = [], hub = [];
+    if (level === 0) {
+      for (const [mat, ix] of parts[k]) add(ps, simplify(sub(mat, ix, wheelTf(w)), 0.45, 0.001, false));
+      for (const [mat, ix] of parts[k + 'h']) add(hub, simplify(sub(mat, ix, hubTf(w)), 0.45, 0.001, false));
+    } else {
+      const L = LOWS[level], spin = [...parts[k]].map(([m, ix]) => sub(m, ix, wheelTf(w))), still = [...parts[k + 'h']].map(([m, ix]) => sub(m, ix, hubTf(w)));
+      const tyre = G => isTyre(mname(G.mat)), tyres = spin.filter(tyre), rim = spin.filter(G => !tyre(G));
+      // (the model's own tyre, which the game replaces with its own, only gives it the bead's radius: as it was)
+      for (const G of tyres) add(ps, level === 1 ? simplifyLow(G, 0.1, 0.008) : simplifyLow(G, 0.05, 0.014));
+      for (const G of lowJoint(rim, tyres.concat(still), L, L.wErr)) add(ps, G);
+      for (const G of lowJoint(still, spin, Object.assign({}, L, { share: L.hShare }), L.hErr)) add(hub, G);
     }
     W[k] = { c, r: w.r, w: w.w, q: w.q, parts: ps, hub };
   }
@@ -433,7 +556,7 @@ for (const [mat, ix] of parts.sw) {
   }
   for (let i = 0; i < G.pos.length; i += 3) if (Math.abs(G.pos[i + 1]) < 0.025) { swV[0] = Math.min(swV[0], G.pos[i]); swV[1] = Math.max(swV[1], G.pos[i]); }
   swTris += G.idx.length / 3;
-  swParts.push(pack(G));
+  swParts.push(pack(G, null, true)); // (as it is: the hands are placed by this mesh's own vertices)
 }
 // the hands close round the outer bars of the grips, a little in from the outermost edge
 const gripX = Math.min(-swV[0], swV[1]) - 0.017;
@@ -457,6 +580,6 @@ const head = Buffer.alloc(8); head.write('SGPC', 0); head.writeUInt32LE(json.len
 const pad = Buffer.alloc((4 - ((8 + json.length) % 4)) % 4, 32);
 const bin = Buffer.concat(chunks);
 fs.writeFileSync(path.join(OUT, ID + '.car'), Buffer.concat([head, json, pad, bin]));
-console.log(ID, 'tris', triCount.map(Math.round), 'sw', swTris, 'grip', gripX.toFixed(3), 'swC', meta.sw.c.map(x => x.toFixed(3)).join(','), 'axis', zW.map(x => x.toFixed(2)).join(','),
+console.log(ID, 'tris', triCount.map(Math.round), 'verts', vBefore, '->', vAfter, 'mixed', mixed, 'lost', lost, 'sw', swTris, 'grip', gripX.toFixed(3), 'swC', meta.sw.c.map(x => x.toFixed(3)).join(','), 'axis', zW.map(x => x.toFixed(2)).join(','),
   'wheels', Object.entries(lods[0].wheels).map(([k, w]) => k + ' ' + w.c.map(x => x.toFixed(2)).join(',') + ' r' + w.r.toFixed(3)).join(' | '),
   'nose', nose.y.toFixed(3), nose.slope.toFixed(2), 'bin', (bin.length / 1e6).toFixed(2) + 'MB', 'tex', texList.length);

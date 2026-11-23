@@ -53,7 +53,6 @@ p = JS / 'core.js'; s = p.read_text(encoding='utf-8'); a = s.index(HEAD) + len(H
 data = json.loads(s[a:b])
 for key, im in (('asphalt_n', N), ('asphalt_arm', ARM)):
     f = io.BytesIO(); Image.fromarray(im).save(f, 'PNG', optimize=True); png = f.getvalue()
-    (ROOT / 'assets' / f'{key}.png').write_bytes(png)
     data[key] = 'data:image/png;base64,' + base64.b64encode(png).decode()
     print(key, len(png) // 1024, 'KB')
 p.write_text(s[:a] + json.dumps(data, separators=(', ', ': ')) + s[b:], encoding='utf-8')

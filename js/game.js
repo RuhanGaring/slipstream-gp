@@ -75,8 +75,8 @@
     high: { liveRefl: 1 },
     medium: { aoSamples: 8, grassDensity: 0.6, grassDist: 70, grassLod: 9 },
     low: { dprCap: 1, aniso: 4, grass: false, trees: 0.6, carNear: 22, carFar: 90, particles: 500, skids: 4500, dispHz: 8 },
-    potato: { dprCap: 1, aniso: 2, grass: false, trees: 0.33, boards: false, viewDist: 3000, carNear: 12, carFar: 40, carDraw: 350, particles: 300, skids: 3000, debris: 20, dispHz: 6, catchup: 8 },
-    rock: { dprCap: 1, aniso: 1, grass: false, trees: 0.12, treeDist: 700, boards: false, backdrop: false, viewDist: 1600, carNear: 2.5, carFar: 9, carDraw: 250, particles: 150, skids: 1500, debris: 10, dispHz: 4, rainK: 0.4, physLod: true, catchup: 8 },
+    potato: { dprCap: 1, aniso: 2, grass: false, trees: 0.33, boards: false, viewDist: 3000, carNear: 12, carFar: 60, carDraw: 350, particles: 300, skids: 3000, debris: 20, dispHz: 6, catchup: 8 },
+    rock: { dprCap: 1, aniso: 1, grass: false, trees: 0.12, treeDist: 700, boards: false, backdrop: false, viewDist: 1600, carNear: 2.5, carFar: 30, carDraw: 250, particles: 150, skids: 1500, debris: 10, dispHz: 4, rainK: 0.4, physLod: true, catchup: 8 },
   };
   for (const k in GFX_PRESETS) Object.assign(GFX_PRESETS[k], ADV, ADV_P[k]);
   Game.GFX_ADV = ADV;
@@ -105,7 +105,9 @@
     } }
   Game.settings.gfx = Object.assign({ preset: 'high', tone: 'aces', ev: 0 }, GFX_PRESETS.high, Game.settings.gfx || {});
   // (the look was graded for ACES in November 2026: saves made before then move across once)
-  if (Game.settings.gfx.lodV !== 1) { const g = Game.settings.gfx; if (g.carNear === 50) g.carNear = 34; if (g.carFar === 300) g.carFar = 130; g.lodV = 1; }
+  if (!(Game.settings.gfx.lodV >= 1)) { const g = Game.settings.gfx; if (g.carNear === 50) g.carNear = 34; if (g.carFar === 300) g.carFar = 130; g.lodV = 1; }
+  // (the far model is far lighter since 2026-11-24 and meant for further off; the mid one is now lighter than the far one was)
+  if (Game.settings.gfx.lodV === 1) { const g = Game.settings.gfx; if (g.carFar === 40) g.carFar = 60; else if (g.carFar === 9) g.carFar = 30; g.lodV = 2; }
       if (Game.settings.gfx.toneV !== 2) { Game.settings.gfx.tone = 'aces'; Game.settings.gfx.toneV = 2; }
   // settings saved before the lite flag existed
   Game.settings.gfx.potato = Game.settings.gfx.preset === 'potato' || Game.settings.gfx.preset === 'rock';
