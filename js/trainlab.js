@@ -52,7 +52,7 @@
   .tl-what { font-size: 14px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; text-align: right; }
   .tl-what small { display: block; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--m-ink-3, #9a9aa8); text-transform: none; }
   .tl-bar { height: 8px; background: rgba(255,255,255,.1); margin: 10px 0 8px; overflow: hidden; }
-  .tl-bar i { display: block; height: 100%; width: 0; background: var(--f1, #e10600); transition: width .25s; }
+  .tl-bar i { display: block; height: 100%; width: 100%; background: var(--f1, #e10600); transform: scaleX(0); transform-origin: left; transition: transform .25s; }
   .tl-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .tl-stats div { background: rgba(255,255,255,.05); padding: 6px 8px; min-width: 0; }
   .tl-stats b { display: block; font-size: 18px; font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -65,7 +65,7 @@
   .tl-step b { font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
   .tl-step small { grid-column: 2 / 4; font-size: 12px; color: var(--m-ink-3, #9a9aa8); }
   .tl-step em { font-style: normal; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; color: #c9cad4; }
-  .tl-step .tl-sbar { grid-column: 2 / 4; height: 3px; background: rgba(255,255,255,.1); } .tl-sbar i { display: block; height: 100%; width: 0; background: #fff; transition: width .25s; }
+  .tl-step .tl-sbar { grid-column: 2 / 4; height: 3px; background: rgba(255,255,255,.1); } .tl-sbar i { display: block; height: 100%; width: 100%; background: #fff; transform: scaleX(0); transform-origin: left; transition: transform .25s; }
   .tl-step.done .tl-sbar i { background: #2bd66b; }
   @keyframes tl-pulse { 50% { box-shadow: 0 0 0 7px rgba(225,6,0,.05); } }
   .tl-set { display: grid; grid-template-columns: 1fr 52px; gap: 4px 10px; align-items: center; margin-top: 8px; font-size: 13px; }
@@ -463,7 +463,7 @@
       const q = this.q, j = D.j, ph = this.phase(D), running = j && j.state === 'running';
       const p = running ? j.p : j && j.state === 'done' ? 1 : D.info && !D.info.partial ? 1 : 0;
       q('pct').textContent = Math.round(p * 100);
-      q('status').querySelector('.tl-bar i').style.width = p * 100 + '%';
+      q('status').querySelector('.tl-bar i').style.transform = `scaleX(${p})`;
       const what = running ? { line: 'Searching the racing line', limits: 'Finding the grip limits', coach: 'Coaching the plan', verify: 'Checking the result' }[j.phase] : j && j.state === 'failed' ? 'Training failed' : j && j.state === 'stopped' ? 'Stopped: best plan kept' : j && j.state === 'done' ? 'Training complete' : D.info ? (D.info.partial ? 'Part-trained' : 'Trained') : 'Not trained yet';
       const sub = running ? (j.phase === 'line' ? `model lap ${fmtT(j.lineT)}` : j.phase === 'limits' ? `search and check laps` : j.phase === 'coach' ? `best lap ${fmtT(j.coach.length ? j.coach[j.coach.length - 1].best : null)}` : 'one clean lap') : j && j.state === 'failed' ? esc(j.error || '') : D.info && D.info.best ? `AI lap ${fmtT(D.info.best)}` : 'Quick learning only';
       q('what').textContent = what; q('sub').innerHTML = sub;
@@ -485,7 +485,7 @@
         const done = j && (at > n || (j.state === 'done' && n <= 3)) && !(j.state === 'stopped');
         e.classList.toggle('act', running && at === n); e.classList.toggle('done', !!done);
         e.querySelector('em').textContent = detail[n] || '';
-        e.querySelector('.tl-sbar i').style.width = (done ? 1 : running && at === n ? sp[n] : at > n ? 1 : 0) * 100 + '%';
+        e.querySelector('.tl-sbar i').style.transform = `scaleX(${done ? 1 : running && at === n ? sp[n] : at > n ? 1 : 0})`;
         e.querySelector('u').textContent = done ? '✓' : n + 1;
       });
       // the result
