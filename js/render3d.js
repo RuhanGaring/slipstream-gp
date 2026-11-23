@@ -1755,7 +1755,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     { const RS = built.roadSky, S3 = F1.R3S.U; S3.uRoadShadeOn.value = RS ? 1 : 0; if (RS) { S3.uRoadShade.value = RS.tex; S3.uRoadShadeP.value.set(RS.L, RS.d0, RS.dw); }
       // (a harbour town's circuit is its own streets: as light as the side streets beside it, its
       // racing line only faintly rubbered; the barriers alone mark it out)
-      const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0; S3.uGSatTrk.value = GRASS_SAT_TRIM[tr.id] || 1;
+      const city = !!(tr.gen2 && tr.gen2.style === 'city'); S3.uRoadShadeK.value = city ? 0.3 : 1; S3.uRubK.value = city ? 0.3 : 1; S3.uTunLamp.value = 0; S3.uGSatTrk.value = grassSatOf(tr);
       // (cast ridges on a circuit's kerbs; a town's kerbs are flat painted aprons and dressed stone)
       S3.uKerbRidge.value = city || tr.def.style === 'street' || tr.def.style2 === 'city' ? 0 : 1; }
     state.envMats = null; state.tunK = 0; state.tunApplied = 0; state.tunLoc = null; state.carLampE = 0; state.carRoofE = 0;
@@ -5534,8 +5534,13 @@ void main() {
   const _tlC = new THREE.Color(), _tlG = new THREE.Color(), TUN_LAMP = new THREE.Color('#ff9638'), TUN_FLOOR = new THREE.Color('#5a3818'), tunOpen = () => ((GFX.liveRefl | 0) ? 6 : 2.2);
   // per-circuit trims: the picture's saturation (post grade) and the grass's own (lawnTune), where
   // measured frames ran hot; ids not listed keep 1
-  const SAT_TRIM = { hakone: 0.67, sierra: 0.77, montaurele: 0.65, varenna: 0.85 };
-  const GRASS_SAT_TRIM = { hakone: 0.85, varenna: 0.85, sierra: 0.9 };
+  // (the numbers are in the F7 panel, js/r3-tyretune.js, "Track saturation", read live)
+  const SV = (k, d) => { const s = F1.TyreTune && F1.TyreTune.sc; return s && s[k] != null ? s[k] : d; };
+  const satOf = tr => {
+    const p = tr ? SV('satP_' + tr.id, SV(tr.gen2 && tr.gen2.city ? 'satP_city' : 'satP_gen', 1)) : 1;
+    return Math.max(0, SV('satAll', 1) * (1 + (p - 1) * SV('satAuto', 1)) * (1 + ((state.todSat || 1) - 1) * SV('satTod', 1)));
+  };
+  const grassSatOf = tr => Math.max(0, SV('satGAll', 1) * (1 + ((tr ? SV('satG_' + tr.id, SV('satG_gen', 1)) : 1) - 1) * SV('satGAuto', 1)));
   function tunnelLight(dt) {
     const tr = state.tr, T = tr && tr.gen2 && tr.gen2.tunnel;
     let want = 0;
@@ -5638,6 +5643,7 @@ void main() {
     if (MATS.water && MATS.water.normalMap) MATS.water.normalMap.offset.set(clock * 0.01, clock * 0.006);
     treeLod();
     const tunK = tunnelLight(dt);
+    if (F1.R3S && F1.R3S.U.uGSatTrk) F1.R3S.U.uGSatTrk.value = grassSatOf(state.tr);
     const exposure = (state.exposure || 1) * Math.pow(2, GFX.ev || 0) * (state.wxExp || 1) * Math.pow(state.todExp || 1, 1 - tunK) * (state.todOn && camMode === 'cockpit' && (state.todExp || 1) > 2 ? 1.23 : 1) * (1 + tunOpen() * tunK);
     if (F1.R3Tyre && F1.R3Tyre.setIris) F1.R3Tyre.setIris(1 / (1 + tunOpen() * tunK));
     F1.R3Shadow.U.r3SunA.value = F1.R3Post.Q.on ? 1 : 0;
@@ -5656,7 +5662,7 @@ void main() {
         // as a toy town)
         // (saturation per circuit, from measured frames: most sit at a mean of 0.11 to 0.16; Hakone 0.26,
         // Sierra 0.23 and Mont-Aurele 0.22 read as a postcard, so they come down to about 0.175)
-        grade: [0.24, (SAT_TRIM[state.tr && state.tr.id] || (state.tr && state.tr.gen2 && state.tr.gen2.city ? 0.9 : 1)) * (state.todSat || 1), 0.012],
+        grade: [0.24, satOf(state.tr), 0.012],
         wheels: GFX.wheelBlur === false ? null : wheelsOf(o.cars || [], !(o.dt > 0)),
         lensRain: ['chase', 'tcam', 'nose', 'side', 'cockpit', 'helmet', 'far'].includes(mode) ? (state.rainS || 0) : 0,
         speed: o.focus ? o.focus.speed || 0 : (o.cars && o.cars[0] ? o.cars[0].speed || 0 : 0),

@@ -68,13 +68,30 @@
     { group: 'Grass from afar', key: 'gSheen', label: 'Low-sun sheen', type: 'f', min: 0, max: 5, step: 0.01, def: 1, u: 'uGFar', c: 2 },
     { group: 'Grass from afar', key: 'gMoist', label: 'Wet and dry ground swing', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGFar', c: 3 },
   ];
+  // The track's own saturation: a fixed factor per circuit (set from measured frames, nothing is measured
+  // while driving), on the whole picture and on the grass, times the boost a low sun brings. The strengths
+  // say how much of that applies (0: every circuit as 1). Read each frame by js/render3d.js satOf, grassSatOf.
+  {
+    const G1 = 'Track saturation (picture)', G2 = 'Track saturation (grass)', row = (group, key, label, def, max) => SC_SCHEMA.push({ group, key, label, type: 'f', min: 0, max: max || 2, step: 0.01, def });
+    const PIC = { hakone: 0.67, sierra: 0.77, montaurele: 0.65, varenna: 0.85 }, GR = { hakone: 0.85, varenna: 0.85, sierra: 0.9 }, defs = (F1.Tracks && F1.Tracks.DEFS) || [];
+    row(G1, 'satAll', 'Every track (x)', 1);
+    row(G1, 'satAuto', 'Per-track strength (0 off)', 1);
+    row(G1, 'satTod', 'Low sun boost (0 off)', 1, 5);
+    for (const d of defs) row(G1, 'satP_' + d.id, d.name, PIC[d.id] || 1);
+    row(G1, 'satP_city', 'Generated city circuits', 0.9);
+    row(G1, 'satP_gen', 'Other generated circuits', 1);
+    row(G2, 'satGAll', 'Every track (x)', 1);
+    row(G2, 'satGAuto', 'Per-track strength (0 off)', 1);
+    for (const d of defs) row(G2, 'satG_' + d.id, d.name, GR[d.id] || 1);
+    row(G2, 'satG_gen', 'Generated circuits', 1);
+  }
   const SC = { SCHEMA: SC_SCHEMA, DEFAULTS: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])), values: Object.fromEntries(SC_SCHEMA.map(d => [d.key, d.def])),
     set(o) { const U = F1.R3S && F1.R3S.U; for (const d of SC_SCHEMA) { if (!o || o[d.key] == null) continue; this.values[d.key] = d.type === 'c' ? String(o[d.key]) : +o[d.key];
         const uu = U && d.u && U[d.u]; if (!uu) continue;
         if (d.type === 'c') uu.value.set(this.values[d.key]); else if (d.c != null) uu.value.setComponent(d.c, this.values[d.key]); else uu.value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
       if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.setLumSat) P.setLumSat(this.values.lsDark, this.values.lsKnee, this.values.lsHigh, this.values.lsHiStart); if (P.Q) P.Q.aoK = this.values.ssao; } } };
-  const baseOf = () => JSON.stringify([T().DEFAULTS, Object.fromEntries(Object.entries(SC.DEFAULTS).filter(([k]) => !/^tun(Car|Wheel)/.test(k)))]);
+  const baseOf = () => JSON.stringify([T().DEFAULTS, Object.fromEntries(Object.entries(SC.DEFAULTS).filter(([k]) => !/^(tun(Car|Wheel)|sat)/.test(k)))]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
   function restore() {
