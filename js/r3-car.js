@@ -2203,7 +2203,9 @@
   // The driver's head, as a real driver's moves: it turns into the corner ahead of the car's
   // own turn, tips with lateral g (the neck fights it, so it lags), drops under braking, and
   // buzzes a little with speed. A damped spring per axis gives the lag and the settle.
-  const SHAKE = 1.8; // how far the helmet shakes (its size only: the road and the springs set how fast)
+  // how far the helmet shakes (its size only: the road and the springs set how fast); the player's
+  // setting scales it
+  const HELMET_SHAKE = 1.8;
   function updateHead(root, c, dt) {
     const ck = root.userData.cockpit;
     if (!ck || !ck.head || !ck.group.visible) return;
@@ -2236,6 +2238,7 @@
       }
     }
     // the neck's response to the car: tips out with lateral g, drops under braking, buzzes
+    const st = F1.Game && F1.Game.settings, SHAKE = HELMET_SHAKE * (st && st.helmetShake != null ? st.helmetShake : 1);
     const buzz = Math.min(1, sp / 80) * 0.004 * SHAKE;
     const rT = -Math.max(-0.03, Math.min(0.03, ay * 0.0007)) + Math.sin(h.t * 5.1 + 1) * buzz,
       pT = Math.max(-0.1, Math.min(0.05, ax * 0.0022)) + Math.sin(h.t * 9.1 + 2) * buzz * 0.7,

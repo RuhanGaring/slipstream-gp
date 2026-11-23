@@ -1259,6 +1259,7 @@
     add(optRow('Tilt sensitivity', 'Full lock at 35 degrees of tilt at 100%', fineRange(0.25, 2.5, 0.05), () => st.tiltSens || 1, v => { st.tiltSens = v; touched(); }, v => Math.round(v * 100) + '%'));
     here = 'display';
     add(optRow('Road feel', 'The car shakes and nods over the road surface', [0, 0.6, 1, 1.5], () => (st.roadFeel == null ? 1 : st.roadFeel), v => { st.roadFeel = v; touched(); }, v => ({ 0: 'OFF', 0.6: 'LOW', 1: 'NORMAL', 1.5: 'STRONG' })[v]));
+    add(optRow('Helmet vibration', 'How far the driver’s helmet shakes. With Road feel off, only a little remains', fineRange(0, 2.5, 0.1), () => (st.helmetShake == null ? 1 : st.helmetShake), v => { st.helmetShake = v; touched(); }, v => (v ? Math.round(v * 100) + '%' : 'OFF')));
     add(optRow('Cockpit head motion', 'The view reacts to braking, cornering and kerbs', [true, false], () => st.headMotion !== false, v => { st.headMotion = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     add(optRow('Speed units', '', ['kmh', 'mph'], () => st.units, v => { st.units = v; touched(); }, v => (v === 'kmh' ? 'KM/H' : 'MPH')));
     add(optRow('Timing tower gaps', '', ['interval', 'leader'], () => st.gapMode, v => { st.gapMode = v; touched(); }, v => (v === 'interval' ? 'TO CAR AHEAD' : 'TO LEADER')));
