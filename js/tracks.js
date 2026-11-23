@@ -584,6 +584,38 @@
     const a = tr.z[i] + crossZ(tr, i, d), b = tr.z[j] + crossZ(tr, j, d);
     return a + (b - a) * t + kerbZ(tr, t < 0.5 ? i : j, d);
   }
+  // The road under a point, for drawing what stands on it: height, grade and banking, all continuous as the point
+  // moves. The lap's samples stand 2 m apart; taking the nearest one's values, or the distance along its
+  // tangent (which runs long or short off the centre of a bend), made a drawn car step up and down as
+  // it passed from one to the next, by centimetres on a steep hairpin. Here the point is placed on the very
+  // patch of road it is over: between which two samples' cross lines, and how far across from one to the other.
+  // out: { z, dz, bank, tx, ty, d, i, t }; null where the point is off the lap's reach (the caller falls back).
+  function roadUnder(tr, px, py, hint, out) {
+    const N = tr.N, X = tr.x, Y = tr.y, TX = tr.tx, TY = tr.ty;
+    // how far ahead of sample j's cross line the point is
+    const g = j => (px - X[j]) * TX[j] + (py - Y[j]) * TY[j];
+    let i = ((hint % N) + N) % N, j = (i + 1) % N, a = g(i), b = g(j), n = 0;
+    for (; n < 12 && !(a >= 0 && b < 0); n++) {
+      if (a < 0) { j = i; b = a; i = (i - 1 + N) % N; a = g(i); } else { i = j; a = b; j = (j + 1) % N; b = g(j); }
+    }
+    if (n === 12) return null;
+    // where between the two the cross line through the point lies (the tangent turns on the way)
+    const f = t => (px - X[i] - (X[j] - X[i]) * t) * (TX[i] + (TX[j] - TX[i]) * t) + (py - Y[i] - (Y[j] - Y[i]) * t) * (TY[i] + (TY[j] - TY[i]) * t);
+    let lo = 0, hi = 1, t = a / (a - b);
+    for (let k = 0; k < 6; k++) {
+      const v = f(t);
+      if (Math.abs(v) < 1e-5) break;
+      if (v > 0) { lo = t; a = v; } else { hi = t; b = v; }
+      t = lo + (hi - lo) * a / (a - b);
+    }
+    const L = (A) => A[i] + (A[j] - A[i]) * t, tx = L(TX), ty = L(TY), l = Math.hypot(tx, ty) || 1;
+    // (the normals are the tangents turned, so the same blend serves)
+    const d = ((px - L(X)) * L(tr.nx) + (py - L(Y)) * L(tr.ny)) / l;
+    const za = tr.z[i] + crossZ(tr, i, d) + kerbZ(tr, i, d), zb = tr.z[j] + crossZ(tr, j, d) + kerbZ(tr, j, d);
+    out = out || {};
+    out.z = za + (zb - za) * t; out.dz = L(tr.dz); out.bank = L(tr.bank); out.tx = tx / l; out.ty = ty / l; out.d = d; out.i = i; out.t = t;
+    return out;
+  }
   // what a tyre feels: surface height plus fine roughness by surface type (physics only)
   function roadZ(tr, i, along, d, surf, s) {
     const j = (i + 1) % tr.N, f = U.clamp(along / tr.ds, -1, 1);
@@ -695,5 +727,5 @@
   // which trees line the circuit: firs, quiver trees or broadleaf
   const treesOf = tr => (tr.def && tr.def.trees) || ({ hakone: 'fir', rimal: 'quiver' })[lookOf(tr)] || 'broad';
 
-  F1.Tracks = { DEFS, byId, lookOf, treesOf, build, locate, surfaceAt, pointAt, fwd, inRange, DS, surfZ, surfS, roadZ, groundAt, crossZ };
+  F1.Tracks = { DEFS, byId, lookOf, treesOf, build, locate, surfaceAt, pointAt, fwd, inRange, DS, surfZ, surfS, roadUnder, roadZ, groundAt, crossZ };
 })(typeof window !== 'undefined' ? window : globalThis);

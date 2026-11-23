@@ -4603,6 +4603,7 @@ void main() {
   }
 
   let frameNo = 0;
+  const ROAD_U = {};
   const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
   let focusCar = null, camMode = '';
   function updateCars(cars, dt, hideHelmet, buzzCar) {
@@ -4615,12 +4616,15 @@ void main() {
       // pitches and rolls on its suspension exactly as the physics has it
       const tr = state.tr;
       const has = tr && c.loc && c.loc.i >= 0;
-      const gy = has ? Tracks.surfS(tr, c.loc.s, c.loc.d) : tr ? Tracks.groundAt(tr, c.x, c.y) : 0;
+      // (at the drawn position, which lies between two of the sim's steps, and smoothly between the lap's
+      // samples: at the last step's own place on the lap, the nearest sample's, the car shook up and down)
+      const ru = has ? Tracks.roadUnder(tr, c.x, c.y, c.loc.i, ROAD_U) : null;
+      const gy = ru ? ru.z : has ? Tracks.surfS(tr, c.loc.s, c.loc.d) : tr ? Tracks.groundAt(tr, c.x, c.y) : 0;
       let pr = 0, rr = 0;
       if (has) {
-        const i = c.loc.i, psi = c.h - Math.atan2(tr.ty[i], tr.tx[i]);
-        pr = Math.atan(tr.dz[i] * Math.cos(psi) + tr.bank[i] * Math.sin(psi));
-        rr = -Math.atan(-tr.dz[i] * Math.sin(psi) + tr.bank[i] * Math.cos(psi));
+        const i = c.loc.i, psi = c.h - (ru ? Math.atan2(ru.ty, ru.tx) : Math.atan2(tr.ty[i], tr.tx[i])), dz = ru ? ru.dz : tr.dz[i], bk = ru ? ru.bank : tr.bank[i];
+        pr = Math.atan(dz * Math.cos(psi) + bk * Math.sin(psi));
+        rr = -Math.atan(-dz * Math.sin(psi) + bk * Math.cos(psi));
       }
       ud.gy = gy;
       o.position.set(c.x, gy, c.y);
