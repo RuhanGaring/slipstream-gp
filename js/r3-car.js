@@ -2203,6 +2203,7 @@
   // The driver's head, as a real driver's moves: it turns into the corner ahead of the car's
   // own turn, tips with lateral g (the neck fights it, so it lags), drops under braking, and
   // buzzes a little with speed. A damped spring per axis gives the lag and the settle.
+  const SHAKE = 1.8; // how far the helmet shakes (its size only: the road and the springs set how fast)
   function updateHead(root, c, dt) {
     const ck = root.userData.cockpit;
     if (!ck || !ck.head || !ck.group.visible) return;
@@ -2235,7 +2236,7 @@
       }
     }
     // the neck's response to the car: tips out with lateral g, drops under braking, buzzes
-    const buzz = Math.min(1, sp / 80) * 0.004;
+    const buzz = Math.min(1, sp / 80) * 0.004 * SHAKE;
     const rT = -Math.max(-0.03, Math.min(0.03, ay * 0.0007)) + Math.sin(h.t * 5.1 + 1) * buzz,
       pT = Math.max(-0.1, Math.min(0.05, ax * 0.0022)) + Math.sin(h.t * 9.1 + 2) * buzz * 0.7,
       yT = Math.sin(h.t * 7.3) * buzz;
@@ -2270,7 +2271,7 @@
     const Q = P.feelQ || (P.feelQ = []);
     if (dt > 0 || !Q.length) Q.push(h.t, root.userData.feelP || 0, root.userData.feelR || 0);
     while (Q.length > 3 && Q[3] <= h.t - 0.08) Q.splice(0, 3);
-    ck.head.position.set(ck.neck.x + P.x + Q[1] * 0.75, ck.neck.y + P.y, ck.neck.z + P.z + Q[2] * 2.6);
+    ck.head.position.set(ck.neck.x + P.x + Q[1] * 0.75 * SHAKE, ck.neck.y + P.y, ck.neck.z + P.z + Q[2] * 2.6 * SHAKE);
     // (the onboard cameras stay locked to the chassis; only the visible helmet moves)
   }
 
