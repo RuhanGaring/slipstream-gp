@@ -776,6 +776,7 @@
       if (key.startsWith('wheel')) {
         const k = +key.slice(5), wheel = bu.wheels[k];
         if (!wheel) continue;
+        if (F1.R3Car.wheelParts) F1.R3Car.wheelParts(wheel);
         const side = k % 2 ? 1 : -1, kick = new THREE.Vector3(-sh * side * 6, 0, ch * side * 6);
         if (again) { if (wheel.parent) wheel.parent.remove(wheel); } else launch(scene, wheel, outer, c, kick, true);
         bu.wheels[k] = new THREE.Group(); bu.wheels[k].userData = { spin: new THREE.Group(), front: k < 2, lods: [], stripes: [] }; // a stand-in the renderer can still turn

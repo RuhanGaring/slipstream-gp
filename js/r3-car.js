@@ -969,6 +969,137 @@
     for (const m of sb.parts) m.castShadow = true;
   }
 
+  // The full-detail wheels of all four corners in one draw per material (some 14 to 20 draws a car
+  // become 3 to 6). The vertices stay in each part's own frame, as they were modelled, and every one
+  // knows which of eight frames moves it (aWb: 0 to 3 the turning wheels FL FR RL RR, 4 to 7 the
+  // brake ducts and uprights, which steer but do not turn); the car's eight matrices go up as a
+  // uniform, and the vertex shader's own matrices are replaced by theirs times the frame's. The
+  // rest of the shader (tyre wear, ground occlusion, shadows, fog) reads the same values it did on a
+  // separate mesh, so the picture is the same. The materials are this car's own copies, since the
+  // uniform is. The wheels' shadow is merged too (one position-only mesh per kind of face culling,
+  // layer SHADOW_ONLY). A damaged car, or one that has lost a wheel, goes back to its separate parts.
+  // Debug: G.__noWheelMerge.
+  const WHL_VERT = [
+    'uniform mat4 uWhl[8]; attribute float aWb;',
+    'mat4 wMM, wMV; mat3 wNM;',
+    'void wInit() { mat4 W = uWhl[int(aWb + 0.5)]; wMM = modelMatrix * W; wMV = modelViewMatrix * W; wNM = normalMatrix * mat3(W); }',
+    '#define modelMatrix wMM', '#define modelViewMatrix wMV', '#define normalMatrix wNM'].join('\n') + '\n';
+  function whlPatch(sh, hold) {
+    sh.uniforms.uWhl = hold;
+    sh.vertexShader = WHL_VERT + sh.vertexShader.replace('void main() {', 'void main() {\n  wInit();');
+  }
+  const WHL_KEYS = ['FL', 'FR', 'RL', 'RR'];
+  function whlGeo(MD) {
+    if (MD.whl) return MD.whl;
+    const by = new Map(), sh = new Map(), v = new THREE.Vector3(), TS = tyShape(MD), L = MD.lods[0], ctr = new THREE.Vector3();
+    WHL_KEYS.forEach((key, wi) => {
+      const W = L.wheels[key];
+      ctr.add(v.fromArray(W.c).multiplyScalar(0.25));
+      const add = (p, bone) => {
+        const G2 = p.G, P = G2.attributes.position, N = G2.attributes.normal, T = G2.attributes.uv;
+        const b = by.get(p.m) || { m: p.m, pos: [], nor: [], uv: [], wi: [], ts: [], wb: [], idx: [] };
+        by.set(p.m, b);
+        const base = b.wb.length;
+        for (let i = 0; i < P.count; i++) {
+          b.pos.push(P.getX(i), P.getY(i), P.getZ(i));
+          b.nor.push(N.getX(i), N.getY(i), N.getZ(i));
+          b.uv.push(T ? T.getX(i) : 0, T ? T.getY(i) : 0);
+          b.wi.push(wi); b.ts.push(TS[key][0], TS[key][1]); b.wb.push(bone);
+        }
+        for (let i = 0; i < G2.index.count; i++) b.idx.push(base + G2.index.getX(i));
+        const mat = MD.mats[p.m];
+        if (!castsShadow(G2, mat)) return;
+        const sk = mat.side + '|' + mat.shadowSide, c = sh.get(sk) || { side: mat.side, shadowSide: mat.shadowSide, pos: [], wb: [], idx: [] };
+        sh.set(sk, c);
+        const b2 = c.wb.length;
+        for (let i = 0; i < P.count; i++) { c.pos.push(P.getX(i), P.getY(i), P.getZ(i)); c.wb.push(bone); }
+        for (let i = 0; i < G2.index.count; i++) c.idx.push(b2 + G2.index.getX(i));
+      };
+      for (const p of W.parts) if (p.G.index.count >= 150) add(p, wi);
+      for (const p of W.hub) add(p, 4 + wi);
+    });
+    let r = 0;
+    for (const key of WHL_KEYS) r = Math.max(r, v.fromArray(L.wheels[key].c).distanceTo(ctr) + 0.75); // (a wheel's own reach, its steer and its travel)
+    const geo = (b, full) => {
+      const g = new THREE.BufferGeometry(), n = b.wb.length;
+      g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+      if (full) {
+        // (normals as the parts have them: normalised bytes, or floats where the tyre has its own)
+        g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+        g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+        g.setAttribute('aWi', new THREE.BufferAttribute(new Uint8Array(b.wi), 1));
+        g.setAttribute('aTyS', new THREE.Float32BufferAttribute(b.ts, 2));
+      }
+      g.setAttribute('aWb', new THREE.BufferAttribute(new Uint8Array(b.wb), 1));
+      g.setIndex(n > 65535 ? new THREE.Uint32BufferAttribute(b.idx, 1) : new THREE.Uint16BufferAttribute(b.idx, 1));
+      g.boundingSphere = new THREE.Sphere(ctr.clone(), r);
+      return g;
+    };
+    MD.whl = { parts: [...by.values()].map(b => ({ m: b.m, G: geo(b, true) })), shadow: [...sh.values()].map(c => ({ side: c.side, shadowSide: c.shadowSide, G: geo(c, false) })) };
+    return MD.whl;
+  }
+  // (called once the car's materials are settled, js/render3d.js modelFor: the copies take after them)
+  function mergeWheels(root) {
+    const u = root.userData, MD = u.md;
+    if (!MD || u.whl || G.__noWheelMerge) return;
+    // each material as this car draws it
+    const mats = new Map(), L = MD.lods[0];
+    for (let k = 0; k < 4; k++) {
+      const w = u.wheels[k], W = L.wheels[WHL_KEYS[k]], ps = W.parts.filter(p => p.G.index.count >= 150);
+      w.userData.lods[0].children.forEach((q, i) => mats.set(ps[i].m, q.material));
+      w.userData.hubs[0].children.forEach((q, i) => mats.set(W.hub[i].m, q.material));
+    }
+    for (const m of mats.values()) if (m.transparent || m.alphaTest > 0) return; // (none has one today)
+    const hold = { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, grp = new THREE.Group();
+    for (const { m, G: g } of whlGeo(MD).parts) {
+      const src = mats.get(m), ud = src.userData;
+      src.userData = {};
+      const c = src.clone();
+      src.userData = ud;
+      const ex = ud.patchExtra;
+      c.userData = Object.assign({}, ud, { patchKey: (ud.patchKey || '') + '_whl', patchExtra: sh => { if (ex) ex(sh); whlPatch(sh, hold); } });
+      delete c.userData.r3s; delete c.userData.softRow;
+      c.onBeforeRender = src.onBeforeRender;
+      const q = new THREE.Mesh(g, c);
+      q.lodS = u.sL[0]; q.receiveShadow = true;
+      grp.add(q);
+    }
+    if (F1.R3Shadow) for (const s of whlGeo(MD).shadow) {
+      const q = new THREE.Mesh(s.G, new THREE.MeshBasicMaterial({ side: s.side, colorWrite: false, depthWrite: false }));
+      q.material.shadowSide = s.shadowSide != null ? s.shadowSide : null;
+      q.castShadow = true; q.receiveShadow = false; q.layers.set(F1.R3Shadow.SHADOW_ONLY);
+      q.userData.shOnly = true; q.userData.noSplit = true;
+      const d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      d.onBeforeCompile = sh => whlPatch(sh, hold);
+      d.customProgramCacheKey = () => 'whlDepth';
+      q.customDepthMaterial = d;
+      grp.add(q);
+    }
+    for (const q of grp.children) { q.matrixAutoUpdate = false; q.userData.whl = true; }
+    grp.matrixAutoUpdate = false;
+    // the eight frames, taken from the wheels as the car poses them, whenever the scene's matrices are
+    grp.updateMatrixWorld = function (force) {
+      const M = hold.value;
+      for (let k = 0; k < 4; k++) {
+        const w = u.wheels[k], sp = w.userData.spin, tilt = sp && sp.parent;
+        if (!tilt) continue;
+        w.updateMatrix(); sp.updateMatrix(); tilt.updateMatrix();
+        M[4 + k].copy(w.matrix);
+        M[k].multiplyMatrices(w.matrix, tilt.matrix).multiply(sp.matrix);
+      }
+      THREE.Group.prototype.updateMatrixWorld.call(this, force);
+    };
+    grp.visible = false; root.add(grp); // (in the tree while its materials are patched; levels() takes it from there)
+    u.whl = grp; u.useWhl = false;
+  }
+  // a wheel about to be thrown off takes its own parts with it, whichever way it was being drawn
+  function wheelParts(w) {
+    const d = w.userData;
+    if (!d || !d.lods || !d.lods.length || d.lods.some(g => g.parent)) return;
+    d.lods[0].visible = true; d.spin.add(d.lods[0]);
+    if (d.hubs && d.hubs[0]) { d.hubs[0].visible = true; w.add(d.hubs[0]); }
+  }
+
   function makeModelCar(team, num, comp) {
     const MD = modelFor(team);
     const root = new THREE.Group();
@@ -1196,11 +1327,12 @@
     // the four wheels are the merged pair of meshes (unless one has come off in a crash)
     const merged = !!u.wheelsLow && u.wheels.every(w => w.userData.lods.length);
     for (const w of u.wheels) {
-      const on = k => !!(mask & (1 << k)) && !(k === 1 && (merged || mid));
+      const on = k => !!(mask & (1 << k)) && !(k === 1 && (merged || mid)) && !(k === 0 && u.useWhl);
       w.userData.lods.forEach((g, k) => put(g, on(k), w.userData.spin));
       if (w.userData.hubs) w.userData.hubs.forEach((g, k) => put(g, on(k), w));
       w.userData.stripes.forEach(m => { m.visible = !!(mask & 1); });
     }
+    if (u.whl) put(u.whl, !!(mask & 1) && !!u.useWhl, root); // (the full-detail wheels, merged)
     if (u.wheelsLow) put(u.wheelsLow, !!(mask & 2) && merged && !mid, root);
     if (u.midG) put(u.midG, !!(mask & 2) && mid, root);
     if (u.farG) put(u.farG, !!(mask & 4), root);
@@ -1228,6 +1360,9 @@
     // or the atlas cannot be made; then the low-detail model as it is. Debug: G.__noMid
     const wantMid = !!u.midG && !G.__noMid && !u.hurt && u.wheels.every(w => w.userData.lods.length) && bakeFar(u.md);
     if (wantMid !== !!u.useMid) { u.useMid = wantMid; if (u.lod != null && u.lod >= 0) levels(u, root, (u.lodFrom >= 0 ? 1 << u.lodFrom : 0) | (1 << u.lod), u.inner || u.innerT >= 0); }
+    // the merged full-detail wheels, unless the car is damaged (each wheel may hang or come off alone)
+    const wantWhl = !!u.whl && !G.__noWheelMerge && !u.hurt && u.wheels.every(w => w.userData.lods.length);
+    if (wantWhl !== !!u.useWhl) { u.useWhl = wantWhl; if (u.lod != null && u.lod >= 0) levels(u, root, (u.lodFrom >= 0 ? 1 << u.lodFrom : 0) | (1 << u.lod), u.inner || u.innerT >= 0); }
     if (u.lod === lod && u.inner === inner && u.lodFrom < 0 && u.innerT < 0 && !(lod === 2 && u.hurt)) return; // settled, as nearly every car is on nearly every frame
     // the far mesh cannot show a dent or a missing wheel, and it needs its atlas
     if (lod === 2 && (u.hurt || !u.wheels.every(w => w.userData.lods.length) || !bakeFar(u.md))) lod = 1;
@@ -1947,6 +2082,9 @@
     if (!armData()) return null;
     const bones = [0, 1, 2, 3, 4].map(() => { const b = new THREE.Bone(); b.matrixAutoUpdate = false; b.matrixWorldAutoUpdate = false; return b; });
     const skel = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
+    // (three uploads a skeleton's bone texture every frame it is drawn: here only when poseArm has moved it)
+    skel.moved = true;
+    skel.update = function () { if (!this.moved && this.boneTexture) return; this.moved = false; THREE.Skeleton.prototype.update.call(this); };
     const mesh = new THREE.SkinnedMesh(armGeo(sd, T, poseId), armMaterial(team, sd));
     mesh.bindMode = THREE.DetachedBindMode;
     mesh.bind(skel, new THREE.Matrix4());
@@ -2061,6 +2199,7 @@
     if (ck.settle) H.multiply(ck.settle);
     _Hc.multiplyMatrices(ck.pivot.matrix, _spinR).multiply(H);
     solveArm(_Hc, arm.shoulder, _sol);
+    arm.mesh.skeleton.moved = true;
     arm.bones.forEach((b, k) => {
       if (arm.sd > 0) b.matrixWorld.copy(_sol[k]);
       else b.matrixWorld.multiplyMatrices(_mirZ, _sol[k]).multiply(_mirZ);
@@ -2314,5 +2453,5 @@
     scene.traverse(o => { const ck = o.userData && o.userData.cockpit; if (ck && ck.arms) { ck.steer = null; updateCockpit(o, 0); } });
   }
 
-  F1.R3Car = { model: team => modelFor(team), thumbFor: MD => thumbFor(MD), armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, setCompound, setLod, updateCockpit, velHull, hasModel: team => !!modelFor(team), loft, box, beam, merge };
+  F1.R3Car = { model: team => modelFor(team), thumbFor: MD => thumbFor(MD), armData: () => armData(), rebuildArms, updateHead, debugHands, makeCar: makeAnyCar, mergeWheels, wheelParts, setCompound, setLod, updateCockpit, velHull, hasModel: team => !!modelFor(team), loft, box, beam, merge };
 })(typeof window !== 'undefined' ? window : globalThis);

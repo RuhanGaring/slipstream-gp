@@ -4499,6 +4499,7 @@ void main() {
         m.material.userData.carAO = under(m, wheels) ? { lift: 0.36, k: 0.62 } : { lift: 0, k: 0.55 };
       });
     }
+    if (RC.mergeWheels) RC.mergeWheels(body);
     const outer = new THREE.Group();
     outer.add(body);
     // the road frame under the car (follows the road, not the sprung body); the car's shadows
@@ -4554,6 +4555,7 @@ void main() {
   function freeCar(o) {
     // a skinned part's bone matrices live in a small float texture of its own
     o.traverse(m => { if (m.isSkinnedMesh && m.skeleton && m.skeleton.boneTexture) { m.skeleton.boneTexture.dispose(); m.skeleton.boneTexture = null; } });
+    { const w = o.userData.body && o.userData.body.userData.whl; if (w) { for (const q of w.children) { if (q.customDepthMaterial) q.customDepthMaterial.dispose(); q.material.dispose(); } } } // (the merged wheels' own copies)
     eachRes(o, r => {
       // (a car-model texture is decoded once and its pixels then dropped: it could never be re-uploaded)
       if (r.isTexture && r.image && typeof r.image.close === 'function') return;
