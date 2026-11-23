@@ -15,8 +15,8 @@
   const SC_SCHEMA = [
     // the tunnel's reflections, as multipliers of the level they stand at now (1 = as it is): the car's paint and the tyres, by day
     // and by night (the two blend with the time of day). The tyres' value is their own brightness, whatever the car's is.
-    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.4 },
-    { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 2.4 },
+    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.73 },
+    { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 1.93 },
     { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 0.67 },
     { group: 'Tunnel reflections (x current)', key: 'tunWheelNight', label: 'Wheels, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
     { group: 'Scene lighting', key: 'ambK', label: 'Ambient (shade) light', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53, u: 'uAmbK' },
@@ -27,18 +27,18 @@
     { group: 'Shade and darks', key: 'carSelf', label: 'Car self-shade (its own sky cover)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.7, u: 'uCarSelfK' },
     { group: 'Shade and darks', key: 'carAO', label: 'Car ground occlusion (darkening low on the car)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.7, u: 'uCarAOK' },
     // auto exposure: the picture's brightness measured and eased toward a target, no part left too dark or bright
-    { group: 'Auto exposure', key: 'autoExp', label: 'Strength (0 off)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.1, q: 'autoExp' },
+    { group: 'Auto exposure', key: 'autoExp', label: 'Strength (0 off)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.43, q: 'autoExp' },
     { group: 'Auto exposure', key: 'aeKey', label: 'Target brightness', type: 'f', min: 0.05, max: 0.6, step: 0.005, def: 0.2, q: 'aeKey' },
     { group: 'Auto exposure', key: 'aeMin', label: 'Darkest it may go (x)', type: 'f', min: 0.2, max: 1, step: 0.01, def: 0.6, q: 'aeMin' },
     { group: 'Auto exposure', key: 'aeMax', label: 'Brightest it may go (x)', type: 'f', min: 1, max: 4, step: 0.01, def: 2.2, q: 'aeMax' },
     { group: 'Auto exposure', key: 'aeSpeed', label: 'Adapt speed', type: 'f', min: 0.1, max: 6, step: 0.05, def: 1.2, q: 'aeSpeed' },
     { group: 'Auto exposure', key: 'aeCenter', label: 'Weight to the middle of the picture', type: 'f', min: 0, max: 1, step: 0.01, def: 0.6, q: 'aeCenter' },
     { group: 'Shade and darks', key: 'blackLift', label: 'Shadow lift (the darkest values come up)', type: 'f', min: 0, max: 0.12, step: 0.001, def: 0.04, post: 'bl' },
-    { group: 'Picture', key: 'contrast', label: 'Contrast', type: 'f', min: 0.7, max: 1.6, step: 0.01, def: 1.12, post: 'ct' },
-    { group: 'Picture', key: 'pivot', label: 'Contrast pivot (what stays put)', type: 'f', min: 0.05, max: 0.8, step: 0.01, def: 0.43, post: 'pv' },
+    { group: 'Picture', key: 'contrast', label: 'Contrast', type: 'f', min: 0.7, max: 1.6, step: 0.01, def: 1.18, post: 'ct' },
+    { group: 'Picture', key: 'pivot', label: 'Contrast pivot (what stays put)', type: 'f', min: 0.05, max: 0.8, step: 0.01, def: 0.31, post: 'pv' },
     // luminance-saturation curve: colour fades as brightness falls (and a little at the very top)
-    { group: 'Lum-sat curve', key: 'lsDark', label: 'Saturation lost at black', type: 'f', min: 0, max: 1, step: 0.01, def: 0.45, post: 'ls' },
-    { group: 'Lum-sat curve', key: 'lsKnee', label: 'Full colour from (brightness)', type: 'f', min: 0.05, max: 0.9, step: 0.01, def: 0.42, post: 'ls' },
+    { group: 'Lum-sat curve', key: 'lsDark', label: 'Saturation lost at black', type: 'f', min: 0, max: 1, step: 0.01, def: 0.42, post: 'ls' },
+    { group: 'Lum-sat curve', key: 'lsKnee', label: 'Full colour from (brightness)', type: 'f', min: 0.05, max: 0.9, step: 0.01, def: 0.43, post: 'ls' },
     { group: 'Lum-sat curve', key: 'lsHigh', label: 'Saturation lost at white', type: 'f', min: 0, max: 1, step: 0.01, def: 0.15, post: 'ls' },
     { group: 'Lum-sat curve', key: 'lsHiStart', label: 'Highlight roll-off starts at', type: 'f', min: 0.4, max: 0.99, step: 0.01, def: 0.8, post: 'ls' },
     { group: 'Shade and darks', key: 'ckAlb', label: 'Cockpit interior brightness', type: 'f', min: 0.005, max: 0.2, step: 0.001, def: 0.014, u: 'uCkAlb' },
@@ -46,9 +46,9 @@
     { group: 'Shade and darks', key: 'ssao', label: 'Screen-space occlusion (corners, crevices)', type: 'f', min: 0, max: 1.5, step: 0.01, def: 0.6, post: 'ao' },
     // the grass (ground and blades alike, js/r3-shaders.js LAWN): its colour, then the patterns that vary it.
     // (defaults: a less saturated, slightly warm green; the old one read as a painted lawn)
-    { group: 'Grass colour', key: 'gHue', label: 'Hue turn (- yellower, + bluer)', type: 'f', min: -40, max: 40, step: 0.5, def: -26.5, u: 'uGHue', c: 0 },
+    { group: 'Grass colour', key: 'gHue', label: 'Hue turn (- yellower, + bluer)', type: 'f', min: -40, max: 40, step: 0.5, def: -25.5, u: 'uGHue', c: 0 },
     { group: 'Grass colour', key: 'gSat', label: 'Saturation', type: 'f', min: 0, max: 2, step: 0.01, def: 0.77, u: 'uGHue', c: 1 },
-    { group: 'Grass colour', key: 'gBright', label: 'Brightness', type: 'f', min: 0.3, max: 2, step: 0.01, def: 0.95, u: 'uGHue', c: 2 },
+    { group: 'Grass colour', key: 'gBright', label: 'Brightness', type: 'f', min: 0.3, max: 2, step: 0.01, def: 0.78, u: 'uGHue', c: 2 },
     { group: 'Grass colour', key: 'gWarm', label: 'Warmth (dry, sun-bleached)', type: 'f', min: -1, max: 1.5, step: 0.01, def: 0.67, u: 'uGHue', c: 3 },
     { group: 'Grass colour', key: 'gTint', label: 'Tint (multiplies)', type: 'c', def: '#ffffff', u: 'uGTint' },
     { group: 'Grass patterns', key: 'gPoa', label: 'Meadow grass clumps (paler, yellower)', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgA', c: 0 },
@@ -58,7 +58,7 @@
     { group: 'Grass patterns', key: 'gDrought', label: 'Drought stress (crests, slopes go straw)', type: 'f', min: 0, max: 3, step: 0.01, def: 1, u: 'uGAlgB', c: 0 },
     { group: 'Grass patterns', key: 'gWear', label: 'Wear beside the track (toward soil)', type: 'f', min: 0, max: 2.2, step: 0.01, def: 1, u: 'uGAlgB', c: 1 },
     { group: 'Grass patterns', key: 'gEdge', label: 'Worn strip at the tarmac edge', type: 'f', min: 0, max: 1.33, step: 0.01, def: 1, u: 'uGAlgB', c: 2 },
-    { group: 'Grass patterns', key: 'gField', label: 'Field patchwork (big uneven patches)', type: 'f', min: 0, max: 2, step: 0.01, def: 1, u: 'uGAlgB', c: 3 },
+    { group: 'Grass patterns', key: 'gField', label: 'Field patchwork (big uneven patches)', type: 'f', min: 0, max: 2, step: 0.01, def: 0.37, u: 'uGAlgB', c: 3 },
     { group: 'Grass patterns', key: 'gClump', label: 'Clump size (x)', type: 'f', min: 0.2, max: 5, step: 0.05, def: 1, u: 'uGAlgC', c: 0 },
     { group: 'Grass patterns', key: 'gYSize', label: 'Yellow patch size (x)', type: 'f', min: 0.2, max: 5, step: 0.05, def: 1, u: 'uGAlgC', c: 1 },
     { group: 'Grass patterns', key: 'gStripes', label: 'Mowing stripes', type: 'f', min: 0, max: 4, step: 0.01, def: 1, u: 'uGAlgC', c: 2 },
@@ -74,7 +74,7 @@
   {
     const G1 = 'Track saturation (picture)', G2 = 'Track saturation (grass)', row = (group, key, label, def, max) => SC_SCHEMA.push({ group, key, label, type: 'f', min: 0, max: max || 2, step: 0.01, def });
     const PIC = { hakone: 0.67, sierra: 0.77, montaurele: 0.65, varenna: 0.85 }, GR = { hakone: 0.85, varenna: 0.85, sierra: 0.9 }, defs = (F1.Tracks && F1.Tracks.DEFS) || [];
-    row(G1, 'satAll', 'Every track (x)', 1);
+    row(G1, 'satAll', 'Every track (x)', 1.6);
     row(G1, 'satAuto', 'Per-track strength (0 off)', 1);
     row(G1, 'satTod', 'Low sun boost (0 off)', 1, 5);
     for (const d of defs) row(G1, 'satP_' + d.id, d.name, PIC[d.id] || 1);
