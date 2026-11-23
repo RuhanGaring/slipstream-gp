@@ -15,10 +15,6 @@
   const SC_SCHEMA = [
     // the tunnel's reflections, as multipliers of the level they stand at now (1 = as it is): the car's paint and the tyres, by day
     // and by night (the two blend with the time of day). The tyres' value is their own brightness, whatever the car's is.
-    // distance haze on the cars (the world round them has its own fog; this lets a car far down the road fade in it too)
-    { group: 'Car distance haze', key: 'hazeK', label: 'Haze at most (0 off)', type: 'f', min: 0, max: 1, step: 0.01, def: 0.45, u: 'uCarHaze', c: 0 },
-    { group: 'Car distance haze', key: 'hazeD', label: 'Comes in over (m)', type: 'f', min: 100, max: 3000, step: 10, def: 650, u: 'uCarHaze', c: 1 },
-    { group: 'Car distance haze', key: 'hazeS', label: 'Starts at (m)', type: 'f', min: 0, max: 500, step: 5, def: 70, u: 'uCarHaze', c: 2 },
     { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.4 },
     { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 2.4 },
     { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 0.67 },
@@ -78,7 +74,7 @@
         if (d.type === 'c') uu.value.set(this.values[d.key]); else if (d.c != null) uu.value.setComponent(d.c, this.values[d.key]); else uu.value = this.values[d.key]; }
       const P = F1.R3Post; if (P && P.Q) for (const d of SC_SCHEMA) if (d.q) P.Q[d.q] = this.values[d.key];
       if (P) { P.setCarShade(this.values.carShadeAmt, this.values.carShadeFloor); if (P.setBlackLift) P.setBlackLift(this.values.blackLift); if (P.setContrast) P.setContrast(this.values.contrast, this.values.pivot); if (P.setLumSat) P.setLumSat(this.values.lsDark, this.values.lsKnee, this.values.lsHigh, this.values.lsHiStart); if (P.Q) P.Q.aoK = this.values.ssao; } } };
-  const baseOf = () => JSON.stringify([T().DEFAULTS, Object.fromEntries(Object.entries(SC.DEFAULTS).filter(([k]) => !/^(tun(Car|Wheel)|haze)/.test(k)))]);
+  const baseOf = () => JSON.stringify([T().DEFAULTS, Object.fromEntries(Object.entries(SC.DEFAULTS).filter(([k]) => !/^tun(Car|Wheel)/.test(k)))]);
   const store = () => { try { localStorage.setItem(KEY, JSON.stringify({ base: baseOf(), values: T().values, scene: SC.values })); } catch (e) {} };
   // the values kept from last time, unless the defaults have changed since
   function restore() {

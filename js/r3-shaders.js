@@ -43,9 +43,6 @@
     // how much of the sun's colour the haze scatters toward the eye when looking at the sun (a venue
     // under a low sun in thick haze sets it lower: at 0.12 the whole frame went white there)
     uFogSun: { value: 0.12 },
-    // extra haze on the cars alone, so a car far down the road fades into the air as the world round it does: how much
-    // of it at most, over what distance it comes in, and from where (js/r3-tyretune.js has the sliders)
-    uCarHaze: { value: new THREE.Vector3(0.45, 650, 70) },
     macroMap: { value: null },
     // lawn: xy the direction the mower laid the stripes, z stripe width (m), w stripe strength
     uLawn: { value: new THREE.Vector4(1, 0, 10, 0) },
@@ -258,12 +255,6 @@
     '  gl_FragColor.rgb = mix(gl_FragColor.rgb, fCol, clamp(fAmt, 0.0, 1.0));',
     '#endif'].join('\n');
 
-  // a car's own extra haze, on top of the fog every surface has: none up close, then rising with distance toward a ceiling
-  const CAR_HAZE = [
-    '#ifdef USE_FOG',
-    '  { float chz = uCarHaze.x * (1.0 - exp(-max(fDist - uCarHaze.z, 0.0) / max(uCarHaze.y, 1.0))); gl_FragColor.rgb = mix(gl_FragColor.rgb, fCol, clamp(chz, 0.0, 0.9)); }',
-    '#endif'].join('\n');
-
   // Livery painted per pixel from object-space position and normal, so stripe edges stay
   // crisp on a simplified mesh: bare-carbon lower bodywork, a spine stripe over the nose,
   // airbox and engine cover, a sweep rising along the sidepods, and an accent nose tip.
@@ -339,7 +330,7 @@
       sh.fragmentShader = LIVERY_VERT + 'uniform vec3 uLivBase; uniform vec3 uLivAccent; uniform vec3 uLivCarbon;\n' + sh.fragmentShader.replace('#include <color_fragment>', LIVERY_FRAG);
     }
     sh.vertexShader = FOG_VERT_PARS + (mac ? 'varying vec2 vMacroW;\n' : '') + sh.vertexShader.replace('#include <fog_vertex>', FOG_VERT);
-    sh.fragmentShader = FOG_FRAG_PARS + (ao ? 'uniform vec3 uCarHaze;\n' : '') + (mac ? 'uniform sampler2D macroMap; varying vec2 vMacroW;\n' : '') + (mac && mac.lawn ? LAWN + '\n' : '') + sh.fragmentShader.replace('#include <fog_fragment>', FOG_FRAG + (ao ? '\n' + CAR_HAZE + '\n' : ''));
+    sh.fragmentShader = FOG_FRAG_PARS + (mac ? 'uniform sampler2D macroMap; varying vec2 vMacroW;\n' : '') + (mac && mac.lawn ? LAWN + '\n' : '') + sh.fragmentShader.replace('#include <fog_fragment>', FOG_FRAG);
     if (wk) {
       // a wet surface: darker, and glassy where water collects in puddles (low spots are
       // noise in world space), so the sky and the lights reflect in it
