@@ -1520,12 +1520,12 @@
         // the circuit's reflection copy (js/r3-reflect.js: made once, then kept by the browser), then
         // straight on as soon as everything is loaded
         const el = document.querySelector('#scr-loading .ld-learn');
-        const shown = p => { if (!el) return; el.style.setProperty('--p', p); el.textContent = `PREPARING REFLECTIONS  ${Math.round(p * 100)}%`; el.classList.toggle('on', p < 1); };
+        const shown = p => { loadAt(0.45 + 0.35 * p); if (!el) return; el.style.setProperty('--p', p); el.textContent = `PREPARING REFLECTIONS  ${Math.round(p * 100)}%`; el.classList.toggle('on', p < 1); };
         // (and every shader this circuit and its twenty cars use, compiled here and not on the grid:
         // done on first draw, it was a second of stalls in the race's first frames)
         Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {})
           .then(() => (R3ok ? R3.precompile(race.cars, race) : null)).catch(() => {})
-          .then(() => { shown(1); setTimeout(goRace, 300); });
+          .then(() => { shown(1); loadAt(1); setTimeout(goRace, 300); });
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
       // so nobody ever races the unlearned AI
@@ -1535,6 +1535,7 @@
       if (st && st.state !== 'done') {
         const el = document.querySelector('#scr-loading .ld-learn');
         const show = s => {
+          if (s.id === def.id) loadAt(0.3 + 0.12 * (s.p || 0));
           if (!el || s.id !== def.id) return;
           el.style.setProperty('--p', s.p || 0);
           el.textContent = `AI DRIVERS LEARNING THE CIRCUIT  ${Math.round((s.p || 0) * 100)}%`;
@@ -1556,11 +1557,14 @@
       // (two frames, so the card is painted, and the fade and the card's slide-in done, then the heavy part)
       afterPaint(() => {
         startLoadScene(def.id, Game.flow.team || 0);
+        loadAt(0.3);
         if (UIm.loadingTrack) UIm.loadingTrack(Race.getTrack(def.id));
         afterBuild();
       });
     }, 380);
   }
+  // how far the loading is, for the picture behind it
+  const loadAt = p => { if (F1.MenuBg) F1.MenuBg.progress(p); };
   const afterPaint = fn => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(fn, 480)));
 
   Game.restart = () => {
@@ -1936,7 +1940,12 @@
     const race = Game.race;
     // the worker holds whenever the race does not run live: the page's copy is the race meanwhile
     if (simLink && (simLink.race !== race || Game.state !== 'race' || Game.paused)) simLink.hold();
-    if (race && (Game.state === 'race' && !Game.paused || Game.state === 'menu')) {
+    // behind the menus and the loading screen: the slats (js/menubg.js). Only team and driver select
+    // show the car itself; under the picture the race stands still and is not drawn.
+    const bgKind = Game.state === 'loading' ? 'load' : Game.state === 'menu' && !Game.show ? 'menu' : null;
+    if (F1.MenuBg) F1.MenuBg.set(bgKind);
+    const covered = bgKind === 'menu' && F1.MenuBg && F1.MenuBg.covers();
+    if (race && !covered && (Game.state === 'race' && !Game.paused || Game.state === 'menu')) {
       // (just after a flashback the race eases back up to speed)
       let flow = 1;
       if (fb.slowT > 0 && Game.state === 'race') { fb.slowT -= dt; flow = U.lerp(1, 0.3, U.clamp(fb.slowT / FB_SLOW, 0, 1)); }
@@ -2047,7 +2056,8 @@
       }
       Audio.updateRace(race, p, cam, Game.paused);
     }
-    if (race && Game.state === 'menu' && Game.show) {
+    if (covered) { /* nothing of the race shows */ }
+    else if (race && Game.state === 'menu' && Game.show) {
       // showcase: the chosen team's car (that driver's, when one is chosen)
       const team = F1.Data.TEAMS[Game.show.team];
       const mine = race.cars.filter(c => c.team && c.team.id === team.id && !c.retired);
@@ -2069,7 +2079,7 @@
       if (race.done || race.time > 240) startAttract();
     }
     if (Game.state === 'loading' && load.on) { stepLoadScene(dt); drawLoadScene(dt); }
-    else if (!race) { /* (the menu, a moment before its race is built) */ }
+    else if (!race || covered) { /* (the menu: its picture covers the race, or the race is not built yet) */ }
     else {
       // draw the cars where they are between the last two fixed physics steps, not where the
       // last step left them: the number of steps per frame varies, and so would the motion

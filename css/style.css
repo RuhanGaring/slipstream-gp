@@ -24,6 +24,8 @@ canvas#world, canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh
 canvas#gl { background: #07090c; }
 body:not(.three) canvas#gl { display: none; }
 canvas#world.blur, canvas#gl.blur { filter: blur(9px) saturate(.75) brightness(.9); transform: scale(1.03); }
+canvas#menubg { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .5s ease, visibility 0s .5s; background: #0d0f13; }
+canvas#menubg.on { opacity: 1; visibility: visible; transition: opacity .5s ease; }
 #hud.blur { opacity: 0; } /* paused: only the blurred track shows behind the menu */
 #shade { position: fixed; inset: 0; pointer-events: none; transition: opacity .6s ease; opacity: 0;
   background: linear-gradient(90deg, rgba(5,7,10,.94) 0%, rgba(5,7,10,.78) 34%, rgba(5,7,10,.25) 70%, rgba(5,7,10,.45) 100%); }

@@ -79,7 +79,10 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // ground
       const bg = ctx.createRadialGradient(W * 0.64, H * 0.52, 20, W * 0.64, H * 0.52, Math.max(W, H) * 0.75);
-      bg.addColorStop(0, '#171b25'); bg.addColorStop(1, '#07090d');
+      // (a veil over the menus' picture, when that stands behind)
+      const over = F1.MenuBg && F1.MenuBg.on;
+      if (over) ctx.clearRect(0, 0, W, H);
+      bg.addColorStop(0, over ? 'rgba(12,14,19,.46)' : '#171b25'); bg.addColorStop(1, over ? 'rgba(7,8,11,.34)' : '#07090d');
       ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
       // the map's room: the right of the screen, the title card holds the left
       const cmp = compact();
