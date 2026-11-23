@@ -1525,6 +1525,7 @@
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
       // so nobody ever races the unlearned AI
       const afterBuild = () => {
+      if (F1.LearnJob && F1.LearnJob.stopDeep) F1.LearnJob.stopDeep(); // (a deep training would take the race's threads; the best plan so far is kept)
       const st = def.gen && F1.LearnJob ? F1.LearnJob.status(def.id) : null;
       if (st && st.state !== 'done') {
         const el = document.querySelector('#scr-loading .ld-learn');

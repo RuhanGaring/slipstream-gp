@@ -119,11 +119,69 @@
     return { fail, t: lt, clean: !fail.some(x => x), rec: this.rec, walls };
   };
 
+  // ---------- 3. coaching ----------
+  // The speed plan comes from a model of the car, so it is only a guess at what the real physics
+  // will take. tools/coach.js finds out by driving; this is the same coach for the browser. One lone
+  // car drives flying laps with the plan's corners nudged (corner speed or brake point, up or
+  // down); each stretch of road, from one braking point to the next, is timed, and a nudge is kept
+  // only where the car was truly quicker there and stayed clean.
+  function install(id, line, limits) {
+    F1.Lines = F1.Lines || { stride: STRIDE_LINE };
+    F1.Limits = F1.Limits || { stride: STRIDE_GRIP };
+    F1.Lines[id] = line; F1.Limits[id] = limits;
+    F1.Race.forgetTrack(id);
+  }
+  function CoachRunner(id) {
+    const race = F1.Race.create({ track: id, mode: 'tt', laps: 4, difficulty: 4, team: 0, driver: 0, seed: 7, field: 1, assists: {} });
+    race.autoPlayer = true; race.thinkOff = true;
+    const c = race.player;
+    if (c.assist) c.assist.damage = false; // (a broken wing would slow every lap after it)
+    this.race = race; this.car = c; this.tr = race.track; this.E = F1.Raceline.lineLimits(this.tr);
+  }
+  CoachRunner.prototype.lap = function* (g, gB, segEnd, trace) {
+    const { race, car: c, tr, E } = this, N = tr.N;
+    c.brain.prof = F1.Raceline.speedProfile(tr, tr.line, c.spec, { pace: 1, grip: g, gripB: gB, brakePace: 1, brake: 1 });
+    const prof = c.brain.prof;
+    const n = segEnd.length, t = new Float64Array(n), bad = new Uint8Array(n);
+    // (every test on the same fresh tyres and the same tank, or a long session drifts away from itself)
+    for (const w of c.wheels) w.wear = 0;
+    c.fuel = 10; c.wingDmg = 0;
+    const wait0 = c.lapTimes.length; let g0 = 0;
+    while (c.lapTimes.length === wait0 && g0++ < 240 * 400) { F1.Race.step(race, DT); race.fx.length = 0; if ((g0 & 511) === 0) yield; }
+    const start = race.time; let k = 0, q = 0;
+    const ts = trace ? new Float32Array(N).fill(-1) : null, vs = trace ? new Float32Array(N) : null;
+    const wait = c.lapTimes.length; let guard = 0;
+    while (c.lapTimes.length === wait && guard++ < 240 * 400) {
+      F1.Race.step(race, DT);
+      for (const f of race.fx) if (f.type === 'wall' && f.power > 2) bad[k] = 1;
+      race.fx.length = 0;
+      const s = c.loc.s, i = c.loc.i;
+      // (all four wheels past the white line is a track-limits strike in a race: it deletes the lap and earns a warning, so it counts as trouble here)
+      if (c.loc.d < -E.L[i] - 1.1 || c.loc.d > E.R[i] + 1.1 || (Math.abs(c.r) > 1.6 && c.speed > 20 && Math.abs(c.v) > 6) || c.wheels.every(w => w.outside)) bad[k] = 1;
+      while (k < n - 1 && s >= segEnd[k] && s < segEnd[k] + 200) { t[k] = race.time - start; k++; }
+      if (ts) { ts[i] = race.time - start; vs[i] = c.speed; }
+      if ((++q & 511) === 0) yield;
+    }
+    t[n - 1] = race.time - start;
+    const tot = t[n - 1];
+    for (let j = n - 1; j > 0; j--) t[j] -= t[j - 1];
+    if (guard >= 240 * 400) bad.fill(1);
+    const out = { t: Array.from(t), bad: Array.from(bad), tot };
+    if (trace) {
+      // (samples the lap skipped take the one before them)
+      for (let i = 1; i < N; i++) if (ts[i] < 0) { ts[i] = ts[i - 1]; vs[i] = vs[i - 1]; }
+      out.ts = Array.from(ts, x => +x.toFixed(3)); out.vs = Array.from(vs, x => +x.toFixed(2)); out.plan = Array.from(prof, x => +x.toFixed(2));
+    }
+    return out;
+  };
+
   // ---------- worker side ----------
   // A worker holds one circuit and, per mode, one test car. Messages:
   //  {cmd:'opt', id, off, iters, seed, a0, a1}  -> {off, t}
   //  {cmd:'init', id, mode, off}                -> {ok} (sets the line, warms the car up)
   //  {cmd:'lap', mode, g}                       -> {fail, t, clean, rec, walls}
+  //  {cmd:'cInit', id, line, limits}            -> {ok} (the coach's car, on this line and these limits)
+  //  {cmd:'cLap', g, gB, segEnd, trace}         -> {t, bad, tot}: one flying lap timed stretch by stretch
   // ctx holds a worker's state (one per thread; a single-threaded host keeps several)
   const CTX = { runners: {}, opt: {} };
   function* handle(msg, ctx = CTX) {
@@ -140,6 +198,8 @@
       return { ok: true };
     }
     if (msg.cmd === 'lap') return yield* ctx.runners[msg.mode].lap(Float64Array.from(msg.g));
+    if (msg.cmd === 'cInit') { install(msg.id, msg.line, msg.limits); ctx.coach = new CoachRunner(msg.id); return { ok: true }; }
+    if (msg.cmd === 'cLap') return yield* ctx.coach.lap(Float64Array.from(msg.g), Float64Array.from(msg.gB), msg.segEnd, msg.trace);
     throw new Error('unknown command ' + msg.cmd);
   }
 
@@ -174,6 +234,7 @@
 
   async function learnTrack(pool, id, opts = {}) {
     const report = opts.progress || (() => {});
+    const ev = opts.on || (() => {}); // structured events for the training lab (js/trainlab.js)
     const cancelled = opts.cancelled || (() => false);
     const tr = F1.Race.getTrack(id), N = tr.N, nW = pool.size;
     const tStart = Date.now(), stats = { line: null, modes: {} };
@@ -223,8 +284,10 @@
       for (const m of moves) bump(off, lim, N, m[0], m[1], m[2]);
       if (moves.length) tBest = evalT(off);
       if ((b & 7) === 7) report(0.3 * (b + 1) / batches, 'line');
+      if ((b & 3) === 3 || b === batches - 1) ev({ type: 'line', round, rounds, b: b + 1, batches, t: tBest, t0 });
     }
       if (opts.onRound) opts.onRound(round, tBest);
+      ev({ type: 'lineRound', round: round + 1, rounds, t: tBest, t0, off: Array.from(off) });
       if (tRound - tBest < (opts.converge || 0) * tBest) break;
       tRound = tBest;
     }
@@ -233,6 +296,7 @@
       off.set(st.off); tBest = st.t;
     }
     stats.line = { from: t0, to: tBest, ms: Date.now() - tStart };
+    ev({ type: 'lineDone', from: t0, to: tBest, off: Array.from(off) });
     // learn on exactly the line the game will race on: stored every STRIDE_LINE samples
     // to the centimetre and interpolated back (the small kinks change the speed plan)
     const line = [];
@@ -281,6 +345,7 @@
           hi[i] = minFail;
           lo[i] = Math.min(ok, minFail - 0.004);
         }
+        { const any = new Array(N).fill(0); for (const b of bads) for (let i = 0; i < N; i++) if (b[i]) any[i] = 1; ev({ type: 'gen', mode, gen: gen + 1, gens: GENS, cars: P, laps, lo: Array.from(lo), hi: Array.from(hi), bad: any, fails: res.map(x => x.fail.reduce((a, v) => a + v, 0)) }); }
         if (opts.watch != null) { const i = opts.watch; console.log(mode, 'gen', gen, 'probes', probes.map(q => q[i].toFixed(3)).join(' '), 'bad', bads.map(b => b[i]).join(''), 'fails', res.map(x => x.fail.reduce((a, v) => a + v, 0)).join(','), 'lo', lo[i].toFixed(3), 'hi', hi[i].toFixed(3)); }
         // grip can only change smoothly along the lap (as in tools/learn.js)
         const ls = smooth(lo, 6);
@@ -299,6 +364,7 @@
         for (const x of res) { const b = badMask(tr, x.fail); for (let i = 0; i < N; i++) if (b[i]) hit[i] = 1; }
         let n = 0;
         for (let i = 0; i < N; i++) if (hit[i]) { g[i] = Math.max(G_MIN, g[i] - 0.025); n++; }
+        ev({ type: 'check', mode, chk: chk + 1, checks: CHECKS, backed: n, hit: Array.from(hit), g: Array.from(g), laps });
         if (opts.watch != null) console.log(mode, 'check', chk, 'g', g[opts.watch].toFixed(3), 'hit', hit[opts.watch], 'samples backed off', n);
         tick();
         if (!n && chk > 0) { while (++chk < CHECKS) tick(); break; }
@@ -319,6 +385,128 @@
     return { version: VERSION, id, N, line, limits, stats };
   }
 
+  // Coach a learned circuit: base is { line, limits } (the quick learner's result). The plan before
+  // coaching is the same as an uncoached circuit's in the game: 5 per cent off the corner limits,
+  // 15 off the braking ones. Returns the coached plan, or null where nothing beat that.
+  async function coachTrack(pool, id, base, opts = {}) {
+    const ev = opts.on || (() => {}), cancelled = opts.cancelled || (() => false);
+    const nW = pool.size, ROUNDS = opts.rounds || 14, st = STRIDE_GRIP;
+    const expand = (L, N) => { const g = new Float64Array(N); for (let i = 0; i < N; i++) { const f = i / st, k = Math.floor(f) % L.length, t = f - Math.floor(f); g[i] = L[k] + (L[(k + 1) % L.length] - L[k]) * t; } return g; };
+    const pick = a => Array.from(a).filter((_, i) => i % st === 0).map(x => +x.toFixed(4));
+    let tr = F1.Race.getTrack(id), N = tr.N;
+    const g0 = expand(base.limits.sim, N);
+    // (from a plan already coached: carry on from it, nudges again from 1)
+    // Only the corner grip is coached, and the braking grip rides with it, 0.85/0.95 of it, as the game derives it
+    // from a circuit's limits (js/race.js planOpts: corners x0.95, braking x0.85). A circuit given a braking grip of
+    // its own counts as one of the hand-made, coached ones, and the AI then stops trimming its line off the kerbs:
+    // on a generated road that made the whole field run past the white line at the fast corners.
+    const base0 = opts.from ? Float64Array.from(expand(opts.from.sim, N), x => x * 0.95) : Float64Array.from(g0, x => x * 0.95), baseB0 = Float64Array.from(base0, x => x * 0.85 / 0.95);
+    const unmargin = a => Float64Array.from(a, x => x / 0.95); // (what is stored: the game puts the 0.95 back)
+    const lim0 = { sim: base.limits.sim, arcade: base.limits.arcade };
+    install(id, base.line, lim0);
+    tr = F1.Race.getTrack(id);
+    await Promise.all(Array.from({ length: nW }, (_, w) => pool.call(w, { cmd: 'cInit', id, line: base.line, limits: lim0 })));
+    // stretches: from a little before one braking point to a little before the next
+    const prof = F1.Raceline.speedProfile(tr, tr.line, F1.Car.SPEC, { pace: 1, grip: base0, gripB: baseB0, brakePace: 1, brake: 1 });
+    const stops = [];
+    for (let i = 0, on = false, top = 0, at = 0; i < N; i++) {
+      const down = prof[(i + 1) % N] < prof[i] - 0.02;
+      if (down && !on) { on = true; top = prof[i]; at = i; }
+      if (!down && on) { on = false; if (top - prof[i] > 1.2) stops.push(at * tr.ds); }
+    }
+    const segEnd = stops.map(x => x - 45).filter(x => x > 30).filter((x, i, a) => !i || x - a[i - 1] > 50); segEnd.push(tr.L + 1);
+    const n = segEnd.length;
+    const segAt = new Int16Array(N); for (let i = 0; i < N; i++) { const s = i * tr.ds; let k = 0; while (k < n - 1 && s >= segEnd[k]) k++; segAt[i] = k; }
+    const W = Math.round(30 / tr.ds);
+    const mix = (b, kk) => {
+      const o = Float64Array.from(b);
+      for (let i = 0; i < N; i++) { let m = 0, c = 0; for (let q = -W; q <= W; q += 3) { m += Math.log(kk[segAt[(i + q + N) % N]]); c++; } o[i] = b[i] * Math.exp(m / c); }
+      return o;
+    };
+    let C = new Float64Array(n).fill(1), B = new Float64Array(n).fill(1), dC = 0.016, dB = 0.05;
+    let seq = 0;
+    const run = (cs, bs, w, trace) => pool.call(w, { cmd: 'cLap', g: Array.from(mix(base0, cs)), gB: Array.from(mix(baseB0, cs)), segEnd, trace });
+    const baseLap = () => run(C, B, 0, true);
+    let cur = await baseLap();
+    const first = cur.tot, firstBad = cur.bad.reduce((a, b) => a + b, 0);
+    let best = { tot: cur.tot, C: C.slice(), B: B.slice(), lap: cur };
+    ev({ type: 'coachBase', first, firstBad, n, segEnd, lap: cur, rounds: ROUNDS });
+    const rnd = F1.U.rng(1234 + id.length);
+    let rd = 0, stopped = false;
+    for (; rd < ROUNDS; rd++) {
+      if (cancelled()) { stopped = true; break; }
+      const arms = Array.from({ length: n }, () => [[], [], [], []]); // corner up, down, brake up, down
+      await Promise.all(Array.from({ length: nW }, async (_, w) => {
+        for (let l = 0; l < 3; l++) {
+          const cs = C.slice(), bs = B.slice(), pk = new Int8Array(n);
+          for (let s = 0; s < n; s++) { const a = Math.floor(rnd() * 2); pk[s] = a; if (a < 2) cs[s] *= a ? 1 - dC : 1 + dC; else bs[s] *= a === 3 ? 1 - dB : 1 + dB; }
+          const r = await run(cs, bs, w, false);
+          for (let s = 0; s < n; s++) arms[s][pk[s]].push({ t: r.t[s], bad: r.bad[s] || r.bad[(s + 1) % n] });
+        }
+      }));
+      let moved = 0;
+      const moves = new Int8Array(n).fill(-1);
+      for (let s = 0; s < n; s++) {
+        let bestA = -1, gain = 0.002;
+        arms[s].forEach((L, a) => {
+          if (!L.length) return;
+          const bads = L.filter(x => x.bad).length;
+          const ts = L.map(x => x.t).sort((x, y) => x - y), med = ts[ts.length >> 1], d = cur.t[s] - med;
+          if (bads === 0 && d > gain) { gain = d; bestA = a; }
+          // a stretch that is hitting something takes any nudge that stops it
+          else if (cur.bad[s] && bads * 2 < L.length && bestA < 0) bestA = a;
+        });
+        if (bestA < 0) continue;
+        moved++; moves[s] = bestA;
+        if (bestA < 2) C[s] *= bestA ? 1 - dC : 1 + dC; else B[s] *= bestA === 3 ? 1 - dB : 1 + dB;
+      }
+      cur = await baseLap();
+      const badN = cur.bad.reduce((a, b) => a + b, 0);
+      let kept = false;
+      if (cur.tot < best.tot && badN <= firstBad) { best = { tot: cur.tot, C: C.slice(), B: B.slice(), lap: cur }; kept = true; }
+      else if (cur.tot > best.tot + 0.25 || badN > firstBad) { C = best.C.slice(); B = best.B.slice(); cur = await baseLap(); }
+      if (moved < 2 || rd % 4 === 3) { dC = Math.max(0.004, dC * 0.65); dB = Math.max(0.012, dB * 0.65); }
+      ev({ type: 'coach', round: rd + 1, rounds: ROUNDS, tot: cur.tot, best: best.tot, first, moved, n, bad: badN, kept, dC, dB, C: Array.from(C), B: Array.from(B), moves: Array.from(moves), lap: best.lap, plan: kept ? { g: pick(unmargin(mix(base0, best.C))), best: best.tot } : null });
+    }
+    // the plan to be shipped, driven once more from scratch
+    const g = mix(base0, best.C), gB = mix(baseB0, best.C);
+    const ver = await pool.call(0, { cmd: 'cLap', g: Array.from(g), gB: Array.from(gB), segEnd, trace: true });
+    const verBad = ver.bad.reduce((a, b) => a + b, 0);
+    ev({ type: 'verify', tot: ver.tot, bad: verBad, first, lap: ver });
+    const gain = first - ver.tot;
+    if (!(gain > 0.02) || verBad > firstBad) return { none: true, first, best: ver.tot, bad: verBad, rounds: rd, n, stopped };
+    return { none: false, first, best: ver.tot, bad: verBad, firstBad, rounds: rd, n, stopped, g: pick(unmargin(g)), segEnd, C: Array.from(best.C), B: Array.from(best.B) };
+  }
+
+  // The full training: the learned line kept, a longer limits search, then the coach.
+  // opts: gens, checks, coachRounds, on(event), cancelled()
+  async function deepTrack(pool, id, opts = {}) {
+    const ev = opts.on || (() => {}), cancelled = opts.cancelled || (() => false);
+    const start = F1.Lines && F1.Lines[id] ? Array.from(F1.Lines[id]) : null; // (carries on from the line it has)
+    // opts.resume: a result stored earlier ({ line, limits }): only the coach runs, on from its plan
+    let quick = opts.resume ? { version: VERSION, id, N: opts.resume.N, line: opts.resume.line, limits: opts.resume.limits, stats: opts.resume.stats } : null;
+    if (!quick) {
+      ev({ type: 'phase', phase: 'line' });
+      // A line already learned is kept. A longer search for a better one was tried and rejected: its model lap
+      // was no better, but it ran the corners wider, and in races the AI then drove all four wheels past the
+      // white line (laps deleted, warnings, time penalties). Only a circuit with no line yet searches for one.
+      quick = await learnTrack(pool, id, start ? { line: start, gens: opts.gens, checks: opts.checks, on: ev, cancelled }
+        : { lineIters: opts.lineIters, gens: opts.gens, checks: opts.checks, on: ev, cancelled });
+      if (!quick || cancelled()) return null;
+      ev({ type: 'quick', res: quick });
+    }
+    ev({ type: 'phase', phase: 'coach' });
+    const from = opts.resume && opts.resume.deep && !opts.resume.deep.none ? opts.resume.limits : null;
+    const co = await coachTrack(pool, id, quick, { rounds: opts.coachRounds, from, on: ev, cancelled });
+    const prev = opts.resume && opts.resume.deep;
+    const res = { version: VERSION, id, N: quick.N, line: quick.line, limits: quick.limits, stats: quick.stats, deep: { first: prev && prev.first0 != null ? prev.first0 : co.first, first0: prev && prev.first0 != null ? prev.first0 : co.first, best: co.none && prev ? prev.best : co.best, rounds: co.rounds + (prev ? prev.rounds || 0 : 0), n: co.n, none: co.none && !(prev && !prev.none), stopped: co.stopped, at: Date.now() } };
+    if (!co.none) {
+      res.limits = { sim: co.g, arcade: quick.limits.arcade };
+      res.deep.C = co.C; res.deep.B = co.B; res.deep.segEnd = co.segEnd;
+    }
+    return res;
+  }
+
   // install a result: the circuit then uses this line and these limits everywhere
   function apply(res) {
     F1.Lines = F1.Lines || { stride: STRIDE_LINE };
@@ -336,5 +524,5 @@
     F1.Race.forgetTrack(id);
   }
 
-  F1.LearnCore = { VERSION, handle, learnTrack, apply, applyLine, Runner };
+  F1.LearnCore = { VERSION, handle, learnTrack, coachTrack, deepTrack, apply, applyLine, install, Runner, STRIDE_LINE, STRIDE_GRIP };
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : globalThis));

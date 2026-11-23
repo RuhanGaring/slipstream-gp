@@ -659,17 +659,19 @@
     const roll = h('div', 'li', `<span class="flag">NEW</span><span><div class="nm">New Circuit</div><div class="sub">RANDOM SEED</div></span><span class="sub">${compact() ? '' : 'R'}</span>`);
     const save = h('div', 'li', `<span class="flag">KEEP</span><span><div class="nm"></div><div class="sub"></div></span><span class="sub">${compact() ? '' : 'F'}</span>`);
     const race = h('div', 'li gx-go', `<span class="flag">GO</span><span><div class="nm">Race This Circuit</div><div class="sub"></div></span><span class="sub"></span>`);
-    [seedRow, roll, save, race].forEach(x => rail.appendChild(x));
+    const train = h('div', 'li', `<span class="flag">AI</span><span><div class="nm">Train AI</div><div class="sub">DEEP TRAINING LAB</div></span><span class="sub"></span>`);
+    [seedRow, roll, save, train, race].forEach(x => rail.appendChild(x));
     const recent = h('div', 'gx-recent');
     let settle = null, shown = null, job = 0, typed = 0, naming = false;
     const here = () => UI.cur && UI.cur.el === el;
     const aiStatus = () => {
       if (!shown) { aiEl.className = 'gen-ai'; aiEl.querySelector('span').textContent = ''; return; }
-      const st = F1.LearnJob.status(shown);
+      const st = F1.LearnJob.status(shown), dj = F1.LearnJob.deepOf(shown), di = F1.LearnJob.deepInfo(shown);
+      if (dj && dj.state === 'running') { aiEl.className = 'gen-ai running'; aiEl.style.setProperty('--p', dj.p || 0); aiEl.querySelector('span').textContent = `AI TRAINING DEEPLY  ${Math.round(dj.p * 100)}%`; return; }
       aiEl.className = 'gen-ai ' + st.state;
       aiEl.style.setProperty('--p', st.p || 0);
       aiEl.querySelector('span').textContent =
-        st.state === 'done' ? 'AI DRIVERS KNOW THIS CIRCUIT'
+        st.state === 'done' ? (di && !di.partial && !di.none ? 'AI FULLY TRAINED ON THIS CIRCUIT' : 'AI DRIVERS KNOW THIS CIRCUIT')
           : st.state === 'running' ? `AI LEARNING ${st.stage === 'line' ? 'THE RACING LINE' : 'THE LIMITS'}  ${Math.round(st.p * 100)}%`
             : st.state === 'failed' ? 'AI LEARNING FAILED: THEY WILL DRIVE IT CAUTIOUSLY'
               : 'AI DRIVERS WILL LEARN THIS CIRCUIT';
@@ -680,7 +682,7 @@
       const s = saved();
       save.querySelector('.nm').textContent = s ? 'Rename Circuit' : 'Save Circuit';
       save.querySelector('.sub').textContent = s ? 'IN YOUR SAVED CIRCUITS' : 'KEEP IT AND NAME IT';
-      save.classList.toggle('off', !shown); race.classList.toggle('off', !shown);
+      save.classList.toggle('off', !shown); race.classList.toggle('off', !shown); train.classList.toggle('off', !shown);
       race.querySelector('.sub').textContent = shown ? 'CHOOSE A TEAM NEXT' : 'STILL BUILDING';
     };
     const recentEls = () => {
@@ -779,11 +781,14 @@
       return false;
     };
     const raceIt = () => { if (shown) { leave(); go(F1.Game.flow.kind === 'spectate' ? 'setup' : 'team'); } };
+    const trainIt = () => { if (shown && F1.TrainLab) F1.TrainLab.open(shown, { onClose: aiStatus }); };
+    aiEl.style.cursor = 'pointer'; aiEl.title = 'Open the AI training lab'; aiEl.addEventListener('click', trainIt);
     const items = [
       ...styles.map((k, i) => ({ el: styleEls[i], activate: () => setStyle(k), left: () => setStyle(styles[(styles.indexOf(flow.genStyle) + styles.length - 1) % styles.length]), right: () => setStyle(styles[(styles.indexOf(flow.genStyle) + 1) % styles.length]) })),
       { el: seedRow, activate: () => seedIn.focus(), left: () => setSeed(flow.genSeed - 1), right: () => setSeed(flow.genSeed + 1) },
       { el: roll, activate: () => setSeed(F1.TrackGen.randomSeed()) },
       { el: save, activate: rename },
+      { el: train, activate: trainIt },
       { el: race, activate: raceIt },
     ];
     return { el, items, onKey, focus: items.length - 1, primary: { label: 'RACE', fn: raceIt }, back: () => { leave(); go('track'); } };
@@ -798,7 +803,7 @@
     wrap.appendChild(genHead('saved'));
     const maps = genMaps();
     const grid = h('div', 'gx-grid');
-    const act = h('div', 'gx-act', `<button class="m-btn gx-rn">Rename</button><button class="m-btn gx-del">Delete</button>`);
+    const act = h('div', 'gx-act', `<button class="m-btn gx-tr">Train AI</button><button class="m-btn gx-rn">Rename</button><button class="m-btn gx-del">Delete</button>`);
     const items = [];
     let naming = false;
     const cur = () => maps[UI.focus];
@@ -814,9 +819,10 @@
       genRename(nm, m.name, name => { naming = false; genSetName(m.id, name); m.name = name; nm.textContent = name; });
     };
     const del = () => { const m = cur(); if (m) { genDelete(m.id); go('genSaved'); } };
+    const trainIt = () => { const m = cur(); if (m && !naming && F1.TrainLab) { if (m.id.startsWith('gen2-')) cityIds.set(m.style + m.seed, m.id); flow.genStyle = m.style; flow.genSeed = m.seed; F1.LearnJob.restore(m.id); F1.TrainLab.open(m.id, { onClose: () => go('genSaved') }); } };
     maps.forEach(m => {
       const best = F1.Game.bestLap(m.id, flow.mode);
-      const e = h('div', 'gx-card', `<canvas></canvas><b></b><small>${GEN_STYLES[m.style] || ''}  /  SEED ${m.seed}</small><small>${m.km.toFixed(2)} KM  /  ${m.corners} CORNERS  /  ${best ? U.fmtTime(best) : 'NOT RACED'}</small>`);
+      const e = h('div', 'gx-card', `<canvas></canvas><b></b><small>${GEN_STYLES[m.style] || ''}  /  SEED ${m.seed}</small><small>${m.km.toFixed(2)} KM  /  ${m.corners} CORNERS  /  ${best ? U.fmtTime(best) : 'NOT RACED'}</small><small class="gx-ai">${(() => { F1.LearnJob.restore(m.id); const di = F1.LearnJob.deepInfo(m.id); return di && !di.partial && !di.none ? 'AI: FULLY TRAINED' : di ? 'AI: PART TRAINED' : F1.LearnJob.status(m.id).state === 'done' ? 'AI: QUICK LEARNED' : 'AI: NOT TRAINED'; })()}</small>`);
       e.querySelector('b').textContent = m.name;
       grid.appendChild(e);
       items.push({ el: e, activate: () => { if (!naming) open(m); } });
@@ -826,6 +832,7 @@
     if (maps.length) {
       const d = act.querySelector('.gx-del');
       act.querySelector('.gx-rn').addEventListener('click', rename);
+      act.querySelector('.gx-tr').addEventListener('click', trainIt);
       d.addEventListener('click', () => sure(del)(d));
       wrap.appendChild(act);
     } else {
@@ -835,11 +842,12 @@
       items.push({ el: b, activate: () => go('gen') });
     }
     el.appendChild(wrap);
-    el.appendChild(foot(maps.length ? [['&#8592;&#8594;', 'Select'], ['ENTER', 'Race'], ['N', 'Rename'], ['X', 'Delete'], ['TAB', 'Create'], ['ESC', 'Back']] : [['ENTER', 'Open'], ['TAB', 'Create'], ['ESC', 'Back']]));
+    el.appendChild(foot(maps.length ? [['&#8592;&#8594;', 'Select'], ['ENTER', 'Race'], ['T', 'Train AI'], ['N', 'Rename'], ['X', 'Delete'], ['TAB', 'Create'], ['ESC', 'Back']] : [['ENTER', 'Open'], ['TAB', 'Create'], ['ESC', 'Back']]));
     const onKey = code => {
       if (naming) return true;
       if (code === 'Tab') { go('gen'); return true; }
       if (code === 'KeyN' && maps.length) { rename(); return true; }
+      if (code === 'KeyT' && maps.length) { trainIt(); return true; }
       if (code === 'KeyX' && maps.length) { sure(del)(act.querySelector('.gx-del')); return true; }
       return false;
     };
