@@ -1272,11 +1272,11 @@
   // the top of the view and the centre pillar runs down to the nose (as on a real onboard);
   // the wheel is about 40 cm ahead and 15 cm below it, with the hands at quarter to three.
   const EYE = new THREE.Vector3(0.52, 0.81, 0), WHEEL_C = new THREE.Vector3(0.85, 0.68, 0), SW_MIN_Y = 0.70;
-  // Wheel centre height per car, so the top of each car's wheel stands 1 inch (2.54 cm) above the top
-  // of its own dashboard. Measured off the converted models: the dash (flat top of the scuttle
-  // ahead of the wheel, off the halo's centre pillar) is 0.707 to 0.770 m up, and the wheel's
-  // half height is 0.081 to 0.088 m, so centre = dash top + 0.0254 - half height.
-  const WHEEL_Y = { amr26: 0.664, fw48: 0.648, vf26: 0.648, mac26: 0.686, mcl40: 0.680, r26: 0.684, rb22: 0.671, sf26: 0.707, w17: 0.688 };
+  // Wheel centre height per car, so the top of each car's wheel stands 2 cm BELOW the top of its own
+  // dashboard (it stood 2.54 cm above, and read too high). Measured off the converted models: the dash
+  // (flat top of the scuttle ahead of the wheel, off the halo's centre pillar) is 0.707 to 0.770 m up, and
+  // the wheel's half height is 0.081 to 0.088 m, so centre = dash top - 0.02 - half height.
+  const WHEEL_Y = { amr26: 0.6186, fw48: 0.6026, vf26: 0.6026, mac26: 0.6406, mcl40: 0.6346, r26: 0.6386, rb22: 0.6256, sf26: 0.6616, w17: 0.6426 };
   // steering wheel turn per unit of road-wheel angle: an F1 wheel turns about one full turn
   // lock to lock (about +-180 degrees; a little more at Monaco) for some 20 degrees of front
   // wheel, so full lock here (0.36 rad) is half a turn of the wheel
