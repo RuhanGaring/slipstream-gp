@@ -25,10 +25,10 @@ void main(){
   vec2 q = (gl_FragCoord.xy - 0.5 * uR) / uR.y;
   float asp = uR.x / uR.y, px = 0.75 / uR.y, wide = clamp(asp / 1.7778, 0.42, 1.25);
   // the stack turns a little toward the mouse
-  q /= 1.0 + dot(q, uM) * 0.045;
+  q /= 1.0 + dot(q, uM) * 0.095;
   vec3 c = mix(vec3(0.048, 0.052, 0.062), vec3(0.094, 0.100, 0.116), clamp(0.5 + 0.5 * q.x / asp + 0.28 * q.y, 0.0, 1.0));
   // a light far behind, moving against the mouse
-  c *= 1.0 + 0.10 * exp(-dot(q - vec2(0.45, 0.2) + uM * 0.05, q - vec2(0.45, 0.2) + uM * 0.05) * 3.0);
+  c *= 1.0 + 0.10 * exp(-dot(q - vec2(0.45, 0.2) + uM * 0.12, q - vec2(0.45, 0.2) + uM * 0.12) * 3.0);
   const float N = 9.0;
   float corner = smoothstep(0.35, 1.05, length(q / vec2(asp * 0.62, 0.62)));   // the lens is softer toward its edge
   float H = 1.0 / N;
@@ -38,9 +38,9 @@ void main(){
     float z = id == 5.0 ? 0.62 : id == 2.0 ? 0.40 : mix(0.05, 1.0, h2(vec2(id, 17.0)));
     float off = abs(z - 0.62) * 0.044, coc = off + corner * 0.020;
     float b = px + coc;
-    vec2 p = q + uM * vec2(0.034, 0.020) * (z - 0.25);
+    vec2 p = q + uM * vec2(0.105, 0.046) * (z - 0.30);
     float s = p.x - p.y * 0.364;
-    float y0 = id * H - 0.5 - H * 0.12 - off * 0.4, h = H * 1.16 + off * 1.1;   // (a soft one overlaps more, or the row under it shows through)
+    float y0 = id * H - 0.5 - H * 0.12 - off * 0.4, h = H * 1.16 + off * 1.1 + 0.020 * abs(uM.y);   // (a soft one overlaps more, or the row under it shows through)
     float e = 0.15 + 0.41 * v + 0.045 * sin(uT * (0.20 + 0.12 * v) + id * 2.2);
     e += (1.0 - ease(uIn * 1.35 - id * 0.05)) * 1.25;
     float in1 = ease(uP * 1.45 - id * 0.050);
@@ -55,7 +55,7 @@ void main(){
     c *= 1.0 - 0.44 * sl * smoothstep(-0.2, 0.0, x);
     c *= 1.0 - 0.34 * sb;
     // the thickness of its end, seen more when the mouse is to its left
-    float th = (0.0045 + 0.0055 * z) * (0.8 - 0.75 * uM.x);
+    float th = (0.0055 + 0.0080 * z) * (0.8 - 0.75 * uM.x);
     float face = edge(-th, x, b) * (1.0 - edge(0.0, x, b)) * edge(0.0, d, b) * (1.0 - edge(h, d, b));
     vec3 k = vec3(0.076 + 0.022 * v) * 1.18 + 0.028; k *= vec3(1.0, 1.04, 1.15);
     vec3 r = mix(vec3(0.46, 0.050, 0.042), vec3(0.80, 0.105, 0.075), smoothstep(-0.6, 0.6, p.y + 0.12 * p.x));
@@ -111,7 +111,7 @@ void main(){
     if (!loadTo) { slow = gap > 0.028 && gap < 0.2 ? slow + 1 : Math.max(0, slow - 0.5); if (slow > 60 && scale > 0.5) { scale -= 0.25; slow = 0; } }
     if (!still) t += dt;
     intro = still ? 2 : Math.min(2, intro + dt / 1.1);
-    const e = 1 - Math.exp(-dt * 4);
+    const e = 1 - Math.exp(-dt * 6);
     M.x += ((still ? 0 : M.tx) - M.x) * e; M.y += ((still ? 0 : M.ty) - M.y) * e;
     load += (loadTo - load) * (1 - Math.exp(-dt * 5)); prog += (progTo - prog) * (1 - Math.exp(-dt * 3)); dim += (dimTo - dim) * e;
     // (they come in on a clock up to the middle at least, so a stage that reports nothing is not an empty screen)

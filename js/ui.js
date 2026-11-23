@@ -265,27 +265,105 @@
     const T_PROFILE = t('profile', 'YOUR RECORD', 'DRIVER PROFILE', '', () => go('profile', { back: 'main' }),
       { stats: stat(P.races, 'Races') + stat(P.wins, 'Wins') + stat(P.podiums, 'Podiums') + stat(won + '/' + T.length, 'Trophies') });
 
+    const go2 = (kind, scr) => { F1.Game.flow = Object.assign({}, F1.Game.flow, { kind, mode: lsGet('slip_mode', 'arcade') === 'sim' ? 'sim' : 'arcade' }); go(scr); };
+    const T_WEEKEND = t('weekend', 'RACE', 'GRAND PRIX WEEKEND', 'Practice, knockout qualifying, then the race.', flowTo('weekend'));
+    const T_TT = t('tt', 'SOLO', 'TIME TRIAL', 'Hot laps against your own ghost.', flowTo('tt'));
+    const T_GEN = t('gen', 'CREATE', 'CIRCUIT GENERATOR', genMaps().length ? `A new layout from any seed. ${genMaps().length} saved.` : 'A brand-new Grand Prix layout from any seed.', () => go2('race', 'gen'));
+    const T_SPEC = t('spectate', 'WATCH', 'SPECTATE', 'A full race from every camera, with a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); });
+    // what the record tile adds: the last results, and the next trophy to go for
+    const next = T.find(x => !P.trophies[x[0]]), log = P.log.slice(0, 6);
+    T_PROFILE.foot = (log.length ? `<div class="t-log">${log.map(r => `<i class="${r.dnf ? 'dnf' : r.pos === 1 ? 'p1' : r.pos <= 3 ? 'pod' : ''}">${r.dnf ? 'DNF' : 'P' + r.pos}</i>`).join('')}</div>` : '') +
+      (next ? `<div class="t-next"><span>Next trophy</span><b>${next[1]}</b>${next[2]}</div>` : '');
+
     // the big tile on HOME: carry on with whatever is under way, else the quickest way into a race
     const hero = career ? T_CAREER : saved ? T_CHAMP : T_LAST || Object.assign({}, T_QUICK, { eye: 'START HERE' });
-    const home = [hero, T_DAILY, hero !== T_LAST && T_LAST ? T_LAST : hero.id === 'quick' ? t('weekend2', 'RACE', 'GRAND PRIX WEEKEND', 'Practice, knockout qualifying, then the race.', flowTo('weekend')) : T_QUICK, T_PROFILE].filter(Boolean);
+    const home = [hero, ...[T_LAST, T_QUICK, T_WEEKEND, T_CAREER, T_TT, T_CHAMP].filter(x => x && x.id !== hero.id).slice(0, 4), T_PROFILE];
+
+    // ---- the band above the tiles: one per tab ----
+    const mode0 = lsGet('slip_mode', 'arcade') === 'sim' ? 'sim' : 'arcade';
+    const cell = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+    const lap = id => F1.Game.bestLap(id, mode0);
+    const km = tr => (tr.L / 1000).toFixed(3) + '<small>KM</small>';
+    // HOME: today's race, its circuit drawn large
+    const bandDaily = () => {
+      if (!D) return null;
+      const def = F1.Tracks.byId(D.track), tr = peek(D.track), done = P.daily[D.key];
+      const e = h('div', 'band bd-day', `<div class="bd-l"><div class="bd-eye">${flag(def.flag)}<span>DAILY RACE</span><i class="bd-cd"></i></div>
+        <div class="bd-title">${def.name}</div>
+        <div class="bd-text">${D.teamName}, ${D.laps} laps from P${D.grid}${mode0 === 'sim' && D.weather !== 'dry' ? ', ' + (D.weather === 'light' ? 'light rain' : 'changing weather') : ''}</div>
+        <div class="bd-stats">${cell(km(tr), 'Length')}${cell(tr.apexes.length, 'Corners')}${cell(lap(D.track) ? U.fmtTime(lap(D.track)) : 'NO TIME', 'Your best lap')}${cell(done ? 'P' + done : 'NOT RACED', 'Best today')}</div>
+        <div class="bd-go">RACE NOW<span>&#8594;</span></div></div><canvas class="bd-map"></canvas>`);
+      const cd = e.querySelector('.bd-cd'), tick = () => { const n = new Date(), m = Math.max(1, Math.ceil((new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1) - n) / 6e4)); cd.textContent = `NEW RACE IN ${m >= 60 ? Math.floor(m / 60) + 'H ' : ''}${m % 60}M`; };
+      tick();
+      const iv = setInterval(() => { if (UI.cur !== scr) clearInterval(iv); else tick(); }, 20000);
+      return { el: e, items: [{ el: e, id: 'daily', fn: () => F1.Game.runDaily() }], maps: [{ cv: e.querySelector('canvas'), id: D.track, o: { mono: true, w: 5, pad: 12, bare: true } }] };
+    };
+    // RACE: every circuit, one press from team select
+    const bandTracks = () => {
+      const e = h('div', 'band bd-trk', `<div class="bd-h"><b>CIRCUITS</b><span>Straight to team select</span></div>`), grid = h('div', 'bd-rail');
+      const out = { el: e, items: [], maps: [] };
+      F1.Tracks.DEFS.forEach((d, k) => {
+        const c = h('div', 'ctile', `<div class="c-top">${flag(d.flag)}<span>${String(k + 1).padStart(2, '0')}</span></div><canvas></canvas><div class="c-nm">${d.name}</div><div class="c-sub">${lap(d.id) ? U.fmtTime(lap(d.id)) : 'NO TIME'}</div>`);
+        grid.appendChild(c);
+        out.items.push({ el: c, id: 'trk-' + d.id, fn: () => { F1.Game.flow = { kind: 'race', mode: mode0, track: d.id, team: last ? last.team : 0, driver: last ? last.driver : 0 }; go('team'); } });
+        out.maps.push({ cv: c.querySelector('canvas'), id: d.id, o: { mono: true, w: 2.2, pad: 5, bare: true } });
+      });
+      { const c = h('div', 'ctile gen', `<div class="c-top"><span class="flg gen"><em>GEN</em></span></div><div class="c-plus">+</div><div class="c-nm">New circuit</div><div class="c-sub">${genMaps().length ? genMaps().length + ' SAVED' : 'ANY SEED'}</div>`); grid.appendChild(c); out.items.push({ el: c, id: 'trk-gen', fn: T_GEN.fn }); }
+      e.appendChild(grid);
+      return out;
+    };
+    // SEASONS: the calendar, and the points (or the field, before a season starts)
+    const bandSeason = () => {
+      const sv = career || saved, kind = career ? 'CAREER, SEASON ' + career.career.season : saved ? 'CHAMPIONSHIP' : 'THE CALENDAR';
+      const at = sv ? sv.round : -1;
+      const cal = F1.Tracks.DEFS.map((d, k) => `<li class="${k < at || (sv && sv.offers) ? 'done' : k === at ? 'now' : ''}"><i></i>${flag(d.flag)}<b>${d.name.replace(/^(Autodromo di|Autódromo|Circuit de|Circuit) /, '')}</b></li>`).join('');
+      let rows, head;
+      if (sv) {
+        const list = Object.values(sv.table).sort((a, b) => b.pts - a.pts || b.wins - a.wins), me = list.findIndex(r => r.player);
+        const show = list.slice(0, 5); if (me > 4) show[4] = list[me];
+        head = 'DRIVERS’ STANDINGS';
+        rows = show.map(r => `<tr class="${r.player ? 'me' : ''}"><td>${list.indexOf(r) + 1}</td><td><i style="background:${r.color}"></i>${r.name}</td><td>${r.pts}</td></tr>`).join('');
+      } else {
+        head = 'THE FIELD';
+        rows = F1.Data.TEAMS.slice(0, 5).map((x, k) => `<tr><td>${k + 1}</td><td><i style="background:${tcol(x)}"></i>${x.name}</td><td>${x.rating}</td></tr>`).join('');
+      }
+      const e = h('div', 'band bd-sea', `<div class="bd-cal"><div class="bd-h"><b>${kind}</b><span>${sv ? (sv.offers ? 'Season complete' : `Round ${sv.round + 1} of ${N}`) : `${N} rounds`}</span></div><ol>${cal}</ol></div><div class="bd-tab"><div class="bd-h"><b>${head}</b><span>${sv ? 'Points' : 'Car rating'}</span></div><table>${rows}</table></div>`);
+      return { el: e, items: [], maps: [] };
+    };
+    // OPTIONS: how the game is set up now
+    const bandSetup = () => {
+      const R = F1.Game.raceDefaults, st = F1.Game.settings, diff = F1.Data.DIFFICULTY[R.difficulty == null ? 2 : R.difficulty];
+      const e = h('div', 'band bd-set', `<div class="bd-h"><b>YOUR SETUP</b><span>How the game is set now</span></div><div class="bd-stats">${[
+        [mode0 === 'sim' ? 'SIMULATION' : 'ARCADE', 'Handling'], [diff ? diff.name : 'PRO', 'Rivals'], [R.laps, 'Race laps'], [R.brakeHelp || R.steerHelp ? 'ON' : 'OFF', 'Driving help'],
+        [F1.Game.CAM_NAMES[st.camera] || 'CHASE', 'Camera'], [String((st.gfx && st.gfx.preset) || 'high').toUpperCase(), 'Graphics'], [st.units === 'mph' ? 'MPH' : 'KM/H', 'Speed'], [Math.round((st.master == null ? 1 : st.master) * 100) + '%', 'Volume'],
+      ].map(x => cell(x[0], x[1])).join('')}</div>`);
+      return { el: e, items: [], maps: [] };
+    };
+    const setTabOf = k => () => go('settings', { back: 'main', tab: k });
     const TABS = [
-      ['HOME', home],
+      ['HOME', home, bandDaily],
       ['RACE', [
         Object.assign({}, T_QUICK, { id: 'quick-r' }),
-        t('weekend', 'RACE', 'GRAND PRIX WEEKEND', 'The full event: free practice, Q1, Q2 and Q3 knockout qualifying, then the race from your grid slot.', flowTo('weekend'), { meta: ['PRACTICE', 'QUALIFYING', 'RACE'] }),
-        t('tt', 'SOLO', 'TIME TRIAL', 'Hot laps against your own ghost.', flowTo('tt'), { meta: ['GHOST'] }),
-        t('spectate', 'WATCH', 'SPECTATE', 'Sit back and watch a full race: switch cars, every camera, a free camera and a TV director.', () => { F1.Game.flow = { kind: 'spectate', team: 0, driver: 0 }; go('mode'); }, { meta: ['TV DIRECTOR', 'FREE CAMERA'] }),
-      ]],
+        Object.assign({}, T_WEEKEND, { id: 'weekend-r', text: 'Practice, knockout qualifying, then the race from your grid slot.' }),
+        Object.assign({}, T_TT, { id: 'tt-r' }), T_SPEC,
+        ...(T_LAST ? [Object.assign({}, T_LAST, { id: 'last-r', map: null })] : T_DAILY ? [Object.assign({}, T_DAILY, { id: 'daily-r', map: null })] : []),
+        T_GEN,
+      ], bandTracks],
       ['SEASONS', [
         Object.assign({}, T_CAREER, { id: 'career-s' }),
         Object.assign({}, T_CHAMP, { id: 'champ-s' }),
         career && t('career-new', 'START AGAIN', 'NEW CAREER', 'Start again in the slowest car. Your saved career is replaced when the first race starts.', () => F1.Game.careerStart()),
         saved && t('champ-new', 'START AGAIN', 'NEW CHAMPIONSHIP', `A fresh title fight. Your saved championship (round ${saved.round + 1}) is replaced when the first race starts.`, flowTo('champ')),
-      ].filter(Boolean)],
+        Object.assign({}, T_PROFILE, { id: 'profile-s' }),
+      ].filter(Boolean), bandSeason],
       ['OPTIONS', [
-        t('settings', 'OPTIONS', 'SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' }), { meta: ['SOUND', 'CAMERA', 'GRAPHICS', 'ASSISTS'] }),
+        t('settings', 'OPTIONS', 'SETTINGS', 'Sound, camera, graphics, steering and display.', () => go('settings', { back: 'main' }), { meta: ['EVERY OPTION'] }),
+        t('o-gfx', 'SETTINGS', 'GRAPHICS', 'Presets and every effect.', setTabOf('graphics')),
+        t('o-snd', 'SETTINGS', 'SOUND', 'Volumes and the engine voice.', setTabOf('audio')),
+        t('o-dsp', 'SETTINGS', 'DISPLAY', 'Camera, units and timing.', setTabOf('display')),
+        t('o-aid', 'SETTINGS', 'RACE AIDS', 'Coach, spotter and accessibility.', setTabOf('aids')),
         t('controls', 'OPTIONS', 'CONTROLS', compact() ? 'Touch, gamepad and racing wheel.' : 'Keyboard, gamepad and racing wheel.', () => go('controls', { back: 'main' })),
-      ]],
+      ], bandSetup],
     ];
 
     const pad = F1.Game.usingPad;
@@ -300,19 +378,25 @@
 
     const panesEl = h('div', 'hub-panes');
     const items = [], panes = [], paints = [];
-    TABS.forEach(([, tiles], k) => {
-      const pane = h('div', `pane n${Math.min(3, tiles.length - 1)}`);
+    TABS.forEach(([, tiles, mkBand], k) => {
+      const pane = h('div', 'pane'), band = mkBand(), tilesEl = h('div', `tiles r${Math.min(6, tiles.length - 1)}`);
+      if (band) pane.appendChild(band.el);
+      pane.appendChild(tilesEl);
       const first = items.length;
       tiles.forEach((d, j) => {
-        const e = h('div', 'htile' + (j === 0 ? ' hero' : '') + (j === 0 || tiles.length === 2 ? ' big' : '') + (d.map ? ' has-map' : ''),
+        const e = h('div', 'htile' + (j === 0 ? ' hero' : '') + (j === 0 ? ' big' : '') + (d.map ? ' has-map' : ''),
           `<div class="t-eye">${d.eye}</div><div class="t-title">${d.title}</div>${d.text ? `<div class="t-text">${d.text}</div>` : ''}` +
-          (d.stats ? `<div class="t-stats">${d.stats}</div>` : '') +
+          (d.stats ? `<div class="t-stats">${d.stats}</div>` : '') + (d.foot || '') +
           (d.meta.length ? `<div class="t-meta">${d.meta.map(m => `<span>${m}</span>`).join('')}</div>` : '') +
           (d.map ? '<canvas class="t-map"></canvas>' : '') + '<i class="t-go">&#8594;</i>');
-        pane.appendChild(e);
-        if (d.map) paints.push({ tab: k, cv: e.querySelector('canvas'), id: d.map, done: false });
+        tilesEl.appendChild(e);
+        if (d.map) paints.push({ tab: k, cv: e.querySelector('canvas'), id: d.map, done: false, o: { mono: true, w: 4, pad: 14, bare: true } });
         items.push({ el: e, tab: k, id: d.id, activate: () => { UI.lastMainName = d.id; UI.mainTab = k; d.fn(); } });
       });
+      if (band) {
+        band.items.forEach(b => items.push({ el: b.el, tab: k, id: b.id, activate: () => { UI.lastMainName = b.id; UI.mainTab = k; b.fn(); } }));
+        band.maps.forEach(m => paints.push({ tab: k, cv: m.cv, id: m.id, done: false, o: m.o }));
+      }
       panes.push({ el: pane, first, n: tiles.length });
       panesEl.appendChild(pane);
     });
@@ -323,7 +407,7 @@
     // circuits are drawn once their tab is on screen (a hidden canvas has no size)
     const paint = k => requestAnimationFrame(() => paints.forEach(p => {
       if (p.tab !== k || p.done || !p.cv.isConnected || !p.cv.clientWidth) return;
-      try { drawTrackMap(p.cv, peek(p.id), { mono: true, w: 4, pad: 14, bare: true }); p.done = true; } catch (e) { /* no map for this one */ }
+      try { drawTrackMap(p.cv, peek(p.id), p.o); p.done = true; } catch (e) { /* no map for this one */ }
     }));
     let tab = 0;
     function setTab(k, focusId) {
@@ -333,6 +417,7 @@
       tabBtns.forEach((b, i) => b.classList.toggle('on', i === tab));
       const p = panes[tab], at = focusId ? items.findIndex(it => it.tab === tab && it.id === focusId) : -1;
       setFocus(at >= 0 ? at : p.first, true);
+      if (compact() && at < 0) el.scrollTop = 0; // (the band above the tiles first)
       paint(tab);
     }
     // arrows move to the nearest tile that way; off the left or right edge goes to the next tab
@@ -363,7 +448,7 @@
     };
     const startTab = UI.mainTab != null && UI.mainTab < TABS.length ? UI.mainTab : 0;
     const startAt = items.findIndex(it => it.tab === startTab && it.id === UI.lastMainName);
-    const scr = { el, items, onKey, focus: startAt >= 0 ? startAt : panes[startTab].first, back: () => go('title') };
+    const scr = { el, items, onKey, focus: startAt >= 0 ? startAt : panes[startTab].first, top: startAt < 0, back: () => go('title') };
     tab = startTab;
     panes[tab].el.classList.add('on');
     tabBtns[tab].classList.add('on');

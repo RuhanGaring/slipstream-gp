@@ -148,9 +148,28 @@ body.compact .hub-tabs { height: 46px; overflow-x: auto; scrollbar-width: none; 
 body.compact .hub-tabs::-webkit-scrollbar { display: none; }
 body.compact .hub-tabs .key { display: none; }
 body.compact .hub-tab { flex: none; padding: 0 14px; font-size: 13px; }
-body.compact .hub-panes { position: relative; left: auto; right: auto; bottom: auto; height: auto;
+body.compact .hub-panes { position: relative; left: auto; right: auto; top: auto; bottom: auto; height: auto;
   padding: 14px max(14px, env(safe-area-inset-right)) 92px max(14px, env(safe-area-inset-left)); }
 body.compact .pane.on { display: flex; flex-direction: column; gap: 10px; }
+body.compact .pane { height: auto; }
+body.compact .tiles { display: flex; flex-direction: column; gap: 10px; height: auto; }
+body.compact .band { flex: none; padding: 6px 0 8px; display: block; }
+/* (what is only there to read comes after the buttons) */
+body.compact .bd-sea, body.compact .bd-set { order: 2; padding-top: 18px; }
+body.compact .bd-text, body.compact .htile:not(.hero) .t-text { display: block; }
+body.compact .bd-day { position: relative; min-height: 150px; }
+body.compact .bd-l { max-width: none; position: relative; z-index: 1; }
+body.compact .bd-eye { flex-wrap: wrap; gap: 6px 10px; font-size: 11px; }
+body.compact .bd-title { font-size: 32px; max-width: 64%; }
+body.compact .bd-text { font-size: 13px; max-width: 64%; }
+body.compact .bd-stats { gap: 10px 22px; } body.compact .bd-stats b { font-size: 18px; }
+body.compact .bd-map { position: absolute; right: 0; top: 14px; width: 34%; height: 90px; }
+body.compact .bd-rail { display: flex; max-height: none; height: 108px; overflow-x: auto; scrollbar-width: none; }
+body.compact .ctile { flex: 0 0 150px; }
+body.compact .ctile canvas { display: block; height: 56%; } body.compact .ctile .c-top { display: flex; } body.compact .ctile .c-plus { display: block; }
+body.compact .bd-cal ol { grid-template-columns: repeat(2, 1fr); }
+body.compact .bd-tab { width: auto; margin-top: 14px; }
+body.compact .bd-set .bd-stats { grid-template-columns: repeat(2, 1fr); gap: 14px 20px; } body.compact .bd-set .bd-stats b { font-size: 20px; }
 body.compact .htile { padding: 16px 18px; min-height: 0; }
 body.compact .htile.hero { min-height: 210px; }
 body.compact .t-title { font-size: 26px; }
