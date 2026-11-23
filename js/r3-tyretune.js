@@ -15,7 +15,7 @@
   const SC_SCHEMA = [
     // the tunnel's reflections, as multipliers of the level they stand at now (1 = as it is): the car's paint and the tyres, by day
     // and by night (the two blend with the time of day). The tyres' value is their own brightness, whatever the car's is.
-    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.53 },
+    { group: 'Tunnel reflections (x current)', key: 'tunCarDay', label: 'Car, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 0.4 },
     { group: 'Tunnel reflections (x current)', key: 'tunWheelDay', label: 'Wheels, by day', type: 'f', min: 0, max: 4, step: 0.01, def: 2.4 },
     { group: 'Tunnel reflections (x current)', key: 'tunCarNight', label: 'Car, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 0.67 },
     { group: 'Tunnel reflections (x current)', key: 'tunWheelNight', label: 'Wheels, at night', type: 'f', min: 0, max: 4, step: 0.01, def: 1 },
@@ -81,7 +81,12 @@
     if (!T()) return;
     try {
       const o = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (o && o.base === baseOf() && o.values) { T().set(o.values); SC.set(o.scene); }
+      if (o && o.base === baseOf() && o.values) {
+        // (a tunnel value still at an earlier default was never touched: it takes the new default)
+        const OLD = { tunCarDay: 0.53 }, sc = Object.assign({}, o.scene);
+        for (const k in OLD) if (sc[k] === OLD[k]) delete sc[k];
+        T().set(o.values); SC.set(sc);
+      }
     } catch (e) {}
   }
 
