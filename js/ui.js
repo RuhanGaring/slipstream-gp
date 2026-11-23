@@ -1694,6 +1694,7 @@
     const handling = o.mode === 'sim' || (o.mode === 'tt' && o.ttHandling === 'sim') ? 'SIMULATION' : 'ARCADE';
     const tc = o.team.base === '#121417' ? o.team.accent : o.team.base;
     el.innerHTML = `
+      <canvas class="ld-3d"></canvas><div class="ld-fade"></div>
       <div class="ld-num">${num}</div>
       <div class="stage ld-left">
         <div class="ld-session"><span>${session}</span><span>${handling}</span></div>
@@ -1710,13 +1711,12 @@
         </div>
         <div class="ld-driver" style="--tc:${tc}"><i></i><span><b>${o.driver[0]} ${o.driver[1].toUpperCase()}</b><small>${o.team.name.toUpperCase()}  /  #${o.driver[3]}</small></span></div>
       </div>
-      <div class="ld-map"><canvas></canvas><div class="ld-legend"><span class="s1">S1</span><span class="s2">S2</span><span class="s3">S3</span><span class="drs">OVERTAKE</span></div></div>
       <div class="ld-foot">
         <div class="ld-tip"><span class="lbl">TIP</span>${TIPS[Math.floor(Math.random() * TIPS.length)]}</div>
         <div class="ld-prog"><div class="ld-bar"><i></i></div><div class="ld-state">LOADING CIRCUIT</div></div>
       </div>`;
     // (the card goes up before the circuit is built, which can take seconds: its numbers and map follow)
-    if (tr) requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
+    if (tr) requestAnimationFrame(() => loadMap(el.querySelector('.ld-3d'), tr));
     return { el, items: [] };
   };
   function loadingTrack(tr) {
@@ -1724,8 +1724,10 @@
     if (!el || !tr) return;
     const set = (q, v) => { const e = el.querySelector(q); if (e) e.textContent = v; };
     set('.ld-km', (tr.L / 1000).toFixed(3)); set('.ld-cn', tr.apexes.length); set('.ld-ot', tr.drs.length);
-    requestAnimationFrame(() => drawTrackMap(el.querySelector('.ld-map canvas'), tr, { corners: true, w: 5, pad: 26 }));
+    requestAnimationFrame(() => loadMap(el.querySelector('.ld-3d'), tr));
   }
+  // the loading screen's circuit: the 3D broadcast map (js/loadmap.js)
+  function loadMap(cv, tr) { if (cv && tr && F1.LoadMap) F1.LoadMap.start(cv, tr); }
 
   // the second press within a few seconds does it: a mistaken key must not end anyone's race
   const sure = fn => e => {

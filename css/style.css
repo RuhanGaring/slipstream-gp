@@ -480,6 +480,8 @@ table.res td.pts { font-weight: 700; text-align: right; }
 
 /* loading */
 /* loading: a title card over the live hero shot */
+#scr-loading .ld-3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#scr-loading .ld-fade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(5,7,10,.9) 0%, rgba(5,7,10,.55) 28%, rgba(5,7,10,0) 50%), linear-gradient(0deg, rgba(5,7,10,.7) 0%, rgba(5,7,10,0) 22%); }
 #scr-loading .ld-num { position: absolute; left: 4vw; top: 10vh; font-size: min(34vh, 300px); font-weight: 900; font-style: italic; line-height: .8; color: transparent;
   -webkit-text-stroke: 2px rgba(255,255,255,.14); letter-spacing: -.04em; pointer-events: none; animation: ldNum 4s ease-out both; }
 @keyframes ldNum { from { transform: translateX(-30px); opacity: 0; } to { transform: none; opacity: 1; } }

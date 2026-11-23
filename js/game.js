@@ -1012,6 +1012,9 @@
   function drawLoadScene(dt) {
     const tr = load.tr, W2 = Game.world;
     const t = load.t;
+    // (the circuit's map covers this shot: once the scene is built it is redrawn only now and then)
+    load.f = (load.f || 0) + 1;
+    if (t > 2 && load.f % 4) return;
     if (R3ok) {
       R3.render({ cars: load.cars, focus: null, mode: 'load', load, dt, fx: FX });
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
