@@ -31,6 +31,7 @@
   };
   // depth bias (m) and PCF radius (texels) per slice
   const BIAS = [0.004, 0.025, 0.09], RADIUS = [1.6, 1.3, 1.1];
+  const MAXMAP = 6144; // (the largest map: 8192 was 3 mm a texel near the camera, finer than any pixel)
   const BACK = 260; // how far toward the sun the shadow cameras reach for casters (stands, trees)
 
   const S = { lights: [], cars: [], on: false, q: Q.high, uni: null };
@@ -91,22 +92,38 @@
     const q0 = Q[level];
     S.on = !!q0;
     const base = q0 || Q.high, res = o.res || 1, dist = o.dist || 1, soft = o.soft || 1;
-    S.q = { n: base.n, size: base.size.map(z => Math.max(256, Math.min(8192, Math.round(z * res)))), ends: base.ends.map(e => e * dist) };
-    S.lights.forEach((l, i) => {
-      l.castShadow = S.on && i < S.q.n;
-      const sz = S.q.size[i] || 512;
-      if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
-      l.shadow.radius = RADIUS[i] * soft;
-    });
-    S.cars.forEach((l, k) => {
-      const i = k + 1, sz = S.q.size[i] || 512;
-      l.castShadow = S.on && i < S.q.n;
-      if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; } }
-      l.shadow.radius = RADIUS[i] * soft;
-    });
+    S.q = { n: base.n, size: base.size.map(z => Math.max(256, Math.min(MAXMAP, Math.round(z * res)))), ends: base.ends.map(e => e * dist) };
     S.all = S.lights.concat(S.cars);
+    let changed = false;
+    S.all.forEach((l, j) => {
+      const car = j >= N, i = car ? j - N + 1 : j;
+      l.castShadow = S.on && i < S.q.n;
+      // (a cars' map holds a handful of cars at twelve metres and more, as one-mesh stand-ins: half
+      // the still scenery's map is as many texels as they can show, from 2048 up)
+      const full = S.q.size[i] || 512, sz = car && full > 2048 ? Math.max(2048, full >> 1) : full;
+      if (l.shadow.mapSize.x !== sz) { l.shadow.mapSize.set(sz, sz); changed = true; }
+      // (its filter is in texels: half as many texels are the same width on the ground)
+      l.shadow.radius = RADIUS[i] * soft * (sz / full) * Math.min(1, MAXMAP / (base.size[i] * res));
+    });
+    if (changed || S.mapsOn !== S.on || S.mapsN !== S.q.n) maps();
     S.radius = S.all.map(l => l.shadow.radius);
     force = true;
+  }
+  // The maps themselves, made here rather than by three: maps of one size share a depth buffer. Each
+  // is cleared and drawn whole before the next, and only its colour (the packed depth) is read
+  // later, so nothing is kept in the depth buffer between them. At Ultra the five maps had one each:
+  // with the 8192 maps it was 1.9 GB of video memory for the shadows alone.
+  function maps() {
+    S.mapsOn = S.on; S.mapsN = S.q.n;
+    for (const l of S.all) if (l.shadow.map) { l.shadow.map.dispose(); l.shadow.map = null; }
+    const depth = new Map();
+    for (const l of S.all) {
+      if (!l.castShadow) continue;
+      const sz = l.shadow.mapSize.x;
+      if (!depth.has(sz)) depth.set(sz, new THREE.DepthTexture(sz, sz, THREE.UnsignedIntType));
+      l.shadow.map = new THREE.WebGLRenderTarget(sz, sz, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture: depth.get(sz) });
+      l.shadow.map.texture.name = 'sun';
+    }
   }
   // under cloud the sun is a bright patch of sky, not a point: what shadow is left is wide and soft
   function setSoften(k) { if (S.radius) S.all.forEach((l, i) => { l.shadow.radius = S.radius[i] * k; }); }
@@ -236,6 +253,15 @@
     chunk = 'float r3SunVis = 1.0;\n' + src.slice(0, a) + DIR + '\n' + src.slice(b);
     return chunk;
   }
+  // Every read of a shadow map names its level (there is only one): an ordinary read works its level
+  // out from the neighbouring pixels, which a branch that differs pixel to pixel does not allow, so
+  // Direct3D's compiler dropped the branches above and every lit pixel paid for all three slices and
+  // both cars' maps, some hundred reads, whichever one it needed.
+  {
+    const C = THREE.ShaderChunk, was = C.shadowmap_pars_fragment;
+    C.shadowmap_pars_fragment = was.replace(/texture2D\( depths, uv \)/g, 'textureLod( depths, uv, 0.0 )').replace(/texture2D\( shadow, uv \)/g, 'textureLod( shadow, uv, 0.0 )');
+    if (C.shadowmap_pars_fragment === was) console.warn('r3-shadow: unexpected shadow chunk');
+  }
   // A cars' map is empty except where a car stands, so most pixels need not pay for the full
   // filter: five probes over the filter's square (its corners and centre) that find no car mean
   // the pixel is lit. (Cleared texels unpack to depth 1; a car is never near the far plane.)
@@ -251,7 +277,7 @@
     '  vec3 c = sc.xyz / sc.w; float zr = c.z + bias, sum = 0.0, n = 0.0; vec2 o = 3.0 / size;',
     '  for ( int k = 0; k < 9; k ++ ) {',
     '    vec2 off = vec2( float( k - ( k / 3 ) * 3 ) - 1.0, float( k / 3 ) - 1.0 ) * o;',
-    '    float z = unpackRGBAToDepth( texture2D( m, c.xy + off ) );',
+    '    float z = unpackRGBAToDepth( textureLod( m, c.xy + off, 0.0 ) );',
     '    if ( z < zr ) { sum += z; n += 1.0; }',
     '  }',
     '  if ( n < 0.5 ) return 1.0;',
@@ -263,9 +289,9 @@
     '#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 4',
     'float r3CarShadow( sampler2D m, vec2 size, float bias, float radius, vec4 sc ) {',
     '  vec3 c = sc.xyz / sc.w; vec2 o = radius / size;',
-    '  float z = min( min( unpackRGBAToDepth( texture2D( m, c.xy ) ), unpackRGBAToDepth( texture2D( m, c.xy + o ) ) ),',
-    '    min( min( unpackRGBAToDepth( texture2D( m, c.xy - o ) ), unpackRGBAToDepth( texture2D( m, c.xy + vec2( o.x, -o.y ) ) ) ),',
-    '      unpackRGBAToDepth( texture2D( m, c.xy + vec2( -o.x, o.y ) ) ) ) );',
+    '  float z = min( min( unpackRGBAToDepth( textureLod( m, c.xy, 0.0 ) ), unpackRGBAToDepth( textureLod( m, c.xy + o, 0.0 ) ) ),',
+    '    min( min( unpackRGBAToDepth( textureLod( m, c.xy - o, 0.0 ) ), unpackRGBAToDepth( textureLod( m, c.xy + vec2( o.x, -o.y ), 0.0 ) ) ),',
+    '      unpackRGBAToDepth( textureLod( m, c.xy + vec2( -o.x, o.y ), 0.0 ) ) ) );',
     '  return z > 0.999 ? 1.0 : getShadow( m, size, bias, radius, sc );',
     '}',
     '#endif',

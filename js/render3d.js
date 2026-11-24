@@ -739,6 +739,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     let hasClip = false;
     try { const t = document.createElement('canvas').getContext('webgl2'); hasClip = !POT && !!t && !!t.getExtension('EXT_clip_control'); const lc = t && t.getExtension('WEBGL_lose_context'); if (lc) lc.loseContext(); } catch (e) { /* none */ }
     renderer = new THREE.WebGLRenderer({ canvas, antialias: !POT && GFX.post === false, stencil: false, powerPreference: 'high-performance', logarithmicDepthBuffer: !POT && !hasClip, preserveDrawingBuffer: false });
+    // The graphics driver took the context away (out of video memory, a driver reset, the laptop changing
+    // graphics cards). The cars' decoded pictures are let go once they are on the GPU, so the scene cannot be
+    // put back as it stood: the race holds, and a notice offers the reload. The next start is told, and
+    // leaves the heaviest settings a step lower (js/game.js gfxLost).
+    canvas.addEventListener('webglcontextlost', e => {
+      e.preventDefault(); ctxLost = true;
+      try { localStorage.setItem('slip_gfxlost', String(Date.now())); } catch (err) { /* no storage */ }
+      if (F1.Game && F1.Game.gfxLost) F1.Game.gfxLost();
+    });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
@@ -937,6 +946,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // built with compileAsync (parallel, off the main thread where the driver allows) while the
   // canvas holds its last frame, instead of all compiling inside the next render call.
   let progKey = '', compiling = null, rawDpr = 1;
+  // Dynamic resolution's own change: the render scale and nothing else. setQuality goes over the whole
+  // scene (every material's filtering, the scenery, the shadow maps) and is far too much to do in the
+  // middle of a race for a step of five per cent.
+  function setScale(k) {
+    if (!renderer || compiling || !F1.R3Post.Q.on) return false;
+    GFX.scale = k;
+    F1.R3Post.setQuality({ scale: k, msaa: GFX.msaa });
+    return true;
+  }
   function setQuality(g) {
     Object.assign(GFX, g);
     // the tier the context was made for wins while it runs (changing it restarts the game)
@@ -4607,13 +4625,14 @@ void main() {
   let frameNo = 0;
   const ROAD_U = {};
   const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
-  let focusCar = null, camMode = '';
+  let focusCar = null, camMode = '', keepCars = null;
   function updateCars(cars, dt, hideHelmet, buzzCar) {
     frameNo++;
     F1.R3S.U.uLodJit.value = (frameNo % 64) * 5.588238;
     for (const c of cars) {
       const o = modelFor(c), ud = o.userData, body = ud.body, bu = body.userData;
       ud.seen = frameNo;
+      if (!o.visible) o.visible = true;
       // on the road surface, tilted to its grade and banking; the chassis then heaves,
       // pitches and rolls on its suspension exactly as the physics has it
       const tr = state.tr;
@@ -4697,7 +4716,11 @@ void main() {
         RC.updateHead(body, c, dt);
       }
     }
-    for (const [car, o] of live) if (o.userData.seen !== frameNo) { scene.remove(o); for (const q of o.userData.velParts) velScene.remove(q); live.delete(car); freeCar(o); }
+    // (the cars of the race being loaded, compiled and warmed by precompile, wait out of sight until it starts:
+    // the loading scene draws cars of its own, and the race's twenty were thrown away for it with every
+    // shader only they used, and all built again on the race's first frame, most of a second of it)
+    if (keepCars && cars.some(c => keepCars.has(c))) keepCars = null;
+    for (const [car, o] of live) if (o.userData.seen !== frameNo) { if (keepCars && keepCars.has(car)) { if (o.visible) { o.visible = false; o.userData.velParts.forEach(q => { q.visible = false; }); } continue; } scene.remove(o); for (const q of o.userData.velParts) velScene.remove(q); live.delete(car); freeCar(o); }
   }
 
   let ghostModel = null;
@@ -5239,6 +5262,7 @@ void main() {
     if (race !== undefined) F1.R3S.setFlood(!!(race && race.cfg && ((race.cfg.tod != null && race.cfg.tod !== 'track') || +race.cfg.todRate > 0)));
     if (!renderer || !state.tr || !renderer.compileAsync) return Promise.resolve();
     updateCars(cars || state.lastCars || [], 0, null); // the car models join the scene here
+    if (cars && race) keepCars = new Set(cars);
     // programs are keyed on the target they draw into: the post stack draws the scene into a
     // linear HDR target with no tone mapping, so compile against one
     const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
@@ -5314,6 +5338,8 @@ void main() {
     });
     renderer.toneMapping = tm;
     renderer.setRenderTarget(prev);
+    // (dynamic resolution's other sizes, js/game.js DRS, so a step in the race makes nothing)
+    if (F1.R3Post.Q.on && GFX.drs && F1.Game && F1.Game.settings && F1.Game.settings.autoQ !== false && F1.Game.drs) { try { F1.R3Post.prewarm(F1.Game.drs.LEVELS.map(k => k / F1.Game.drs.k)); } catch (e) { /* made when first needed */ } }
     // the cars' textures go up here too, not on the frame a car first comes close
     if (renderer.initTexture) for (const m of live.values()) m.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const q of ms) for (const k of TEX_KEYS) { const t = q[k]; if (t && t.isTexture && t.image && t.image.close && t.image.width && !t.r3Up) { t.r3Up = true; try { renderer.initTexture(t); } catch (e) { /* best effort */ } } } });
     return Promise.all([p.catch(() => {}), F1.R3Post.Q.on ? F1.R3Post.precompile() : null]).then(() => rt.dispose());
@@ -5580,8 +5606,9 @@ void main() {
     }
     return k;
   }
+  let ctxLost = false;
   function render(o) {
-    if (!renderer || !state.tr || compiling) return;
+    if (!renderer || !state.tr || compiling || ctxLost) return;
     sortFrame++;
     const dt = o.dt || 0.016;
     clock += dt;
@@ -5779,5 +5806,5 @@ void main() {
   function clearDebris() { if (F1.R3D) F1.R3D.clearDebris(scene); }
   // (a flashback that took effect at race time t: what broke after it goes, js/r3-damage.js)
   function trimDebris(t) { if (F1.R3D && F1.R3D.trimDebris) F1.R3D.trimDebris(scene, t); }
-  F1.R3 = { todCam: () => camera, todMats: () => MATS, todState: () => state, todFlood: () => state.root && state.root.userData.flood, todDebug: () => ({ exp: state.exposure, todExp: state.todExp, wxExp: state.wxExp, sunI: sun.intensity, sunC: sun.color.toArray(), hemi: hemi.intensity, B: state.base && { sunI: state.base.sunI, floodKey: state.base.floodKey, hemi: state.base.hemi }, eDef: state.tod0 && state.tod0.eDef, hDef: state.tod0 && state.tod0.hDef, Lsky: state.tod0 && state.tod0.Lsky, todOn: state.todOn, look: state.tr && state.tr.id }), prepareReflections, reflectStats: () => PX.stats, reflectDebug: () => ({ PX, LP }), carModels: live, linePalette, dropCar, clearDebris, trimDebris, HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
+  F1.R3 = { todCam: () => camera, todMats: () => MATS, todState: () => state, todFlood: () => state.root && state.root.userData.flood, todDebug: () => ({ exp: state.exposure, todExp: state.todExp, wxExp: state.wxExp, sunI: sun.intensity, sunC: sun.color.toArray(), hemi: hemi.intensity, B: state.base && { sunI: state.base.sunI, floodKey: state.base.floodKey, hemi: state.base.hemi }, eDef: state.tod0 && state.tod0.eDef, hDef: state.tod0 && state.tod0.hDef, Lsky: state.tod0 && state.tod0.Lsky, todOn: state.todOn, look: state.tr && state.tr.id }), prepareReflections, reflectStats: () => PX.stats, reflectDebug: () => ({ PX, LP }), carModels: live, linePalette, dropCar, clearDebris, trimDebris, HM, potatoBoot: () => POT, bootTier: () => (ROCK ? 'rock' : POT ? 'potato' : ''), init, resize, setTrack, render, precompile, diagnose, project, setQuality, setScale, GFX, MODES, LOOKS, get camera() { return camera; }, get renderer() { return renderer; }, get scene() { return scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

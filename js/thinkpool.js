@@ -129,6 +129,9 @@ function thinkPoolModule(G) {
     // frame rate; the cars on screen still think every time they ask.)
     ask(race, c) {
       if (!this.ok || this.closed || !this.ready || race !== this.race) return false;
+      // (the run to the first corner: the look-ahead drives a car alone on the road, which nobody is
+      // there, and the picture is at its heaviest, the whole field in view; the workers wait)
+      if (race.time - race.startTime < 6) return true;
       if (!this.busy.has(c) && !this.want.has(c)) this.want.set(c, race.time);
       this.pump();
       return true;

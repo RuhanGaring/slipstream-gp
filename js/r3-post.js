@@ -339,7 +339,11 @@
     '}'].join('\n'), { tSrc: { value: null }, uSun: { value: new THREE.Vector2() }, uStep: { value: 1 } });
 
   // ---------- motion blur ----------
+  // (every read by textureLod: the pass's textures have one level, and an ordinary read needs the
+  // neighbouring pixels' coordinates, so Direct3D's compiler flattened the wheels' loops and ran all
+  // eight wheels' sixteen reads on every pixel of the screen, two milliseconds of it)
   const motionMat = mk([
+    '#undef texture2D', '#define texture2D(s, u) textureLod(s, u, 0.0)',
     'varying vec2 vUv;', DEPTH, 'uniform sampler2D tScene; uniform sampler2D tVel; uniform mat4 uInvView; uniform mat4 uPrevVP; uniform float uScale; uniform float uNear;',
     // spinning wheels: centre (world) and radius, axle (world, unit) and the angle turned while
     // the shutter is open, for the wheels of the nearest cars
@@ -631,9 +635,41 @@
   function target(w, h, o = {}) {
     return new THREE.WebGLRenderTarget(Math.max(1, w), Math.max(1, h), Object.assign({ type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false }, o));
   }
+  // The targets are kept as sets, one per size: dynamic resolution moves between a few sizes it
+  // has had made while the race loaded (prewarm), so a step in the middle of a race makes
+  // nothing. Making them there, some fifteen targets in one frame, held the GPU for 0.3 to 0.6
+  // seconds now and then, a freeze of the game each time.
+  const SETS = new Map(); // size -> its targets
+  let setOf = '', setBase = '';
+  const each = (o, f) => { for (const k in o) { const v = o[k]; if (Array.isArray(v)) v.forEach(f); else if (v && v.dispose) f(v); } };
   function build() {
-    for (const k in RT) { const v = RT[k]; if (Array.isArray(v)) v.forEach(t => t.dispose()); else if (v && v.dispose) v.dispose(); delete RT[k]; }
     const w = Math.max(2, Math.round(W * Q.scale)), h = Math.max(2, Math.round(H * Q.scale));
+    const base = W + 'x' + H + '|' + Q.msaa + '|' + !!Q.taa, key = w + 'x' + h;
+    if (RT.scene) SETS.set(setOf, Object.assign({}, RT));
+    if (base !== setBase) { const ae = RT.ae || []; for (const s of SETS.values()) each(s, t => { if (!ae.includes(t)) t.dispose(); }); ae.forEach(t => t.dispose()); delete RT.ae; SETS.clear(); setBase = base; }
+    const ae = RT.ae, aeWas = aeI;
+    for (const k in RT) delete RT[k];
+    setOf = key;
+    if (SETS.has(key)) { Object.assign(RT, SETS.get(key)); if (ae) RT.ae = ae; return; }
+    make(w, h);
+    // (the measured exposure is one pixel and goes on as it was)
+    if (ae) { RT.ae.forEach(t => t.dispose()); RT.ae = ae; aeI = aeWas; }
+    SETS.set(key, Object.assign({}, RT));
+  }
+  // make the sets for these shares of the chosen render scale now, and put each on the GPU
+  function prewarm(list) {
+    if (!R || !RT.scene || dirty || Q.on === false) return;
+    const was = Q.scale, prev = R.getRenderTarget(), ar = R.autoClear;
+    for (const k of list) {
+      Q.scale = Math.round(was * k * 1000) / 1000;
+      build();
+      each(RT, t => { if (!t.isWebGLRenderTarget || RT.ae.includes(t)) return; /* (the measured exposure is left as it is) */ R.setRenderTarget(t); R.clear(true, !!t.depthBuffer, false); });
+    }
+    Q.scale = was; build();
+    R.setRenderTarget(prev); R.autoClear = ar;
+    hadPrev = false; histOK = false;
+  }
+  function make(w, h) {
     const dt = new THREE.DepthTexture(w, h, THREE.FloatType);
     RT.scene = target(w, h, { depthBuffer: true, depthTexture: dt, samples: Q.msaa });
     RT.motion = target(w, h);
@@ -874,7 +910,7 @@
   }
   // how wet the road is (0..1) and where the road is (see wetMask in js/render3d.js)
   function setWet(k, mask) { WET.k = k; WET.mask = mask || null; }
-  F1.R3Post = { setShadeK: k => { compMat.uniforms.uShadeK.value = k; }, setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setLumSat: (a, k, h, s) => { compMat.uniforms.uLumSat.value.set(a, k, h, s); }, setContrast: (k, p) => { if (k != null) compMat.uniforms.uContrast.value = k; if (p != null) compMat.uniforms.uPivot.value = p; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
+  F1.R3Post = { prewarm, setShadeK: k => { compMat.uniforms.uShadeK.value = k; }, setWet, setReversed: n => { revNear = n; }, setBlackLift: v => { compMat.uniforms.uBlackLift.value = v; }, setLumSat: (a, k, h, s) => { compMat.uniforms.uLumSat.value.set(a, k, h, s); }, setContrast: (k, p) => { if (k != null) compMat.uniforms.uContrast.value = k; if (p != null) compMat.uniforms.uPivot.value = p; }, setAutoExposure: o => { Object.assign(Q, o); }, autoExposureValue: () => { if (!RT.ae) return null; const b = new Uint16Array(4); R.readRenderTargetPixels(RT.ae[aeI], 0, 0, 1, 1, b); const H = THREE.DataUtils.fromHalfFloat; return { mult: H(b[0]), avg: H(b[1]), target: H(b[2]) }; }, setSunK: k => { compMat.uniforms.uSunK.value = k; }, setCarShade: (a, f) => { if (a != null) compMat.uniforms.uShadeAmt.value = a; if (f != null) compMat.uniforms.uShadeFloor.value = f; }, init, setSize, setQuality, render, precompile, status, Q, get height() { return RT.h || H; },
     // the scene's own HDR target (made if need be), for a warm-up draw off screen (js/render3d.js precompile)
     sceneTarget: () => { if (dirty || !RT.scene) { build(); dirty = false; hadPrev = false; histOK = false; } return RT.scene; } };
 })(typeof window !== 'undefined' ? window : globalThis);

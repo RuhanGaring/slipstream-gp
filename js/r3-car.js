@@ -1424,7 +1424,23 @@
   // lamp colours in linear HDR: lit ones go well past 1 so they glow (and bloom) in a dark cockpit
   const LED_ON = [new THREE.Color(1, 0.9, 0).multiplyScalar(5), new THREE.Color(0.1, 1, 0.12).multiplyScalar(5), new THREE.Color(1, 0.06, 0.04).multiplyScalar(5)];
   const LED_OFF = [new THREE.Color(0.1, 0.09, 0), new THREE.Color(0.01, 0.07, 0.015), new THREE.Color(0.1, 0.01, 0.01)];
+  // Only the car being driven shows live data (updateCockpit); every other car's screen shows the same
+  // resting picture. They share one: a canvas and a texture each were 5 MB of video memory a car.
+  let restDisp = null;
   function makeDisplay() {
+    if (!restDisp) restDisp = newDisplay();
+    return { c: restDisp.c, g: restDisp.g, t: restDisp.t.clone(), last: 0, key: '', shared: true };
+  }
+  // this car's own screen, from the first time it is the one driven
+  function ownDisplay(d) {
+    const own = newDisplay();
+    d.c = own.c; d.g = own.g; d.key = ''; d.shared = false;
+    const swap = t => { const n = t.clone(); n.source = own.t.source; n.needsUpdate = true; t.dispose(); return n; };
+    const was = d.t; d.t = swap(d.t);
+    d.views = (d.views || []).map(swap);
+    for (const m of d.mats || []) m.map = m.userData.dispView >= 0 ? d.views[m.userData.dispView] : m.map === was ? d.t : m.map;
+  }
+  function newDisplay() {
     const c = document.createElement('canvas'); c.width = DISP_PX[0] * DISP_K; c.height = DISP_PX[1] * DISP_K;
     // uploaded as plain RGBA and decoded from sRGB in the screen's shader: Chrome copies a 2D
     // canvas into an sRGB texture by a slow path that cost the GPU about 20 ms on every redraw
@@ -1785,6 +1801,7 @@
         t.needsUpdate = true;
         disp.views = (disp.views || []).concat([t]);
         mat = screenMat({ t });
+        mat.userData.dispView = disp.views.length - 1; (disp.mats = disp.mats || []).push(mat);
       }
       spin.add(mesh(p.G, mat, !mat.transparent));
     }
@@ -1804,6 +1821,7 @@
     }
     // the screen with its shift lights, set into the bezel
     const screen = screenMat(disp);
+    (disp.mats = disp.mats || []).push(screen);
     const scr = mesh(new THREE.PlaneGeometry(DISP_PX[0] * WS, DISP_PX[1] * WS), screen, false);
     scr.position.set(WX(DISP_PX[2] + DISP_PX[0] / 2), WY(DISP_PX[3] + DISP_PX[1] / 2), WF + 0.0006);
     spin.add(scr);
@@ -1816,7 +1834,7 @@
     }
     const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 4, 4.2) });
     for (const x of [668, 1366]) for (const y of [172, 211, 249]) { const l = new THREE.Mesh(lampG, white); l.position.set(WX(x), WY(y), WF + 0.0012); spin.add(l); }
-    drawDisplay(disp, null);
+    if (!disp.shared) drawDisplay(disp, null);
     // buttons: short caps with their legends
     for (const [x, y, r, col, lab, ink] of BUTTONS) {
       const cg = new THREE.CylinderGeometry(r * WS, r * WS * 1.04, 0.0045, 28); cg.rotateX(Math.PI / 2);
@@ -2315,6 +2333,7 @@
     const ck = root.userData.cockpit;
     if (!ck || !ck.group.visible || ck.inner === false) return;
     if (car && ck.disp) {
+      if (ck.disp.shared) ownDisplay(ck.disp);
       const now = performance.now();
       // refresh rate from advanced graphics (each redraw re-uploads the display texture); 0 freezes it
       const hz = F1.R3 && F1.R3.GFX.dispHz != null ? F1.R3.GFX.dispHz : 12;

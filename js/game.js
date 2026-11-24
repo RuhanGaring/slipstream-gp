@@ -93,6 +93,15 @@
       if (gl && gl.getExtension('WEBGL_lose_context')) gl.getExtension('WEBGL_lose_context').loseContext();
     } catch (e) { /* no WebGL: the 2D renderer takes over */ }
   }
+  // (the last session ended with the graphics driver dropping the picture: the two settings that take
+  // the most video memory come down a step)
+  try {
+    if (localStorage.getItem('slip_gfxlost')) {
+      localStorage.removeItem('slip_gfxlost');
+      const g = Game.settings.gfx;
+      if (g) { if (g.shadowRes > 1) g.shadowRes = 1; else if (g.shadows === 'ultra') g.shadows = 'high'; if (g.msaa > 2) g.msaa = 2; }
+    }
+  } catch (e) { /* no storage */ }
   // settings saved before an option existed take its value from their preset (a custom setup
   // from the preset it most resembles), so an old save never ends up with missing values
   { const sv = Game.settings.gfx;
@@ -1477,6 +1486,9 @@
         if (o.practice) race.practice = true;
         Game.pendingRace = race;
         Game.lastLaunch = o;
+        // (the race's own thread builds its copy of the circuit meanwhile: started as the race began, the
+        // page ran the physics itself on the grid until it was ready)
+        if (simWanted() && race.mode !== 'tt') { simLink = F1.SimWorker.link(race); if (simLink) F1.SimWorker.Link.onFail = l => { if (l === simLink) simLink = null; }; }
         // hold the shot: continue on Enter once ready, or by itself after a few seconds
         let went = false;
         const goRace = () => {
@@ -1487,7 +1499,7 @@
             load.on = false;
             Game.race = race;
             // (not time trial: its ghost lap is kept in the browser's storage, which a worker cannot reach)
-            if (simWanted() && race.mode !== 'tt') { simLink = F1.SimWorker.link(race); if (simLink) F1.SimWorker.Link.onFail = l => { if (l === simLink) simLink = null; }; }
+            if (!simLink && simWanted() && race.mode !== 'tt') { simLink = F1.SimWorker.link(race); if (simLink) F1.SimWorker.Link.onFail = l => { if (l === simLink) simLink = null; }; }
             Game.state = 'race'; Game.paused = false; Game.pitMenu = false;
             UIm.hide();
             document.getElementById('shade').className = '';
@@ -1525,6 +1537,7 @@
         // done on first draw, it was a second of stalls in the race's first frames)
         Promise.resolve(R3ok && R3.prepareReflections ? R3.prepareReflections(shown) : null).catch(() => {})
           .then(() => (R3ok ? R3.precompile(race.cars, race) : null)).catch(() => {})
+          .then(() => settle()).catch(() => {})
           .then(() => { shown(1); loadAt(1); setTimeout(goRace, 300); });
       };
       // a procedural circuit the AI has not learned yet: the race waits for it, with no way past,
@@ -1562,6 +1575,25 @@
         afterBuild();
       });
     }, 380);
+  }
+  // Loading leaves some hundreds of megabytes of used-up working data behind, and the browser cleared
+  // it when it next ran out of room: about a minute into the race, half a second in which nothing
+  // moved. It is cleared here instead, behind the loading screen: room is taken and dropped again
+  // until the browser collects (seen by an object of ours being collected), in small steps, so it
+  // can do most of the work alongside. Where it cannot be seen, or does not come, 2.5 seconds at most.
+  let settleTok = typeof FinalizationRegistry !== 'undefined' ? { n: 0 } : null, settled = 0;
+  const settleReg = settleTok ? new FinalizationRegistry(() => { settled++; }) : null;
+  async function settle() {
+    if (!settleReg) return;
+    settleReg.register(settleTok, 1);
+    const was = settled, t0 = performance.now();
+    settleTok = null;
+    while (settled === was && performance.now() - t0 < 2500) {
+      try { const b = new Uint8Array(64 << 20); b[0] = 1; } catch (e) { break; } // (no room: leave it)
+      await new Promise(r => setTimeout(r, 12));
+    }
+    Game.settleMs = Math.round(performance.now() - t0);
+    settleTok = { n: settled };
   }
   // how far the loading is, for the picture behind it
   const loadAt = p => { if (F1.MenuBg) F1.MenuBg.progress(p); };
@@ -2108,7 +2140,8 @@
   // off. Going back up is a probe: after a few good seconds it tries a step up, and a probe that
   // costs the frame rate is undone and the next one waits twice as long (a 60 Hz screen never
   // shows spare speed, so there is no other way to find it).
-  const DRS = { k: 1, t: 0, n: 0, good: 0, probe: 5, probing: false, skip: 0, MIN: 0.67 };
+  // (a few fixed levels: the picture's buffers for each are made while the race loads)
+  const DRS = { k: 1, t: 0, n: 0, good: 0, probe: 5, probing: false, skip: 0, MIN: 0.7, LEVELS: [1, 0.85, 0.7] };
   function drsStep(dt) {
     const g = Game.settings.gfx;
     if (!g.drs || AQ.wait > 0) { if (!g.drs && DRS.k !== 1) { DRS.k = 1; R3.setQuality(autoGfx()); } DRS.t = 0; DRS.n = 0; return; }
@@ -2119,15 +2152,26 @@
     if (DRS.skip > 0) { DRS.skip--; return; } // (the second after a change: new render targets)
     let k = DRS.k;
     if (fps < target * 0.93) {
-      k = Math.max(DRS.MIN, k - (fps < target * 0.8 ? 0.1 : 0.05)); DRS.good = 0;
+      k = DRS.LEVELS.find(v => v < k - 1e-3) || DRS.MIN; DRS.good = 0;
       if (DRS.probing) { DRS.probe = Math.min(64, DRS.probe * 2); DRS.probing = false; }
     } else if (fps > target * 0.97 && k < 1) {
-      if (++DRS.good >= DRS.probe) { k = Math.min(1, k + 0.05); DRS.good = 0; DRS.probing = true; }
+      if (++DRS.good >= DRS.probe) { k = DRS.LEVELS.slice().reverse().find(v => v > k + 1e-3) || 1; DRS.good = 0; DRS.probing = true; }
     } else { DRS.good = 0; if (DRS.probing && fps >= target * 0.97) DRS.probing = false; }
     k = Math.round(k * 100) / 100;
-    if (k !== DRS.k) { DRS.k = k; DRS.skip = 1; R3.setQuality(autoGfx()); }
+    if (k !== DRS.k) { DRS.k = k; DRS.skip = 1; const q = autoGfx(); if (!R3.setScale || !R3.setScale(q.scale)) R3.setQuality(q); }
   }
   Game.drs = DRS;
+  // the graphics driver dropped the picture (js/render3d.js webglcontextlost)
+  Game.gfxLost = () => {
+    Game.paused = true;
+    if (document.getElementById('gfx-lost')) return;
+    const el = document.createElement('div');
+    el.id = 'gfx-lost';
+    el.style.cssText = 'position:fixed;inset:0;z-index:99998;display:flex;align-items:center;justify-content:center;background:rgba(6,8,12,.92);color:#e8e8ee;font:16px/1.5 "Titillium Web","Segoe UI",sans-serif;text-align:center';
+    el.innerHTML = '<div style="max-width:520px;padding:32px"><div style="font-size:26px;font-weight:800;letter-spacing:.04em;margin-bottom:10px">THE GRAPHICS CARD RESET</div><div style="color:#aeb6bf;margin-bottom:22px">The graphics driver stopped the game, usually because its memory ran out. Reload to carry on. Shadows and edge smoothing start one step lower next time; you can raise them again in Settings.</div><button style="font:inherit;font-weight:800;padding:10px 28px;background:#e10600;color:#fff;border:0;cursor:pointer">RELOAD</button></div>';
+    el.querySelector('button').onclick = () => location.reload();
+    document.body.appendChild(el);
+  };
   function autoGfx() {
     const g = Game.settings.gfx, s = Game.settings.autoQ === false ? 0 : Game.settings.autoStep || 0, m = Object.assign({}, g, LADDER[s] || {});
     // the ladder never raises anything: a Low preset stays Low
