@@ -792,7 +792,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const batchOf = (batches, geo, mat) => {
         let b = batches.get(geo);
         if (!b) {
-          const im = new THREE.InstancedMesh(geo, mat, 8);
+          const im = new THREE.InstancedMesh(ownGeometry(geo), mat, 8); // (the two sets share the stand-ins: each its own vertex setup)
           im.castShadow = true; im.receiveShadow = false; im.frustumCulled = false; im.matrixAutoUpdate = false; im.matrixWorldAutoUpdate = false;
           b = { im, n: 0 }; batches.set(geo, b);
         }
@@ -1740,6 +1740,36 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     return b.wetMask;
   }
 
+  // Each instanced mesh its own geometry object, sharing the model's buffers. The vertex setup three keeps is per
+  // geometry, and the instances' matrices are part of it, so two tiles of the same tree drawn one after the other
+  // each took the other's down and set all their attributes up again: some nine hundred calls a frame in a town.
+  const GEO_OF = new Map(); // model geometry -> the ones made from it
+  function ownGeometry(g) {
+    const w = new THREE.BufferGeometry();
+    w.index = g.index; w.attributes = Object.assign({}, g.attributes); w.morphAttributes = g.morphAttributes; w.groups = g.groups;
+    w.drawRange = { start: g.drawRange.start, count: g.drawRange.count };
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    w.boundingSphere = g.boundingSphere; w.boundingBox = g.boundingBox; w.userData = g.userData; w.name = g.name;
+    w.r3base = g;
+    if (!GEO_OF.has(g)) {
+      const set = new Set(); GEO_OF.set(g, set);
+      // (the buffers go with the model: what was set up on them is let go too, and made again when next drawn)
+      g.addEventListener('dispose', () => { for (const q of set) q.dispose(); });
+    }
+    GEO_OF.get(g).add(w);
+    return w;
+  }
+  function ownInstanced(root) {
+    const n = new Map(), list = [];
+    root.traverse(o => { if (o.isInstancedMesh && !o.geometry.isInstancedBufferGeometry) { list.push(o); n.set(o.geometry, (n.get(o.geometry) || 0) + 1); } });
+    for (const o of list) if (n.get(o.geometry) > 1 || GEO_OF.has(o.geometry)) o.geometry = ownGeometry(o.geometry);
+  }
+  // a circuit's own geometries are let go: any other made from the same model loses its buffers with them
+  function freeOwn(root) {
+    const bases = new Set();
+    root.traverse(o => { const w = o.geometry; if (w && w.r3base) { bases.add(w.r3base); GEO_OF.get(w.r3base).delete(w); } });
+    for (const g of bases) for (const w of GEO_OF.get(g)) w.dispose();
+  }
   function dropBuilt(b) {
     if (b.wetMask) { b.wetMask.tex.dispose(); b.wetMask = null; }
     if (b.tunMask) { b.tunMask.tex.dispose(); b.tunMask = null; }
@@ -1750,6 +1780,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (o.geometry) o.geometry.dispose();
       for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (!shared.has(m)) mats.add(m);
     });
+    freeOwn(b.root);
     for (const m of mats) { texturesOf(m, texs); m.dispose(); }
     if (b.turf && b.turf.tex) texs.add(b.turf.tex); // (held by a shared shader uniform, not by a material)
     for (const t of texs) if (!t.isRenderTargetTexture && !state.keepTex.has(t)) t.dispose();
@@ -2779,6 +2810,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     shadowProxies(root);
     root.traverse(o => { o.matrixAutoUpdate = false; });
     root.matrixWorldAutoUpdate = false;
+    ownInstanced(root);
+    // (its attributes never change either: three's own check of every one of them, every frame, is a sum here)
+    root.traverse(o => { const g = o.geometry; if (g && g.isBufferGeometry && !Object.values(g.attributes).some(a => a.isInterleavedBufferAttribute || a.isGLBufferAttribute)) g.r3k = 1; });
     root.userData.farList = root.children.filter(o => o.userData.far && o.geometry);
     for (const o of root.userData.farList) if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
     return { tr, root, gantry, water, tvCams, grass, turf };

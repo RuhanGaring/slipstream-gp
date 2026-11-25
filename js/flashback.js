@@ -20,8 +20,14 @@
   const isTyped = ArrayBuffer.isView;
   function isPlain(o) { const p = Object.getPrototypeOf(o); return p === Object.prototype || p === null; }
 
-  function take(race, memo) {
+  // last: object -> its copy in the snapshot before (a ring's): one that has not changed since is the same copy
+  // again. Most of a race does not change in a quarter of a second, and 120 whole copies of it, each kept 30
+  // seconds, were most of what the browser's memory clean-up had to go through, a dropped frame or
+  // four at a time.
+  function take(race, memo, last) {
     const seen = new Set(), list = [];
+    const same = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && (a[i] === a[i] || b[i] === b[i])) return false; return true; };
+    const keep = (o, copy) => { if (last) last.set(o, copy); list.push(o, copy); };
     const walk = o => {
       if (o === null || typeof o !== 'object' || seen.has(o)) return;
       seen.add(o);
@@ -29,14 +35,15 @@
         // a resting soft body keeps its arrays from the last snapshot: only a crash changes them
         const m = memo && memo.get(o);
         if (m && m.owner.awake === 0 && m.owner.ver === m.ver) { list.push(o, m.copy); return; }
-        const copy = o.slice();
-        list.push(o, copy);
+        const was = last && last.get(o);
+        const copy = was && same(was, o) ? was : o.slice();
+        keep(o, copy);
         if (memo && walk.owner) memo.set(o, { owner: walk.owner, ver: walk.owner.ver, copy });
         return;
       }
       if (Array.isArray(o)) {
-        const copy = o.slice();
-        list.push(o, copy);
+        const was = last && last.get(o), copy = was && same(was, o) ? was : o.slice();
+        keep(o, copy);
         for (let k = 0; k < copy.length; k++) { const v = copy[k]; if (v !== null && typeof v === 'object') walk(v); }
         return;
       }
@@ -53,17 +60,25 @@
         return;
       }
       if (!isPlain(o)) return; // anything else is treated as a constant
-      const copy = {};
+      const prev = last && last.get(o);
+      let copy = null, n = 0;
+      if (prev) { // (as it was? then the same copy does)
+        copy = prev;
+        for (const k in o) { const v = o[k], p = prev[k]; n++; if (v !== p && (v === v || p === p) || p === undefined && !(k in prev)) { copy = null; break; } }
+        if (copy) { let m = 0; for (const k in prev) m++; if (m !== n) copy = null; }
+      }
+      const fresh = !copy;
+      if (fresh) copy = {};
       const soft = typeof o.ver === 'number' && typeof o.awake === 'number';
       const was = walk.owner;
       if (soft) walk.owner = o;
       for (const k in o) {
         const v = o[k];
-        copy[k] = v;
+        if (fresh) copy[k] = v;
         if (v !== null && typeof v === 'object' && !SHARED.has(k) && !DROP.has(k)) walk(v);
       }
       if (soft) walk.owner = was;
-      list.push(o, copy);
+      keep(o, copy);
     };
     for (const k in race) {
       const v = race[k];
@@ -103,12 +118,13 @@
     this.snaps = [];
     this.next = 0;
     this.memo = new WeakMap();
+    this.last = new WeakMap();
   }
   Ring.prototype.capture = function () {
     const r = this.race;
     if (r.time < this.next) return false;
     this.next = r.time + this.step;
-    this.snaps.push(take(r, this.memo));
+    this.snaps.push(take(r, this.memo, this.last));
     const old = r.time - this.span;
     while (this.snaps.length > 2 && this.snaps[1].t < old) this.snaps.shift();
     return true;
