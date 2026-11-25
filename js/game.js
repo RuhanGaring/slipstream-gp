@@ -102,6 +102,9 @@
       if (g) { if (g.shadowRes > 1) g.shadowRes = 1; else if (g.shadows === 'ultra') g.shadows = 'high'; if (g.msaa > 2) g.msaa = 2; }
     }
   } catch (e) { /* no storage */ }
+  // (the steps the automatic quality took before 2026-11-26 were taken in races that were held up by
+  // shaders being built, not by the graphics card: it starts again)
+  if (Game.settings.aqV !== 2) { Game.settings.aqV = 2; Game.settings.autoStep = 0; }
   // settings saved before an option existed take its value from their preset (a custom setup
   // from the preset it most resembles), so an old save never ends up with missing values
   { const sv = Game.settings.gfx;
@@ -1475,6 +1478,8 @@
         // session's own race resets the track's rubber)
         if ((o.quali != null || o.practice) && Game.weekend && !Game.weekend.ai) aiBaseTimes();
         const cfg = cfgFromFlow(o);
+        // (the automatic quality's heavier changes, held back through the last race)
+        { const was = heavyStep; autoHeavy(); if (heavyStep !== was && R3ok) R3.setQuality(autoGfx()); }
         const race = newRace(cfg);
         if (cfg.ttArcade) {
           // arcade handling in time trial: same assists as the arcade race
@@ -2172,13 +2177,28 @@
     el.querySelector('button').onclick = () => location.reload();
     document.body.appendChild(el);
   };
+  // What a step changes is of two kinds. Some is a pass left out or the grass put away, and comes into
+  // force at once. The rest (the shadow setup, the post stack, the edge smoothing, the ladder's own render
+  // scale) changes what every lit shader is built for, or every buffer of the picture: in the middle of a race
+  // that rebuilt the circuit's two hundred and more shaders on the spot, some twenty seconds with
+  // nothing moving, just when the frame rate had dipped. It waits for the next circuit to load.
+  const HEAVY = ['shadows', 'post', 'lite', 'msaa', 'scale'];
+  let heavyStep = 0;
+  function autoHeavy() { heavyStep = Game.settings.autoQ === false ? 0 : Math.min(LADDER.length - 1, Game.settings.autoStep || 0); }
   function autoGfx() {
-    const g = Game.settings.gfx, s = Game.settings.autoQ === false ? 0 : Game.settings.autoStep || 0, m = Object.assign({}, g, LADDER[s] || {});
+    const off = Game.settings.autoQ === false, s = off ? 0 : Math.min(LADDER.length - 1, Game.settings.autoStep || 0), g = Game.settings.gfx;
+    if (off || heavyStep > s) heavyStep = s;
+    const L = Object.assign({}, LADDER[s]), H = LADDER[heavyStep];
+    for (const k of HEAVY) { delete L[k]; if (H[k] != null) L[k] = H[k]; }
+    return ladderOn(g, L);
+  }
+  function ladderOn(g, L) {
+    const m = Object.assign({}, g, L);
     // the ladder never raises anything: a Low preset stays Low
-    if (LADDER[s].scale) m.scale = LOW_SCALE(g.scale, LADDER[s].scale);
+    if (L.scale) m.scale = LOW_SCALE(g.scale, L.scale);
     if (g.drs && Game.settings.autoQ !== false) m.scale = Math.round(m.scale * DRS.k * 1000) / 1000;
-    if (LADDER[s].msaa != null) m.msaa = LOW_SCALE(g.msaa, LADDER[s].msaa);
-    if (LADDER[s].shadows && SHADOW.indexOf(g.shadows) < SHADOW.indexOf(LADDER[s].shadows)) m.shadows = g.shadows;
+    if (L.msaa != null) m.msaa = LOW_SCALE(g.msaa, L.msaa);
+    if (L.shadows && SHADOW.indexOf(g.shadows) < SHADOW.indexOf(L.shadows)) m.shadows = g.shadows;
     return m;
   }
   function autoStep(dt) {

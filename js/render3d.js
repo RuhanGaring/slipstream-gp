@@ -4625,7 +4625,7 @@ void main() {
   let frameNo = 0;
   const ROAD_U = {};
   const ONBOARD = new Set(['tcam', 'cockpit', 'helmet', 'nose', 'side', 'orbit', 'chase']);
-  let focusCar = null, camMode = '', keepCars = null;
+  let focusCar = null, camMode = '', keepCars = null, pendRace = null;
   function updateCars(cars, dt, hideHelmet, buzzCar) {
     frameNo++;
     F1.R3S.U.uLodJit.value = (frameNo % 64) * 5.588238;
@@ -5263,6 +5263,11 @@ void main() {
     if (!renderer || !state.tr || !renderer.compileAsync) return Promise.resolve();
     updateCars(cars || state.lastCars || [], 0, null); // the car models join the scene here
     if (cars && race) keepCars = new Set(cars);
+    // The race's own hour, before anything is compiled: the night's sky map is made at another size than
+    // the day's, and a material's shader is built for one size, so the first frame of a night race built
+    // every lit shader of the circuit again, over twenty seconds with nothing moving.
+    pendRace = race && todHour(race) != null ? race : null;
+    if (pendRace) { try { applyTod(pendRace); } catch (e) { /* as it stands */ } probeWarm(); }
     // programs are keyed on the target they draw into: the post stack draws the scene into a
     // linear HDR target with no tone mapping, so compile against one
     const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
@@ -5282,9 +5287,19 @@ void main() {
     // With live reflections the cars' materials read the probe's map, not the sky's (see
     // renderBufferDirect in init): compiled against it here too, so they do not all look their
     // program up again on the race's first frame.
-    const probeEnv = LP.out && PX.scene && (GFX.liveRefl | 0) ? LP.out.texture : null;
-    for (const L of bodies.length ? [2, 1, 0] : [0]) {
-      bodies.forEach(b => F1.R3Car.setLod(b, L, true));
+    const probeOf = () => (LP.out && PX.scene && (GFX.liveRefl | 0) ? LP.out.texture : null);
+    // (-1 and -2: a damaged car's own parts at each level. It goes back from the merged wheels and the mid level to
+    // its separate wheels and the low-detail model, whose shaders nothing else draws with: left out
+    // here, the first contact of a race built them on the spot, half a second and more for each.)
+    // (a clock that runs through the race: the other side of the day as well, at the near level)
+    const hours = pendRace && +pendRace.cfg.todRate > 0 ? [12, 0] : [];
+    for (const step of (bodies.length ? [2, 1, 0, -1, -2] : [0]).concat(hours.flatMap(h => (bodies.length ? [2, 1, 0, -1, -2] : [0]).map(L => [L, h])))) {
+      const L = Array.isArray(step) ? step[0] : step;
+      if (Array.isArray(step)) { const t0 = G.__tod; G.__tod = step[1]; try { applyTod(pendRace); } catch (e) { /* as it stands */ } G.__tod = t0; probeWarm(); }
+      const apart = L < 0, nw = G.__noWheelMerge, nm = G.__noMid;
+      const probeEnv = probeOf();
+      if (apart) { G.__noWheelMerge = true; G.__noMid = true; }
+      bodies.forEach(b => F1.R3Car.setLod(b, apart ? -1 - L : L, true));
       const hid = [];
       scene.traverse(o => { if (!o.visible && o !== state.grass) { hid.push(o); o.visible = true; } });
       try { renderer.compile(scene, camera); } catch (e) { /* compile is best effort */ }
@@ -5327,7 +5342,21 @@ void main() {
         for (const [o, k, v] of empty) o[k] = v;
       }
       hid.forEach(o => { o.visible = false; });
+      if (apart) { G.__noWheelMerge = nw; G.__noMid = nm; }
     }
+    if (hours.length) { try { applyTod(pendRace); } catch (e) { /* as it stands */ } probeWarm(); }
+    // (what the reflection cube shows only in a tunnel or by night, drawn once: its shaders were built at the
+    // first tunnel of the race)
+    if (probeOf()) {
+      try {
+        probeStep(null);
+        const off = [];
+        PX.scene.traverse(o => { if (o.userData.keep && !o.visible) { off.push(o); o.visible = true; } });
+        renderer.toneMapping = THREE.NoToneMapping; renderer.setRenderTarget(LP.rt, 0); renderer.render(PX.scene, LP.cam.children[0]);
+        off.forEach(o => { o.visible = false; });
+      } catch (e) { /* best effort */ }
+    }
+    bodies.forEach(b => F1.R3Car.setLod(b, 0, true));
     const p = new Promise(res => {
       const t0 = performance.now();
       (function wait() {
@@ -5405,19 +5434,25 @@ void main() {
       // (its programs now, not on the race's first frame)
       // (its programs now, not on the race's first frame: the copy's, the sky behind it and the
       // filter's cube input, by drawing one cube from the start line)
-      try {
-        const n = Math.round(envRT.texture.image.height / 4);
-        if (n !== LP.size) probeInit(n);
-        const prev = renderer.getRenderTarget(), tm = renderer.toneMapping, cc = LP.cam;
-        PX.scene.background = envRT.texture; renderer.toneMapping = THREE.NoToneMapping;
-        cc.position.set(state.tr.x[0], (state.tr.z ? state.tr.z[0] : 0) + 0.9, state.tr.y[0]); cc.updateMatrixWorld(true);
-        if (cc.coordinateSystem !== renderer.coordinateSystem) { cc.coordinateSystem = renderer.coordinateSystem; cc.updateCoordinateSystem(); cc.updateMatrixWorld(true); }
-        for (let f = 0; f < 6; f++) { renderer.setRenderTarget(LP.rt, f); renderer.render(PX.scene, cc.children[f]); }
-        LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out);
-        renderer.toneMapping = tm; renderer.setRenderTarget(prev);
-      } catch (e) { /* best effort */ }
+      probeWarm();
     })().catch(e => { console.warn('reflections:', e); }).finally(() => { PX.busy = null; PX.prog = null; });
     return PX.busy;
+  }
+  // one cube drawn and filtered at the sky map's present size, from the start line
+  function probeWarm() {
+    if (!envRT || !PX.scene || !state.tr || !(GFX.liveRefl | 0) || !proxyLook()) return;
+    const prev = renderer.getRenderTarget(), tm = renderer.toneMapping;
+    try {
+      const n = Math.round(envRT.texture.image.height / 4);
+      if (n !== LP.size) probeInit(n);
+      const cc = LP.cam;
+      PX.scene.background = envRT.texture; renderer.toneMapping = THREE.NoToneMapping;
+      cc.position.set(state.tr.x[0], (state.tr.z ? state.tr.z[0] : 0) + 0.9, state.tr.y[0]); cc.updateMatrixWorld(true);
+      if (cc.coordinateSystem !== renderer.coordinateSystem) { cc.coordinateSystem = renderer.coordinateSystem; cc.updateCoordinateSystem(); cc.updateMatrixWorld(true); }
+      for (let f = 0; f < 6; f++) { renderer.setRenderTarget(LP.rt, f); renderer.render(PX.scene, cc.children[f]); }
+      LP.out = pmrem.fromCubemap(LP.rt.texture, LP.out);
+    } catch (e) { /* best effort */ }
+    renderer.toneMapping = tm; renderer.setRenderTarget(prev);
   }
   // the copy's material, made for the sky map's size (three's filtered maps are read by that size),
   // put on every tile; false while there is no sky map yet
@@ -5641,7 +5676,8 @@ void main() {
     const lit = o.lightsOn || 0;
     state.gantry.forEach((m, k) => { m.emissiveIntensity = k < lit ? 7 : 0; });
     skyReady();
-    applyTod(o.weather);
+    if (o.mode !== 'load') pendRace = null; // (while a race with its own hour loads, the loading scene stands in that hour's light too)
+    applyTod(pendRace || o.weather);
     updateCamera(o);
     applyWeather(o.weather, dt);
     updateSC(o.sc, dt);
