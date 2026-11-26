@@ -2884,6 +2884,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
     }
 
+    // the teams' pit crews, at their boxes (js/r3-pitcrew.js)
+    if (F1.R3Crew) F1.R3Crew.build(tr, W2, root, { std, col });
+
     // Every part of the venue is tagged with a category (userData.cat) so the scenery setting
     // can thin or hide it as a whole: road and ground stay; stands, buildings, trees, boards...
     let mark = 0;
@@ -5429,7 +5432,8 @@ void main() {
       ud.gy = gy;
       o.position.set(c.x, gy, c.y);
       o.rotation.y = -c.h;
-      body.position.y = c.zh || 0;
+      // (up on the pit crew's jacks through a stop, js/r3-pitcrew.js)
+      body.position.y = (c.zh || 0) + (F1.R3Crew && c.brain && c.brain.pit ? F1.R3Crew.lift(c) : 0);
       body.rotation.z = pr + (c.pitch || 0);
       body.rotation.x = rr + (c.roll || 0);
       ud.ground.rotation.set(rr, 0, pr);
@@ -6429,6 +6433,7 @@ void main() {
     state.lastCars = o.cars;
     focusCar = o.focus || null; camMode = o.mode || '';
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null, o.mode === 'tcam' ? o.focus : null); // (the T-cam sees the wheel buzz and the hands shake too, the helmet stays shown)
+    if (F1.R3Crew) F1.R3Crew.update(o.cars || [], dt);
     if (state.root && state.root.userData.farList) {
       const cp = camera.position, lift = 1 + Math.max(0, cp.y - (o.focus ? o.focus.z || 0 : 0)) / 40;
       for (const m of state.root.userData.farList) { const b = m.geometry.boundingSphere, c = b.center, dx = c.x - cp.x, dz = c.z - cp.z, r = m.userData.far * lift + b.radius; m.visible = dx * dx + dz * dz < r * r; }
