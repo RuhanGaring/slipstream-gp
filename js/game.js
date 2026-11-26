@@ -15,6 +15,7 @@
   try { R3.init(document.getElementById('gl')); R3ok = true; } catch (e) { console.warn('WebGL unavailable, using the 2D renderer', e); }
   document.body.classList.toggle('three', R3ok);
   const miniCv = document.getElementById('minimap');
+  // (drawn on the CPU: a GPU 2D canvas redrawn this often puts its repaint in the GPU's queue with the race)
   const miniCtx = miniCv.getContext('2d');
 
   const store = {
@@ -836,9 +837,12 @@
     return { x: a[i] + (a[j] - a[i]) * f, y: a[i + 1] + (a[j + 1] - a[i + 1]) * f, h: a[i + 2] + U.wrapAngle(a[j + 2] - a[i + 2]) * f };
   }
 
+  // (the overlay is cleared only when something was drawn on it: clearing a full-screen canvas
+  // every frame, with nothing on it, still marks it changed and has it composited again)
+  let overlayInk = true;
   function render3d(race, dt, mode) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.clearRect(0, 0, W, H);
+    if (overlayInk) { ctx.clearRect(0, 0, W, H); overlayInk = false; }
     if (!Game.world || !race) return;
     const p = race.player;
     let assist = null;
@@ -889,6 +893,7 @@
         for (let k = 0; k < PLACED.length && !clash; k += 2) clash = Math.abs(PLACED[k] - q.x) < 42 && Math.abs(PLACED[k + 1] - q.y) < 16;
         if (clash) continue;
         PLACED.push(q.x, q.y);
+        overlayInk = true;
         const a = U.clamp((140 - d) / 40, 0, 1) * 0.9;
         ctx.globalAlpha = a;
         ctx.fillStyle = 'rgba(8,10,13,0.82)'; ctx.fillRect(q.x - 20, q.y - 22, 40, 15);
@@ -904,6 +909,7 @@
     if (R3ok) { render3d(race, dt, mode); return; }
     const W2 = Game.world;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    overlayInk = true; // (the 2D view paints the whole overlay)
     if (!W2 || !race) { ctx.fillStyle = '#07090c'; ctx.fillRect(0, 0, W, H); return; }
     const m = camMatrix();
     ctx.setTransform(m.a * DPR, m.b * DPR, m.c * DPR, m.d * DPR, m.e * DPR, m.f * DPR);
@@ -1033,6 +1039,7 @@
       R3.render({ cars: load.cars, focus: null, mode: 'load', load, dt, fx: FX });
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.clearRect(0, 0, W, H);
+      overlayInk = true; // (the bars: the race's first frame clears them)
       const bar = H * 0.085 * U.smooth(Math.min(1, t * 2.5));
       ctx.fillStyle = '#050608';
       ctx.fillRect(0, 0, W, bar); ctx.fillRect(0, H - bar, W, bar);
@@ -1058,6 +1065,7 @@
     // the venue's light
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     const g = load.grade;
+    overlayInk = true;
     ctx.globalCompositeOperation = g.op; ctx.fillStyle = g.tint; ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = g.lift; ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'source-over';

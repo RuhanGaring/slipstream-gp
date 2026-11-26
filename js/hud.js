@@ -15,6 +15,8 @@
   function sharp(cv, w, h) {
     const d = Math.min(2, G.devicePixelRatio || 1);
     cv.width = w * d; cv.height = h * d; cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    // (on the CPU: redrawn up to 30 times a second, a GPU-backed 2D canvas would put its repaint in the
+    // GPU's queue alongside the race)
     const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
     return g;
   }
@@ -121,7 +123,7 @@
     e.drs.classList.add('show');
     e.miniName.textContent = race.track.name.toUpperCase();
     e.msgs.innerHTML = '';
-    e.lights.className = '';
+    e.lights.className = ''; e.lights._cl = '';
     e.lightEls.forEach(l => l.classList.remove('on'));
     e.sec.forEach(s => (s.className = ''));
     e.pit.classList.remove('show');
@@ -205,6 +207,14 @@
     if (H.spotR._v !== r) { H.spotR.style.opacity = r.toFixed(2); H.spotR.classList.toggle('near', r > 0.75); H.spotR._v = r; }
   }
 
+  // Writes to the HUD only when the value shown changes: a text, class or style written every frame
+  // (even unchanged) re-styles, re-lays out and repaints its part of the page each frame, and that
+  // paint is drawn on the GPU in the same queue as the race.
+  const setT = (el, v) => { v = String(v); if (el._t !== v) { el.textContent = v; el._t = v; } };
+  const setC = (el, v) => { if (el._cl !== v) { el.className = v; el._cl = v; } };
+  const setBg = (el, v) => { if (el._bg !== v) { el.style.background = v; el._bg = v; } };
+  const setVar = (el, v) => { if (el._vv !== v) { el.style.setProperty('--v', v); el._vv = v; } };
+
   function update(race, p, dt, settings, extra) {
     const e = H.el;
     H.spotT = (H.spotT || 0) - dt;
@@ -212,8 +222,8 @@
     const tr = race.track;
     // dashboard
     const v = p.speed * (settings.units === 'mph' ? 2.23694 : 3.6);
-    e.speed.textContent = Math.round(v);
-    e.gear.textContent = p.gear < 0 ? 'R' : (p.speed < 0.5 && p.ctl.throttle < 0.05 && race.green ? 'N' : p.gear);
+    setT(e.speed, Math.round(v));
+    setT(e.gear, p.gear < 0 ? 'R' : (p.speed < 0.5 && p.ctl.throttle < 0.05 && race.green ? 'N' : p.gear));
     const rpm = p.rpm, lo = 8600, hi = p.spec.rpmLimit - 150;
     const lit = U.clamp(Math.floor((rpm - lo) / (hi - lo) * 15), 0, 15);
     const flash = rpm > hi && p.gear > 0 && p.gear < 8;
@@ -226,8 +236,8 @@
       if (H.arcT <= 0) { H.arcT = 1 / 30; drawArc(p, lit, hi, !!p.drsOpen); }
     }
     for (let k = 0; k < 15; k++) { const on = k < lit; if (H.revs[k]._on !== on) { H.revs[k].classList.toggle('on', on); H.revs[k]._on = on; } }
-    e.thr.style.setProperty('--v', p.throttleOut != null ? p.throttleOut.toFixed(2) : p.ctl.throttle.toFixed(2));
-    e.brk.style.setProperty('--v', p.ctl.brake.toFixed(2));
+    setVar(e.thr, p.throttleOut != null ? p.throttleOut.toFixed(2) : p.ctl.throttle.toFixed(2));
+    setVar(e.brk, p.ctl.brake.toFixed(2));
     e.drs.classList.toggle('show', race.green && (p.drsAvail || p.drsOpen));
     e.drs.classList.toggle('on', p.drsOpen);
     if (document.body.classList.contains('mobile')) {
@@ -237,7 +247,7 @@
     // 2026 power unit: straight-line aero mode and battery state
     e.xm.classList.toggle('show', !!p.aeroX); e.xm.classList.toggle('on', !!p.aeroX);
     if (p.soc != null) {
-      e.ers.style.setProperty('--v', p.soc.toFixed(3));
+      setVar(e.ers, p.soc.toFixed(3));
       e.ersBox.classList.toggle('dep', p.deploy > 0.05);
       e.ersBox.classList.toggle('harv', !!p.harvest && !(p.deploy > 0.05));
       const pct = Math.round(p.soc * 100);
@@ -267,17 +277,17 @@
     }
     if (race.sim && H.slowT <= 0) {
       H.slowT = 0.25;
-      p.wheels.forEach((w, k) => { e.tyreEls[k].style.background = tyreColor(w.temp, w.wear, p.compound.topt); });
+      p.wheels.forEach((w, k) => { setBg(e.tyreEls[k], tyreColor(w.temp, w.wear, p.compound.topt)); });
       if (!document.body.classList.contains('mobile')) drawCar(p, tyreColor);
       if (document.body.classList.contains('mobile')) {
         const mi = $('m-info'), worst = Math.round(Math.max(...p.wheels.map(w => w.wear)) * 100), hurt = p.dm ? Object.keys(p.dm.p).filter(k => p.dm.p[k] > 0.25 || p.dm.off[k]).length : p.wingDmg > 0.1 ? 1 : 0;
         const txt = `${p.compound.id} ${worst}%${hurt ? '  DAMAGE' : ''}`;
         if (mi._v !== txt) { mi.textContent = txt; mi.classList.toggle('bad', hurt > 0 || worst > 70); mi._v = txt; }
       }
-      e.comp.textContent = p.compound.name;
-      e.comp.className = 'c-' + p.compound.id;
+      setT(e.comp, p.compound.name);
+      setC(e.comp, 'c-' + p.compound.id);
       const wr = Math.max(...p.wheels.map(w => w.wear));
-      e.wear.textContent = `WEAR ${Math.round(wr * 100)}%  ${Math.round(p.wheels.reduce((a, w) => a + w.temp, 0) / 4)}°C`;
+      setT(e.wear, `WEAR ${Math.round(wr * 100)}%  ${Math.round(p.wheels.reduce((a, w) => a + w.temp, 0) / 4)}°C`);
       if (p.dm) {
         // the full model: the worst-hit parts, a hot engine, punctures and failures
         const dm = p.dm, N = { fwL: 'FRONT WING L', fwR: 'FRONT WING R', nose: 'NOSE', sFL: 'SUSP FL', sFR: 'SUSP FR', sRL: 'SUSP RL', sRR: 'SUSP RR', podL: 'SIDEPOD L', podR: 'SIDEPOD R', floor: 'FLOOR', rw: 'REAR WING', gbox: 'GEARBOX' };
@@ -287,26 +297,26 @@
         if (dm.wheelOff.some(v => v)) bad.unshift('WHEEL LOST');
         if (dm.failed) bad.unshift(dm.failed + ' FAILURE');
         else if (dm.engT > 126) bad.push('ENGINE HOT ' + Math.round(dm.engT) + '°C');
-        e.wing.textContent = bad.length ? bad.slice(0, 2).join('  /  ') : 'NO DAMAGE';
+        setT(e.wing, bad.length ? bad.slice(0, 2).join('  /  ') : 'NO DAMAGE');
         e.wing.classList.toggle('bad', bad.length > 0);
       } else {
-        e.wing.textContent = p.wingDmg > 0.1 ? `FRONT WING ${Math.round(p.wingDmg * 100)}%` : 'FRONT WING OK';
+        setT(e.wing, p.wingDmg > 0.1 ? `FRONT WING ${Math.round(p.wingDmg * 100)}%` : 'FRONT WING OK');
         e.wing.classList.toggle('bad', p.wingDmg > 0.1);
       }
     }
     // position & lap
-    e.pos.textContent = p.pos;
+    setT(e.pos, p.pos);
     const lap = race.mode === 'tt' ? Math.max(1, p.lap) : U.clamp(p.lap, 1, race.laps);
-    e.lap.textContent = lap;
+    setT(e.lap, lap);
     // timing
     const curT = race.green ? race.time - p.lapStart : 0;
-    e.cur.textContent = U.fmtTime(curT);
-    e.last.textContent = U.fmtTime(p.lastLap);
-    e.best.textContent = U.fmtTime(p.bestLap);
+    setT(e.cur, U.fmtTime(curT));
+    setT(e.last, U.fmtTime(p.lastLap));
+    setT(e.best, U.fmtTime(p.bestLap));
     if (extra && extra.delta != null && isFinite(extra.delta)) {
-      e.delta.textContent = U.fmtGap(extra.delta);
-      e.delta.className = 'delta ' + (extra.delta > 0 ? 'up' : 'down');
-    } else e.delta.textContent = '';
+      setT(e.delta, U.fmtGap(extra.delta));
+      setC(e.delta, 'delta ' + (extra.delta > 0 ? 'up' : 'down'));
+    } else setT(e.delta, '');
     // live sector
     const sIdx = p.dist < 0 ? 0 : (p.loc.s < tr.sectors[1] ? 0 : p.loc.s < tr.sectors[2] ? 1 : 2);
     for (let k = 0; k < 3; k++) {
@@ -315,11 +325,11 @@
     }
     // start lights
     if (race.phase === 'lights' || race.phase === 'grid') {
-      e.lights.className = 'show';
+      setC(e.lights, 'show');
       e.lightEls.forEach((l, k) => l.classList.toggle('on', k < race.lightsOn));
     } else if (race.green && race.time - race.startTime < 1.2) {
-      e.lights.className = 'show go';
-    } else e.lights.className = '';
+      setC(e.lights, 'show go');
+    } else setC(e.lights, '');
 
     // tower (4 Hz)
     H.towerT -= dt;
