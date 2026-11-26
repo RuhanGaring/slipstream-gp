@@ -35,16 +35,20 @@
   ROLES.push({ r: 'w', x: 2.65, y: 1.25, yaw: -Math.PI / 2 });
   ROLES.push({ r: 'c', x: 4.4, y: 2.5, gs: true, yaw: Math.PI });
   const NPER = ROLES.length;
+  // each corner's wheel-off man, by the corner's index (front 0 / rear 2, plus 1 on the car's right)
+  const OQ = [];
+  ROLES.forEach((R, q) => { if (R.r === 'o') OQ[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)] = q; });
 
   // Parts, each an instanced mesh over every crew. Low-poly but shaped as a person is: a torso wider
   // at the shoulders than the waist, hips, a rounded helmet with its dark visor, upper arms and
   // forearms with gloved hands, thighs and shins with boots. Limbs are unit long and hang from their
   // top (their length is a scale); their widths taper.
-  const PARTS = ['torso', 'pelvis', 'head', 'visor', 'uarmL', 'uarmR', 'farmL', 'farmR', 'handL', 'handR', 'legL', 'legR', 'shinL', 'shinR', 'bootL', 'bootR', 'tyre', 'gun', 'jack'];
+  const PARTS = ['torso', 'pelvis', 'head', 'visor', 'uarmL', 'uarmR', 'farmL', 'farmR', 'handL', 'handR', 'legL', 'legR', 'shinL', 'shinR', 'bootL', 'bootR', 'tyre', 'rim', 'gun', 'jack'];
   const SUIT = ['torso', 'pelvis', 'uarmL', 'uarmR', 'farmL', 'farmR', 'legL', 'legR', 'shinL', 'shinR'];
   let S = null; // the lap's crews: { meshes, crews, tr }
   const M4 = new THREE.Matrix4(), M5 = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), PV = new THREE.Vector3(), SC = new THREE.Vector3();
   const HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
+  const TYW = []; // per person, where the wheel in their hands is (world), or null
   // A limb or trunk from y 0 down to -1: an n-sided ring at each [t, width, depth] of its profile (t 0 at
   // the top, 1 at the bottom), smooth shaded, so it reads round in the light at a few dozen triangles.
   function limb(prof, n) {
@@ -66,7 +70,25 @@
     const boxes = W2.decor.filter(it => it.type === 'box');
     if (!boxes.length) return;
     const std = opt.std;
-    const tyreG = new THREE.CylinderGeometry(0.36, 0.36, 0.36, 16); tyreG.rotateX(Math.PI / 2); // (its axis the way its carrier faces: onto the hub)
+    // A spare wheel as the car's own are: an 18 inch rim inside a 720 mm tyre, rounded at the shoulders,
+    // its sidewall ringed in the compound's colour (the instance colour; the rubber black). Its axis the
+    // way its carrier faces: onto the hub.
+    const tyreG = new THREE.LatheGeometry([[0.232, -0.165], [0.3, -0.172], [0.345, -0.16], [0.36, -0.12], [0.362, 0], [0.36, 0.12], [0.345, 0.16], [0.3, 0.172], [0.232, 0.165]].map(([r, y]) => new THREE.Vector2(r, y)), 28);
+    tyreG.rotateX(Math.PI / 2); tyreG.computeVertexNormals();
+    const rimG = new THREE.CylinderGeometry(0.234, 0.234, 0.31, 24, 1, false); rimG.rotateX(Math.PI / 2);
+    const tyreM = std({ color: '#ffffff', roughness: 0.85 });
+    tyreM.userData.patchKey = 'crewTyre';
+    tyreM.userData.patchExtra = sh => {
+      const VAR = '#include <common>\nvarying vec3 vTyP; varying vec3 vTyN;';
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', VAR).replace('#include <begin_vertex>', '#include <begin_vertex>\nvTyP = position; vTyN = normal;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', VAR).replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          float r = length(vTyP.xy), side = smoothstep(0.55, 0.75, abs(normalize(vTyN).z));
+          float ring = side * smoothstep(0.278, 0.284, r) * (1.0 - smoothstep(0.3, 0.306, r));
+          diffuseColor.rgb = mix(vec3(0.03, 0.03, 0.032), diffuseColor.rgb, ring);
+        }`);
+    };
+    const rimM = std({ color: '#ffffff', roughness: 0.38, metalness: 0.6 });
     // (overalls: a chest deeper than the waist and shoulders rounded off at the top; the helmet smooth,
     // its visor a band wrapped round its front)
     const torsoG = limb([[0, 0.3, 0.17], [0.08, 0.44, 0.23], [0.3, 0.46, 0.26], [0.65, 0.4, 0.23], [1, 0.35, 0.21]], 8);
@@ -78,7 +100,7 @@
     const thighG = limb([[0, 0.17, 0.18], [0.25, 0.165, 0.18], [1, 0.12, 0.13]], 7), shinG = limb([[0, 0.12, 0.13], [0.3, 0.125, 0.14], [1, 0.085, 0.095]], 7);
     const bootG = new THREE.BoxGeometry(0.12, 0.09, 0.27); bootG.translate(0, 0.045, 0.05);
     const unit = new THREE.BoxGeometry(1, 1, 1);
-    const geo = { torso: torsoG, pelvis: pelvisG, head: headG, visor: visorG, uarmL: uarmG, uarmR: uarmG, farmL: farmG, farmR: farmG, handL: handG, handR: handG, legL: thighG, legR: thighG, shinL: shinG, shinR: shinG, bootL: bootG, bootR: bootG, tyre: tyreG, gun: unit, jack: unit };
+    const geo = { torso: torsoG, pelvis: pelvisG, head: headG, visor: visorG, uarmL: uarmG, uarmR: uarmG, farmL: farmG, farmR: farmG, handL: handG, handR: handG, legL: thighG, legR: thighG, shinL: shinG, shinR: shinG, bootL: bootG, bootR: bootG, tyre: tyreG, rim: rimG, gun: unit, jack: unit };
     const n = boxes.length * NPER;
     // Overalls black, as the teams' are, with lines in the team's colour (the instance colour): down the
     // outside of each arm and leg and the sides of the body, and a yoke over the shoulders. Drawn by the
@@ -106,7 +128,7 @@
     const dark = std({ color: '#ffffff', roughness: 0.45, metalness: 0.15 });
     const meshes = {};
     for (const p of PARTS) {
-      const im = new THREE.InstancedMesh(geo[p], p === 'torso' ? suitT : p === 'pelvis' ? suitH : SUIT.includes(p) ? suitL : p === 'head' ? mat : dark, n);
+      const im = new THREE.InstancedMesh(geo[p], p === 'tyre' ? tyreM : p === 'rim' ? rimM : p === 'torso' ? suitT : p === 'pelvis' ? suitH : SUIT.includes(p) ? suitL : p === 'head' ? mat : dark, n);
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.castShadow = p !== 'visor' && p !== 'handL' && p !== 'handR'; im.receiveShadow = true;
       im.userData.cat = 'venue';
@@ -127,8 +149,10 @@
         const i = k * NPER + q;
         c.set(line); for (const p of SUIT) meshes[p].setColorAt(i, c);
         meshes.head.setColorAt(i, c);
-        c.set('#101215'); for (const p of ['visor', 'handL', 'handR', 'bootL', 'bootR', 'tyre', 'jack']) meshes[p].setColorAt(i, c);
+        c.set('#101215'); for (const p of ['visor', 'handL', 'handR', 'bootL', 'bootR', 'jack']) meshes[p].setColorAt(i, c);
         c.set('#c9ccd0'); meshes.gun.setColorAt(i, c);
+        c.set('#26292e'); meshes.rim.setColorAt(i, c);
+        c.set('#ffd400'); meshes.tyre.setColorAt(i, c);
       }
       const gy = Tracks.groundAt(tr, b.x, b.y);
       return { k, team, box: b, gy, side: tr.pit.side, state: 'idle', t: 0, w: 0, dirty: true, car: null, cur: [], settling: false };
@@ -236,14 +260,19 @@
     };
     arm(-1, 'uarmL', 'farmL', 'handL', P.armL || 0);
     const hand = arm(1, 'uarmR', 'farmR', 'handR', P.armR || 0);
+    // The wheel in their hands; where it is is noted (TYW) for wheels() below, which carries the car's
+    // own wheel there while it is off the car (P.carried: this person's spare not drawn meanwhile).
     if (P.tyre && P.tyreW) {
       // (between the car's hub and the hands: placed in the world, turned as the person is)
       E.set(0, P.yaw, 0); Q.setFromEuler(E);
-      ms.tyre.setMatrixAt(i, M4.compose(P.tyreW, Q, SC.set(1, 1, 1)));
+      M4.compose(P.tyreW, Q, SC.set(1, 1, 1));
     } else if (P.tyre) {
       const tp = P.tyreAt || V(0, 0.5, 0.55);
-      ms.tyre.setMatrixAt(i, M4.multiplyMatrices(_R, M5.makeTranslation(tp.x, tp.y, tp.z)));
-    } else ms.tyre.setMatrixAt(i, HIDE);
+      M4.multiplyMatrices(_R, M5.makeTranslation(tp.x, tp.y, tp.z));
+    }
+    if (P.tyre) (TYW[i] || (TYW[i] = new THREE.Vector3())).setFromMatrixPosition(M4); else TYW[i] = null;
+    const tyM = P.tyre && !P.carried ? M4 : HIDE;
+    ms.tyre.setMatrixAt(i, tyM); ms.rim.setMatrixAt(i, tyM);
     if (P.gun) { _E2.set(-1.1 * reach, 0, 0); _Q2.setFromEuler(_E2); ms.gun.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(PV.set(hand.x - 0.12, hand.y + 0.02, hand.z + 0.12), _Q2, SC.set(0.1, 0.15, 0.36)))); }
     else ms.gun.setMatrixAt(i, HIDE);
     if (P.jack != null) {
@@ -338,6 +367,7 @@
           // the old wheel off the hub and pulled out (0.18..0.3), then held as he backs away
           P.crouch = 0.75; P.arms = 0.95;
           const off = U.smooth((s - 0.17) / 0.12);
+          if (st === 'stop' && s > 0.17 && s < 0.55) P.carried = true;
           if (s > 0.17) { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += R.corner[1] * 0.75 * off; lx += 0.25 * off; if (st === 'stop') P.lerpT = { from: 'hub', f: U.smooth((s - 0.17) / 0.13) }; }
         } else if (R.r === 'n') {
           // the new wheel held upright at hub height, slid onto the hub (0.4..0.55)
@@ -458,7 +488,7 @@
       // (getting up off a knee to walk, or down onto it, takes a person a good part of a second)
       C.up = C.up == null ? C.walkAmp || 0 : C.up + ((C.walkAmp || 0) - C.up) * (dt > 0 ? 1 - Math.exp(-dt / 0.22) : 1);
       C.walkAmp += (Math.max(U.smooth((C.spd - 0.12) / 0.45), C.far && (P.crouch || 0) < 0.3 ? 0.6 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.12) : 1);
-      C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.gun = P.gun;
+      C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.carried = P.carried; C.gun = P.gun;
       // (still settling: keep posing this crew)
       // (walking while their place moves under them by more than a stroll)
       const mv = Math.hypot(P.x - C.x, P.z - C.z);
@@ -589,17 +619,41 @@
     if (stop) {
       const hubs = HUBS.get(c) || []; HUBS.set(c, hubs);
       wl.forEach((w, k) => {
-        _v.set(w.position.x, w.position.y + body.position.y, w.position.z).applyAxisAngle(YAX, o.rotation.y).add(o.position);
+        const h = w.userData.crewHome;
+        const hx = h ? h.x : w.position.x, hz = h ? h.y : w.position.z;
+        _v.set(hx, w.position.y + body.position.y, hz).applyAxisAngle(YAX, o.rotation.y).add(o.position);
         // (by where it sits: front or rear, and the car's right, +z, or left)
-        const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
+        const ci = (hx > 0 ? 0 : 2) + (hz > 0 ? 1 : 0);
         (hubs[ci] || (hubs[ci] = new THREE.Vector3())).copy(_v);
       });
     }
-    const hide = stop && u > 0.17 && u < 0.55;
-    if (!hide && !c.__crewHid) return;
-    for (const w of wl) { const sp = w.userData && w.userData.spin; if (sp) sp.scale.setScalar(hide ? 1e-4 : 1); }
-    c.__crewHid = hide;
+    // The car's own wheels come off: from the moment its wheel-off man pulls it (u 0.17) until the new
+    // one is on (u 0.55) each wheel goes where his hands have it, out from the hub and away; then it is
+    // back on its hub (the new wheel, carried in meanwhile), and the old one he holds is his spare.
+    const cr = stop && S ? S.crews.find(q => q.team === c.team || q.team.id === c.team.id) : null;
+    const off = cr && u > 0.17 && u < 0.55;
+    if (off) {
+      o.updateMatrix(); body.updateMatrix();
+      _M.multiplyMatrices(o.matrix, body.matrix).invert();
+      // (the spares in the compound's colours, as the car's own)
+      const tc = body.userData && body.userData.tyComp;
+      if (tc && !cr.tyC) { cr.tyC = true; for (let q = 0; q < NPER; q++) S.meshes.tyre.setColorAt(cr.k * NPER + q, tc.value); S.meshes.tyre.instanceColor.needsUpdate = true; }
+    } else if (cr) cr.tyC = false;
+    if (!off && !c.__crewOff) return;
+    for (const w of wl) {
+      const d = w.userData;
+      if (!d) continue;
+      const ci = (d.crewHome ? d.crewHome.x : w.position.x) > 0 ? 0 : 2, cj = ci + ((d.crewHome ? d.crewHome.y : w.position.z) > 0 ? 1 : 0);
+      const at = off ? TYW[cr.k * NPER + OQ[cj]] : null;
+      if (at) {
+        if (!d.crewHome) d.crewHome = new THREE.Vector2(w.position.x, w.position.z);
+        _v.copy(at).applyMatrix4(_M);
+        w.position.set(_v.x, _v.y, _v.z);
+      } else if (d.crewHome) { w.position.x = d.crewHome.x; w.position.z = d.crewHome.y; d.crewHome = null; }
+    }
+    c.__crewOff = off;
   }
+  const _M = new THREE.Matrix4();
 
   // how far up the jacks have the car (m), for the renderer to lift the car model
   function lift(c) {
