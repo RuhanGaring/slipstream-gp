@@ -5431,6 +5431,8 @@ void main() {
       }
       ud.gy = gy;
       o.position.set(c.x, gy, c.y);
+      // (round a pit stop the car is drawn easing into its place and away, js/r3-pitcrew.js settle)
+      if (F1.R3Crew) { const sO = F1.R3Crew.settle(c, dt); if (sO) { o.position.x += sO[0]; o.position.z += sO[1]; } }
       o.rotation.y = -c.h;
       // (up on the pit crew's jacks through a stop, js/r3-pitcrew.js)
       body.position.y = (c.zh || 0) + (F1.R3Crew && c.brain && c.brain.pit ? F1.R3Crew.lift(c) : 0);
@@ -5455,6 +5457,8 @@ void main() {
         if (wd.baseY == null) wd.baseY = w.position.y;
         w.position.y = wd.baseY + (pw && pw.s0 != null ? U.clamp(pw.comp - pw.s0, -0.05, 0.05) : 0);
       });
+      // (a stop's wheels off and on, js/r3-pitcrew.js)
+      if (F1.R3Crew) F1.R3Crew.wheels(c, bu.wheels, o, body);
       ud.flap += ((c.drsOpen ? -0.85 : 0) - ud.flap) * Math.min(1, dt * 12);
       bu.flapPivot.rotation.z = ud.flap;
       bu.rainMat.emissiveIntensity = c.limiter ? (Math.floor(performance.now() / 120) % 2 ? 5 : 0) : 0;

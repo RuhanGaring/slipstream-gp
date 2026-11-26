@@ -47,7 +47,7 @@
     const boxes = W2.decor.filter(it => it.type === 'box');
     if (!boxes.length || W2.town && !boxes.length) return;
     const std = opt.std, col = opt.col;
-    const unit = new THREE.BoxGeometry(1, 1, 1), tyreG = new THREE.CylinderGeometry(0.33, 0.33, 0.3, 14); tyreG.rotateX(Math.PI / 2); // (its axis the way its carrier faces: onto the hub)
+    const unit = new THREE.BoxGeometry(1, 1, 1), tyreG = new THREE.CylinderGeometry(0.36, 0.36, 0.36, 16); tyreG.rotateX(Math.PI / 2); // (its axis the way its carrier faces: onto the hub)
     const geo = { torso: unit, head: unit, armL: unit, armR: unit, legL: unit, legR: unit, shinL: unit, shinR: unit, tyre: tyreG, gun: unit, jack: unit };
     const n = boxes.length * NPER;
     const mat = std({ color: '#ffffff', roughness: 0.75 });
@@ -131,7 +131,11 @@
     set('armR', sh.x + 0.27, sh.y, sh.z, arm + (P.armR || 0), -0.08, 0.11, 0.6, 0.11, 0.3); // (armR < 0: the hand up)
     // the hands, roughly: the arm's end
     const hand = V(0, -0.6, 0).applyEuler(new THREE.Euler(arm, 0, 0)).add(sh);
-    if (P.tyre) {
+    if (P.tyre && P.tyreW) {
+      // (between the car's hub and the hands: placed in the world, turned as the person is)
+      E.set(0, P.yaw, 0); Q.setFromEuler(E);
+      ms.tyre.setMatrixAt(i, M4.compose(P.tyreW, Q, SC.set(1, 1, 1)));
+    } else if (P.tyre) {
       const tp = P.tyreAt || V(hand.x, hand.y - 0.05, hand.z + 0.25);
       ms.tyre.setMatrixAt(i, M4.multiplyMatrices(R, M5.makeTranslation(tp.x, tp.y, tp.z)));
     } else ms.tyre.setMatrixAt(i, HIDE);
@@ -149,7 +153,7 @@
   // box when the car left moved the whole crew a metre or two at once)
   function frame(cr) {
     const c = cr.car, b = cr.box;
-    if (c && cr.state === 'stop') { cr.stopF = { x: c.x, y: c.y, h: c.h, gy: cr.gy }; return cr.stopF; }
+    if (c && cr.state === 'stop') { const d = SET.get(c); cr.stopF = { x: d ? d.x : c.x, y: d ? d.y : c.y, h: c.h, gy: cr.gy }; return cr.stopF; }
     if (cr.stopF && (cr.state === 'release' || cr.state === 'back')) return cr.stopF;
     return { x: b.x, y: b.y, h: b.h, gy: cr.gy };
   }
@@ -184,13 +188,14 @@
           // the old wheel off the hub and pulled out (0.18..0.3), then held as he backs away
           P.crouch = 0.75; P.arms = 0.95;
           const off = U.smooth((s - 0.17) / 0.12);
-          if (s > 0.17) { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += R.corner[1] * 0.75 * off; lx += 0.25 * off; }
+          if (s > 0.17) { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += R.corner[1] * 0.75 * off; lx += 0.25 * off; if (st === 'stop') P.lerpT = { from: 'hub', f: U.smooth((s - 0.17) / 0.13) }; }
         } else if (R.r === 'n') {
           // the new wheel held upright at hub height, slid onto the hub (0.4..0.55)
           P.crouch = 0.65; P.arms = 0.95; P.tyre = st === 'ready' || s < 0.55;
           const on = U.smooth((s - 0.4) / 0.15);
           if (st === 'stop') { ly -= R.corner[1] * 0.38 * on; lx += 0.3 * on; }
           if (P.tyre) P.tyreAt = V(0, 0.5, 0.55);
+          if (st === 'stop' && s > 0.4 && P.tyre) P.lerpT = { from: 'hand', f: on };
         } else if (R.r === 'j') {
           const up = R.front ? U.smooth(s / 0.14) : U.smooth((s - 0.06) / 0.12), down = U.smooth((s - 0.94) / 0.03);
           P.jack = st === 'stop' ? up * (1 - down) : 0; P.lean = 0.3 + 0.3 * P.jack; P.arms = 0.65;
@@ -229,14 +234,14 @@
       // its nearer side. Their own car standing in the box is the exception: they work round it.
       for (const c of S.cars || []) {
         if (!c || c.x == null || (c === cr.car && st === 'stop')) continue;
-        const dx0 = P.x - c.x, dz0 = P.z - c.y;
+        const dd = SET.get(c), ccx = dd ? dd.x : c.x, ccy = dd ? dd.y : c.y, dx0 = P.x - ccx, dz0 = P.z - ccy;
         if (dx0 * dx0 + dz0 * dz0 > 196) continue;
         const ch = Math.cos(c.h), sh = Math.sin(c.h), sp = Math.max(0, c.speed || 0);
         const along = dx0 * ch + dz0 * sh, acr = -dx0 * sh + dz0 * ch, HW = 1.5;
         if (along > -3.2 && along < 3.2 + Math.min(9, sp * 0.45) && Math.abs(acr) < HW) {
           const sd = Math.abs(acr) > 0.05 ? Math.sign(acr) : (c === cr.car ? Math.sign(-Math.sin(c.h - cr.box.h) || 1) * cr.side : cr.side) || 1;
           const a2 = sd * HW;
-          P.x = c.x + along * ch - a2 * sh; P.z = c.y + along * sh + a2 * ch;
+          P.x = ccx + along * ch - a2 * sh; P.z = ccy + along * sh + a2 * ch;
         }
       }
       // (walking: facing the way they go)
@@ -244,6 +249,15 @@
       // three's y rotation: local +z to (sin, cos); a person faces local +z
       const hW = F.h + yaw;
       P.yaw = Math.PI / 2 - hW;
+      // a wheel on its way between the car's hub and the hands (the car's own wheel is hidden
+      // meanwhile, wheels() below): the hub of this corner as the car is drawn
+      if (P.lerpT && R.corner) {
+        const hubs = cr.car && HUBS.get(cr.car), hub = hubs && hubs[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)];
+        if (hub) {
+          const hw = V(P.x + Math.sin(P.yaw) * 0.55, P.y + 0.5, P.z + Math.cos(P.yaw) * 0.55), f = P.lerpT.f;
+          P.tyreW = P.lerpT.from === 'hub' ? hub.clone().lerp(hw, f) : hw.lerp(hub, f);
+        }
+      }
       // Every change of plan eased, never jumped to: the frame moving from the painted box to where
       // the car really stopped, everyone standing up at the release, the step back, the walk home.
       // Each person follows their target with a time constant of 0.09 s (their facing a little
@@ -254,7 +268,7 @@
       const dy = Math.atan2(Math.sin(P.yaw - C.yaw), Math.cos(P.yaw - C.yaw)); C.yaw += dy * (dt > 0 ? 1 - Math.exp(-dt / 0.14) : 1);
       C.jack = P.jack == null ? null : C.jack == null ? P.jack : C.jack + (P.jack - C.jack) * k;
       C.walkAmp += ((cr.moving ? 1 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.15) : 1);
-      C.walk = S.time * 9 + q * 0.7; C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.gun = P.gun;
+      C.walk = S.time * 9 + q * 0.7; C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.gun = P.gun;
       // (still settling: keep posing this crew)
       if (Math.abs(P.x - C.x) + Math.abs(P.z - C.z) + Math.abs(dy) + Math.abs((P.crouch || 0) - C.crouch) > 0.002 || C.walkAmp > 0.01) cr.settling = true;
       person(cr, q, C);
@@ -301,6 +315,58 @@
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
 
+  // The car as drawn round its stop. The race brings it to rest in one step from about 3 m/s at its
+  // box and releases it the moment the stop's time is up; drawn so, it halted dead and leapt away.
+  // Near its box the drawn car follows the race's on a critically damped spring (it brakes into its
+  // place and pulls away), stiff everywhere else, so it is never more than centimetres out on the
+  // lane. Returns the drawn place's offset from the race's (x, y), or null.
+  const SET = new WeakMap(), HUBS = new WeakMap();
+  function settle(c, dt) {
+    const p = c.brain && c.brain.pit;
+    let d = SET.get(c);
+    if (!p && !d) return null;
+    if (!d) { d = { x: c.x, y: c.y, vx: c.vx || 0, vy: c.vy || 0 }; SET.set(c, d); }
+    if (dt <= 0) return [d.x - c.x, d.y - c.y];
+    // (a reset or a teleport: start again where the car is)
+    if (Math.hypot(c.x - d.x, c.y - d.y) > 8) { d.x = c.x; d.y = c.y; d.vx = c.vx || 0; d.vy = c.vy || 0; }
+    let w = 40;
+    if (p && S && S.tr && c.team) {
+      const box = S.tr.pit.boxS[c.team.idx], gap = box == null || !c.loc ? 1e9 : Math.abs(((c.loc.s - box) % S.tr.L + S.tr.L * 1.5) % S.tr.L - S.tr.L / 2);
+      w = 7 + 33 * U.smooth((gap - 12) / 30);
+    }
+    // (critically damped, sub-stepped for the stiff end)
+    const n = Math.max(1, Math.ceil(dt * w / 0.5)), h = dt / n;
+    for (let k = 0; k < n; k++) {
+      const ax = w * w * (c.x - d.x) - 2 * w * d.vx, ay = w * w * (c.y - d.y) - 2 * w * d.vy;
+      d.vx += ax * h; d.vy += ay * h; d.x += d.vx * h; d.y += d.vy * h;
+    }
+    if (!p && Math.hypot(c.x - d.x, c.y - d.y) < 0.002) { SET.delete(c); return null; }
+    return [d.x - c.x, d.y - c.y];
+  }
+
+  // The car's wheels through a stop: each corner's own wheel hidden from the moment its old one comes
+  // off the hub (u 0.17, the crew carries a wheel away from there) to the moment the new one is on
+  // (u 0.55); and the hubs' places noted for the crew. wheels: the model's four, front left, front
+  // right, rear left, rear right; o the car's root, body its body.
+  const _v = new THREE.Vector3(), YAX = new THREE.Vector3(0, 1, 0);
+  function wheels(c, wl, o, body) {
+    const p = c.brain && c.brain.pit;
+    const stop = p && p.phase === 'stop' && p.service, u = stop ? 1 - (p.serviceT || 0) / p.service : -1;
+    if (stop) {
+      const hubs = HUBS.get(c) || []; HUBS.set(c, hubs);
+      wl.forEach((w, k) => {
+        _v.set(w.position.x, w.position.y + body.position.y, w.position.z).applyAxisAngle(YAX, o.rotation.y).add(o.position);
+        // (by where it sits: front or rear, and the car's right, +z, or left)
+        const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
+        (hubs[ci] || (hubs[ci] = new THREE.Vector3())).copy(_v);
+      });
+    }
+    const hide = stop && u > 0.17 && u < 0.55;
+    if (!hide && !c.__crewHid) return;
+    for (const w of wl) { const sp = w.userData && w.userData.spin; if (sp) sp.scale.setScalar(hide ? 1e-4 : 1); }
+    c.__crewHid = hide;
+  }
+
   // how far up the jacks have the car (m), for the renderer to lift the car model
   function lift(c) {
     const p = c.brain && c.brain.pit;
@@ -310,5 +376,5 @@
     return 0.05 * U.smooth((u - 0.1) / 0.08) * (1 - U.smooth((u - 0.94) / 0.03));
   }
 
-  F1.R3Crew = { build, update, lift, ROLES, get state() { return S; } };
+  F1.R3Crew = { build, update, lift, settle, wheels, ROLES, get state() { return S; } };
 })(typeof window !== 'undefined' ? window : globalThis);
