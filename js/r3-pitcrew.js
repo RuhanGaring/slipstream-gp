@@ -807,7 +807,8 @@
         const d = it.w.userData, tilt = d.spin.parent;
         _q.setFromAxisAngle(YAX, -cr.box.h).multiply(tilt.quaternion).multiply(_q2.setFromAxisAngle(ZAX, -ang));
         it.g.matrix.compose(at, _q, _s);
-        it.g.matrixWorldNeedsUpdate = true;
+        // (its world matrices made here: the venue's tree is not walked every frame, being still)
+        it.g.updateMatrixWorld(true);
       }
     }
   }
