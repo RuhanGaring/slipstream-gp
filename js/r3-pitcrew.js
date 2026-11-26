@@ -23,7 +23,7 @@
   const AX = 1.8; // the axles from the car's centre (a 3.6 m wheelbase)
   const ROLES = [];
   for (const [fx, sx] of [[1, -1], [1, 1], [-1, -1], [-1, 1]]) {
-    ROLES.push({ r: 'g', x: fx * AX, y: sx * 1.22, yaw: -sx * Math.PI / 2, corner: [fx, sx] });
+    ROLES.push({ r: 'g', x: fx * AX, y: sx * 1.6, yaw: -sx * Math.PI / 2, corner: [fx, sx] }); // (far enough out for the gun's length to the nut)
     ROLES.push({ r: 'o', x: fx * AX + 0.5, y: sx * 1.5, yaw: -sx * Math.PI / 2, corner: [fx, sx] });
     ROLES.push({ r: 'n', x: fx * AX - 0.55, y: sx * 1.55, yaw: -sx * Math.PI / 2, corner: [fx, sx] });
   }
@@ -167,6 +167,7 @@
   // A person's pose: place, heading, crouch (0 standing .. 1 kneeling), lean, reach (arms 0 hanging .. 1
   // forward at the hands' work), a raised arm (armL/armR, negative up), walk phase and amplitude, and
   // what they carry. (About x a negative turn takes a hanging limb forward, to +z, the way they face.)
+  const _wl = new THREE.Vector3(), _gl = new THREE.Vector3(), _gt = new THREE.Vector3();
   const _R = new THREE.Matrix4(), _P = new THREE.Vector3(), _Q2 = new THREE.Quaternion(), _E2 = new THREE.Euler();
   function person(cr, q, P) {
     const ms = S.meshes, i = cr.k * NPER + q;
@@ -233,8 +234,67 @@
     }
     // (the arms swing against the legs)
     const sw = -Math.cos(ph) * 0.5 * amp * (1 + 0.6 * U.smooth((spd - 2) / 2));
-    // hips, then the torso leaning forward from them, the helmet on top with its visor ahead
-    const lean = 0.3 * c + (P.lean || 0) * (1 - amp) + amp * (0.05 + 0.12 * U.smooth((spd - 1.5) / 3));
+    // What the hands hold, and where they take hold of it (the person's frame). The wheel: by its tread
+    // at either side as it is carried or worked, by its top as it stands on the floor; the wheel gun:
+    // the right hand on its grip, the left along its barrel, its nose on the wheel nut; the jack: both
+    // hands along its handle; the stabilisers on the car's flanks, the wing men on the front wing.
+    const R0 = ROLES[q], cyw = Math.cos(P.yaw), syw = Math.sin(P.yaw);
+    const toLocal = (w, out) => { const dx = w.x - P.x, dz = w.z - P.z; return out.set(dx * cyw - dz * syw, w.y - P.y, dx * syw + dz * cyw); };
+    const hubs = cr.car && HUBS.get(cr.car), hubW = R0.corner && hubs && hubs[(R0.corner[0] > 0 ? 0 : 2) + (R0.corner[1] > 0 ? 1 : 0)];
+    const atCar = cr.state === 'stop', u = cr.u || 0;
+    let gL = null, gR = null;
+    // the wheel: where it is (in the world between hub and hands, else in the hands' frame)
+    let Wc = null;
+    if (P.tyre && P.tyreW) Wc = toLocal(P.tyreW, _wl);
+    else if (P.tyre) Wc = _wl.copy(P.tyreAt || V(0, 1.0, 0.38));
+    else if (R0.r === 'o' && atCar && u < 0.17 && hubW) Wc = toLocal(hubW, _wl); // (on the car, about to come off)
+    if (Wc) {
+      if (Wc.y < TYRE_R + 0.08) { gL = V(Wc.x - 0.15, Wc.y + 0.31, Wc.z - 0.05); gR = V(Wc.x + 0.15, Wc.y + 0.31, Wc.z - 0.05); }
+      else { gL = V(Wc.x - 0.33, Wc.y + 0.05, Wc.z - 0.02); gR = V(Wc.x + 0.33, Wc.y + 0.05, Wc.z - 0.02); }
+    }
+    // the gun: nose on the nut (the hub as the car stands), else held ready before the chest
+    let gunC = null;
+    if (P.gun) {
+      const tip = atCar && hubW && u < 0.88 ? toLocal(hubW, _gl).add(_gt.set(0, 0, -0.18)) : _gl.set(0.06, 1.02, 0.5);
+      gunC = tip.clone().add(_gt.set(0, 0, -0.18));
+      gR = V(gunC.x + 0.07, gunC.y - 0.07, gunC.z - 0.1); gL = V(gunC.x - 0.07, gunC.y + 0.02, gunC.z + 0.08);
+    }
+    // the jack's handle: from the hands down to the car (P.jack 0 out .. 1 under it)
+    let jC = null, jD = null;
+    if (P.jack != null) {
+      // (its foot under the car's nose or tail 1.75 m out, its handle's end at the waist, pulled down
+      // a third of a metre to lift the car)
+      const nE = V(0, 1.02 - 0.32 * P.jack, 0.12), fE = V(0, 0.1 + 0.04 * P.jack, 1.75);
+      jD = fE.clone().sub(nE); const jl = jD.length(); jD.divideScalar(jl); jC = nE.clone().add(fE).multiplyScalar(0.5); jC.len = jl;
+      gR = nE.clone().addScaledVector(jD, 0.06).add(_gt.set(0.1, 0, 0)); gL = nE.clone().addScaledVector(jD, 0.4).add(_gt.set(-0.1, 0, 0));
+    }
+    if (!gL && atCar && R0.r === 's' && u < 0.92) { gL = V(-0.2, 0.74, 0.46); gR = V(0.2, 0.74, 0.46); }
+    if (!gL && atCar && R0.r === 'w' && u > 0.08 && u < 0.72) { gL = V(-0.22, 0.36, 0.4); gR = V(0.22, 0.36, 0.4); }
+    // (a signalling arm raised: that hand lets go)
+    if ((P.armR || 0) < -0.3) gR = null;
+    if ((P.armL || 0) < -0.3) gL = null;
+    const kG = DT > 0 ? 1 - Math.exp(-DT / 0.12) : 1;
+    P.gwL = (P.gwL || 0) + ((gL ? 1 : 0) - (P.gwL || 0)) * kG;
+    P.gwR = (P.gwR || 0) + ((gR ? 1 : 0) - (P.gwR || 0)) * kG;
+    if (gL) P.gpL = (P.gpL || new THREE.Vector3()).copy(gL);
+    if (gR) P.gpR = (P.gpR || new THREE.Vector3()).copy(gR);
+    // hips, then the torso leaning forward from them, the helmet on top with its visor ahead; bent
+    // further, as far as it must be, for the hands to reach their holds
+    const lean0 = 0.3 * c + (P.lean || 0) * (1 - amp) + amp * (0.05 + 0.12 * U.smooth((spd - 1.5) / 3));
+    const shAt = (ln, sd) => V(sd * 0.235, -0.07 * Math.cos(ln) + 0.6 * Math.cos(ln) + hip + 0.06, -0.07 * Math.sin(ln) + 0.6 * Math.sin(ln));
+    let leanN = lean0;
+    if (P.gpL || P.gpR) {
+      let best = lean0, bestE = 1e9;
+      for (let ln = lean0; ln <= lean0 + 1.1; ln += 0.05) {
+        let e = 0;
+        if (P.gpL && P.gwL > 0.01) e = Math.max(e, shAt(ln, -1).distanceTo(P.gpL) - 0.56);
+        if (P.gpR && P.gwR > 0.01) e = Math.max(e, shAt(ln, 1).distanceTo(P.gpR) - 0.56);
+        if (e <= 0) { best = ln; bestE = 0; break; }
+        if (e < bestE) { bestE = e; best = ln; }
+      }
+      leanN = best;
+    }
+    const lean = lean0 + (leanN - lean0) * Math.max(P.gwL || 0, P.gwR || 0);
     put('pelvis', 0, hip + 0.12, 0, 0, 0, 0.2);
     E.set(lean, 0, 0); Q.setFromEuler(E);
     const top = V(0, 0.6, 0).applyQuaternion(Q).add(V(0, hip + 0.06, 0));
@@ -244,23 +304,34 @@
     ms.head.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(hc, _Q2, SC.set(1, 1, 1))));
     const vc = V(0, -0.005, 0.135).applyEuler(new THREE.Euler(hl, 0, 0)).add(hc);
     ms.visor.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(vc, _Q2, SC.set(1, 1, 1))));
-    // arms: the upper arm forward by the reach (and swinging against the legs when walking), the
-    // elbow bending more as the hands come up to their work; a raised arm straight up
-    const reach = P.arms || 0;
-    const arm = (side, name1, name2, nameH, raise) => {
+    // Arms: hanging and swinging as they walk, or reaching their holds (shoulder to elbow to wrist, the
+    // elbows down and out); the change between eased, so a hand comes to its hold and leaves it.
+    const UA = 0.3, FA = 0.28;
+    const dirOf = (rx, rz) => V(Math.sin(rz), -Math.cos(rz) * Math.cos(rx), -Math.cos(rz) * Math.sin(rx));
+    const put2 = (name, o, d, len) => put(name, o.x, o.y, o.z, Math.atan2(-d.z, -d.y), Math.asin(U.clamp(d.x, -1, 1)), len);
+    const arm = (side, name1, name2, nameH, raise, gw, gp) => {
       const sh = V(side * 0.235, -0.07, 0).applyQuaternion(Q).add(top);
       const up = raise < -0.3;
-      const sA = up ? raise : -(reach * 1.2 + lean * 0.6) + side * sw * 0.55 + (raise || 0);
-      const eA = up ? -0.15 : -(0.3 + reach * 0.75);
-      put(name1, sh.x, sh.y, sh.z, sA, side * -0.1, 0.3);
-      const el = end(sh.x, sh.y, sh.z, sA, side * -0.1, 0.3);
-      put(name2, el.x, el.y, el.z, sA + eA, side * -0.05, 0.28);
-      const hd = end(el.x, el.y, el.z, sA + eA, side * -0.05, 0.28);
-      put(nameH, hd.x, hd.y, hd.z, sA + eA, 0, 1);
+      const sA = up ? raise : -(0.15 + lean * 0.6) + side * sw * 0.55 + (raise || 0);
+      const eA = up ? -0.15 : -0.3;
+      let dU = dirOf(sA, side * -0.1), dF = dirOf(sA + eA, side * -0.05);
+      if (gw > 0.001 && gp) {
+        const D = gp.clone().sub(sh), dl = D.length(), d = U.clamp(dl, 0.05, UA + FA - 0.002); D.normalize();
+        const a = Math.acos(U.clamp((UA * UA + d * d - FA * FA) / (2 * UA * d), -1, 1));
+        const pole = V(side * 0.8, -0.6, -0.2); pole.addScaledVector(D, -pole.dot(D)).normalize();
+        const iU = D.clone().multiplyScalar(Math.cos(a)).addScaledVector(pole, Math.sin(a));
+        const W = sh.clone().addScaledVector(D, Math.min(dl, UA + FA)), iF = W.sub(sh.clone().addScaledVector(iU, UA)).normalize();
+        dU.lerp(iU, gw).normalize(); dF.lerp(iF, gw).normalize();
+      }
+      put2(name1, sh, dU, UA);
+      const el = sh.clone().addScaledVector(dU, UA);
+      put2(name2, el, dF, FA);
+      const hd = el.clone().addScaledVector(dF, FA);
+      put2(nameH, hd, dF, 1);
       return hd;
     };
-    arm(-1, 'uarmL', 'farmL', 'handL', P.armL || 0);
-    const hand = arm(1, 'uarmR', 'farmR', 'handR', P.armR || 0);
+    arm(-1, 'uarmL', 'farmL', 'handL', P.armL || 0, P.gwL, P.gpL);
+    arm(1, 'uarmR', 'farmR', 'handR', P.armR || 0, P.gwR, P.gpR);
     // The wheel in their hands; where it is is noted (TYW) for wheels() below, which carries the car's
     // own wheel there while it is off the car (P.carried: this person's spare not drawn meanwhile).
     if (P.tyre && P.tyreW) {
@@ -268,18 +339,17 @@
       E.set(0, P.yaw, 0); Q.setFromEuler(E);
       M4.compose(P.tyreW, Q, SC.set(1, 1, 1));
     } else if (P.tyre) {
-      const tp = P.tyreAt || V(0, 0.5, 0.55);
+      const tp = P.tyreAt || V(0, 1.0, 0.38);
       M4.multiplyMatrices(_R, M5.makeTranslation(tp.x, tp.y, tp.z));
     }
     if (P.tyre) (TYW[i] || (TYW[i] = new THREE.Vector3())).setFromMatrixPosition(M4); else TYW[i] = null;
     const tyM = P.tyre && !P.carried && !(cr.cl && (ROLES[q].r === 'o' || ROLES[q].r === 'n')) ? M4 : HIDE;
     ms.tyre.setMatrixAt(i, tyM); ms.rim.setMatrixAt(i, tyM);
-    if (P.gun) { _E2.set(-1.1 * reach, 0, 0); _Q2.setFromEuler(_E2); ms.gun.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(PV.set(hand.x - 0.12, hand.y + 0.02, hand.z + 0.12), _Q2, SC.set(0.1, 0.15, 0.36)))); }
+    if (gunC) ms.gun.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(gunC, _Q2.identity(), SC.set(0.1, 0.15, 0.36))));
     else ms.gun.setMatrixAt(i, HIDE);
-    if (P.jack != null) {
-      // the jack's long handle from the hands down to the car (P.jack 0 out .. 1 under the car)
-      _E2.set(0.42 - 0.2 * P.jack, 0, 0); _Q2.setFromEuler(_E2);
-      ms.jack.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(PV.set(0, 0.55, 0.85 + 0.35 * P.jack), _Q2, SC.set(0.08, 0.08, 1.9))));
+    if (jC) {
+      _Q2.setFromUnitVectors(_gt.set(0, 0, 1), jD);
+      ms.jack.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(jC, _Q2, SC.set(0.08, 0.08, jC.len))));
     } else ms.jack.setMatrixAt(i, HIDE);
   }
 
@@ -369,13 +439,13 @@
           P.crouch = 0.75; P.arms = 0.95;
           const off = U.smooth((s - 0.17) / 0.12);
           if (st === 'stop' && s > 0.17 && s < 0.55) P.carried = true;
-          if (s > 0.17) { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += R.corner[1] * 0.75 * off; lx += 0.25 * off; if (st === 'stop') P.lerpT = { from: 'hub', f: U.smooth((s - 0.17) / 0.13) }; }
+          if (s > 0.17) { P.tyre = true; P.tyreAt = V(0, 1.0, 0.38); ly += R.corner[1] * 0.75 * off; lx += 0.25 * off; if (st === 'stop') P.lerpT = { from: 'hub', f: U.smooth((s - 0.17) / 0.13) }; }
         } else if (R.r === 'n') {
           // the new wheel held upright at hub height, slid onto the hub (0.4..0.55)
           P.crouch = 0.65; P.arms = 0.95; P.tyre = st === 'ready' || s < 0.55;
           const on = U.smooth((s - 0.4) / 0.15);
           if (st === 'stop') { ly -= R.corner[1] * 0.38 * on; lx += 0.3 * on; }
-          if (P.tyre) P.tyreAt = V(0, 0.5, 0.55);
+          if (P.tyre) P.tyreAt = V(0, 1.0, 0.38);
           if (st === 'stop' && s > 0.4 && P.tyre) P.lerpT = { from: 'hand', f: on };
         } else if (R.r === 'j') {
           const up = R.front ? U.smooth(s / 0.14) : U.smooth((s - 0.06) / 0.12), down = U.smooth((s - 0.94) / 0.03);
@@ -388,7 +458,7 @@
             if (into < 0.5) yaw = -cr.side * Math.PI / 2;
           }
         } else if (R.r === 's') { P.lean = 0.3; P.arms = st === 'stop' && s < 0.92 ? 0.95 : 0.25; }
-        else if (R.r === 'w') { P.crouch = 0.8; P.arms = st === 'stop' && s > 0.08 && s < 0.72 ? 0.9 : 0.4; }
+        else if (R.r === 'w') { P.crouch = 1; P.arms = st === 'stop' && s > 0.08 && s < 0.72 ? 0.9 : 0.4; }
         else if (R.r === 'c') { P.arms = 0.15; if (st === 'stop' && s > 0.93) P.armR = -2.4 * U.smooth((s - 0.93) / 0.05); }
       } else if (st === 'release') {
         // stepping back from the car as it goes
@@ -396,10 +466,10 @@
         // (everyone at least 1.8 m out from the car's axis, the old wheels carried back with them)
         const sg = Math.sign(R.y || cr.side);
         ly += sg * Math.max(0, (sg === -cr.side ? 2.5 : 1.9) - Math.abs(R.y)) * back; if (R.r === 'j') lx += (R.front ? 0 : -1) * back, ly += R.front ? cr.side * 1.5 : 0;
-        if (R.r === 'o') { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += Math.sign(R.y) * 0.75; }
+        if (R.r === 'o') { P.tyre = true; P.tyreAt = V(0, 1.0, 0.38); ly += Math.sign(R.y) * 0.75; }
       } else if (st === 'back' && R.r === 'o') {
         // (the old wheels carried back to the garage)
-        P.tyre = true; P.tyreAt = V(0, 0.5, 0.55);
+        P.tyre = true; P.tyreAt = V(0, 1.0, 0.38);
         P.crouch = R.r === 'g' ? 1 - back : 0; P.gun = R.r === 'g'; P.arms = 0.3;
       }
       // Waiting in the garage the wheel-on men stand with their new wheels, upright on the floor in
@@ -448,6 +518,8 @@
       }
       // (walking: facing the way they go)
       if (cr.moving && Math.hypot(ax - bx, az - bz) > 0.3) yaw = Math.atan2((az - bz) * cr.dir, (ax - bx) * cr.dir) - F.h;
+      // (a wheel carried at the waist, lower and further out as they crouch over their work)
+      if (P.tyre && P.tyreAt && P.tyreAt.y > 0.9) P.tyreAt.set(0, 1.0 - 0.5 * (P.crouch || 0), 0.38 + 0.15 * (P.crouch || 0));
       // three's y rotation: local +z to (sin, cos); a person faces local +z
       const hW = F.h + yaw;
       P.yaw = Math.PI / 2 - hW;
@@ -456,7 +528,8 @@
       if (P.lerpT && R.corner) {
         const hubs = cr.car && HUBS.get(cr.car), hub = hubs && hubs[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)];
         if (hub) {
-          const hw = V(P.x + Math.sin(P.yaw) * 0.55, P.y + 0.5, P.z + Math.cos(P.yaw) * 0.55), f = P.lerpT.f;
+          const cz = 0.38 + 0.15 * (P.crouch || 0), cyy = 1.0 - 0.5 * (P.crouch || 0);
+          const hw = V(P.x + Math.sin(P.yaw) * cz, P.y + cyy, P.z + Math.cos(P.yaw) * cz), f = P.lerpT.f;
           P.tyreW = P.lerpT.from === 'hub' ? hub.clone().lerp(hw, f) : hw.lerp(hub, f);
         }
       }
