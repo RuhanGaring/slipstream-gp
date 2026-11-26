@@ -236,6 +236,14 @@
     }
   }
 
+  // the pit lane's drawn outer edge (from the centreline, positive): its full width, except where it
+  // leaves the track and where it rejoins, there peeling away from the track's edge over 50 m
+  function pitOuterOf(tr, k) {
+    const pit = tr.pit, L2 = pit.lane / 2, full = Math.abs(pit.off[k]) + L2;
+    const u = mod(k * tr.ds - pit.sIn, tr.L), t = U.smooth(Math.min(u, pit.len - u) / 50);
+    return Math.max(tr.hw, tr.hw + (full - tr.hw) * t);
+  }
+
   // vertical faces along an offset path: inner face (and top + outer face when thick)
   function wallRun(acc, tr, i0, i1, df, y0, y1, uLen, vLen, thick, c, plainBack) {
     const N = tr.N;
@@ -1858,6 +1866,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   function buildTrack(tr, W2) {
+    const pitOuter = k => pitOuterOf(tr, k);
     const M = materials();
     const root = new THREE.Group();
     const N = tr.N, hw = tr.hw, style = tr.def.style, th = F1.Render.THEMES[style];
@@ -1937,7 +1946,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             E[side][k] = e0; out[side][k] = o0; meet[side][k] = Tracks.surfZ(tr, k, sg * o0) - 0.006;
             continue;
           }
-          const e = STREET ? tr.barr[side][k] + 0.2 : Math.max(tr.hw + Math.max(kerbE[side][k], runE[side][k]), po === po ? Math.abs(po) + L2 + 0.2 : 0);
+          const e = STREET ? tr.barr[side][k] + 0.2 : Math.max(tr.hw + Math.max(kerbE[side][k], runE[side][k]), po === po ? pitOuter(k) + 0.2 : 0); // (the lane as drawn: narrower where it peels off the track)
           // (10.5 m: a grid cell and a half past the last thing drawn, where the ground is the
           // terrain's own again, metres above or below it in a cutting or on a bank; the verge is the
           // slope between; never into another part of the lap)
@@ -2039,7 +2048,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
                 if (aq < lim + cell + 0.5 && (STREET || !(sq === pS && !isNaN(tr.pit.off[q])))) cov = Math.min(cov, Tracks.surfZ(tr, q, (sq ? 1 : -1) * Math.min(aq, lim)) + al * tr.dz[q] - (runE[sq][q] > 0 && tr.runT[sq][q] === F1.SURF.GRAVEL ? 0.25 : 0.12));
                 // (the pit lane and its apron to the garage doors, likewise: a hillside stood through them)
                 const po = tr.pit.off[q];
-                if (po === po && sq === pS && Math.abs(dlq - po) < tr.pit.lane / 2 + 2.2) cov = Math.min(cov, Tracks.surfZ(tr, q, dlq) + al * tr.dz[q] - 0.12);
+                if (po === po && sq === pS && dlq * Math.sign(po) > Math.abs(po) - tr.pit.lane / 2 - 2.2 && dlq * Math.sign(po) < pitOuter(q) + 2.2) cov = Math.min(cov, Tracks.surfZ(tr, q, dlq) + al * tr.dz[q] - 0.12);
               }
             });
             if (bi >= 0) {
@@ -2316,11 +2325,23 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         ag.setAttribute('trk', new THREE.Float32BufferAttribute(trk, 4));
       }
       add(ag, M.asphalt);
-      const p = new Acc(), L2 = tr.pit.lane / 2;
+      // The pit lane: the track's own asphalt (its rubbered line kept off it), so that where they meet
+      // there is no seam of another colour. Where it leaves the track and where it rejoins, its outer
+      // edge peels away from the track's edge over 50 m, as a real lane does, instead of the lane's full
+      // width standing out beside the track at once; under the track it is hidden (the track drawn
+      // over it). The lane the cars drive is unchanged (pit.off): only how it is drawn.
+      const p = new Acc(), L2 = tr.pit.lane / 2, ln = [];
       // (along the garages the lane is paved up to their doors: a strip of turf lay between)
       const gz = k => !W2.town && Tracks.inRange(tr, k * tr.ds, tr.pit.boxS[9] - 16, tr.pit.boxS[0] + 16), apr = k => (gz(k) ? 2.2 : 0);
-      for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) ribbon(p, tr, i0, i1 - 1, k => tr.pit.off[k] - L2 - (tr.pit.side < 0 ? apr(k) : 0), k => tr.pit.off[k] + L2 + (tr.pit.side > 0 ? apr(k) : 0), -0.006, 9);
-      add(p.geo(), M.pitlane);
+      const sdp = tr.pit.side > 0 ? 1 : -1, outA = k => pitOuter(k) + apr(k), innA = k => Math.abs(tr.pit.off[k]) - L2;
+      for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) {
+        const fa = k => (sdp > 0 ? innA(k) : -outA(k)), fb = k => (sdp > 0 ? outA(k) : -innA(k));
+        ribbon(p, tr, i0, i1 - 1, fa, fb, -0.006, 9);
+        // (its coordinates for the asphalt's shader: along the lap, across, and a racing line 40 m off)
+        for (let i = i0; i <= i1 - 1; i++) { const k = mod(i, N), a = fa(k), b = fb(k); ln.push(i * tr.ds, a, a + 40, 0, i * tr.ds, b, b + 40, 0); }
+      }
+      const pg = p.geo();
+      if (pg) { pg.setAttribute('trk', new THREE.Float32BufferAttribute(ln, 4)); add(pg, M.asphalt); }
     }
 
     // Tyre marks laid on the road over a race weekend, beyond the rubbered line the asphalt
@@ -2451,10 +2472,14 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         ribbon(pa, tr, 0, N, () => hw - 0.32, () => hw - 0.05, 0.012, 9, white);
       }
       const L2 = tr.pit.lane / 2;
+      // the lane's two lines: the inner one only where the lane has left the track (it starts at the
+      // track's edge, as the pit entry line does, never across the racing surface), the outer one along
+      // the drawn edge once it stands clear of the track's own edge line
       for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) {
-        const dry = (k, o) => (W2.town && Math.abs(tr.pit.off[k]) - L2 < hw + 0.3 ? NaN : o);
-        ribbon(pa, tr, i0, i1 - 1, k => dry(k, tr.pit.off[k] - L2 + 0.05), k => dry(k, tr.pit.off[k] - L2 + 0.3), 0.008, 9, white);
-        ribbon(pa, tr, i0, i1 - 1, k => dry(k, tr.pit.off[k] + L2 - 0.3), k => dry(k, tr.pit.off[k] + L2 - 0.05), 0.008, 9, white);
+        const sdp = tr.pit.side > 0 ? 1 : -1, inn = k => Math.abs(tr.pit.off[k]) - L2;
+        const inL = (k, e) => (inn(k) < hw - 0.02 ? NaN : sdp * (inn(k) + e)), outL = (k, e) => (pitOuter(k) < hw + 0.35 ? NaN : sdp * (pitOuter(k) - e));
+        ribbon(pa, tr, i0, i1 - 1, k => (sdp > 0 ? inL(k, 0.05) : inL(k, 0.3)), k => (sdp > 0 ? inL(k, 0.3) : inL(k, 0.05)), 0.008, 9, white);
+        ribbon(pa, tr, i0, i1 - 1, k => (sdp > 0 ? outL(k, 0.3) : outL(k, 0.05)), k => (sdp > 0 ? outL(k, 0.05) : outL(k, 0.3)), 0.008, 9, white);
       }
       const quad = (s0, s1, d0, d1, c, y = 0.012) => {
         const q1 = Tracks.pointAt(tr, s0, d0), q2 = Tracks.pointAt(tr, s0, d1), q3 = Tracks.pointAt(tr, s1, d1), q4 = Tracks.pointAt(tr, s1, d0);
