@@ -78,8 +78,15 @@
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    // The build the whole cache now matches, for the service worker: it answers a versioned request
+    // (?v=) from the cache only when this is that version. Written only once every file is current;
+    // until then (a first visit after an update, or a download that failed part way) requests go to
+    // the network, so an old copy of one file can never run beside new copies of the others. (A
+    // friend's browser did that: an old trackgen.js with this build's trackgen2-fixed.js, and
+    // Mont-Aurele would not build.)
+    if (!failed && m.v) await c.put(abs('assets/build.txt'), new Response(String(m.v), { headers: { 'content-type': 'text/plain' } }));
     // drop files the game no longer uses
-    const keep = new Set(files.map(f => abs(f.p)).concat([abs('assets/manifest.json')]));
+    const keep = new Set(files.map(f => abs(f.p)).concat([abs('assets/manifest.json'), abs('assets/build.txt')]));
     for (const req of await c.keys()) if (!keep.has(req.url)) c.delete(req);
     const code = stale.filter(p => /\.(html|js|css)$/.test(p));
     return { cached: true, failed, total, codeChanged: code.length > 0 };

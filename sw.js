@@ -1,4 +1,4 @@
-// Service worker: answers every request for the game's own files from the cache that
+// Service worker: answers requests for the game's own files from the cache that
 // js/offline.js fills (keyed by path, without the ?v= version), so the game runs offline.
 // Anything not cached yet goes to the network as usual. The manifest and the downloader's
 // own requests (?h=) always go to the network.
@@ -18,5 +18,16 @@ self.addEventListener('fetch', e => {
   // older download would not match the lab's own, newer scripts
   const from = req.referrer ? new URL(req.referrer).pathname.slice(new URL(scope).pathname.length) : '';
   if (rel.startsWith('lab/') || from.startsWith('lab/')) return;
-  e.respondWith(caches.open(CACHE).then(c => c.match(scope + rel)).then(hit => hit || fetch(req)));
+  // A versioned request (?v=, the page's scripts and styles) is answered from the cache only when the
+  // whole cache matches that version (assets/build.txt, written by js/offline.js once every file is
+  // current); otherwise from the network, the cached copy kept for when there is none.
+  const v = url.searchParams.get('v');
+  e.respondWith(caches.open(CACHE).then(async c => {
+    const hit = await c.match(scope + rel);
+    if (hit && v) {
+      const b = await c.match(scope + 'assets/build.txt');
+      if (!b || (await b.text()) !== v) return fetch(req).catch(() => hit);
+    }
+    return hit || fetch(req);
+  }));
 });
