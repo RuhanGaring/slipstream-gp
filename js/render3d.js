@@ -2433,9 +2433,12 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // triangle can sit just outside it, where it extrapolates past 1: 1.3^6 made the alpha
           // -3.8, and blending with a negative alpha multiplied the road beneath about five times,
           // the white dots over the road ahead and, larger, the coloured flashes. Kept in 0..1)
-          sh.fragmentShader = 'varying float vAcr;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= clamp(1.0 - pow(min(abs(vAcr), 1.0), 6.0), 0.0, 1.0);');
+          sh.fragmentShader = 'varying float vAcr;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= clamp(1.0 - pow(min(abs(vAcr), 1.0), 6.0), 0.0, 1.0);')
+            // (rubber laid on asphalt is duller than the asphalt: into a low sun the marks shone pale
+            // over the road, whose own glare is held down, uRoadGlare in js/r3-shaders.js)
+            .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecular *= 0.35;');
         };
-        M.tyreMarks.customProgramCacheKey = () => 'tyreMarks';
+        M.tyreMarks.customProgramCacheKey = () => 'tyreMarks2';
       }
       add(g, M.tyreMarks, { order: 1 });
     }
