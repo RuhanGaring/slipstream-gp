@@ -658,11 +658,21 @@
       if (cr.state === 'idle' || cr.state === 'ready') cr.stopF = null;
       cr.u = cr.state === 'stop' && p && p.service ? U.clamp(1 - (p.serviceT || 0) / p.service, 0, 1) : 0;
       // (re-posed only while something changes: a crew standing still costs nothing)
+      // (a car moving in the pit lane near the box: the crew may have to make way. Cars racing past on
+      // the main straight do not count: they ran within 30 m of every garage, and kept all ten crews,
+      // 190 people, re-posed every frame of the race for nothing)
       let near = false;
-      for (const c of cars) if (c && c.x != null && (c.speed || 0) > 0.3 && (c.x - cr.box.x) ** 2 + (c.y - cr.box.y) ** 2 < 900) { near = true; break; }
-      if (near || cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
+      for (const c of cars) {
+        if (!c || c.x == null || (c.speed || 0) <= 0.3) continue;
+        const pp = c.brain && c.brain.pit, inLane = c.inPit || (pp && pp.phase !== 'approach');
+        if (inLane && (c.x - cr.box.x) ** 2 + (c.y - cr.box.y) ** 2 < 900) { near = true; break; }
+      }
+      cr.posed = false;
+      if (near || cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; cr.posed = true; }
     }
-    for (const cr of S.crews) clones(cr, cars);
+    // (the wheels in hand placed again only when the crew moved, or a spare is waiting to be stood
+    // or a dropped one to go: a crew standing still leaves them where they are)
+    for (const cr of S.crews) if (cr.posed || !cr.cl || cr.nPend || cr.oldSpot || cr.state !== 'idle' || (cr.nSpare && cr.nSpare.some(Boolean))) clones(cr, cars);
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
 

@@ -93,6 +93,7 @@
   // ---- GPU time: one query per frame, read back when ready ----
   let gl = null, ext = null, q = null, pend = [], gpuLast = -1;
   function gpuBegin() {
+    if (G.__perfNoGpu) return; // (timer queries can stall the pipeline: off for stall hunts)
     const r = R();
     if (!r) return;
     if (!gl) { gl = r.getContext(); ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'); }
@@ -109,6 +110,7 @@
     gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
   }
   function gpuEnd() {
+    if (G.__perfNoGpu) return; // (timer queries can stall the pipeline: off for stall hunts)
     if (!q) return;
     gl.endQuery(ext.TIME_ELAPSED_EXT);
     pend.push(q); q = null;

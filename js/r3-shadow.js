@@ -154,8 +154,9 @@
       // due this frame? (a camera that jumped further than a tenth of the slice re-renders it now)
       camera.getWorldDirection(_d);
       const l0 = S.lights[i], jump = lastPos[i].distanceToSquared(camera.position) > (end * 0.1) ** 2 || (i > 0 && lastDir[i].dot(_d) < 0.985);
-      const due = force || jump || G.__shFull || frame % EVERY[i] === PHASE[i];
+      const EV = G.__shEvery || EVERY, due = force || (jump && !G.__shNoJump) || G.__shFull || frame % EV[i] === PHASE[i];
       l0.shadow.needsUpdate = due;
+      if (due) G.__shMask = (G.__shMask || 0) | (1 << i) | (jump ? 8 : 0);
       if (due) { lastPos[i].copy(camera.position); lastDir[i].copy(_d); fit(l0, i, d0, d1, camera, tx, ty, sunDir); }
       start = end;
     }
