@@ -78,7 +78,7 @@
         c.set('#c9ccd0'); meshes.gun.setColorAt(i, c);
       }
       const gy = Tracks.groundAt(tr, b.x, b.y);
-      return { k, team, box: b, gy, side: tr.pit.side, state: 'idle', t: 0, from: null, w: 0, dirty: true, car: null };
+      return { k, team, box: b, gy, side: tr.pit.side, state: 'idle', t: 0, from: null, w: 0, dirty: true, car: null, cur: [], settling: false };
     });
     for (const p of PARTS) { if (meshes[p].instanceColor) meshes[p].instanceColor.needsUpdate = true; }
     S = { meshes, crews, tr, time: 0 };
@@ -105,7 +105,7 @@
     // Legs, a thigh and a shin each. Kneeling (crouch 1, a wheel gunner): the front knee up, its
     // thigh forward and its shin down to the foot; the back knee on the ground, its shin back along it.
     // A squat between. (About x a negative turn takes a hanging limb forward, to +z.)
-    const c = U.clamp(P.crouch || 0, 0, 1), hip = 0.93 - 0.42 * c, sw = P.walk ? Math.sin(P.walk) * 0.5 : 0;
+    const c = U.clamp(P.crouch || 0, 0, 1), hip = 0.93 - 0.42 * c, sw = Math.sin(P.walk || 0) * 0.5 * (P.walkAmp || 0);
     const TH = 0.46;
     const leg = (side, th, name, shin) => {
       const kx = side * 0.1, kz = -Math.sin(th) * TH, ky = hip - Math.cos(th) * TH;
@@ -114,7 +114,8 @@
     };
     // front leg: thigh forward by up to 75 degrees, the shin straight down from the knee to the ground
     const tF = -(c * 1.3) - sw, kF = leg(-1, tF, 'legL');
-    set('shinL', kF[0], kF[1], kF[2], c > 0.3 ? 0 : -tF * 0.3 + sw * 0.6, 0, 0.15, Math.max(0.2, kF[1]), 0.17, Math.max(0.2, kF[1]) / 2);
+    // (the shin's own swing while walking fades as the knee comes up: no step at any crouch)
+    set('shinL', kF[0], kF[1], kF[2], (-tF * 0.3 + sw * 0.6) * (1 - U.smooth(c / 0.3)), 0, 0.15, Math.max(0.2, kF[1]), 0.17, Math.max(0.2, kF[1]) / 2);
     // back leg: the thigh down and a little back, the shin back along the ground when kneeling
     const tB = c * 0.2 + sw, kB = leg(1, tB, 'legR');
     const shinB = c > 0.5 ? 1.45 * U.smooth((c - 0.5) / 0.4) : 0;
@@ -144,9 +145,12 @@
   }
 
   // the box's frame (or the car's, while it stands there) to the world
+  // (where the car really stopped, kept until the crew is home again: going back to the painted
+  // box when the car left moved the whole crew a metre or two at once)
   function frame(cr) {
     const c = cr.car, b = cr.box;
-    if (c && cr.state === 'stop') return { x: c.x, y: c.y, h: c.h, gy: cr.gy };
+    if (c && cr.state === 'stop') { cr.stopF = { x: c.x, y: c.y, h: c.h, gy: cr.gy }; return cr.stopF; }
+    if (cr.stopF && (cr.state === 'release' || cr.state === 'back')) return cr.stopF;
     return { x: b.x, y: b.y, h: b.h, gy: cr.gy };
   }
   const toWorld = (F, lx, ly) => [F.x + Math.cos(F.h) * lx - Math.sin(F.h) * ly, F.y + Math.sin(F.h) * lx + Math.cos(F.h) * ly];
@@ -158,19 +162,17 @@
   }
 
   function pose(cr, dt) {
-    const F = frame(cr), st = cr.state, u = cr.u || 0;
+    const F = frame(cr), BF = { x: cr.box.x, y: cr.box.y, h: cr.box.h }, st = cr.state, u = cr.u || 0;
     for (let q = 0; q < NPER; q++) {
       const R = ROLES[q];
-      // where this person is: between waiting and ready places by cr.w (0 waiting .. 1 at the box)
+      // where this person is: their place at the car (lx, ly, in the car's frame F) and their place in
+      // the garage's mouth (the box's frame), in between by cr.w (0 waiting .. 1 at the car)
       const wa = waitAt(cr, q), w = U.smooth(U.clamp(cr.w, 0, 1));
-      let lx = wa[0] + (R.x - wa[0]) * w, ly = wa[1] + (R.y - wa[1]) * w;
-      const P = { crouch: 0, arms: 0, yaw: 0, walk: cr.moving ? cr.t * 9 + q : 0 };
+      let lx = R.x, ly = R.gs ? R.y * cr.side : R.y;
+      const P = { crouch: 0, arms: 0, yaw: 0, gun: R.r === 'g', jack: R.r === 'j' ? 0 : null, tyre: R.r === 'n' && (st === 'idle' || st === 'ready') };
       // facing: toward the lane while waiting, their role's way at the box
       const yawBox = R.yaw, yawWait = cr.side > 0 ? -Math.PI / 2 : Math.PI / 2;
       let yaw = w > 0.5 ? yawBox : yawWait;
-      // (walking: facing the way they go)
-      if (cr.moving) yaw = Math.atan2((R.y - wa[1]) * cr.dir, (R.x - wa[0]) * cr.dir);
-      if (R.gs) ly = wa[1] + (R.y * cr.side - wa[1]) * w;
       if (st === 'stop' || st === 'ready') {
         // The stop's own clock, u 0..1 of its length, timed from a 2.2 s stop (F1.com): the front jack
         // in and the car up by 0.3 s (u 0.14), the rear by 0.4 s; wheels off by 0.6 s; the front jack
@@ -196,7 +198,7 @@
           if (!R.front) {
             // waiting beside the car's path; behind the car once it has stopped
             const into = st === 'stop' ? U.smooth(s / 0.1) : 0, wx = R.waitX, wy = R.waitY * cr.side;
-            lx = wa[0] + (wx + (R.x - wx) * into - wa[0]) * w; ly = wa[1] + (wy + (R.y - wy) * into - wa[1]) * w;
+            lx = wx + (R.x - wx) * into; ly = wy + (R.y - wy) * into;
             if (into < 0.5) yaw = -cr.side * Math.PI / 2;
           }
         } else if (R.r === 's') { P.lean = 0.3; P.arms = st === 'stop' && s < 0.92 ? 0.95 : 0.25; }
@@ -205,18 +207,35 @@
       } else if (st === 'release') {
         // stepping back from the car as it goes
         const back = U.smooth(cr.t / 0.6);
-        if (R.gs) ly = R.y * cr.side;
         // (everyone at least 1.8 m out from the car's axis, the old wheels carried back with them)
         ly += Math.sign(R.y || cr.side) * Math.max(0, 1.9 - Math.abs(R.y)) * back; if (R.r === 'j') lx += (R.front ? 0 : -1) * back, ly += R.front ? cr.side * 1.5 : 0;
         if (R.r === 'o') { P.tyre = true; P.tyreAt = V(0, 0.5, 0.55); ly += Math.sign(R.y) * 0.75; }
+      } else if (st === 'back' && R.r === 'o') {
+        // (the old wheels carried back to the garage)
+        P.tyre = true; P.tyreAt = V(0, 0.5, 0.55);
         P.crouch = R.r === 'g' ? 1 - back : 0; P.gun = R.r === 'g'; P.arms = 0.3;
       }
-      const [wx, wz] = toWorld(F, lx, ly);
-      P.x = wx; P.y = F.gy; P.z = wz;
+      const [ax, az] = toWorld(F, lx, ly), [bx, bz] = toWorld(BF, wa[0], wa[1]);
+      P.x = bx + (ax - bx) * w; P.y = cr.gy; P.z = bz + (az - bz) * w;
+      // (walking: facing the way they go)
+      if (cr.moving && Math.hypot(ax - bx, az - bz) > 0.3) yaw = Math.atan2((az - bz) * cr.dir, (ax - bx) * cr.dir) - F.h;
       // three's y rotation: local +z to (sin, cos); a person faces local +z
       const hW = F.h + yaw;
       P.yaw = Math.PI / 2 - hW;
-      person(cr, q, P);
+      // Every change of plan eased, never jumped to: the frame moving from the painted box to where
+      // the car really stopped, everyone standing up at the release, the step back, the walk home.
+      // Each person follows their target with a time constant of 0.09 s (their facing a little
+      // slower), and the legs' swing fades in and out with their walking.
+      const C = cr.cur[q] || (cr.cur[q] = Object.assign({ walkAmp: 0 }, P, { jack: P.jack }));
+      const k = dt > 0 ? 1 - Math.exp(-dt / 0.09) : 1;
+      for (const key of ['x', 'y', 'z', 'crouch', 'arms', 'lean', 'armR', 'armL']) C[key] = (C[key] || 0) + ((P[key] || 0) - (C[key] || 0)) * k;
+      const dy = Math.atan2(Math.sin(P.yaw - C.yaw), Math.cos(P.yaw - C.yaw)); C.yaw += dy * (dt > 0 ? 1 - Math.exp(-dt / 0.14) : 1);
+      C.jack = P.jack == null ? null : C.jack == null ? P.jack : C.jack + (P.jack - C.jack) * k;
+      C.walkAmp += ((cr.moving ? 1 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.15) : 1);
+      C.walk = S.time * 9 + q * 0.7; C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.gun = P.gun;
+      // (still settling: keep posing this crew)
+      if (Math.abs(P.x - C.x) + Math.abs(P.z - C.z) + Math.abs(dy) + Math.abs((P.crouch || 0) - C.crouch) > 0.002 || C.walkAmp > 0.01) cr.settling = true;
+      person(cr, q, C);
     }
   }
 
@@ -250,9 +269,10 @@
       cr.w += U.clamp(target - cr.w, -dt / 2.2, dt / 2.2);
       cr.moving = Math.abs(cr.w - w0) > 1e-5; cr.dir = target > w0 ? 1 : -1;
       if (cr.state === 'back' && cr.w <= 0) cr.state = 'idle';
+      if (cr.state === 'idle' || cr.state === 'ready') cr.stopF = null;
       cr.u = cr.state === 'stop' && p && p.service ? U.clamp(1 - (p.serviceT || 0) / p.service, 0, 1) : 0;
       // (re-posed only while something changes: a crew standing still costs nothing)
-      if (cr.moving || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { pose(cr, dt); cr.dirty = false; any = true; }
+      if (cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
     }
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
