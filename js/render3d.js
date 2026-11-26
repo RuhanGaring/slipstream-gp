@@ -572,6 +572,24 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       g.fillStyle = '#c9cdd1'; for (let i = 0; i < 8; i++) g.fillRect(i * 128 - 3, 38, 7, 214);
       g.fillStyle = 'rgba(200,205,210,.8)'; g.fillRect(0, 196, 1024, 4);
       g.fillStyle = 'rgba(255,255,255,.1)'; for (let i = 0; i < 8; i++) { g.beginPath(); g.moveTo(i * 128 + 20, 38); g.lineTo(i * 128 + 70, 38); g.lineTo(i * 128 + 10, 252); g.lineTo(i * 128 - 30, 252); g.fill(); }
+    } else if (kind === 'tools') {
+      // a garage's back wall, seen square on: grey panels, the team's tool trolleys and wheel racks,
+      // two timing screens, a gantry of tyre warmers' controllers
+      c.width = 1024; c.height = 384;
+      g.fillStyle = '#b9bdc2'; g.fillRect(0, 0, 1024, 384);
+      g.fillStyle = 'rgba(60,64,70,.35)'; for (let i = 0; i <= 8; i++) g.fillRect(i * 128 - 1, 0, 2, 384);
+      g.fillStyle = '#2b2e33'; g.fillRect(0, 300, 1024, 84);
+      for (let i = 0; i < 12; i++) { g.fillStyle = i % 4 === 1 ? '#7a2b2e' : '#3d4147'; g.fillRect(14 + i * 84, 236, 72, 140); g.fillStyle = 'rgba(255,255,255,.18)'; for (let j = 0; j < 5; j++) g.fillRect(18 + i * 84, 246 + j * 26, 64, 3); }
+      g.fillStyle = '#15181c'; g.fillRect(180, 70, 250, 130); g.fillRect(594, 70, 250, 130);
+      const sc = g.createLinearGradient(0, 78, 0, 192); sc.addColorStop(0, '#3d6f94'); sc.addColorStop(1, '#1d3a52');
+      g.fillStyle = sc; g.fillRect(190, 80, 230, 110); g.fillRect(604, 80, 230, 110);
+      g.fillStyle = 'rgba(255,255,255,.55)'; for (let j = 0; j < 6; j++) { g.fillRect(200, 92 + j * 16, 90 + (j * 37) % 100, 5); g.fillRect(614, 92 + j * 16, 70 + (j * 53) % 120, 5); }
+      g.fillStyle = '#26292e'; for (let i = 0; i < 6; i++) { g.beginPath(); g.arc(80 + i * 170, 150, 26, 0, 7); g.fill(); }
+    } else if (kind === 'ceil') {
+      // the garage ceiling: dark, with lines of bright strip lights
+      c.width = 256; c.height = 256;
+      g.fillStyle = '#2c2f34'; g.fillRect(0, 0, 256, 256);
+      g.fillStyle = '#f4f6f8'; for (let i = 0; i < 4; i++) g.fillRect(24 + i * 64, 18, 14, 220);
     } else {
       // a garage seen from the pit lane, in the shade of its own roof
       c.width = 1024; c.height = 320;
@@ -1954,6 +1972,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       return { E, out, m, meet, at };
     })();
 
+    // the garages' footprints: their floors are level at the ground under each one's centre, and on
+    // a slope the terrain stood through them (the ground is kept just under each, all over)
+    const garFoot = VG ? W2.decor.filter(it => it.type === 'garage').map(it => ({ x: it.x, z: it.y, c: Math.cos(it.h), s: Math.sin(it.h), y: Tracks.groundAt(tr, it.x, it.y) })) : [];
+
     // ground: the venue's terrain, cut and filled to meet the circuit
     const SEA = 0;
     let hgrid = null; // the fine terrain samples, kept for the grass
@@ -2002,6 +2024,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               if (al > -1.5 * tr.ds && al < 1.5 * tr.ds) {
                 const dlq = dx * tr.nx[q] + dz * tr.ny[q], sq = dlq > 0 ? 1 : 0, rw = Math.max(runE[sq][q], kerbE[sq][q]), lim = tr.hw + rw, aq = Math.abs(dlq);
                 if (aq < lim + cell + 0.5 && !(sq === pS && !isNaN(tr.pit.off[q]))) cov = Math.min(cov, Tracks.surfZ(tr, q, (sq ? 1 : -1) * Math.min(aq, lim)) + al * tr.dz[q] - (runE[sq][q] > 0 && tr.runT[sq][q] === F1.SURF.GRAVEL ? 0.25 : 0.12));
+                // (the pit lane and its apron to the garage doors, likewise: a hillside stood through them)
+                const po = tr.pit.off[q];
+                if (po === po && sq === pS && Math.abs(dlq - po) < tr.pit.lane / 2 + 2.2) cov = Math.min(cov, Tracks.surfZ(tr, q, dlq) + al * tr.dz[q] - 0.12);
               }
             });
             if (bi >= 0) {
@@ -2041,6 +2066,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
                   const flat = ad < e + cell + 1.5 ? Math.min(v, tr.z[bi] + tr.dz[bi] * al + Tracks.crossZ(tr, bi, (sd2 ? 1 : -1) * ad)) : v;
                   y = flat - VG.m[bi]; Wv[k] = 0; RV[k] = v;
                 }
+              }
+              for (const q of garFoot) {
+                const dx = x - q.x, dz = z - q.z;
+                if (dx * dx + dz * dz > 400) continue;
+                if (Math.abs(dx * q.c + dz * q.s) < 9.6 && Math.abs(-dx * q.s + dz * q.c) < 5.4) cov = Math.min(cov, q.y - 0.1);
               }
               // (a point kept up under the verge keeps its grass on the verge: RV)
               if (VG && cov < y) { y = cov; Wv[k] = 1; }
@@ -2274,7 +2304,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       }
       add(ag, M.asphalt);
       const p = new Acc(), L2 = tr.pit.lane / 2;
-      for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) ribbon(p, tr, i0, i1 - 1, k => tr.pit.off[k] - L2, k => tr.pit.off[k] + L2, -0.006, 9);
+      // (along the garages the lane is paved up to their doors: a strip of turf lay between)
+      const gz = k => !W2.town && Tracks.inRange(tr, k * tr.ds, tr.pit.boxS[9] - 16, tr.pit.boxS[0] + 16), apr = k => (gz(k) ? 2.2 : 0);
+      for (const [i0, i1] of runs(N, k => !isNaN(tr.pit.off[k]))) ribbon(p, tr, i0, i1 - 1, k => tr.pit.off[k] - L2 - (tr.pit.side < 0 ? apr(k) : 0), k => tr.pit.off[k] + L2 + (tr.pit.side > 0 ? apr(k) : 0), -0.006, 9);
       add(p.geo(), M.pitlane);
     }
 
@@ -2734,25 +2766,92 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
     // pit complex: garages, pit building
     {
-      const shell = new Batch(false), paint = new Batch(true), dark = new Batch(false);
+      // The garages are one building, as on a real pit lane: each team's garage meets the next, its
+      // door a real opening 6 m deep with the garage lit inside (the tool wall, the epoxy floor, the
+      // light strips), a glass floor of team suites above, a canopy over the lane, the team's tyres
+      // stacked at the door, the light boom over its pit box, and its stand on the pit wall.
       const pit = tr.pit;
-      const box = new THREE.BoxGeometry(1, 1, 1);
-      for (const it of W2.decor) {
-        if (it.type !== 'garage') continue;
-        const f = pit.side > 0 ? -1 : 1; // local z of the face that looks onto the pit lane
-        const ry = -it.h;
-        const P = (lx, lz) => [it.x + Math.cos(it.h) * lx - Math.sin(it.h) * lz, it.y + Math.sin(it.h) * lx + Math.cos(it.h) * lz];
-        const [x0, z0] = P(0, 0);
-        const gy = Tracks.groundAt(tr, x0, z0);
-        shell.add(facadeBox(it.w, 6.8, it.d, 7, 6.8), mat(x0, 2.9 + gy - 0.5, z0, ry));
-        const [x1, z1] = P(0, f * (it.d / 2 + 0.02));
-        dark.add(box, mat(x1, 2.0 + gy, z1, ry, it.w - 1.2, 4.0, 0.05));
-        const [x2, z2] = P(0, f * (it.d / 2 + 0.08));
-        paint.add(box, mat(x2, 4.75 + gy, z2, ry, it.w, 1.3, 0.12), col(it.team.base));
-        paint.add(box, mat(x2, 4.2 + gy, z2, ry, it.w, 0.18, 0.14), col(it.team.accent));
+      const shell = new Batch(false), paint = new Batch(true), glass = new Batch(false), floor = new Batch(false), backW = new Batch(false), sideW = new Batch(false), ceil = new Batch(false);
+      const canopy = new Batch(false), kit = new Batch(true), boom = new Batch(false), lens = new Batch(true), stand = new Batch(true);
+      const box = new THREE.BoxGeometry(1, 1, 1), pl = new THREE.PlaneGeometry(1, 1), tyre = new THREE.CylinderGeometry(0.33, 0.33, 1, 12);
+      const G = W2.decor.filter(it => it.type === 'garage');
+      const H = 5.8, D = 9, OH = 4.6, RD = 6.2, f = pit.side > 0 ? -1 : 1; // f: local z of the face that looks onto the pit lane
+      const dim = (c, k) => { const q = col(c); return q.multiplyScalar(k); };
+      for (const it of G) {
+        // (as wide as the gap to the next garage: no slots of sky between them)
+        let W = 18; for (const o of G) if (o !== it) W = Math.min(W, Math.hypot(o.x - it.x, o.y - it.y));
+        W = U.clamp(W + 0.15, 14, 18.2);
+        const OW = Math.min(12.4, W - 2.6), pw = (W - OW) / 2, gy = Tracks.groundAt(tr, it.x, it.y);
+        const B = new THREE.Matrix4().compose(V(it.x, gy, it.y), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -it.h, 0)), V(1, 1, 1));
+        const at = m => B.clone().multiply(m), u = v => f * v, face = f > 0 ? 0 : Math.PI;
+        // the shell: two piers, the lintel over the door, the block behind the garage, the roof
+        for (const sx of [-1, 1]) shell.add(facadeBox(pw, H + 1, D, 7, 6.8), at(mat(sx * (OW / 2 + pw / 2), (H - 1) / 2, 0)));
+        shell.add(facadeBox(OW, H - OH, D, 7, 6.8), at(mat(0, (OH + H) / 2, 0)));
+        shell.add(facadeBox(OW, OH + 1, D - RD, 7, 6.8), at(mat(0, (OH - 1) / 2, u(-RD / 2))));
+        shell.add(facadeBox(W, 0.45, D, 7, 6.8), at(mat(0, H + 3.85, 0)));
+        // inside: floor, tool wall, side walls, ceiling
+        floor.add(pl, at(mat(0, 0.03, u(D / 2 - RD / 2), 0, OW, RD, 1, -Math.PI / 2)));
+        backW.add(pl, at(mat(0, OH / 2, u(D / 2 - RD + 0.01), face, OW, OH, 1)));
+        for (const sx of [-1, 1]) sideW.add(pl, at(mat(sx * (OW / 2 - 0.01), OH / 2, u(D / 2 - RD / 2), -sx * Math.PI / 2, RD, OH, 1)));
+        ceil.add(pl, at(mat(0, OH - 0.01, u(D / 2 - RD / 2), 0, OW, RD, 1, Math.PI / 2)));
+        paint.add(box, at(mat(0, OH - 0.45, u(D / 2 - RD + 0.04), 0, OW, 0.55, 0.05)), col(it.team.base));
+        // the team's name band on the lintel, its accent under it
+        paint.add(box, at(mat(0, (OH + H) / 2 + 0.05, u(D / 2 + 0.06), 0, W - 0.1, H - OH - 0.35, 0.12)), col(it.team.base));
+        paint.add(box, at(mat(0, OH + 0.12, u(D / 2 + 0.07), 0, W - 0.1, 0.16, 0.13)), col(it.team.accent));
+        // a floor of glass above (the suites), set back a metre, and the canopy over the lane
+        glass.add(facadeBox(W, 3.4, D - 1.2, 1, 1), at(mat(0, H + 1.7, u(-0.6))));
+        canopy.add(box, at(mat(0, H - 0.05, u(D / 2 + 1.1), 0, W, 0.22, 2.2)));
+        // tyres in their blankets, stacks of three at each side of the door (the rubber shows between)
+        for (const sx of [-1, 1]) for (const dz of [0.9, 1.7]) {
+          const tx = sx * (OW / 2 - 0.65), tzz = u(D / 2 - dz);
+          kit.add(tyre, at(mat(tx, 0.49, tzz, 0, 0.94, 0.96, 0.94)), col('#121315'));
+          for (let j = 0; j < 3; j++) kit.add(tyre, at(mat(tx, 0.17 + j * 0.32, tzz, 0, 1, 0.27, 1)), dim(it.team.base, 0.85));
+        }
+        // the team's colour along the garage's walls, and its tool trolleys and a parts bench inside
+        for (const sx of [-1, 1]) {
+          paint.add(box, at(mat(sx * (OW / 2 - 0.04), 0.55, u(D / 2 - RD / 2), 0, 0.05, 1.1, RD - 0.2)), dim(it.team.base, 0.9));
+          for (let q = 0; q < 3; q++) kit.add(box, at(mat(sx * (OW / 2 - 0.5), 0.5, u(D / 2 - RD + 1.2 + q * 1.35), 0, 0.75, 1.0, 1.15)), q === 1 ? col(it.team.accent) : col('#3a3d42'));
+        }
+        kit.add(box, at(mat(0, 0.45, u(D / 2 - RD + 0.55), 0, OW * 0.6, 0.9, 0.8)), col('#2e3136'));
+        // the light boom over the pit box (the box is painted 3.4 m out from the door)
+        boom.add(box, at(mat(0, 5.05, u(D / 2 + 1.75), 0, 0.12, 0.12, 3.5)));
+        boom.add(box, at(mat(0, 4.55, u(D / 2 + 3.4), 0, 0.3, 0.9, 0.35)));
+        lens.add(box, at(mat(-0.16, 4.75, u(D / 2 + 3.4), 0, 0.02, 0.22, 0.22)), col('#ff2a20'));
+        lens.add(box, at(mat(-0.16, 4.35, u(D / 2 + 3.4), 0, 0.02, 0.22, 0.22)), col('#1fd760'));
+        // the team's stand on the pit wall: on legs over the wall's foot, its desk and screens to the
+        // track, seats behind, a roof in the team's colour (on the lane side of the wall's fence)
+        const L = Tracks.locate(tr, it.x, it.y, -1), k = L.i, wd = pit.wall[k];
+        if (wd === wd) {
+          const lat = pit.side * (wd + 0.1 + 0.3 + 0.85), [sxp, szp, sh] = Tracks.pointAt(tr, L.s, lat), sy = Tracks.surfZ(tr, k, lat) - 0.006;
+          const S2 = new THREE.Matrix4().compose(V(sxp, sy, szp), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -sh, 0)), V(1, 1, 1));
+          const sa = m => S2.clone().multiply(m), tz = -pit.side; // local z toward the track
+          const grey = col('#5b6067'), black = col('#1c1f23');
+          for (const lx of [-2.8, 2.8]) for (const lz of [-0.6, 0.6]) stand.add(box, sa(mat(lx, 0.6, lz, 0, 0.1, 1.2, 0.1)), grey);
+          stand.add(box, sa(mat(0, 1.24, 0, 0, 6, 0.12, 1.5)), grey);
+          stand.add(box, sa(mat(0, 1.66, tz * 0.5, 0, 5.8, 0.72, 0.45)), black);
+          stand.add(box, sa(mat(0, 2.28, tz * 0.64, 0, 5.4, 0.42, 0.05)), col('#20384c'));
+          for (let q = 0; q < 5; q++) stand.add(box, sa(mat(-2.2 + q * 1.1, 1.56, -tz * 0.12, 0, 0.5, 0.5, 0.5)), dim(it.team.base, 0.7));
+          for (const lx of [-2.9, 2.9]) stand.add(box, sa(mat(lx, 2.3, -tz * 0.65, 0, 0.08, 2.05, 0.08)), grey);
+          stand.add(box, sa(mat(0, 3.36, 0, 0, 6.4, 0.1, 1.9)), col('#e6e6e2'));
+          stand.add(box, sa(mat(0, 3.18, tz * 0.95, 0, 6.4, 0.38, 0.06)), col(it.team.base));
+        }
       }
       add(shell.geo(), M.pitPanel || (M.pitPanel = std({ map: pitTex('panel'), roughness: 0.55, metalness: 0.15 })), { cast: true });
-      add(dark.geo(), M.pitBay || (M.pitBay = std({ map: pitTex('bay'), emissive: '#ffffff', emissiveMap: pitTex('bay'), emissiveIntensity: 0.42, roughness: 0.8 }))); add(paint.geo(), M.vcolMetal, { cast: false });
+      add(paint.geo(), M.vcolMetal, { cast: false });
+      if (G.length) {
+        // (a garage is lit inside: its walls and ceiling glow a little, the strips brightly)
+        if (!M.garageIn) {
+          M.garageFloor = std({ color: '#9a9ea4', roughness: 0.32, metalness: 0.05 });
+          M.garageBack = std({ map: pitTex('tools'), emissive: '#ffffff', emissiveMap: pitTex('tools'), emissiveIntensity: 0.22, roughness: 0.7 });
+          M.garageIn = std({ color: '#aeb3b9', emissive: '#1a1d21', roughness: 0.7 });
+          M.garageCeil = std({ map: pitTex('ceil'), emissive: '#ffffff', emissiveMap: pitTex('ceil'), emissiveIntensity: 0.9, roughness: 0.8 });
+          M.pitLens = new THREE.MeshBasicMaterial({ vertexColors: true });
+        }
+        add(floor.geo(), M.garageFloor); add(backW.geo(), M.garageBack); add(sideW.geo(), M.garageIn); add(ceil.geo(), M.garageCeil);
+        add(glass.geo(), M.pitGlaze || (M.pitGlaze = (() => { const t = pitTex('band').clone(); t.repeat.set(1 / 12, 1 / 3.6); t.needsUpdate = true; return capGlare(std({ map: t, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.3 }), 0.9); })()), { cast: true });
+        add(canopy.geo(), M.white, { cast: true }); add(kit.geo(), M.vcol, { cast: true, far: 260 }); add(boom.geo(), M.steel, { far: 260 }); add(lens.geo(), M.pitLens, { far: 260 });
+        if (stand.parts.length) add(stand.geo(), M.vcol, { cast: true, far: 400 });
+      }
       for (const it of W2.decor) {
         if (it.type !== 'poly') continue;
         const sh = new THREE.Shape(it.pts.map(p => new THREE.Vector2(p[0], -p[1])));
@@ -2778,12 +2877,29 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     {
       const conc = new Batch(false), crowd = new Batch(false), roof = new Batch(false), steel = new Batch(false), fascia = new Batch(true), scrim = new Batch(false), lattice = new Batch(false);
       const box = new THREE.BoxGeometry(1, 1, 1);
-      // seating slope: local x along the track, rising away from it (+z)
-      const slope = new THREE.PlaneGeometry(28, Math.hypot(12, 8.5));
-      slope.rotateX(-Math.PI / 2 - Math.atan2(8.5, 12)); slope.translate(0, 5.6, 0);
+      // seating: local x along the track, rising away from it (+z) in 14 rows, each a riser and a
+      // tread (it was one flat slope: from the track and the TV cameras a stand showed no rows)
       // (a harbour town's stands are seen from further off and in shade: the crowd is drawn 1.6 times
       // finer there, a speckle of heads and shirts, not seat-sized tiles of colour)
-      const suv = slope.attributes.uv, cf = W2.town ? 1.6 : 1; for (let k = 0; k < suv.count; k++) suv.setXY(k, suv.getX(k) * 0.6 * cf, (1 - suv.getY(k)) * 0.95 * cf);
+      const cf = W2.town ? 1.6 : 1;
+      const slope = (() => {
+        const R = 14, h = 8.5 / R, t = 12 / R, P = [], Nn = [], UV = [], I = [];
+        const v = (x, y, z, nx, ny, nz, fr) => { P.push(x, y, z); Nn.push(nx, ny, nz); UV.push((x + 14) / 28 * 0.6 * cf, (1 - fr) * 0.95 * cf); return P.length / 3 - 1; };
+        for (let r = 0; r < R; r++) {
+          const y0 = 1.35 + r * h, z0 = -6 + r * t, f0 = r / R, fm = (r + 0.35) / R, f1 = (r + 1) / R;
+          let a = v(-14, y0, z0, 0, 0, -1, f0); v(14, y0, z0, 0, 0, -1, f0); v(14, y0 + h, z0, 0, 0, -1, fm); v(-14, y0 + h, z0, 0, 0, -1, fm);
+          I.push(a, a + 2, a + 1, a, a + 3, a + 2);
+          a = v(-14, y0 + h, z0, 0, 1, 0, fm); v(14, y0 + h, z0, 0, 1, 0, fm); v(14, y0 + h, z0 + t, 0, 1, 0, f1); v(-14, y0 + h, z0 + t, 0, 1, 0, f1);
+          I.push(a, a + 2, a + 1, a, a + 3, a + 2);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(Nn, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
+        g.setIndex(I);
+        return g;
+      })();
+      // the front: sponsors' banners along the parapet, 4 m each (the hoarding atlas, read from the track)
+      const bannerG = [0, 1, 2, 3, 4, 5, 6, 7].map(sl => { const g = new THREE.PlaneGeometry(1, 1), uv = g.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setX(k, (sl + 0.03 + 0.94 * uv.getX(k)) / 8); return g; });
+      const banners = new Batch(false);
       const sideS = new THREE.Shape([new THREE.Vector2(-6, 0), new THREE.Vector2(6.3, 0), new THREE.Vector2(6.3, 10.5), new THREE.Vector2(-6, 1.4)]);
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
@@ -2799,17 +2915,51 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const at = m => base.clone().multiply(m);
         crowd.add(slope, base);
         conc.add(box, at(mat(0, 0.7, -6.1, 0, 28, 1.4, 0.3)));
+        { const rb = U.rng(it.seed || 1); let sl = Math.floor(rb() * 8); for (let q = 0; q < 7; q++) { if (rb() < 0.3) sl = Math.floor(rb() * 8); banners.add(bannerG[sl], at(mat(-12 + q * 4, 0.72, -6.27, Math.PI, 3.96, 1.2, 1))); } }
         conc.add(box, at(mat(0, 5.4, 6.4, 0, 28, 10.8, 0.4)));
-        // (the ends: scaffold hung with mesh scrim, not a concrete plate)
+        // (the ends: scaffold wrapped in printed scrim, the event's colours; no lettering, which would
+        // read backwards from one side)
         lattice.add(side, at(mat(-14.2, 0, 0)));
         lattice.add(side, at(mat(13.85, 0, 0)));
-        for (const sx of [-14.05, 14.05]) scrim.add(box, at(mat(sx, 2.0, 0.15, 0, 0.06, 4.0, 12.3)));
         roof.add(box, at(mat(0, 13.2, 2.0, 0, 29.5, 0.35, 10, -0.06)));
         for (const x of [-12, -4, 4, 12]) steel.add(col0, at(mat(x, 6.6, 6.2, 0, 1, 13.2, 1)));
         fascia.add(box, at(mat(0, 12.6, -3.0, 0, 29.5, 1.0, 0.25, -0.06)), col(ads[n++ % ads.length]));
       }
-      if (scrim.parts.length) add(scrim.geo(), M.scrim || (M.scrim = std({ color: '#3f5a4c', roughness: 0.95, side: THREE.DoubleSide })), { cast: true });
-      if (lattice.parts.length) add(lattice.geo(), fenceMat(M, W2) || M.steel, { cast: false });
+      if (lattice.parts.length) add(lattice.geo(), M.standEnd || (M.standEnd = std({ map: standEndTex(), roughness: 0.92, side: THREE.DoubleSide })), { cast: true });
+      if (banners.parts.length) add(banners.geo(), M.adwall, { cast: false, far: 600 });
+      // Giant screens: an LED wall on a scaffold tower across the track from each of the three biggest
+      // groups of stands, facing them (the crowd watches the rest of the race on it)
+      if (!W2.town) {
+        const S = W2.decor.filter(it => it.type === 'stand').map(it => { const L = Tracks.locate(tr, it.x, it.y, -1); return { it, s: L.s, i: L.i }; }).sort((a, b) => a.s - b.s);
+        const groups = [];
+        for (const q of S) { const g = groups[groups.length - 1]; if (g && q.s - g[g.length - 1].s < 45 && q.it.side === g[0].it.side) g.push(q); else groups.push([q]); }
+        groups.sort((a, b) => b.length - a.length);
+        const tower = new Batch(false), face = new Batch(false), frame = new Batch(false), bx = new THREE.BoxGeometry(1, 1, 1), sp = new THREE.PlaneGeometry(1, 1);
+        let made = 0;
+        for (const g of groups) {
+          if (made >= 3) break;
+          const mid = g[Math.floor(g.length / 2)], side = mid.it.side > 0 ? 0 : 1, sg = side ? 1 : -1, k = mid.i; // the far side
+          if (!isNaN(tr.pit.off[k]) && side === (tr.pit.side > 0 ? 1 : 0)) continue;
+          const d = sg * (tr.barr[side][k] + 9), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d;
+          // (clear of every part of the lap by 14 m, and of the run-offs)
+          let clear = true;
+          tr.hash.near(x, z, 60, j => { const dx = x - tr.x[j], dz = z - tr.y[j], dl = Math.abs(dx * tr.nx[j] + dz * tr.ny[j]); if (Math.hypot(dx, dz) < Math.max(14, tr.barr[dl > 0 ? 1 : 0][j] + 4)) clear = false; });
+          if (!clear) continue;
+          const y = Tracks.groundAt(tr, x, z), ry = -Math.atan2(tr.ty[k], tr.tx[k]) + (sg < 0 ? Math.PI : 0);
+          const B = new THREE.Matrix4().compose(V(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), V(1, 1, 1)), at = m => B.clone().multiply(m);
+          for (const lx of [-4.5, 4.5]) tower.add(bx, at(mat(lx, 5, 0.6, 0, 0.5, 10, 0.5)));
+          tower.add(bx, at(mat(0, 4.9, 0.6, 0, 9.5, 0.3, 0.3)));
+          frame.add(bx, at(mat(0, 8.6, 0, 0, 12.6, 7.3, 0.55)));
+          // (the screen faces -z, toward the track and the stands beyond it)
+          face.add(sp, at(mat(0, 8.6, -0.29, Math.PI, 12, 6.75, 1)));
+          made++;
+        }
+        if (made) {
+          add(tower.geo(), M.steel, { cast: true }); add(frame.geo(), M.dark || M.steel, { cast: true });
+          if (!M.bigScreen) { const t = bigScreenTex(); M.bigScreen = std({ color: '#000000', emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 1.1, roughness: 0.35 }); }
+          add(face.geo(), M.bigScreen);
+        }
+      }
       add(conc.geo(), M.standShell || (M.standShell = T.has('stand') ? pbr('stand', 1 / 6, { color: '#c4c6c8' }) : T.has('concrete') ? pbr('concrete', 4, { color: '#9da2a8' }) : std({ color: '#6d727a', roughness: 0.8 })), { cast: true }); add(crowd.geo(), M.crowd, { cast: false });
       // the roof: profiled steel sheet (the corrugation runs down the slope)
       add(roof.geo(), T.has('clad') ? (M.standRoof || (M.standRoof = pbr('clad', [6, 2], { color: '#dfe3e7' }))) : M.white, { cast: true }); add(steel.geo(), M.steel, { cast: true }); add(fascia.geo(), M.vcol);
@@ -4547,6 +4697,46 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(k * 128, 34, 128, 3); g.fillRect(k * 128, 92, 128, 3); // the straps
     });
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
+
+  // what a circuit's giant screen shows: the broadcast's running order beside a frame of the race
+  function bigScreenTex() {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 576;
+    const g = c.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, 576); sky.addColorStop(0, '#4f7fb8'); sky.addColorStop(0.55, '#a9c3dc'); sky.addColorStop(0.56, '#3b3f44'); sky.addColorStop(1, '#25282c');
+    g.fillStyle = sky; g.fillRect(0, 0, 1024, 576);
+    g.fillStyle = '#e9e9e4'; g.beginPath(); g.moveTo(420, 576); g.lineTo(610, 322); g.lineTo(630, 322); g.lineTo(520, 576); g.fill();
+    g.fillStyle = '#c4262e'; for (let i = 0; i < 6; i++) { g.fillRect(860 - i * 40, 330 + i * 40, 36, 14); }
+    // a car, from behind, small
+    g.fillStyle = '#16181c'; g.fillRect(560, 410, 130, 46); g.fillRect(545, 440, 34, 40); g.fillRect(672, 440, 34, 40); g.fillStyle = '#c8102e'; g.fillRect(585, 396, 80, 16);
+    // the running order down the left
+    g.fillStyle = 'rgba(10,14,22,.88)'; g.fillRect(24, 24, 250, 528);
+    g.fillStyle = '#c8102e'; g.fillRect(24, 24, 250, 40);
+    g.fillStyle = '#ffffff'; g.font = '900 26px Titillium Web, Segoe UI, sans-serif'; g.textBaseline = 'middle'; g.fillText('LAP 12 / 52', 40, 45);
+    // (the game's own drivers and team colours, js/data.js)
+    const T = [];
+    for (const tm of (F1.Data && F1.Data.TEAMS) || []) for (const d of tm.drivers || []) T.push([d[2], tm.base]);
+    const order = U.rng(12);
+    for (let i = T.length - 1; i > 0; i--) { const j = Math.floor(order() * (i + 1)); [T[i], T[j]] = [T[j], T[i]]; }
+    g.font = '700 26px Titillium Web, Segoe UI, sans-serif';
+    T.slice(0, 12).forEach(([n, c], i) => { const y = 88 + i * 38; g.fillStyle = i % 2 ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.09)'; g.fillRect(24, y - 17, 250, 36); g.fillStyle = '#ffffff'; g.fillText(String(i + 1), 40, y); g.fillStyle = c === '#121417' ? '#d8b45a' : c; g.fillRect(76, y - 12, 5, 24); g.fillStyle = '#ffffff'; g.fillText(n, 92, y); g.fillStyle = '#b9c2cf'; g.fillText(i ? '+' + (i * 1.7 + 0.4).toFixed(1) : 'LEADER', 170, y); });
+    g.fillStyle = 'rgba(0,0,0,.18)'; for (let y = 0; y < 576; y += 3) g.fillRect(0, y, 1024, 1);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    return t;
+  }
+  // a stand's end: scaffold wrapped in printed scrim, navy with the event's diagonal bands (the
+  // ExtrudeGeometry's caps take the shape's own coordinates, metres: one print an end)
+  function standEndTex() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = '#16233f'; g.fillRect(0, 0, 512, 512);
+    g.save(); g.translate(256, 256); g.rotate(-0.5);
+    for (const [y, w, cc] of [[-40, 46, '#c8102e'], [20, 16, '#f2f2ee'], [52, 46, '#c8102e']]) { g.fillStyle = cc; g.fillRect(-600, y, 1200, w); }
+    g.restore();
+    g.fillStyle = 'rgba(255,255,255,.08)'; for (let i = 0; i < 512; i += 8) g.fillRect(0, i, 512, 1);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    t.repeat.set(1 / 12.3, 1 / 10.5); t.offset.set(6 / 12.3, 0);
     return t;
   }
 
