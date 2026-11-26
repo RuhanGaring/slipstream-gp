@@ -3136,8 +3136,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     }
 
     tag('lots');
-    buildTrees(root, W2, tr); tag('trees');
+    // (the venue first: the trees keep out of the buildings and trucks it places)
     const venue = buildVenue(root, tr, W2); tag('venue');
+    buildTrees(root, W2, tr, venue); tag('trees');
     const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue, { root, renderer, ground: MATS['ground_' + style] }) : null;
     if (grass) root.add(grass);
     tag('grass');
@@ -4200,7 +4201,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   // trees, conifers and palms, instanced and split into tiles so they cull
-  function buildTrees(root, W2, tr) {
+  function buildTrees(root, W2, tr, avoid) {
     const M = materials();
     const conifer = Tracks.treesOf(tr) === 'fir';
     const crownG = new THREE.IcosahedronGeometry(1, 1);
@@ -4271,6 +4272,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     }
     const tiles = new Map();
     let items = W2.decor.filter(it => it.type === 'tree' || it.type === 'palm');
+    if (avoid && avoid.length) items = items.filter(it => !avoid.some(f => Math.hypot(f.x - it.x, f.y - it.y) < f.r + (it.r || 3) * 0.7));
     // forests as masses, not rows: a tree inside a stand (two or more others within 15 m) gets two
     // more behind it, away from the track, and the edge facing the track a skirt of shrubs and saplings
     // (kept clear of the barrier)
@@ -4404,11 +4406,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     for (const it of W2.decor) {
       if (it.type === 'stand') blocked.push({ x: it.x, y: it.y, r: 22 });
       else if (it.type === 'building' || it.type === 'lot') blocked.push({ x: it.x, y: it.y, r: Math.max(it.w, it.h) * 0.6 });
+      else if (it.type === 'boat') blocked.push({ x: it.x, y: it.y, r: it.l * 0.6 + 2 });
     }
     const polys = W2.decor.filter(it => it.type === 'poly').map(it => it.pts);
     const inPoly = (x, y, v) => { let c = false; for (let i = 0, j = v.length - 1; i < v.length; j = i++) { if ((v[i][1] > y) !== (v[j][1] > y) && x < (v[j][0] - v[i][0]) * (y - v[i][1]) / (v[j][1] - v[i][1]) + v[i][0]) c = !c; } return c; };
     // clear of every part of the circuit (centreline plus its barriers and a margin)
-    const clear = (x, y, w, d, h) => {
+    // (pad: a paddock unit or truck, which stand side by side with each other, alleys between)
+    const clear = (x, y, w, d, h, pad) => {
       const ch = Math.cos(h), sh = Math.sin(h), R = Math.hypot(w, d) / 2;
       let ok = true;
       tr.hash.near(x, y, R + 70, i => {
@@ -4418,16 +4422,30 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       });
       if (!ok) return false;
       for (const b of blocked) if (Math.hypot(b.x - x, b.y - y) < b.r + R) return false;
-      for (const f of foot) if (Math.hypot(f.x - x, f.y - y) < f.r + R + 3) return false;
+      for (const f of foot) if (pad && f.pad ? !boxApart(f, { x, y, w, d, h }) : Math.hypot(f.x - x, f.y - y) < f.r + R + 3) return false;
       for (const [cx, cz] of [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2], [0, 0]]) {
         const px = x + ch * cx - sh * cz, py = y + sh * cx + ch * cz;
         for (const v of polys) if (inPoly(px, py, v)) return false;
+        // (on land: a harbour's paddock had its units standing in the sea among the boats)
+        if (W2.water && py < W2.water.y + 3) return false;
+        if (W2.town && W2.town.site.inland && W2.town.site.inland(px, py) < 6) return false;
       }
       return true;
     };
     const glass = new Batch(false), office = new Batch(false), lit = new Batch(false), roof = new Batch(false), clad = new Batch(false), brick = new Batch(false), pitBand = new Batch(false);
-    const place = (x, y, h, w, d, floors, kind) => {
-      if (!clear(x, y, w, d, h)) return false;
+    // two footprints (centre, size, heading) at least 0.8 m apart: separating axes
+    const boxApart = (A, B) => {
+      const ax = [[Math.cos(A.h), Math.sin(A.h)], [-Math.sin(A.h), Math.cos(A.h)]], bx2 = [[Math.cos(B.h), Math.sin(B.h)], [-Math.sin(B.h), Math.cos(B.h)]];
+      const dx = B.x - A.x, dy = B.y - A.y;
+      for (const [ux, uy] of ax.concat(bx2)) {
+        const ra = Math.abs(ax[0][0] * ux + ax[0][1] * uy) * A.w / 2 + Math.abs(ax[1][0] * ux + ax[1][1] * uy) * A.d / 2;
+        const rb = Math.abs(bx2[0][0] * ux + bx2[0][1] * uy) * B.w / 2 + Math.abs(bx2[1][0] * ux + bx2[1][1] * uy) * B.d / 2;
+        if (Math.abs(dx * ux + dy * uy) > ra + rb + 0.8) return true;
+      }
+      return false;
+    };
+    const place = (x, y, h, w, d, floors, kind, pad) => {
+      if (!clear(x, y, w, d, h, pad)) return false;
       const gy = Tracks.groundAt(tr, x, y), H = floors * 3.6, ry = -h;
       // glazed ground floor, office or glass floors above, a roof slab with plant on top
       lit.add(facadeBox(w, 3.6, d, 15, 15), mat(x, gy + 1.8 - 0.4, y, ry));
@@ -4437,18 +4455,52 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (B === brick) for (let fl = 0; fl < floors - 1; fl++) lit.add(facadeBox(w - 2.2, 1.7, d - 0.25, 15, 15), mat(x, gy + 3.6 + fl * 3.6 + 1.6 - 0.4, y, ry));
       roof.add(new THREE.BoxGeometry(w + (kind === 'pit' ? 1.2 : 0.6), kind === 'pit' ? 0.35 : 0.5, d + (kind === 'pit' ? 4.4 : 0.6)), mat(x, gy + H - 0.15, y, ry));
       clad.add(facadeBox(w * 0.3, 1.6, d * 0.4, 3, 3), mat(x + Math.cos(h) * w * 0.15, gy + H + 0.9, y + Math.sin(h) * w * 0.15, ry));
-      foot.push({ x, y, w, d, h, r: Math.hypot(w, d) / 2 });
+      foot.push({ x, y, w, d, h, r: Math.hypot(w, d) / 2, pad });
       return true;
     };
-    // behind the garages: the paddock
+    // Behind the garages: the paddock. Each team's hospitality unit behind its own garage, two or
+    // three floors of glass with the team's colour round the top, an alley between it and the next;
+    // behind it the team's two transporters, parked side by side; the whole of it paved.
     const garages = W2.decor.filter(it => it.type === 'garage');
     const f = pit.side > 0 ? -1 : 1; // local z of the garage face that looks onto the pit lane
+    const teamBand = new Batch(true), trucks = new Batch(true), pave = [], bx = new THREE.BoxGeometry(1, 1, 1);
     garages.forEach((it, k) => {
-      if (k % 2) return;
-      const back = -f * (it.d / 2 + 18 + 6.5);
-      const x = it.x - Math.sin(it.h) * back, y = it.y + Math.cos(it.h) * back;
-      place(x, y, it.h, 26, 13, 2 + ((k / 2) % 3 === 1 ? 1 : 0), 'pit');
+      const back = -f * (it.d / 2 + 18 + 6.5), ch = Math.cos(it.h), sh = Math.sin(it.h);
+      const x = it.x - sh * back, y = it.y + ch * back, floors = 2 + (k % 3 === 1 ? 1 : 0);
+      if (!place(x, y, it.h, 14.2, 13, floors, 'pit', true)) return;
+      const gy = Tracks.groundAt(tr, x, y), Hh = floors * 3.6;
+      teamBand.add(bx, mat(x, gy + Hh - 0.75, y, -it.h, 14.35, 0.9, 13.15), col(it.team.base));
+      teamBand.add(bx, mat(x, gy + Hh - 1.25, y, -it.h, 14.36, 0.12, 13.16), col(it.team.accent));
+      // (the team's patch of paddock, unit to trucks, as wide as its garage's spacing: one paved whole)
+      { let sp = 18; for (const o of garages) if (o !== it) sp = Math.min(sp, Math.hypot(o.x - it.x, o.y - it.y)); const mid = back - f * 9.5; pave.push([it.x - sh * mid, it.y + ch * mid, it.h, U.clamp(sp, 14, 18) + 0.3, 36]); }
+      // the transporters: trailer in the team's colour, the tractor dark, 16.5 m long in all
+      const tb = back - f * 17;
+      for (const lat of [-3.2, 3.2]) {
+        const tx = it.x - sh * tb + ch * lat, ty = it.y + ch * tb + sh * lat;
+        if (!clear(tx, ty, 16.5, 2.6, it.h, true)) continue;
+        const ty0 = Tracks.groundAt(tr, tx, ty);
+        trucks.add(bx, mat(tx - ch * 1.6, ty0 + 2.15, ty - sh * 1.6, -it.h, 13.4, 3.0, 2.55), col(it.team.base));
+        trucks.add(bx, mat(tx - ch * 1.6, ty0 + 0.62, ty - sh * 1.6, -it.h, 13.4, 0.18, 2.56), col(it.team.accent));
+        trucks.add(bx, mat(tx + ch * 6.6, ty0 + 1.8, ty + sh * 6.6, -it.h, 2.4, 2.9, 2.5), col('#24272c'));
+        trucks.add(bx, mat(tx + ch * 7.83, ty0 + 2.55, ty + sh * 7.83, -it.h, 0.04, 1.0, 2.2), col('#1a2a38'));
+        foot.push({ x: tx, y: ty, w: 16.5, d: 2.6, h: it.h, r: 8.4, pad: true });
+      }
     });
+    if (teamBand.parts.length) { const mm = new THREE.Mesh(teamBand.geo(), M.vcolMetal); mm.castShadow = true; mm.receiveShadow = true; root.add(mm); }
+    if (trucks.parts.length) { const mm = new THREE.Mesh(trucks.geo(), M.vcolMetal); mm.castShadow = true; mm.receiveShadow = true; root.add(mm); }
+    // the paddock's asphalt: a slab under each unit and truck, draped on the ground 6 cm up
+    if (pave.length) {
+      const pa = new Acc();
+      for (const [px, py, ph, pw, pd] of pave) {
+        const ch = Math.cos(ph), sh = Math.sin(ph), NU = Math.max(2, Math.ceil(pw / 3)), NV = Math.max(2, Math.ceil(pd / 3)), base = pa.k;
+        for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) {
+          const lx = (i / NU - 0.5) * pw, lz = (j / NV - 0.5) * pd, x = px + ch * lx - sh * lz, z = py + sh * lx + ch * lz;
+          pa.v(x, Tracks.groundAt(tr, x, z) - 0.07 + 0.13, z, 0, 1, 0, x / 9, z / 9);
+        }
+        for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) { const a = base + j * (NU + 1) + i, b = a + 1, c = a + NU + 1, d = c + 1; pa.t(a, c, b); pa.t(b, c, d); }
+      }
+      const mm = new THREE.Mesh(pa.geo(), M.pitlane); mm.receiveShadow = true; root.add(mm);
+    }
     // race control: a glass tower at the head of the pit lane
     if (garages.length) {
       for (const it of [garages[0], garages[garages.length - 1]]) {
@@ -4761,15 +4813,26 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const k = Math.floor(4 / tr.ds);
     const dl = -(tr.barr[0][k] + 1.2), dr = tr.barr[1][k] + 1.2;
     const box = (w, hh, d, px, py, pz, m) => { const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), m); mesh.position.set(px, py, pz); mesh.castShadow = true; g.add(mesh); return mesh; };
-    box(0.6, 7.4, 0.6, 0, 3.7, dl, M.dark); box(0.6, 7.4, 0.6, 0, 3.7, dr, M.dark);
-    box(0.7, 0.9, dr - dl, 0, 7.0, (dl + dr) / 2, M.dark);
-    box(0.4, 1.7, 4.0, 0, 5.75, 0, M.dark);
-    const lamp = new THREE.CylinderGeometry(0.16, 0.16, 0.12, 14); lamp.rotateZ(Math.PI / 2);
+    // The start gantry as F1's: two towers, a deep beam carrying the series' name on both faces, and
+    // under it five light pods, each four red lamps (the start sequence lights them a pod at a time)
+    // over a pair that stays dark; the pods' foot 4.8 m over the road (FIA: at least 4.5 m)
+    box(1.0, 8.6, 1.0, 0, 4.3, dl, M.dark); box(1.0, 8.6, 1.0, 0, 4.3, dr, M.dark);
+    box(1.3, 1.5, dr - dl + 1.0, 0, 7.85, (dl + dr) / 2, M.dark);
+    {
+      const span = dr - dl + 1.0, sp = new THREE.PlaneGeometry(1, 1), uv = sp.attributes.uv;
+      for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * span / 6);
+      const adM = M.adwall0 || (M.adwall0 = F1.R3S.wear.barrier(std({ map: adTexture(0), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap })));
+      for (const sx of [-1, 1]) { const pm = new THREE.Mesh(sp, adM); pm.scale.set(span, 1.2, 1); pm.rotation.y = sx * Math.PI / 2; pm.position.set(sx * 0.66, 7.85, (dl + dr) / 2); g.add(pm); }
+    }
+    box(0.5, 0.35, 6.4, 0, 6.95, 0, M.dark);
+    const lamp = new THREE.CylinderGeometry(0.15, 0.15, 0.1, 14); lamp.rotateZ(Math.PI / 2);
+    const off = M.lampOff || (M.lampOff = std({ color: '#141414', roughness: 0.3 }));
     const mats = [];
     for (let c = 0; c < 5; c++) {
-      const m = std({ color: '#2a0a08', emissive: '#ff2414', emissiveIntensity: 0, roughness: 0.3 });
+      const m = std({ color: '#2a0a08', emissive: '#ff2414', emissiveIntensity: 0, roughness: 0.3 }), zc = -2.4 + c * 1.2;
       mats.push(m);
-      for (const yy of [6.15, 5.4]) { const l = new THREE.Mesh(lamp, m); l.position.set(-0.24, yy, -1.44 + c * 0.72); g.add(l); }
+      box(0.42, 2.0, 0.9, 0, 5.8, zc, M.dark);
+      for (const yy of [6.45, 6.0, 5.5, 5.05]) for (const dz of [-0.2, 0.2]) { const l = new THREE.Mesh(lamp, yy < 5.8 ? m : off); l.position.set(-0.24, yy, zc + dz); g.add(l); }
     }
     root.add(g);
     return mats;
