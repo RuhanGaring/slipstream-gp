@@ -154,24 +154,60 @@
       ms[name].setMatrixAt(i, M4.multiplyMatrices(_R, M5));
     };
     const end = (ox, oy, oz, rx, rz, len) => V(0, -len, 0).applyEuler(new THREE.Euler(rx, 0, rz)).add(V(ox, oy, oz));
-    const c = U.clamp(P.crouch || 0, 0, 1), amp = P.walkAmp || 0, sw = Math.sin(P.walk || 0) * 0.5 * amp;
-    const TH = 0.45, hip = 0.95 - 0.44 * c;
-    // legs: kneeling, the front knee up (thigh forward, shin down to the boot) and the back knee on the
-    // ground (shin back along it); squatting between; walking, the legs swing
-    const tF = -(c * 1.3) - sw, kF = end(-0.1, hip, 0, tF, 0, TH);
-    put('legL', -0.1, hip, 0, tF, 0, TH);
-    const sLF = (-tF * 0.3 + sw * 0.6) * (1 - U.smooth(c / 0.3)), lenF = Math.max(0.2, kF.y / Math.max(0.3, Math.cos(sLF)));
-    put('shinL', kF.x, kF.y, kF.z, sLF, 0, lenF);
-    const fF = end(kF.x, kF.y, kF.z, sLF, 0, lenF);
-    put('bootL', fF.x, Math.max(0, fF.y - 0.06), fF.z, 0, 0, 1);
-    const tB = c * 0.2 + sw, kB = end(0.1, hip, 0, tB, 0, TH);
-    put('legR', 0.1, hip, 0, tB, 0, TH);
-    const sLB = c > 0.5 ? 1.45 * U.smooth((c - 0.5) / 0.4) : -sw * 0.6 * (1 - c), lenB = Math.max(0.2, kB.y / Math.max(0.2, Math.cos(sLB)));
-    put('shinR', kB.x, kB.y, kB.z, sLB, 0, lenB);
-    const fB = end(kB.x, kB.y, kB.z, sLB, 0, lenB);
-    put('bootR', fB.x, Math.max(0, fB.y - 0.06), fB.z, sLB * 0.85, 0, 1);
+    const amp = U.clamp(P.walkAmp || 0, 0, 1), ph = P.walk || 0, spd = P.spd || 0;
+    // (nobody walks on their knees: walking stands a person up)
+    const c = U.clamp(P.crouch || 0, 0, 1) * (1 - amp);
+    const TH = 0.45, SL = 0.47, ANK = 0.06;
+    // the body's rise and fall: lowest as the weight passes from one foot to the other
+    let hip = 0.95 - 0.44 * c + amp * 0.028 * (Math.cos(2 * (ph - 0.6 * Math.PI)) - 1) / 2 - amp * 0.05 * U.smooth((spd - 2) / 2.5);
+    // Feet where they stand: kneeling, the front knee up and the back knee on the ground; squatting
+    // between (the same pose as ever, its feet the targets below)
+    const tF0 = -(c * 1.3), kF0 = end(-0.1, hip, 0, tF0, 0, TH);
+    const sLF0 = (-tF0 * 0.3) * (1 - U.smooth(c / 0.3)), lenF0 = Math.max(0.2, kF0.y / Math.max(0.3, Math.cos(sLF0))), fF0 = end(kF0.x, kF0.y, kF0.z, sLF0, 0, lenF0);
+    const tB0 = c * 0.2, kB0 = end(0.1, hip, 0, tB0, 0, TH);
+    const sLB0 = c > 0.5 ? 1.45 * U.smooth((c - 0.5) / 0.4) : 0, lenB0 = Math.max(0.2, kB0.y / Math.max(0.2, Math.cos(sLB0))), fB0 = end(kB0.x, kB0.y, kB0.z, sLB0, 0, lenB0);
+    if (c >= 0.5) {
+      put('legL', -0.1, hip, 0, tF0, 0, TH); put('shinL', kF0.x, kF0.y, kF0.z, sLF0, 0, lenF0); put('bootL', fF0.x, Math.max(0, fF0.y - ANK), fF0.z, 0, 0, 1);
+      put('legR', 0.1, hip, 0, tB0, 0, TH); put('shinR', kB0.x, kB0.y, kB0.z, sLB0, 0, lenB0); put('bootR', fB0.x, Math.max(0, fB0.y - ANK), fB0.z, sLB0 * 0.85, 0, 1);
+    } else {
+      // Walking: each foot planted on the ground while the body passes over it (stance, back along the
+      // way they go exactly as fast as they move, so it does not slide), then lifted and swung through
+      // to the next footfall; the legs bend to reach their feet (two-bone, the knee forward). The
+      // phase runs with the distance covered, the step lengthening and the stance shortening with speed.
+      // (the feet's places on the ground come from feet() below, in the world; here into the person's frame)
+      const cyw = Math.cos(P.yaw), syw = Math.sin(P.yaw);
+      const foot = (f0, side, u0) => {
+        const fw = P.fw && P.fw[side < 0 ? 0 : 1];
+        if (!fw || amp <= 0.001) return f0.clone();
+        const dx = fw.x - P.x, dz = fw.z - P.z, lx = dx * cyw - dz * syw, lz = dx * syw + dz * cyw;
+        const wl = U.smooth(amp / 0.35);
+        // (the ankle its own height off the ground, so a lifted foot clears it by the whole lift)
+        const y0 = Math.max(f0.y, ANK * wl);
+        return V(f0.x + (lx - f0.x) * wl, y0 + fw.lift * wl, f0.z + (lz - f0.z) * wl);
+      };
+      const leg = (nT, nS, nB, hx, f0, u0, kneel) => {
+        const H = V(hx, hip, 0), F = foot(f0, hx, u0);
+        const D = F.clone().sub(H), d = U.clamp(D.length(), 0.05, TH + SL - 0.002); D.normalize();
+        // (a foot out of reach is drawn at the end of the straight leg, never the leg stretched to it)
+        { const fd = Math.min(F.distanceTo(H), TH + SL); F.copy(H).addScaledVector(D, fd); }
+        const a = Math.acos(U.clamp((TH * TH + d * d - SL * SL) / (2 * TH * d), -1, 1));
+        const pole = V(0, 0, 1).addScaledVector(D, -D.z); if (pole.lengthSq() < 1e-6) pole.set(0, 1, 0); pole.normalize();
+        const tD = D.clone().multiplyScalar(Math.cos(a)).addScaledVector(pole, Math.sin(a));
+        const K = H.clone().addScaledVector(tD, TH), sD = F.clone().sub(K); const sl = sD.length(); sD.divideScalar(sl || 1);
+        // (a unit limb hanging down, turned rx about x then rz about z, points (sin rz, -cos rz cos rx, -cos rz sin rx))
+        put(nT, H.x, H.y, H.z, Math.atan2(-tD.z, -tD.y), Math.asin(U.clamp(tD.x, -1, 1)), TH);
+        put(nS, K.x, K.y, K.z, Math.atan2(-sD.z, -sD.y), Math.asin(U.clamp(sD.x, -1, 1)), sl);
+        // (the boot flat on the ground in stance, toe down a little as it swings)
+        const toe = F.y - Math.max(f0.y, ANK) > 0.005 ? -0.25 * U.clamp((F.y - Math.max(f0.y, ANK)) / 0.1, 0, 1) : 0;
+        put(nB, F.x, Math.max(0, F.y - ANK), F.z, kneel + toe, 0, 1);
+      };
+      leg('legL', 'shinL', 'bootL', -0.1, fF0, ph, 0);
+      leg('legR', 'shinR', 'bootR', 0.1, fB0, ph + Math.PI, sLB0 * 0.85);
+    }
+    // (the arms swing against the legs)
+    const sw = -Math.cos(ph) * 0.5 * amp * (1 + 0.6 * U.smooth((spd - 2) / 2));
     // hips, then the torso leaning forward from them, the helmet on top with its visor ahead
-    const lean = 0.3 * c + (P.lean || 0);
+    const lean = 0.3 * c + (P.lean || 0) * (1 - amp) + amp * (0.05 + 0.12 * U.smooth((spd - 1.5) / 3));
     put('pelvis', 0, hip + 0.12, 0, 0, 0, 0.2);
     E.set(lean, 0, 0); Q.setFromEuler(E);
     const top = V(0, 0.6, 0).applyQuaternion(Q).add(V(0, hip + 0.06, 0));
@@ -230,6 +266,42 @@
   function waitAt(cr, q) {
     const side = cr.side, row = q % 2, col = Math.floor(q / 2);
     return [-4.2 + col * 1.2, side * (4.4 + row * 0.9)];
+  }
+
+  // Footfalls, in the world. A foot in its stance stays where it was put down while the body walks
+  // over it; in its swing it travels from where it lifted to where it will land, the place under the
+  // hip half a stance ahead at the pace they are going, rising and falling as it goes. Its timing is
+  // the stride's phase (C.walk, run by the ground covered): stance the first sf of each foot's cycle.
+  let DT = 0;
+  function feet(C, step) {
+    const sf = 0.62 - 0.22 * U.smooth((C.spd - 2) / 2), cyc = C.spd > 0.05 ? 2 * step / C.spd : 1e9;
+    const cy = Math.cos(C.yaw), sy = Math.sin(C.yaw), fw = C.fw || (C.fw = [null, null]);
+    let far = false;
+    for (let k = 0; k < 2; k++) {
+      const hx = k ? 0.1 : -0.1, rx = C.x + hx * cy, rz = C.z - hx * sy;
+      const u = (((C.walk + k * Math.PI) / (2 * Math.PI)) % 1 + 1) % 1;
+      let f = fw[k];
+      if (!f) f = fw[k] = { x: rx, z: rz, lift: 0, st: true, ax: rx, az: rz };
+      if (u < sf) {
+        // (down: stays put; just landed, wherever the swing brought it)
+        if (!f.st) { f.st = true; f.lift = 0; }
+        // (left behind by more than a leg can reach, as by a shove: stepped back under)
+        // (dragged after the body, never jumped, at up to 2.5 m/s)
+        const ex = f.x - rx, ez = f.z - rz, el = Math.hypot(ex, ez);
+        if (el > 1.5) { f.x = rx; f.z = rz; }
+        else if (el > 0.8) { const m = Math.min(el - 0.8, 2.5 * DT); f.x -= ex / el * m; f.z -= ez / el * m; }
+      } else {
+        if (f.st) { f.st = false; f.ax = f.x; f.az = f.z; }
+        const t = (u - sf) / (1 - sf), ahead = (1 - t) * (1 - sf) * cyc + sf * cyc / 2;
+        const tx = rx + (C.vx || 0) * ahead, tz = rz + (C.vz || 0) * ahead, e = U.smooth(t);
+        f.x = f.ax + (tx - f.ax) * e; f.z = f.az + (tz - f.az) * e;
+        f.lift = Math.sin(Math.PI * t) * (0.09 + 0.05 * U.smooth((C.spd - 1.5) / 2));
+      }
+      // (standing still: the feet back under the hips)
+      if (C.walkAmp < 0.02) { f.x = rx; f.z = rz; f.lift = 0; }
+      if (!f.st || Math.hypot(f.x - rx, f.z - rz) > 0.04) far = true;
+    }
+    return far;
   }
 
   function pose(cr, dt) {
@@ -349,6 +421,7 @@
       // slides or spins however the plan changes)
       const k = dt > 0 ? 1 - Math.exp(-dt / 0.11) : 1;
       for (const key of ['y', 'crouch', 'arms', 'lean', 'armR', 'armL']) C[key] = (C[key] || 0) + ((P[key] || 0) - (C[key] || 0)) * k;
+      const ox = C.x, oz = C.z;
       {
         let mx = (P.x - C.x) * k, mz = (P.z - C.z) * k;
         const lim = dt > 0 ? 4.5 * dt : 1e9, l = Math.hypot(mx, mz);
@@ -359,8 +432,20 @@
       if (dt > 0) dy = U.clamp(dy, -7 * dt, 7 * dt);
       C.yaw += dy;
       C.jack = P.jack == null ? null : C.jack == null ? P.jack : C.jack + (P.jack - C.jack) * k;
-      C.walkAmp += ((cr.moving || Math.hypot(P.x - C.x, P.z - C.z) > 0.15 ? 1 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.15) : 1);
-      C.walk = S.time * 9 + q * 0.7; C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.gun = P.gun;
+      // The walk: how fast they really go (eased a little), the way they go in their own frame, and the
+      // stride's phase run on by the ground covered, so the feet keep pace with the body.
+      if (dt > 0) {
+        const vx = (C.x - ox) / dt, vz = (C.z - oz) / dt, kv = 1 - Math.exp(-dt / 0.07);
+        C.vx = (C.vx || 0) + (vx - (C.vx || 0)) * kv; C.vz = (C.vz || 0) + (vz - (C.vz || 0)) * kv;
+      }
+      C.spd = Math.hypot(C.vx || 0, C.vz || 0);
+      const stepL = U.clamp(0.3 + 0.18 * C.spd, 0.3, 0.75);
+      // (come to a stop with a foot still out: one more step or two, in place, to bring it under)
+      const dW = Math.hypot(C.x - ox, C.z - oz) / (2 * stepL) * 2 * Math.PI;
+      C.walk = (C.walk == null ? q * 0.9 : C.walk) + (C.far && (P.crouch || 0) < 0.3 ? Math.max(dW, dt * 2 * Math.PI * 0.9) : dW);
+      DT = dt; C.far = feet(C, stepL);
+      C.walkAmp += (Math.max(U.smooth((C.spd - 0.12) / 0.45), C.far && (P.crouch || 0) < 0.3 ? 0.6 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.08) : 1);
+      C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.gun = P.gun;
       // (still settling: keep posing this crew)
       // (walking while their place moves under them by more than a stroll)
       const mv = Math.hypot(P.x - C.x, P.z - C.z);
@@ -437,9 +522,11 @@
     if (stop) d.stood = true;
     if (d.stood && !stop) {
       // released: the offset at that moment fades out as the car pulls away
-      if (!d.rel) d.rel = { ox: d.x - c.x, oy: d.y - c.y, oh: d.h, t: 0 };
-      d.rel.t += dt;
-      const k = 1 - U.smooth(d.rel.t / 1.6);
+      // (over the ground it covers, 14 m, not a time: a car slow off the line would otherwise slide
+      // sideways back onto the race's line while hardly moving)
+      if (!d.rel) d.rel = { ox: d.x - c.x, oy: d.y - c.y, oh: d.h, t: 0, s: 0 };
+      d.rel.t += dt; d.rel.s += Math.max(0, c.speed || 0) * dt;
+      const k = Math.min(1 - U.smooth(d.rel.s / 14), 1 - U.smooth((d.rel.t - 2) / 3));
       d.x = c.x + d.rel.ox * k; d.y = c.y + d.rel.oy * k; d.h = d.rel.oh * k; d.vx = c.vx || 0; d.vy = c.vy || 0; d.vh = 0;
       if (k <= 0) { d.done = true; return null; }
       return [d.x - c.x, d.y - c.y, d.h];
