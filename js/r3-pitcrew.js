@@ -687,6 +687,10 @@
     if (d && d.done) { if (!p) SET.delete(c); return null; }
     if (!d) { d = { x: c.x, y: c.y, vx: c.vx || 0, vy: c.vy || 0, h: 0, vh: 0, rel: null, stood: false }; SET.set(c, d); }
     if (dt <= 0) return [d.x - c.x, d.y - c.y, d.h];
+    d.lastDt = dt;
+    // (its speed as drawn, from where it was drawn last: the spring's own velocity lagged the lead)
+    if (d.px != null) { const kv = 1 - Math.exp(-dt / 0.06); d.mvx = (d.mvx == null ? (d.x - d.px) / d.pdt : d.mvx + ((d.x - d.px) / d.pdt - d.mvx) * kv); d.mvy = (d.mvy == null ? (d.y - d.py) / d.pdt : d.mvy + ((d.y - d.py) / d.pdt - d.mvy) * kv); }
+    d.px = d.x; d.py = d.y; d.pdt = dt;
     // (a reset or a teleport: start again where the car is)
     if (Math.hypot(c.x - d.x, c.y - d.y) > 8) { d.x = c.x; d.y = c.y; d.vx = c.vx || 0; d.vy = c.vy || 0; d.h = 0; d.vh = 0; d.rel = null; d.stood = false; }
     const stop = p && p.phase === 'stop';
@@ -697,15 +701,51 @@
       // (over the ground it covers, 14 m, not a time: a car slow off the line would otherwise slide
       // sideways back onto the race's line while hardly moving)
       if (!d.rel) d.rel = { ox: d.x - c.x, oy: d.y - c.y, oh: d.h, t: 0, s: 0 };
+      d.plan = null;
       d.rel.t += dt; d.rel.s += Math.max(0, c.speed || 0) * dt;
       const k = Math.min(1 - U.smooth(d.rel.s / 14), 1 - U.smooth((d.rel.t - 2) / 3));
       d.x = c.x + d.rel.ox * k; d.y = c.y + d.rel.oy * k; d.h = d.rel.oh * k; d.vx = c.vx || 0; d.vy = c.vy || 0; d.vh = 0;
       if (k <= 0) { d.done = true; return null; }
       return [d.x - c.x, d.y - c.y, d.h];
     }
-    // the target: the race's place, or through the stop the box's centre and heading
+    // The arrival, planned: some 25 m out the car as drawn is given one run into its box, along it as
+    // a quintic in time from where it is, at the speed it is going (braking as it is, at about 3 m/s^2),
+    // to rest at the box's centre with no speed and no braking left, so the braking builds and eases
+    // off as a driver's does; across from the lane to the box in the first four fifths of that time,
+    // the car pointing along its own path (no sideways slide) and straight by the end, its front wheels
+    // steered to the path. The run lasts as long as the race takes to stop the car from there (its
+    // 4.5 m/s^2 braking law), within what keeps the run from overshooting or braking too hard.
+    if (cr && p && !p.served && S.tr && c.team) {
+      const box = S.tr.pit.boxS[c.team.idx], L = S.tr.L, r = box == null || !c.loc ? 1e9 : ((box - c.loc.s) % L + L * 1.5) % L - L / 2;
+      const bh = cr.box.h, ch = Math.cos(bh), sh = Math.sin(bh);
+      if (!d.plan && !stop && r < 26 && r > 2) {
+        const ex = d.x - cr.box.x, ey = d.y - cr.box.y, s0 = ex * ch + ey * sh, l0 = -ex * sh + ey * ch;
+        const mvx = d.mvx == null ? d.vx : d.mvx, mvy = d.mvy == null ? d.vy : d.mvy;
+        const vs = Math.max(0.5, mvx * ch + mvy * sh), vl = -mvx * sh + mvy * ch, dist = -s0;
+        if (dist > 1) {
+          let T = (2 / 3) * (Math.sqrt(Math.max(r - 0.5, 1.1)) - Math.sqrt(1.1)) + 0.15;
+          T = U.clamp(T, 1.25 * dist / vs, 1.8 * dist / vs);
+          d.plan = { t: 0, T, S: quint(s0, vs, -3, T), Lt: T * 0.8, Lq: quint(l0, vl, 0, T * 0.8), psi: null, sv: null, acc: 0, steer: 0 };
+        }
+      }
+      const P = d.plan;
+      if (P && P.t < P.T) {
+        P.t = Math.min(P.T, P.t + dt);
+        const t = P.t, sp = qv(P.S, t), sv = qd(P.S, t), tl = Math.min(t, P.Lt), l = qv(P.Lq, tl), lv = t < P.Lt ? qd(P.Lq, tl) : 0;
+        const nx = cr.box.x + ch * sp - sh * l, ny = cr.box.y + sh * sp + ch * l;
+        d.vx = (nx - d.x) / dt; d.vy = (ny - d.y) / dt; d.x = nx; d.y = ny;
+        const psi = Math.atan2(lv, Math.max(sv, 0.3));
+        if (P.psi != null) P.steer += (U.clamp(Math.atan(3.6 * wrapA(psi - P.psi) / Math.max(sv * dt, 1e-3)), -0.35, 0.35) - P.steer) * (1 - Math.exp(-dt / 0.08));
+        P.acc = P.sv == null ? 0 : (sv - P.sv) / dt;
+        P.psi = psi; P.sv = sv;
+        d.h = wrapA(bh + psi - c.h); d.vh = 0;
+        return [d.x - c.x, d.y - c.y, d.h];
+      }
+    }
+    // the target: the race's place, or through the stop (and once the planned run is done) the box's
+    // centre and heading
     let tx = c.x, ty = c.y, th = 0, w = 40;
-    if (stop && cr) { tx = cr.box.x; ty = cr.box.y; th = wrapA(cr.box.h - c.h); w = 6; }
+    if ((stop || d.plan) && cr) { tx = cr.box.x; ty = cr.box.y; th = wrapA(cr.box.h - c.h); w = 6; if (d.plan) { d.plan.acc = 0; d.plan.steer *= Math.exp(-dt / 0.1); } }
     else if (p && S && S.tr && c.team) {
       // Coming in: the race (ai.js) brakes the car at 4.5 m/s^2 toward its box and, once it is within
       // 1.6 m, stops it dead from 3 to 4 m/s. Drawn that way it slammed to a halt short of the box, and
@@ -734,6 +774,14 @@
     if (!p && Math.hypot(c.x - d.x, c.y - d.y) < 0.002 && Math.abs(d.h) < 1e-4) { SET.delete(c); return null; }
     return [d.x - c.x, d.y - c.y, d.h];
   }
+  // quintic in time: from x0 at speed v0 and acceleration a0 to 0 at rest with none, by time T
+  function quint(x0, v0, a0, T) {
+    const T2 = T * T, T3 = T2 * T, T4 = T3 * T, T5 = T4 * T;
+    const c3 = (-20 * x0 - 12 * v0 * T - 3 * a0 * T2) / (2 * T3), c4 = (30 * x0 + 16 * v0 * T + 3 * a0 * T2) / (2 * T4), c5 = (-12 * x0 - 6 * v0 * T - a0 * T2) / (2 * T5);
+    return [x0, v0, a0 / 2, c3, c4, c5];
+  }
+  const qv = (c, t) => c[0] + t * (c[1] + t * (c[2] + t * (c[3] + t * (c[4] + t * c[5]))));
+  const qd = (c, t) => c[1] + t * (2 * c[2] + t * (3 * c[3] + t * (4 * c[4] + t * 5 * c[5])));
   // the car's heading as drawn
   const drawnH = c => { const d = SET.get(c); return c.h + (d ? d.h : 0); };
 
@@ -755,6 +803,19 @@
         const ci = (hx > 0 ? 0 : 2) + (hz > 0 ? 1 : 0);
         (hubs[ci] || (hubs[ci] = new THREE.Vector3())).copy(_v);
       });
+    }
+    // The planned run in: the front wheels steered to its path, and the car's nose dipping under its
+    // braking and rising back, a little past level, as it comes to rest (a spring, lightly damped),
+    // in place of what the race's own braking would make of it
+    const sd = SET.get(c), pl = sd && sd.plan; const dtW = (sd && sd.lastDt) || 1 / 60;
+    if (pl || sd && sd.pitch) {
+      const tgt = pl && p && !p.served && pl.t < pl.T ? U.clamp(pl.acc * 0.0017, -0.024, 0.008) : 0;
+      sd.pitch = sd.pitch || 0; sd.pv = sd.pv || 0;
+      const nn = Math.max(1, Math.ceil(dtW / 0.01)), hh = dtW / nn;
+      for (let i = 0; i < nn; i++) { sd.pv += (196 * (tgt - sd.pitch) - 2 * 0.35 * 14 * sd.pv) * hh; sd.pitch += sd.pv * hh; }
+      if (pl && p && !p.served) body.rotation.z += sd.pitch - (c.pitch || 0) * 1;
+      else { body.rotation.z += sd.pitch; if (Math.abs(sd.pitch) < 1e-4 && Math.abs(sd.pv) < 1e-3) sd.pitch = 0; }
+      if (pl && pl.steer) for (const w of wl) if (w.userData && w.userData.front) w.rotation.y = -pl.steer;
     }
     // The car's own wheels come off: from the moment its wheel-off man pulls it (u 0.17) until the new
     // one is on (u 0.55) each wheel goes where his hands have it, out from the hub and away (the wheel
