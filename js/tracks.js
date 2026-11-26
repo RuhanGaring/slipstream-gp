@@ -261,9 +261,38 @@
     const kerbL = new Uint8Array(N), kerbR = new Uint8Array(N);
     {
       const corner = new Uint8Array(N);
-      for (let i = 0; i < N; i++) if (Math.abs(kap[i]) > (def.gen2 && def.style2 === 'city' ? 1 / 70 : 1 / 300)) corner[i] = 1;
+      const cityK = def.gen2 && def.style2 === 'city';
+      for (let i = 0; i < N; i++) if (Math.abs(kap[i]) > (cityK ? 1 / 70 : 1 / 300)) corner[i] = 1;
       const pre = Math.round(10 / ds), post = Math.round(22 / ds);
-      for (let i = 0; i < N; i++) if (corner[i]) {
+      // A circuit's kerbs as real Grand Prix circuits lay them (measured on surveys of Sakhir, Monza
+      // and Monaco): the inside kerb runs the whole arc and on, from about 20 m before the apex to
+      // 22 m past it; on the outside there is no kerb on the way in, but a long exit kerb, from
+      // around 25 m past the apex for 80 to 110 m, where the cars run out wide on the power.
+      const realK = def.style !== 'street' && !cityK;
+      if (realK) {
+        let start = 0; while (start < N && corner[start]) start++;
+        const runsK = [];
+        for (let q = 0; q < N; q++) {
+          const i = (start + q) % N;
+          if (!corner[i]) continue;
+          const sg = Math.sign(kap[i]), last = runsK[runsK.length - 1];
+          if (last && last.sg === sg && (last.b + 1) % N === i) { last.b = i; if (Math.abs(kap[i]) > last.kp) { last.kp = Math.abs(kap[i]); last.m = i; } }
+          else runsK.push({ a: i, b: i, m: i, kp: Math.abs(kap[i]), sg });
+        }
+        const M = Math.round, fwdI = (a, b) => (b - a + N) % N;
+        runsK.forEach((r, k) => {
+          const ins = r.sg > 0 ? kerbR : kerbL, out = r.sg > 0 ? kerbL : kerbR;
+          const from = -Math.max(fwdI(r.a, r.m) + M(8 / ds), M(20 / ds));
+          const to = Math.max(fwdI(r.m, r.b) + M(8 / ds), M(22 / ds));
+          for (let q = from; q <= to; q++) ins[(r.m + q + N) % N] = 1;
+          if (r.kp > 1 / 220) {
+            const R = 1 / r.kp, next = runsK[(k + 1) % runsK.length], room = runsK.length > 1 ? fwdI(r.m, next.a) - M(12 / ds) : N;
+            const s0 = Math.max(M(15 / ds), M(fwdI(r.m, r.b) * 0.8)), s1 = Math.min(room, fwdI(r.m, r.b) + M((45 + Math.min(45, R * 0.4)) / ds));
+            for (let q = s0; q <= s1; q++) out[(r.m + q) % N] = 1;
+          }
+        });
+      }
+      if (!realK) for (let i = 0; i < N; i++) if (corner[i]) {
         const inside = kap[i] > 0 ? 1 : -1; // right-hand corner: inside is the right
         for (let k = -pre; k <= post; k++) {
           const j = (i + k + N) % N;
@@ -273,7 +302,7 @@
         }
       }
     }
-    const kerbW = def.style === 'street' ? 0.9 : 1.6;
+    const kerbW = def.style === 'street' ? 0.9 : 1.3; // (real circuits' kerbs: 1.0 to 1.5 m)
 
     // --- run-off and barriers, per side ---
     const runT = [new Uint8Array(N), new Uint8Array(N)]; // 0 = left, 1 = right
