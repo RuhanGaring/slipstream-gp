@@ -5432,8 +5432,9 @@ void main() {
       ud.gy = gy;
       o.position.set(c.x, gy, c.y);
       // (round a pit stop the car is drawn easing into its place and away, js/r3-pitcrew.js settle)
-      if (F1.R3Crew) { const sO = F1.R3Crew.settle(c, dt); if (sO) { o.position.x += sO[0]; o.position.z += sO[1]; } }
-      o.rotation.y = -c.h;
+      const sO = F1.R3Crew ? F1.R3Crew.settle(c, dt) : null;
+      if (sO) { o.position.x += sO[0]; o.position.z += sO[1]; }
+      o.rotation.y = -c.h - (sO ? sO[2] : 0);
       // (up on the pit crew's jacks through a stop, js/r3-pitcrew.js)
       body.position.y = (c.zh || 0) + (F1.R3Crew && c.brain && c.brain.pit ? F1.R3Crew.lift(c) : 0);
       body.rotation.z = pr + (c.pitch || 0);

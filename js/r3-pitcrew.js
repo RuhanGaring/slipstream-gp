@@ -153,7 +153,7 @@
   // box when the car left moved the whole crew a metre or two at once)
   function frame(cr) {
     const c = cr.car, b = cr.box;
-    if (c && cr.state === 'stop') { const d = SET.get(c); cr.stopF = { x: d ? d.x : c.x, y: d ? d.y : c.y, h: c.h, gy: cr.gy }; return cr.stopF; }
+    if (c && cr.state === 'stop') { const d = SET.get(c); cr.stopF = { x: d ? d.x : c.x, y: d ? d.y : c.y, h: drawnH(c), gy: cr.gy }; return cr.stopF; }
     if (cr.stopF && (cr.state === 'release' || cr.state === 'back')) return cr.stopF;
     return { x: b.x, y: b.y, h: b.h, gy: cr.gy };
   }
@@ -236,7 +236,7 @@
         if (!c || c.x == null || (c === cr.car && st === 'stop')) continue;
         const dd = SET.get(c), ccx = dd ? dd.x : c.x, ccy = dd ? dd.y : c.y, dx0 = P.x - ccx, dz0 = P.z - ccy;
         if (dx0 * dx0 + dz0 * dz0 > 196) continue;
-        const ch = Math.cos(c.h), sh = Math.sin(c.h), sp = Math.max(0, c.speed || 0);
+        const hd = drawnH(c), ch = Math.cos(hd), sh = Math.sin(hd), sp = Math.max(0, c.speed || 0);
         const along = dx0 * ch + dz0 * sh, acr = -dx0 * sh + dz0 * ch, HW = 1.5;
         if (along > -3.2 && along < 3.2 + Math.min(9, sp * 0.45) && Math.abs(acr) < HW) {
           const sd = Math.abs(acr) > 0.05 ? Math.sign(acr) : (c === cr.car ? Math.sign(-Math.sin(c.h - cr.box.h) || 1) * cr.side : cr.side) || 1;
@@ -321,28 +321,53 @@
   // place and pulls away), stiff everywhere else, so it is never more than centimetres out on the
   // lane. Returns the drawn place's offset from the race's (x, y), or null.
   const SET = new WeakMap(), HUBS = new WeakMap();
+  // Through the stop itself the drawn car stands in its painted box, square to it: the race stops a car
+  // up to 1.6 m short of the box and at a slant (it halts as soon as it is within 1.6 m), and lets it
+  // creep backwards at some 0.2 m/s while it stands (its brakes do not hold at rest). Drawn as the race
+  // has it, it rolled slowly back through the wheel change and stood crooked and short of its marks.
+  // When it is released the difference fades out over 1.6 s as it pulls away, never back.
+  // Returns [dx, dy, dh]: the drawn place's and heading's offsets from the race's, or null.
+  const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
   function settle(c, dt) {
     const p = c.brain && c.brain.pit;
     let d = SET.get(c);
     if (!p && !d) return null;
-    if (!d) { d = { x: c.x, y: c.y, vx: c.vx || 0, vy: c.vy || 0 }; SET.set(c, d); }
-    if (dt <= 0) return [d.x - c.x, d.y - c.y];
+    // (its stop done and faded out: drawn as the race has it until it is out of the pit lane)
+    if (d && d.done) { if (!p) SET.delete(c); return null; }
+    if (!d) { d = { x: c.x, y: c.y, vx: c.vx || 0, vy: c.vy || 0, h: 0, vh: 0, rel: null, stood: false }; SET.set(c, d); }
+    if (dt <= 0) return [d.x - c.x, d.y - c.y, d.h];
     // (a reset or a teleport: start again where the car is)
-    if (Math.hypot(c.x - d.x, c.y - d.y) > 8) { d.x = c.x; d.y = c.y; d.vx = c.vx || 0; d.vy = c.vy || 0; }
-    let w = 40;
-    if (p && S && S.tr && c.team) {
+    if (Math.hypot(c.x - d.x, c.y - d.y) > 8) { d.x = c.x; d.y = c.y; d.vx = c.vx || 0; d.vy = c.vy || 0; d.h = 0; d.vh = 0; d.rel = null; d.stood = false; }
+    const stop = p && p.phase === 'stop';
+    const cr = S && c.team ? S.crews.find(q => q.team === c.team || q.team.id === c.team.id) : null;
+    if (stop) d.stood = true;
+    if (d.stood && !stop) {
+      // released: the offset at that moment fades out as the car pulls away
+      if (!d.rel) d.rel = { ox: d.x - c.x, oy: d.y - c.y, oh: d.h, t: 0 };
+      d.rel.t += dt;
+      const k = 1 - U.smooth(d.rel.t / 1.6);
+      d.x = c.x + d.rel.ox * k; d.y = c.y + d.rel.oy * k; d.h = d.rel.oh * k; d.vx = c.vx || 0; d.vy = c.vy || 0; d.vh = 0;
+      if (k <= 0) { d.done = true; return null; }
+      return [d.x - c.x, d.y - c.y, d.h];
+    }
+    // the target: the race's place, or through the stop the box's centre and heading
+    let tx = c.x, ty = c.y, th = 0, w = 40;
+    if (stop && cr) { tx = cr.box.x; ty = cr.box.y; th = wrapA(cr.box.h - c.h); w = 6; }
+    else if (p && S && S.tr && c.team) {
       const box = S.tr.pit.boxS[c.team.idx], gap = box == null || !c.loc ? 1e9 : Math.abs(((c.loc.s - box) % S.tr.L + S.tr.L * 1.5) % S.tr.L - S.tr.L / 2);
       w = 7 + 33 * U.smooth((gap - 12) / 30);
     }
     // (critically damped, sub-stepped for the stiff end)
-    const n = Math.max(1, Math.ceil(dt * w / 0.5)), h = dt / n;
+    const n = Math.max(1, Math.ceil(dt * w / 0.5)), hh = dt / n;
     for (let k = 0; k < n; k++) {
-      const ax = w * w * (c.x - d.x) - 2 * w * d.vx, ay = w * w * (c.y - d.y) - 2 * w * d.vy;
-      d.vx += ax * h; d.vy += ay * h; d.x += d.vx * h; d.y += d.vy * h;
+      const ax = w * w * (tx - d.x) - 2 * w * d.vx, ay = w * w * (ty - d.y) - 2 * w * d.vy, ah = w * w * (th - d.h) - 2 * w * d.vh;
+      d.vx += ax * hh; d.vy += ay * hh; d.vh += ah * hh; d.x += d.vx * hh; d.y += d.vy * hh; d.h += d.vh * hh;
     }
-    if (!p && Math.hypot(c.x - d.x, c.y - d.y) < 0.002) { SET.delete(c); return null; }
-    return [d.x - c.x, d.y - c.y];
+    if (!p && Math.hypot(c.x - d.x, c.y - d.y) < 0.002 && Math.abs(d.h) < 1e-4) { SET.delete(c); return null; }
+    return [d.x - c.x, d.y - c.y, d.h];
   }
+  // the car's heading as drawn
+  const drawnH = c => { const d = SET.get(c); return c.h + (d ? d.h : 0); };
 
   // The car's wheels through a stop: each corner's own wheel hidden from the moment its old one comes
   // off the hub (u 0.17, the crew carries a wheel away from there) to the moment the new one is on
