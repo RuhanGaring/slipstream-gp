@@ -37,7 +37,8 @@
   const NPER = ROLES.length;
   // each corner's wheel-off man, by the corner's index (front 0 / rear 2, plus 1 on the car's right)
   const OQ = [];
-  ROLES.forEach((R, q) => { if (R.r === 'o') OQ[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)] = q; });
+  const NQ = []; // (and its wheel-on man)
+  ROLES.forEach((R, q) => { if (R.r === 'o') OQ[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)] = q; if (R.r === 'n') NQ[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)] = q; });
 
   // Parts, each an instanced mesh over every crew. Low-poly but shaped as a person is: a torso wider
   // at the shoulders than the waist, hips, a rounded helmet with its dark visor, upper arms and
@@ -158,7 +159,7 @@
       return { k, team, box: b, gy, side: tr.pit.side, state: 'idle', t: 0, w: 0, dirty: true, car: null, cur: [], settling: false };
     });
     for (const p of PARTS) { if (meshes[p].instanceColor) meshes[p].instanceColor.needsUpdate = true; }
-    S = { meshes, crews, tr, time: 0 };
+    S = { meshes, crews, tr, time: 0, root };
     for (const cr of crews) pose(cr, 0);
     for (const p of PARTS) meshes[p].instanceMatrix.needsUpdate = true;
   }
@@ -271,7 +272,7 @@
       M4.multiplyMatrices(_R, M5.makeTranslation(tp.x, tp.y, tp.z));
     }
     if (P.tyre) (TYW[i] || (TYW[i] = new THREE.Vector3())).setFromMatrixPosition(M4); else TYW[i] = null;
-    const tyM = P.tyre && !P.carried ? M4 : HIDE;
+    const tyM = P.tyre && !P.carried && !(cr.cl && (ROLES[q].r === 'o' || ROLES[q].r === 'n')) ? M4 : HIDE;
     ms.tyre.setMatrixAt(i, tyM); ms.rim.setMatrixAt(i, tyM);
     if (P.gun) { _E2.set(-1.1 * reach, 0, 0); _Q2.setFromEuler(_E2); ms.gun.setMatrixAt(i, M4.multiplyMatrices(_R, M5.compose(PV.set(hand.x - 0.12, hand.y + 0.02, hand.z + 0.12), _Q2, SC.set(0.1, 0.15, 0.36)))); }
     else ms.gun.setMatrixAt(i, HIDE);
@@ -352,7 +353,7 @@
       // the garage's mouth (the box's frame), in between by cr.w (0 waiting .. 1 at the car)
       const wa = waitAt(cr, q), w = U.smooth(U.clamp(cr.w, 0, 1));
       let lx = R.x, ly = R.gs ? R.y * cr.side : R.y;
-      const P = { crouch: 0, arms: 0, yaw: 0, gun: R.r === 'g', jack: R.r === 'j' ? 0 : null, tyre: R.r === 'n' && (st === 'idle' || st === 'ready') };
+      const P = { crouch: 0, arms: 0, yaw: 0, gun: R.r === 'g', jack: R.r === 'j' ? 0 : null, tyre: R.r === 'n' && st === 'ready' };
       // facing: toward the lane while waiting, their role's way at the box
       const yawBox = R.yaw, yawWait = cr.side > 0 ? -Math.PI / 2 : Math.PI / 2;
       let yaw = w > 0.5 ? yawBox : yawWait;
@@ -534,6 +535,9 @@
       for (const c of cars) if (c && c.x != null && (c.speed || 0) > 0.3 && (c.x - cr.box.x) ** 2 + (c.y - cr.box.y) ** 2 < 900) { near = true; break; }
       if (near || cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
     }
+    // (copies only for a crew at work: an idle crew's wheels are in the garage, and each copy is a few
+    // draws of its own)
+    for (const cr of S.crews) { if (cr.state === 'idle') dropClones(cr); else clones(cr, cars); }
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
 
@@ -628,32 +632,117 @@
       });
     }
     // The car's own wheels come off: from the moment its wheel-off man pulls it (u 0.17) until the new
-    // one is on (u 0.55) each wheel goes where his hands have it, out from the hub and away; then it is
-    // back on its hub (the new wheel, carried in meanwhile), and the old one he holds is his spare.
+    // one is on (u 0.55) each wheel goes where his hands have it, out from the hub and away (the wheel
+    // and its rim; the upright and brake duct stay on the car). From u 0.55 it is back on its hub as the
+    // new wheel, the very copy the wheel-on man carried in (clones() below), and he that took it off
+    // holds a copy of it, so no wheel ever changes its look.
     const cr = stop && S ? S.crews.find(q => q.team === c.team || q.team.id === c.team.id) : null;
     const off = cr && u > 0.17 && u < 0.55;
-    if (off) {
-      o.updateMatrix(); body.updateMatrix();
-      _M.multiplyMatrices(o.matrix, body.matrix).invert();
-      // (the spares in the compound's colours, as the car's own)
-      const tc = body.userData && body.userData.tyComp;
-      if (tc && !cr.tyC) { cr.tyC = true; for (let q = 0; q < NPER; q++) S.meshes.tyre.setColorAt(cr.k * NPER + q, tc.value); S.meshes.tyre.instanceColor.needsUpdate = true; }
-    } else if (cr) cr.tyC = false;
-    if (!off && !c.__crewOff) return;
+    if (off) { o.updateMatrix(); body.updateMatrix(); }
+    if (!off && !c.__crewOff && !(stop && u >= 0.55)) return;
     for (const w of wl) {
-      const d = w.userData;
-      if (!d) continue;
-      const ci = (d.crewHome ? d.crewHome.x : w.position.x) > 0 ? 0 : 2, cj = ci + ((d.crewHome ? d.crewHome.y : w.position.z) > 0 ? 1 : 0);
-      const at = off ? TYW[cr.k * NPER + OQ[cj]] : null;
+      const d = w.userData, tilt = d && d.spin && d.spin.parent;
+      if (!tilt) continue;
+      const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
+      const at = off ? TYW[cr.k * NPER + OQ[ci]] : null;
       if (at) {
-        if (!d.crewHome) d.crewHome = new THREE.Vector2(w.position.x, w.position.z);
-        _v.copy(at).applyMatrix4(_M);
-        w.position.set(_v.x, _v.y, _v.z);
-      } else if (d.crewHome) { w.position.x = d.crewHome.x; w.position.z = d.crewHome.y; d.crewHome = null; }
+        w.updateMatrix();
+        _M.multiplyMatrices(o.matrix, body.matrix).multiply(w.matrix).invert();
+        tilt.position.copy(at).applyMatrix4(_M);
+        d.crewAng = d.ang || 0;
+      } else tilt.position.set(0, 0, 0);
+      // (the new wheel goes on as the copy was carried: unturned; the car turns it on from there)
+      if (stop && u >= 0.55) { d.ang = 0; d.spin.rotation.z = 0; }
     }
+    // From u 0.55 the wheels on the car are the new ones: unworn, in the compound chosen for the stop
+    // (the race itself fits them at the stop's end; its compound then is the same)
+    const bu = body.userData;
+    if (stop && u >= 0.55 && F1.R3Tyre) {
+      if (bu.tyWear) bu.tyWear.set(0, 0, 0, 0);
+      if (bu.tyComp) bu.tyComp.value.copy(F1.R3Tyre.compColor(newComp(c)));
+    } else if (bu.tyComp && c.compound && F1.R3Tyre && c.__crewComp) bu.tyComp.value.copy(F1.R3Tyre.compColor(c.compound.id));
+    c.__crewComp = !!(stop && u >= 0.55);
     c.__crewOff = off;
   }
   const _M = new THREE.Matrix4();
+
+  // Copies of the team's own wheels for the crew's hands: the wheel-on men's new wheels (n) and, once
+  // theirs is off, the wheel-off men's old ones (o); the car's own wheel parts (their geometry and
+  // materials shared, so its tyre's compound, wear and lettering), one copy of each corner's wheel for
+  // each. Made from the car the crew is serving, or from either of the team's cars while they wait;
+  // placed where the hands are (TYW), turned as the wheel sits on a car in the box.
+  const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), ZAX = new THREE.Vector3(0, 0, 1), _s = new THREE.Vector3(1, 1, 1);
+  function wheelSrc(cr, cars) {
+    const models = F1.R3 && F1.R3.carModels;
+    if (!models) return null;
+    const pick = cr.car || cars.find(c => c.team === cr.team || c.team && c.team.id === cr.team.id);
+    const m = pick && models.get(pick), body = m && m.userData && m.userData.body, wl = body && body.userData && body.userData.wheels;
+    return wl && wl.length === 4 && wl.every(w => w.userData && w.userData.lods && w.userData.lods[0]) ? { car: pick, body, wl } : null;
+  }
+  const newComp = car => (car.pitPlan && car.pitPlan.compound) || (car.compound && car.compound.id);
+  function dropClones(cr) {
+    if (!cr.cl) return;
+    for (const g of cr.cl.all) if (g.parent) g.parent.remove(g);
+    cr.cl = null;
+  }
+  function clones(cr, cars) {
+    const src = wheelSrc(cr, cars);
+    if (!src) { dropClones(cr); return; }
+    if (!cr.cl || cr.cl.car !== src.car) {
+      dropClones(cr);
+      const n = [], o = [], all = [];
+      // (each set its own copies of the tyre materials: the new wheels in the compound chosen for this
+      // stop and unworn, the old ones in the compound and wear they came off with)
+      const T0 = () => new THREE.Color(0xffd400);
+      const U2 = { n: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } }, o: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } } };
+      const mats = { n: new Map(), o: new Map() };
+      const matFor = (m, set) => {
+        if (mats[set].has(m)) return mats[set].get(m);
+        const ud = m.userData; m.userData = {};
+        const t = m.clone(); m.userData = ud;
+        const ex = ud.patchExtra, u2 = U2[set];
+        t.userData = Object.assign({}, ud, { patchExtra: sh => { if (ex) ex(sh); if (sh.uniforms.uTyComp) { sh.uniforms.uTyComp = u2.comp; sh.uniforms.uTyWear = u2.wear; } } });
+        delete t.userData.r3s;
+        if (F1.R3S) F1.R3S.patch(t);
+        mats[set].set(m, t);
+        return t;
+      };
+      for (const w of src.wl) {
+        const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
+        for (const [arr, set] of [[n, 'n'], [o, 'o']]) {
+          const g = w.userData.lods[0].clone(true);
+          g.visible = false; g.matrixAutoUpdate = false;
+          g.traverse(q => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; if (!Array.isArray(q.material)) q.material = matFor(q.material, set); } });
+          S.root.add(g); arr[ci] = { g, w }; all.push(g);
+        }
+      }
+      cr.cl = { car: src.car, n, o, all, U: U2, oldId: null };
+    }
+    // the compounds: new, the one chosen for this stop (the player's choice, or the strategist's);
+    // old, the one the car came in on (noted while it is still on the car)
+    const car = cr.car, p = car && car.brain && car.brain.pit, R3T = F1.R3Tyre;
+    if (car && car.compound && R3T) {
+      const stopping = p && p.phase === 'stop', u = stopping && p.service ? 1 - (p.serviceT || 0) / p.service : -1;
+      if (stopping || cr.state === 'ready') cr.cl.oldId = car.compound.id;
+      const newId = newComp(car);
+      cr.cl.U.n.comp.value.copy(R3T.compColor(newId));
+      cr.cl.U.o.comp.value.copy(R3T.compColor(cr.cl.oldId || car.compound.id));
+      const m = F1.R3.carModels.get(car), tw = m && m.userData.body && m.userData.body.userData.tyWear;
+      if (tw && (cr.state === 'ready' || stopping && u < 0.55)) cr.cl.U.o.wear.value.copy(tw);
+    }
+    for (let ci = 0; ci < 4; ci++) {
+      for (const [arr, role] of [[cr.cl.n, NQ], [cr.cl.o, OQ]]) {
+        const it = arr[ci], q = role[ci], C = cr.cur[q], at = TYW[cr.k * NPER + q];
+        const show = !!(C && C.tyre && !C.carried && at);
+        it.g.visible = show;
+        if (!show) continue;
+        const d = it.w.userData, tilt = d.spin.parent;
+        _q.setFromAxisAngle(YAX, -cr.box.h).multiply(tilt.quaternion).multiply(_q2.setFromAxisAngle(ZAX, arr === cr.cl.o ? -(d.crewAng || 0) : 0));
+        it.g.matrix.compose(at, _q, _s);
+        it.g.matrixWorldNeedsUpdate = true;
+      }
+    }
+  }
 
   // how far up the jacks have the car (m), for the renderer to lift the car model
   function lift(c) {
