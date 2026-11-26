@@ -215,8 +215,30 @@
         P.tyre = true; P.tyreAt = V(0, 0.5, 0.55);
         P.crouch = R.r === 'g' ? 1 - back : 0; P.gun = R.r === 'g'; P.arms = 0.3;
       }
+      // (the last tenth of the stop: everyone clear of the car before it goes, as the real crews are
+      // before the light turns green; the race releases the car the moment its stop time is up)
+      if (st === 'stop' && u > 0.88 && R.r !== 'j') {
+        const cl = U.smooth((u - 0.88) / 0.1);
+        ly += Math.sign(ly || cr.side) * Math.max(0, 1.95 - Math.abs(ly)) * cl;
+        if (R.r === 'g') P.crouch = 1 - 0.7 * cl;
+      }
       const [ax, az] = toWorld(F, lx, ly), [bx, bz] = toWorld(BF, wa[0], wa[1]);
       P.x = bx + (ax - bx) * w; P.y = cr.gy; P.z = bz + (az - bz) * w;
+      // Make way: nobody stands where a moving car is, or is about to be. Each car's footprint (its
+      // 5.6 m by 2 m and a margin) runs further ahead the faster it goes; a person inside it goes to
+      // its nearer side. Their own car standing in the box is the exception: they work round it.
+      for (const c of S.cars || []) {
+        if (!c || c.x == null || (c === cr.car && st === 'stop')) continue;
+        const dx0 = P.x - c.x, dz0 = P.z - c.y;
+        if (dx0 * dx0 + dz0 * dz0 > 196) continue;
+        const ch = Math.cos(c.h), sh = Math.sin(c.h), sp = Math.max(0, c.speed || 0);
+        const along = dx0 * ch + dz0 * sh, acr = -dx0 * sh + dz0 * ch, HW = 1.5;
+        if (along > -3.2 && along < 3.2 + Math.min(9, sp * 0.45) && Math.abs(acr) < HW) {
+          const sd = Math.abs(acr) > 0.05 ? Math.sign(acr) : (c === cr.car ? Math.sign(-Math.sin(c.h - cr.box.h) || 1) * cr.side : cr.side) || 1;
+          const a2 = sd * HW;
+          P.x = c.x + along * ch - a2 * sh; P.z = c.y + along * sh + a2 * ch;
+        }
+      }
       // (walking: facing the way they go)
       if (cr.moving && Math.hypot(ax - bx, az - bz) > 0.3) yaw = Math.atan2((az - bz) * cr.dir, (ax - bx) * cr.dir) - F.h;
       // three's y rotation: local +z to (sin, cos); a person faces local +z
@@ -242,7 +264,7 @@
   // the race's state for this crew: its car on the way in, stopped or leaving
   function update(cars, dt) {
     if (!S) return;
-    S.time += dt;
+    S.time += dt; S.cars = cars;
     let any = false;
     for (const cr of S.crews) {
       let car = null, best = 1e9;
@@ -272,7 +294,9 @@
       if (cr.state === 'idle' || cr.state === 'ready') cr.stopF = null;
       cr.u = cr.state === 'stop' && p && p.service ? U.clamp(1 - (p.serviceT || 0) / p.service, 0, 1) : 0;
       // (re-posed only while something changes: a crew standing still costs nothing)
-      if (cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
+      let near = false;
+      for (const c of cars) if (c && c.x != null && (c.speed || 0) > 0.3 && (c.x - cr.box.x) ** 2 + (c.y - cr.box.y) ** 2 < 900) { near = true; break; }
+      if (near || cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
     }
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
