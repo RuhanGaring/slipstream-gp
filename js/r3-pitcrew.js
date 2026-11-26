@@ -402,6 +402,12 @@
         P.tyre = true; P.tyreAt = V(0, 0.5, 0.55);
         P.crouch = R.r === 'g' ? 1 - back : 0; P.gun = R.r === 'g'; P.arms = 0.3;
       }
+      // Waiting in the garage the wheel-on men stand with their new wheels, upright on the floor in
+      // front of them, hands on top (and the wheel-off men with the old ones they brought back); they lift
+      // them to walk out.
+      if (st === 'idle' && (R.r === 'n' || R.r === 'o' && cr.oldHeld)) {
+        P.tyre = true; P.tyreAt = V(0, TYRE_R, 0.5); P.crouch = 0.25; P.arms = 0.55; P.lean = 0.15;
+      }
       // Their marks while the car comes in are a step back from their places at it (out from its side,
       // ahead of its nose); they step in as it comes to rest, in the stop's first 0.2 s or so.
       if (st === 'ready' || st === 'stop') {
@@ -489,7 +495,10 @@
       // (getting up off a knee to walk, or down onto it, takes a person a good part of a second)
       C.up = C.up == null ? C.walkAmp || 0 : C.up + ((C.walkAmp || 0) - C.up) * (dt > 0 ? 1 - Math.exp(-dt / 0.22) : 1);
       C.walkAmp += (Math.max(U.smooth((C.spd - 0.12) / 0.45), C.far && (P.crouch || 0) < 0.3 ? 0.6 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.12) : 1);
-      C.tyre = P.tyre; C.tyreAt = P.tyreAt; C.tyreW = P.tyreW; C.carried = P.carried; C.gun = P.gun;
+      C.tyre = P.tyre; C.tyreW = P.tyreW;
+      // (a wheel lifted or set down, not jumped)
+      if (P.tyreAt) { if (!C.tyreAt || !C.tyre0) C.tyreAt = P.tyreAt.clone(); else C.tyreAt.lerp(P.tyreAt, k * 0.6); } else C.tyreAt = null;
+      C.tyre0 = P.tyre; C.carried = P.carried; C.gun = P.gun;
       // (still settling: keep posing this crew)
       // (walking while their place moves under them by more than a stroll)
       const mv = Math.hypot(P.x - C.x, P.z - C.z);
@@ -518,16 +527,25 @@
       if (p && p.phase === 'stop') next = 'stop';
       // (out to their marks while the car is in the lane, or on its in-lap within 900 m of the entry:
       // the real crews are in place some 15 to 20 s before it arrives)
-      else if (p && !p.served && (p.phase === 'in' || p.phase === 'approach' && car.loc && Tracks.fwd(S.tr, car.loc.s, S.tr.pit.sIn) < 900)) next = 'ready';
+      else if (p && !p.served && (p.phase === 'in' || p.phase === 'approach' && car.loc && (was === 'ready' || Tracks.fwd(S.tr, car.loc.s, S.tr.pit.sIn) < 900))) next = 'ready';
       else if (p && p.served && (p.phase === 'in' || p.phase === 'out') && was !== 'idle') next = was === 'release' && cr.t > 1.2 ? 'back' : (was === 'back' ? 'back' : 'release');
       else if (was === 'release' || was === 'back') next = 'back';
-      if (next !== was) { cr.state = next; cr.t = 0; }
+      if (next !== was) {
+        // (out to the car: the old wheels they were standing with left where they were, on the floor)
+        if (was === 'idle' && cr.oldHeld) {
+          cr.oldSpot = OQ.map(q => TYW[cr.k * NPER + q] && TYW[cr.k * NPER + q].clone()); cr.oldHeld = false;
+          if (cr.cl) { cr.cl.U.f.comp.value.copy(cr.cl.U.o.comp.value); cr.cl.U.f.wear.value.copy(cr.cl.U.o.wear.value); cr.fAng = cr.cl.o.map(it => it.w.userData.crewAng || 0); }
+        }
+        // (a new stop: its spares are the ones in hand)
+        if (next === 'ready') cr.nCycle = false;
+        cr.state = next; cr.t = 0;
+      }
       cr.t += dt;
       // walking out to the box while a car is on its way, back to the garage afterwards (about 2 s)
       const target = cr.state === 'idle' || cr.state === 'back' ? 0 : 1, w0 = cr.w;
       cr.w += U.clamp(target - cr.w, -dt / 2.2, dt / 2.2);
       cr.moving = Math.abs(cr.w - w0) > 1e-5; cr.dir = target > w0 ? 1 : -1;
-      if (cr.state === 'back' && cr.w <= 0) cr.state = 'idle';
+      if (cr.state === 'back' && cr.w <= 0) { cr.state = 'idle'; cr.t = 0; cr.oldHeld = true; }
       if (cr.state === 'idle' || cr.state === 'ready') cr.stopF = null;
       cr.u = cr.state === 'stop' && p && p.service ? U.clamp(1 - (p.serviceT || 0) / p.service, 0, 1) : 0;
       // (re-posed only while something changes: a crew standing still costs nothing)
@@ -535,9 +553,7 @@
       for (const c of cars) if (c && c.x != null && (c.speed || 0) > 0.3 && (c.x - cr.box.x) ** 2 + (c.y - cr.box.y) ** 2 < 900) { near = true; break; }
       if (near || cr.moving || cr.settling || cr.state === 'stop' || cr.state === 'release' || was !== cr.state || cr.dirty) { cr.settling = false; pose(cr, dt); cr.dirty = false; any = true; }
     }
-    // (copies only for a crew at work: an idle crew's wheels are in the garage, and each copy is a few
-    // draws of its own)
-    for (const cr of S.crews) { if (cr.state === 'idle') dropClones(cr); else clones(cr, cars); }
+    for (const cr of S.crews) clones(cr, cars);
     if (any) for (const p of PARTS) S.meshes[p].instanceMatrix.needsUpdate = true;
   }
 
@@ -679,6 +695,13 @@
     const m = pick && models.get(pick), body = m && m.userData && m.userData.body, wl = body && body.userData && body.userData.wheels;
     return wl && wl.length === 4 && wl.every(w => w.userData && w.userData.lods && w.userData.lods[0]) ? { car: pick, body, wl } : null;
   }
+  // where a wheel-on man's wheel stands while he waits: half a metre ahead of his place in the garage
+  const TYRE_R = 0.362, _spot = new THREE.Vector3();
+  function spareSpot(cr, q) {
+    const wa = waitAt(cr, q), BF = { x: cr.box.x, y: cr.box.y, h: cr.box.h }, [x, z] = toWorld(BF, wa[0], wa[1]);
+    const yaw = Math.PI / 2 - (cr.box.h + (cr.side > 0 ? -Math.PI / 2 : Math.PI / 2));
+    return _spot.set(x + Math.sin(yaw) * 0.5, cr.gy + TYRE_R, z + Math.cos(yaw) * 0.5);
+  }
   const newComp = car => (car.pitPlan && car.pitPlan.compound) || (car.compound && car.compound.id);
   function dropClones(cr) {
     if (!cr.cl) return;
@@ -688,14 +711,17 @@
   function clones(cr, cars) {
     const src = wheelSrc(cr, cars);
     if (!src) { dropClones(cr); return; }
-    if (!cr.cl || cr.cl.car !== src.car) {
+    // (rebuilt only for another model: the team's two cars share theirs)
+    const mid = src.body.userData.carId || src.car;
+    if (cr.cl && cr.cl.mid === mid) cr.cl.car = src.car;
+    if (!cr.cl || cr.cl.mid !== mid) {
       dropClones(cr);
-      const n = [], o = [], all = [];
+      const n = [], o = [], f = [], all = [];
       // (each set its own copies of the tyre materials: the new wheels in the compound chosen for this
       // stop and unworn, the old ones in the compound and wear they came off with)
       const T0 = () => new THREE.Color(0xffd400);
-      const U2 = { n: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } }, o: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } } };
-      const mats = { n: new Map(), o: new Map() };
+      const U2 = { n: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } }, o: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } }, f: { comp: { value: T0() }, wear: { value: new THREE.Vector4() } } };
+      const mats = { n: new Map(), o: new Map(), f: new Map() };
       const matFor = (m, set) => {
         if (mats[set].has(m)) return mats[set].get(m);
         const ud = m.userData; m.userData = {};
@@ -709,14 +735,14 @@
       };
       for (const w of src.wl) {
         const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
-        for (const [arr, set] of [[n, 'n'], [o, 'o']]) {
+        for (const [arr, set] of [[n, 'n'], [o, 'o'], [f, 'f']]) {
           const g = w.userData.lods[0].clone(true);
           g.visible = false; g.matrixAutoUpdate = false;
           g.traverse(q => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; if (!Array.isArray(q.material)) q.material = matFor(q.material, set); } });
           S.root.add(g); arr[ci] = { g, w }; all.push(g);
         }
       }
-      cr.cl = { car: src.car, n, o, all, U: U2, oldId: null };
+      cr.cl = { car: src.car, mid, n, o, f, all, U: U2, oldId: null };
     }
     // the compounds: new, the one chosen for this stop (the player's choice, or the strategist's);
     // old, the one the car came in on (noted while it is still on the car)
@@ -730,19 +756,62 @@
       const m = F1.R3.carModels.get(car), tw = m && m.userData.body && m.userData.body.userData.tyWear;
       if (tw && (cr.state === 'ready' || stopping && u < 0.55)) cr.cl.U.o.wear.value.copy(tw);
     }
+    // Nothing a viewer is watching appears or vanishes. The next stop's new wheels are stood at the
+    // wheel-on men's places in the garage once these are on the car, at the first moment those places
+    // are out of the camera's view (or, at the latest, when the crew is home); a man picks his up as his
+    // hands come to it. The old wheels set down when the crew went out stay on the floor until the
+    // camera looks away (or the crew is home with the next ones).
+    const cam = F1.R3 && F1.R3.camera;
+    if (cam) _fr.setFromProjectionMatrix(_m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    // (in view: inside the camera's frustum, within 160 m, and not behind one of the crew standing close
+    // in front of it, as when they walk back past it)
+    const hidBy = pt => {
+      const cx = cam.position.x, cz = cam.position.z, dx = pt.x - cx, dz = pt.z - cz, L2 = dx * dx + dz * dz;
+      for (const C of cr.cur) {
+        if (!C) continue;
+        const ex = C.x - cx, ez = C.z - cz, t = (ex * dx + ez * dz) / L2;
+        if (t < 0.6 || t > 0.98) continue;
+        const px = cx + dx * t, pz = cz + dz * t, y = cam.position.y + (pt.y - cam.position.y) * t;
+        if (Math.hypot(C.x - px, C.z - pz) < 0.14 && y > cr.gy && y < cr.gy + 1.7 && Math.hypot(C.x - pt.x, C.z - pt.z) < 2.2) return true;
+      }
+      return false;
+    };
+    const seen = pt => !!cam && pt.distanceToSquared(cam.position) < 160 * 160 && _fr.intersectsSphere(_sph.set(pt, 0.6)) && !hidBy(pt);
+    const u = cr.u || 0;
+    if (cr.state === 'stop' && u >= 0.55 && !cr.nCycle) { cr.nCycle = true; cr.nPend = true; cr.nSpare = [false, false, false, false]; }
+    if (cr.nPend) {
+      // (each wheel on its own: stood there the first moment its place is out of sight)
+      cr.nSpare = cr.nSpare || [false, false, false, false];
+      for (let ci = 0; ci < 4; ci++) if (!cr.nSpare[ci] && (cr.state === 'idle' || !seen(spareSpot(cr, NQ[ci])))) cr.nSpare[ci] = true;
+      if (cr.nSpare.every(Boolean)) cr.nPend = false;
+    }
+    if (cr.oldSpot) {
+      for (let ci = 0; ci < 4; ci++) if (cr.oldSpot[ci] && (!seen(cr.oldSpot[ci]) || cr.state === 'idle' && cr.oldHeld)) cr.oldSpot[ci] = null;
+      if (!cr.oldSpot.some(Boolean)) cr.oldSpot = null;
+    }
     for (let ci = 0; ci < 4; ci++) {
-      for (const [arr, role] of [[cr.cl.n, NQ], [cr.cl.o, OQ]]) {
-        const it = arr[ci], q = role[ci], C = cr.cur[q], at = TYW[cr.k * NPER + q];
-        const show = !!(C && C.tyre && !C.carried && at);
-        it.g.visible = show;
-        if (!show) continue;
+      for (const [arr, role] of [[cr.cl.n, NQ], [cr.cl.o, OQ], [cr.cl.f, OQ]]) {
+        const it = arr[ci], q = role[ci], C = cr.cur[q], hold = C && C.tyre && !C.carried ? TYW[cr.k * NPER + q] : null;
+        let at = null, ang = 0;
+        if (arr === cr.cl.n) {
+          if (cr.nSpare && cr.nSpare[ci]) {
+            const sp = spareSpot(cr, q);
+            // (picked up: his hands at it, or a moment after he is home whatever they are doing)
+            if (hold && cr.state === 'idle' && (hold.distanceTo(sp) < 0.15 || cr.t > 1.6)) { cr.nSpare[ci] = false; at = hold; }
+            else at = sp;
+          } else if (hold && !(cr.nPend && cr.state !== 'idle')) at = hold;
+        } else if (arr === cr.cl.o) { at = hold; ang = it.w.userData.crewAng || 0; }
+        else if (cr.oldSpot && cr.oldSpot[ci]) { at = cr.oldSpot[ci]; ang = cr.fAng ? cr.fAng[ci] : 0; }
+        it.g.visible = !!at;
+        if (!at) continue;
         const d = it.w.userData, tilt = d.spin.parent;
-        _q.setFromAxisAngle(YAX, -cr.box.h).multiply(tilt.quaternion).multiply(_q2.setFromAxisAngle(ZAX, arr === cr.cl.o ? -(d.crewAng || 0) : 0));
+        _q.setFromAxisAngle(YAX, -cr.box.h).multiply(tilt.quaternion).multiply(_q2.setFromAxisAngle(ZAX, -ang));
         it.g.matrix.compose(at, _q, _s);
         it.g.matrixWorldNeedsUpdate = true;
       }
     }
   }
+  const _fr = new THREE.Frustum(), _m4 = new THREE.Matrix4(), _sph = new THREE.Sphere();
 
   // how far up the jacks have the car (m), for the renderer to lift the car model
   function lift(c) {
