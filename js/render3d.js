@@ -1915,7 +1915,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // grid points out past the verge's first metre stay up, just under the verge, and the verge itself,
     // drawn in the ground's own material, covers the strip where the two meet.
     tr.drawn = { runE, kerbE }; // (for the test tools: what is drawn in the road's plane)
-    const VG = (W2.town || style === 'street') ? null : (() => {
+    // (a street circuit's tarmac runs to the foot of its walls: its verge starts there, behind them;
+    // a town keeps its own pavements, js townGround)
+    const STREET = style === 'street';
+    const VG = W2.town ? null : (() => {
       const E = [new Float32Array(N), new Float32Array(N)], out = [new Float32Array(N), new Float32Array(N)], m = new Float32Array(N), meet = [new Float32Array(N).fill(NaN), new Float32Array(N).fill(NaN)];
       for (let k = 0; k < N; k++) {
         // (how far under the verge the grid points stay: a 7 m chord across a dip or a banked edge)
@@ -1925,8 +1928,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // (beside the pit lane where it runs alongside the track, as it joins and leaves: the verge
           // starts past the lane; none where the pit wall stands between them, that is the pit's own)
           const po = side === pS ? tr.pit.off[k] : NaN, L2 = tr.pit.lane / 2;
-          if (po === po && Math.abs(po) - L2 > tr.hw + kerbE[side][k] + 0.5) { E[side][k] = NaN; continue; }
-          const e = Math.max(tr.hw + Math.max(kerbE[side][k], runE[side][k]), po === po ? Math.abs(po) + L2 + 0.2 : 0);
+          if (!STREET && po === po && Math.abs(po) - L2 > tr.hw + kerbE[side][k] + 0.5) {
+            // (where the pit wall stands between the track and the lane: the strip between them, level
+            // from the track's edge to the lane's; it was the sunk ground, the main straight's edge
+            // standing over it)
+            const e0 = tr.hw + Math.max(kerbE[side][k], runE[side][k]), o0 = Math.abs(po) - L2 - 0.02;
+            if (o0 - e0 < 0.15) { E[side][k] = NaN; continue; }
+            E[side][k] = e0; out[side][k] = o0; meet[side][k] = Tracks.surfZ(tr, k, sg * o0) - 0.006;
+            continue;
+          }
+          const e = STREET ? tr.barr[side][k] + 0.2 : Math.max(tr.hw + Math.max(kerbE[side][k], runE[side][k]), po === po ? Math.abs(po) + L2 + 0.2 : 0);
           // (10.5 m: a grid cell and a half past the last thing drawn, where the ground is the
           // terrain's own again, metres above or below it in a cutting or on a bank; the verge is the
           // slope between; never into another part of the lap)
@@ -1939,6 +1950,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // of stopping short and leaving the 7 m grid to draw the bank in a sawtooth.
           for (let ad = e + 0.5; ad <= o + 1e-6; ad += 0.5) {
             const qx = tr.x[k] + tr.nx[k] * sg * ad, qz = tr.y[k] + tr.ny[k] * sg * ad;
+            // (a harbour: the verge stops level at the quay, it does not pave the sea)
+            if (W2.water && qz < W2.water.y + 1) { o = Math.max(e, ad - 0.5); meet[side][k] = Tracks.surfZ(tr, k, sg * e); break; }
             let hit = null;
             tr.hash.near(qx, qz, 60, j => {
               if (hit) return;
@@ -2022,8 +2035,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               if (dd < bd) { bd = dd; bi = q; }
               const al = dx * tr.tx[q] + dz * tr.ty[q];
               if (al > -1.5 * tr.ds && al < 1.5 * tr.ds) {
-                const dlq = dx * tr.nx[q] + dz * tr.ny[q], sq = dlq > 0 ? 1 : 0, rw = Math.max(runE[sq][q], kerbE[sq][q]), lim = tr.hw + rw, aq = Math.abs(dlq);
-                if (aq < lim + cell + 0.5 && !(sq === pS && !isNaN(tr.pit.off[q]))) cov = Math.min(cov, Tracks.surfZ(tr, q, (sq ? 1 : -1) * Math.min(aq, lim)) + al * tr.dz[q] - (runE[sq][q] > 0 && tr.runT[sq][q] === F1.SURF.GRAVEL ? 0.25 : 0.12));
+                const dlq = dx * tr.nx[q] + dz * tr.ny[q], sq = dlq > 0 ? 1 : 0, rw = Math.max(runE[sq][q], kerbE[sq][q]), lim = STREET ? tr.barr[sq][q] + 0.2 : tr.hw + rw, aq = Math.abs(dlq);
+                if (aq < lim + cell + 0.5 && (STREET || !(sq === pS && !isNaN(tr.pit.off[q])))) cov = Math.min(cov, Tracks.surfZ(tr, q, (sq ? 1 : -1) * Math.min(aq, lim)) + al * tr.dz[q] - (runE[sq][q] > 0 && tr.runT[sq][q] === F1.SURF.GRAVEL ? 0.25 : 0.12));
                 // (the pit lane and its apron to the garage doors, likewise: a hillside stood through them)
                 const po = tr.pit.off[q];
                 if (po === po && sq === pS && Math.abs(dlq - po) < tr.pit.lane / 2 + 2.2) cov = Math.min(cov, Tracks.surfZ(tr, q, dlq) + al * tr.dz[q] - 0.12);
