@@ -3148,6 +3148,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue, { root, renderer, ground: MATS['ground_' + style] }) : null;
     if (grass) root.add(grass);
     tag('grass');
+    // (after the grass, which would otherwise leave bald patches under the fans' feet)
+    if (!W2.town) buildFans(tr, W2, add, venue);
+    tag('stands');
     const gantry = buildGantry(root, tr); tag('gantry');
     buildBoards(root, W2, tr); tag('boards');
     buildBackdrop(root, W2, tr);
@@ -4809,6 +4812,70 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
     t.repeat.set(1 / 12.3, 1 / 10.5); t.offset.set(6 / 12.3, 0);
     return t;
+  }
+
+  // ---------- fans on the banks ----------
+  // General admission: people standing on the grass behind the fences at the corners, thickest at
+  // the fence and thinning back from it, more at the slow corners, facing the track. Low-poly
+  // figures (legs, a shirt in the crowd's colours, a head, a cap now and then), merged a corner to
+  // a mesh so the ones out of view or far off are not drawn. Never inside a barrier, on a stand,
+  // a building, the paddock or the pit side by the garages.
+  function buildFans(tr, W2, add, venue) {
+    const N = tr.N, ds = tr.ds, rn = U.rng((tr.def.seed || 5) * 131 + 17);
+    const ms = x => Math.round(x / ds);
+    // one figure: legs and head (their own colours), the shirt (coloured per person)
+    const torso = new THREE.BoxGeometry(0.44, 0.58, 0.26); torso.translate(0, 1.13, 0);
+    const rest = (() => {
+      const b = new Batch(true), legs = new THREE.BoxGeometry(0.34, 0.84, 0.2), head = new THREE.BoxGeometry(0.2, 0.24, 0.22), arms = new THREE.BoxGeometry(0.56, 0.5, 0.16);
+      b.add(legs, mat(0, 0.42, 0), col('#2a2f3a')); b.add(head, mat(0, 1.56, 0), col('#c9a07c')); b.add(arms, mat(0, 1.1, 0.02), col('#c9a07c'));
+      return b.geo();
+    })();
+    const cap = new THREE.BoxGeometry(0.23, 0.07, 0.27); cap.translate(0, 1.7, 0.03);
+    const shirts = ['#1b2030', '#141518', '#23262b', '#1d2a44', '#3a3f48', '#586270', '#d8d6cf', '#e4e2dc', '#b8322a', '#d2691e', '#c9a227', '#1f6f5c', '#2b5fa8', '#a02040', '#f4f1e8', '#c8102e', '#ff8000'];
+    const skins = ['#d9b08c', '#c4946c', '#a5714c', '#7a4f33', '#e6c3a3'];
+    const stands = W2.decor.filter(it => it.type === 'stand' || it.type === 'garage' || it.type === 'building' || it.type === 'lot' || it.type === 'poly');
+    const away = (x, z) => {
+      for (const it of stands) { const r = it.type === 'stand' ? 22 : it.type === 'poly' ? 60 : it.type === 'garage' ? 30 : Math.max(it.w || 20, it.h || 20) * 0.7; if (Math.hypot(it.x - x, it.y - z) < r) return false; }
+      for (const f of venue || []) if (Math.hypot(f.x - x, f.y - z) < f.r + 3) return false;
+      return true;
+    };
+    // outside every barrier of the lap, by 2 m
+    const outside = (x, z) => {
+      let ok = true;
+      tr.hash.near(x, z, 70, j => { if (!ok) return; const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j], al = dx * tr.tx[j] + dz * tr.ty[j]; if (Math.abs(al) < 2 * ds && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][j] + 2) ok = false; if (Math.hypot(dx, dz) < tr.hw + 3) ok = false; });
+      return ok;
+    };
+    const pS = tr.pit.side > 0 ? 1 : 0;
+    let made = 0;
+    for (const c of tr.apexes || []) {
+      if (Math.abs(c.k) < 1 / 400) continue;
+      const oS = c.k > 0 ? 0 : 1, sg = oS ? 1 : -1, R = 1 / Math.abs(c.k);
+      const want = Math.round(U.clamp(140 + 9000 / R, 140, 420));
+      const body = new Batch(true), heads = new Batch(true);
+      let n = 0;
+      for (let t = 0; t < want * 3 && n < want; t++) {
+        const i = c.i + Math.round((rn() * 2 - 1) * ms(75)), k = mod(i, N);
+        if (oS === pS && !isNaN(tr.pit.off[k])) continue;
+        const depth = -Math.log(1 - rn() * 0.95) * 4.5; // most at the fence, a few far back
+        const d = sg * (tr.barr[oS][k] + 2.6 + depth), x = tr.x[k] + tr.nx[k] * d + (rn() - 0.5) * 1.5, z = tr.y[k] + tr.ny[k] * d + (rn() - 0.5) * 1.5;
+        if (W2.water && z < W2.water.y + 3) continue;
+        if (!outside(x, z) || !away(x, z)) continue;
+        const y = Tracks.groundAt(tr, x, z) - 0.04, th = Math.atan2(tr.x[k] - x, tr.y[k] - z) + (rn() - 0.5) * 0.7, s = 0.92 + rn() * 0.16;
+        const m = new THREE.Matrix4().compose(V(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, th, 0)), V(s, s, s));
+        body.add(torso, m, col(shirts[Math.floor(rn() * shirts.length)]));
+        heads.add(rest, m);
+        if (rn() < 0.3) body.add(cap, m, col(shirts[Math.floor(rn() * 6)]));
+        n++;
+      }
+      if (!n) continue;
+      // (skin tone per corner group is the rest's own colour; a few tones across the groups)
+      const g2 = heads.geo(), cc = g2.attributes.color, sk = col(skins[made % skins.length]);
+      for (let q = 0; q < cc.count; q++) if (cc.getX(q) > 0.5) cc.setXYZ(q, sk.r, sk.g, sk.b);
+      if (!MATS.fans) MATS.fans = std({ vertexColors: true, roughness: 0.85 });
+      add(body.geo(), MATS.fans, { cast: false, far: 520 });
+      add(g2, MATS.fans, { cast: false, far: 520 });
+      made++;
+    }
   }
 
   function buildGantry(root, tr) {
