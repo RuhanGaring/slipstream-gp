@@ -2897,12 +2897,15 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const cf = W2.town ? 1.6 : 1;
       const slope = (() => {
         const R = 14, h = 8.5 / R, t = 12 / R, P = [], Nn = [], UV = [], I = [];
-        const v = (x, y, z, nx, ny, nz, fr) => { P.push(x, y, z); Nn.push(nx, ny, nz); UV.push((x + 14) / 28 * 0.6 * cf, (1 - fr) * 0.95 * cf); return P.length / 3 - 1; };
+        // (one painted row of the crowd texture a step, js/r3-textures.js T.crowd: rows 24 px of its
+        // 512, the people on the riser, the painted tread on the tread; 21 rows had been spread over
+        // the 14 steps, people cut across the step edges and stretched up the risers)
+        const v = (x, y, z, nx, ny, nz, vv) => { P.push(x, y, z); Nn.push(nx, ny, nz); UV.push((x + 14) / 28 * 0.6 * cf, vv); return P.length / 3 - 1; };
         for (let r = 0; r < R; r++) {
-          const y0 = 1.35 + r * h, z0 = -6 + r * t, f0 = r / R, fm = (r + 0.35) / R, f1 = (r + 1) / R;
-          let a = v(-14, y0, z0, 0, 0, -1, f0); v(14, y0, z0, 0, 0, -1, f0); v(14, y0 + h, z0, 0, 0, -1, fm); v(-14, y0 + h, z0, 0, 0, -1, fm);
+          const y0 = 1.35 + r * h, z0 = -6 + r * t, vb = (24 * r + 3) / 512, vt = (24 * r + 24) / 512, vf = (24 * r + 6) / 512;
+          let a = v(-14, y0, z0, 0, 0, -1, vb); v(14, y0, z0, 0, 0, -1, vb); v(14, y0 + h, z0, 0, 0, -1, vt); v(-14, y0 + h, z0, 0, 0, -1, vt);
           I.push(a, a + 2, a + 1, a, a + 3, a + 2);
-          a = v(-14, y0 + h, z0, 0, 1, 0, fm); v(14, y0 + h, z0, 0, 1, 0, fm); v(14, y0 + h, z0 + t, 0, 1, 0, f1); v(-14, y0 + h, z0 + t, 0, 1, 0, f1);
+          a = v(-14, y0 + h, z0, 0, 1, 0, vf); v(14, y0 + h, z0, 0, 1, 0, vf); v(14, y0 + h, z0 + t, 0, 1, 0, vb); v(-14, y0 + h, z0 + t, 0, 1, 0, vb);
           I.push(a, a + 2, a + 1, a, a + 3, a + 2);
         }
         const g = new THREE.BufferGeometry();
