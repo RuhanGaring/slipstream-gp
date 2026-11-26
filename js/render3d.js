@@ -1855,6 +1855,105 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const b = W2.bounds;
     const cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2, span = Math.max(b.x1 - b.x0, b.y1 - b.y0);
 
+    // What lies in the road's own plane either side, as drawn: the kerb (easing in and out over its
+    // first and last 9 m) and the run-off ribbons (gravel, tarmac, grass), out from the road's edge.
+    // The ground's verge starts where they stop.
+    const Tg = W2.townGates, pS = tr.pit.side > 0 ? 1 : 0, inPit = (side, k) => !Tg || (side === pS && !isNaN(tr.pit.off[k]));
+    // run-off width eased over 12 samples either side (within the same surface), so steps in
+    // the data become curves instead of polygon corners
+    const smoothW = (side, k, t) => {
+      let w = 0, n = 0;
+      for (let q = -12; q <= 12; q++) { const kk = mod(k + q, N); if (tr.runT[side][kk] !== t) continue; const f = 13 - Math.abs(q); w += tr.runW[side][kk] * f; n += f; }
+      return w / n;
+    };
+    const runDrawn = t => t !== SURF.GRASS || !(style === 'park' || W2.town);
+    // the drawn width of a run of run-off (from the road's edge) at sample k: a gravel trap's outer
+    // edge is raked by hand, not cut by a ruler, so it wanders by half a metre; every run narrows
+    // to nothing at its ends (it stopped at 30 % of its width, a square step the ground showed through)
+    const runGw = (side, t, i0, i1, k) => {
+      const w = smoothW(side, k, t);
+      const e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds;
+      const taper = w * U.smooth(Math.min(1, e / 14));
+      if (t !== SURF.GRAVEL) return taper;
+      const h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
+      return Math.max(0, taper + (Math.sin(k * 0.9 + side) * 0.35 + (h - Math.floor(h) - 0.5) * 0.5) * Math.min(1, e / 6));
+    };
+    const runE = [new Float32Array(N), new Float32Array(N)], kerbE = [new Float32Array(N), new Float32Array(N)];
+    for (const side of [0, 1]) {
+      for (const t of [SURF.GRAVEL, SURF.TARMAC, SURF.GRASS]) {
+        if (!runDrawn(t)) continue;
+        for (const [i0, i1] of runs(N, k => tr.runT[side][k] === t && inPit(side, k))) for (let i = i0; i <= i1; i++) { const k = mod(i, N); runE[side][k] = Math.max(runE[side][k], runGw(side, t, i0, i1, k)); }
+      }
+      if (!W2.town) for (const [i0, i1] of runs(N, k => (side ? tr.kerbR : tr.kerbL)[k])) {
+        if ((i1 - i0) * tr.ds < 6) continue;
+        for (let i = i0; i <= i1; i++) { const k = mod(i, N); kerbE[side][k] = Math.max(kerbE[side][k], tr.kerbW * U.smooth(Math.min(1, Math.min(i - i0, i1 - i) * tr.ds / 9))); }
+      }
+    }
+    // The verge: beyond what is drawn, the ground runs on level with the track for two and a half metres
+    // (FIA Appendix O: a verge level with the track, no step) and then eases into the terrain, up to
+    // 9 m out or just past the barrier. The ground mesh, a 7 m grid, was sunk well below the road all
+    // along so its flat triangles could not poke through where the road dips or banks between its
+    // vertices: the road's edge stood 20 to 45 cm above the turf, a slab laid on the grass. Now the
+    // grid points out past the verge's first metre stay up, just under the verge, and the verge itself,
+    // drawn in the ground's own material, covers the strip where the two meet.
+    tr.drawn = { runE, kerbE }; // (for the test tools: what is drawn in the road's plane)
+    const VG = (W2.town || style === 'street') ? null : (() => {
+      const E = [new Float32Array(N), new Float32Array(N)], out = [new Float32Array(N), new Float32Array(N)], m = new Float32Array(N), meet = [new Float32Array(N).fill(NaN), new Float32Array(N).fill(NaN)];
+      for (let k = 0; k < N; k++) {
+        // (how far under the verge the grid points stay: a 7 m chord across a dip or a banked edge)
+        m[k] = Math.min(0.3, 0.04 + Math.abs(tr.ddz[k]) * 49 * 0.2 + Math.abs(tr.bank[k]) * 0.6);
+        for (const side of [0, 1]) {
+          const sg = side ? 1 : -1;
+          // (beside the pit lane where it runs alongside the track, as it joins and leaves: the verge
+          // starts past the lane; none where the pit wall stands between them, that is the pit's own)
+          const po = side === pS ? tr.pit.off[k] : NaN, L2 = tr.pit.lane / 2;
+          if (po === po && Math.abs(po) - L2 > tr.hw + kerbE[side][k] + 0.5) { E[side][k] = NaN; continue; }
+          const e = Math.max(tr.hw + Math.max(kerbE[side][k], runE[side][k]), po === po ? Math.abs(po) + L2 + 0.2 : 0);
+          // (10.5 m: a grid cell and a half past the last thing drawn, where the ground is the
+          // terrain's own again, metres above or below it in a cutting or on a bank; the verge is the
+          // slope between; never into another part of the lap)
+          let o = e + 10.5, c = 0;
+          // (inside a tight bend no further out than its centre, nearly: past it the strip folds)
+          for (let q = -3; q <= 3; q++) c = Math.max(c, tr.kap[mod(k + q, N)] * sg);
+          if (c > 1e-4) o = Math.min(o, 0.97 / c);
+          // Another part of the lap within reach: the verge runs out to the edge of what is drawn there
+          // and meets it, one straight bank between the two (cut into the slope, or built up), instead
+          // of stopping short and leaving the 7 m grid to draw the bank in a sawtooth.
+          for (let ad = e + 0.5; ad <= o + 1e-6; ad += 0.5) {
+            const qx = tr.x[k] + tr.nx[k] * sg * ad, qz = tr.y[k] + tr.ny[k] * sg * ad;
+            let hit = null;
+            tr.hash.near(qx, qz, 60, j => {
+              if (hit) return;
+              const sep = Math.min(Math.abs(j - k), N - Math.abs(j - k));
+              if (sep * tr.ds <= 40) return;
+              const dx = qx - tr.x[j], dz = qz - tr.y[j], al = dx * tr.tx[j] + dz * tr.ty[j];
+              if (Math.abs(al) > 1.5 * tr.ds) return;
+              const dlj = dx * tr.nx[j] + dz * tr.ny[j], sj = dlj > 0 ? 1 : 0, aj = Math.abs(dlj);
+              if (aj < tr.hw + Math.max(kerbE[sj][j], runE[sj][j])) hit = { j, dlj, sj, aj, al };
+            });
+            if (hit) {
+              o = Math.max(e, ad - 0.5);
+              const { j, sj, aj, al } = hit, dj = (sj ? 1 : -1) * Math.max(tr.hw, aj - 0.5);
+              meet[side][k] = Tracks.surfZ(tr, j, dj) + tr.dz[j] * al + (aj - 0.5 > tr.hw + kerbE[sj][j] && runE[sj][j] > 0 ? (tr.runT[sj][j] === SURF.GRAVEL ? -0.035 : -0.02) : 0);
+              break;
+            }
+          }
+          E[side][k] = o - e < 0.15 ? NaN : e; out[side][k] = o;
+        }
+      }
+      // the verge's height at lateral distance ad (sample k's side), point x, z, `along` metres past k
+      const at = (k, side, ad, x, z, along) => {
+        // (level as far as the barrier's foot, so the wall stands on it, then the slope; out to
+        // another part of the lap, a bank to its edge)
+        const e = E[side][k], o = out[side][k], my = meet[side][k], mt = my === my;
+        const lz = mt ? Math.min(2.5, (o - e) * 0.3) : Math.max(0.3, Math.min(o - e - 2, Math.max(Math.min(2.5, (o - e) * 0.35), tr.barr[side][k] + 1.0 - e)));
+        const road = tr.z[k] + tr.dz[k] * along + Tracks.crossZ(tr, k, (side ? 1 : -1) * ad);
+        const w = U.smooth((ad - e - lz) / Math.max(0.3, o - e - lz));
+        return road + ((mt ? my : Tracks.groundAt(tr, x, z)) - road) * w;
+      };
+      return { E, out, m, meet, at };
+    })();
+
     // ground: the venue's terrain, cut and filled to meet the circuit
     const SEA = 0;
     let hgrid = null; // the fine terrain samples, kept for the grass
@@ -1877,6 +1976,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         if (fine) { hgrid = { x0, z0, cell, nx: nxv, nz: nzv, y: new Float32Array(nxv * nzv), edge: new Float32Array(nxv * nzv) }; hgrid.edge.fill(99); }
         const pos = new Float32Array(nxv * nzv * 3), uv = new Float32Array(nxv * nzv * 2), idx = new Uint32Array((nxv - 1) * (nzv - 1) * 6);
         const Yv = fine ? new Float32Array(nxv * nzv) : null, Wv = fine ? new Float32Array(nxv * nzv) : null, Bv = fine ? new Float32Array(nxv * nzv) : null;
+        const RV = fine && VG ? new Float32Array(nxv * nzv).fill(NaN) : null; // the verge's height over a grid point kept up under it
         for (let j = 0; j < nzv; j++) for (let i = 0; i < nxv; i++) {
           const x = x0 + i * cell, z = z0 + j * cell, k = j * nxv + i;
           let y = fine ? Tracks.groundAt(tr, x, z) - 0.07 : tr.H(x, z) - 0.6;
@@ -1889,7 +1989,21 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             // triangles would poke through the tarmac. Sink the ground near the road by the sag a
             // chord of this size makes (curvature x cell^2 / 8, with a margin), fading out beyond.
             let bi = -1, bd = 1e18;
-            tr.hash.near(x, z, 150, q => { const dd = (x - tr.x[q]) ** 2 + (z - tr.y[q]) ** 2; if (dd < bd) { bd = dd; bi = q; } });
+            // (and the lowest that anything drawn near this point asks for, whichever part of the lap it
+            // belongs to: under a road or run-off, or within a cell of its edge, the grid point stays below
+            // it. Where two parts at different heights run side by side, the terrain steps metres up or
+            // down halfway between them, and a cell's triangle from one side to the other stood through
+            // the lower one's run-off in a sawtooth; the verge draws the bank between them instead.)
+            let cov = Infinity;
+            tr.hash.near(x, z, 150, q => {
+              const dx = x - tr.x[q], dz = z - tr.y[q], dd = dx * dx + dz * dz;
+              if (dd < bd) { bd = dd; bi = q; }
+              const al = dx * tr.tx[q] + dz * tr.ty[q];
+              if (al > -1.5 * tr.ds && al < 1.5 * tr.ds) {
+                const dlq = dx * tr.nx[q] + dz * tr.ny[q], sq = dlq > 0 ? 1 : 0, rw = Math.max(runE[sq][q], kerbE[sq][q]), lim = tr.hw + rw, aq = Math.abs(dlq);
+                if (aq < lim + cell + 0.5 && !(sq === pS && !isNaN(tr.pit.off[q]))) cov = Math.min(cov, Tracks.surfZ(tr, q, (sq ? 1 : -1) * Math.min(aq, lim)) + al * tr.dz[q] - (runE[sq][q] > 0 && tr.runT[sq][q] === F1.SURF.GRAVEL ? 0.25 : 0.12));
+              }
+            });
             if (bi >= 0) {
               const dl = (x - tr.x[bi]) * tr.nx[bi] + (z - tr.y[bi]) * tr.ny[bi];
               const sag = bd > 3600 ? 0 : Math.min(0.9, 0.1 + Math.abs(tr.ddz[bi]) * cell * cell * 0.6 + Math.abs(tr.bank[bi]) * 2);
@@ -1900,20 +2014,36 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               // the cutting held by the retaining wall; an 8 m grid drawn up its face would show
               // as a ramp in front of the wall)
               if (W2.town && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 9) y = Math.min(y, Tracks.surfZ(tr, bi, Math.sign(dl) * Math.min(Math.abs(dl), tr.hw)) - 0.05);
-              // A wide gravel or tarmac run-off is a ribbon in the road's own plane; out at its far
-              // edge a rising hillside can stand above it and show through as bare turf. The ground
-              // under the whole run-off is kept below it (and its neighbours' minimum, below).
-              const sd = dl > 0 ? 1 : 0, rt = tr.runT[sd][bi];
-              if (bd < 3600 && rt === F1.SURF.GRAVEL) {
-                const re = tr.hw + tr.runW[sd][bi], wr = 1 - U.smooth((Math.abs(dl) - re - 0.5) / 3);
-                if (wr > 0) {
-                  // a quarter metre under the gravel, and never more than 1.5 m below the terrain
-                  // (the surface height extrapolated far out can fall away; the ground must not)
-                  const under = Math.max(Tracks.surfZ(tr, bi, dl) - 0.25, y - 1.5);
-                  if (y > under) y += (under - y) * wr;
-                  Wv[k] = Math.max(Wv[k], wr);
+              // A wide run-off (gravel, tarmac, grass ribbon) lies in the road's own plane; out across it a
+              // rising hillside stood through it, in a staircase of turf or sand (9 m out the grid was no
+              // longer sunk, and a gravel trap's ground went no more than 1.5 m under the terrain). The
+              // ground under the run-off as drawn is kept below it, however far: past its edge it climbs
+              // back over 3 m, a bank the verge covers.
+              {
+                const sdr = dl > 0 ? 1 : 0, rw = runE[sdr][bi];
+                if (bd < 3600 && rw > 0) {
+                  const wr = 1 - U.smooth((Math.abs(dl) - tr.hw - rw - 0.5) / 3);
+                  if (wr > 0) {
+                    const under = Math.max(Tracks.surfZ(tr, bi, dl) - (tr.runT[sdr][bi] === F1.SURF.GRAVEL ? 0.25 : 0.12), y - 8);
+                    if (y > under) y += (under - y) * wr;
+                    Wv[k] = Math.max(Wv[k], wr);
+                  }
                 }
               }
+              // out past the verge's first metre: just under the verge, not sunk
+              if (RV) {
+                const sd2 = dl > 0 ? 1 : 0, e = VG.E[sd2][bi], ad = Math.abs(dl);
+                if (e === e && ad >= e + 1 && ad <= VG.out[sd2][bi]) {
+                  const al = (x - tr.x[bi]) * tr.tx[bi] + (z - tr.y[bi]) * tr.ty[bi], v = VG.at(bi, sd2, ad, x, z, al);
+                  // (within a cell of what is drawn the grid point stays no higher than the road's plane:
+                  // where the verge climbs a cutting, a triangle from up the bank to a point under the
+                  // run-off stood through the run-off's outer metres; the verge above hides it)
+                  const flat = ad < e + cell + 1.5 ? Math.min(v, tr.z[bi] + tr.dz[bi] * al + Tracks.crossZ(tr, bi, (sd2 ? 1 : -1) * ad)) : v;
+                  y = flat - VG.m[bi]; Wv[k] = 0; RV[k] = v;
+                }
+              }
+              // (a point kept up under the verge keeps its grass on the verge: RV)
+              if (VG && cov < y) { y = cov; Wv[k] = 1; }
             }
             Yv[k] = y;
           }
@@ -1955,6 +2085,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             const y2 = Yv[k] + (m - 0.06 - Yv[k]) * w;
             if (!(waterZ != null && z0 + j * cell < waterZ - 2)) { pos[k * 3 + 1] = y2; hgrid.y[k] = y2 + 0.07; }
           }
+          // (the grass grows on the verge, not on the grid point a few centimetres under it)
+          if (RV) for (let k = 0; k < RV.length; k++) if (RV[k] === RV[k]) hgrid.y[k] = RV[k];
         }
         let q = 0;
         for (let j = 0; j < nzv - 1; j++) for (let i = 0; i < nxv - 1; i++) {
@@ -1988,6 +2120,46 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const fineG = grid(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad, W2.town ? 8 : 7, true);
       if (gn) townGround(fineG, W2, tr, gm);
       add(fineG, gm, { order: 4 });
+      if (VG) {
+        // the verge strip: six rows across, level with the track at its inner edge, on the ground's own
+        // triangles at its outer edge (and never under them in between), lit with the ground's normals
+        const P = fineG.attributes.position.array, NR = fineG.attributes.normal.array, gx0 = hgrid.x0, gz0 = hgrid.z0, gc = hgrid.cell, gnx = hgrid.nx, gnz = hgrid.nz;
+        const cellAt = (x, z) => { const fx = (x - gx0) / gc, fz = (z - gz0) / gc, i = Math.floor(fx), j = Math.floor(fz); return i < 0 || j < 0 || i >= gnx - 1 || j >= gnz - 1 ? null : [i, j, fx - i, fz - j]; };
+        const gY = (x, z) => {
+          const c = cellAt(x, z); if (!c) return -1e9;
+          const [i, j, u, v] = c, a = (j * gnx + i) * 3 + 1, b1 = a + 3, c1 = a + gnx * 3, d1 = c1 + 3;
+          // (the grid's two triangles a cell: a, c, b and b, c, d)
+          return u + v <= 1 ? P[a] + (P[b1] - P[a]) * u + (P[c1] - P[a]) * v : P[d1] + (P[c1] - P[d1]) * (1 - u) + (P[b1] - P[d1]) * (1 - v);
+        };
+        const nOut = [0, 1, 0];
+        const gN = (x, z) => {
+          const c = cellAt(x, z); if (!c) { nOut[0] = 0; nOut[1] = 1; nOut[2] = 0; return nOut; }
+          const [i, j, u, v] = c, a = (j * gnx + i) * 3;
+          for (let q = 0; q < 3; q++) nOut[q] = (NR[a + q] * (1 - u) + NR[a + 3 + q] * u) * (1 - v) + (NR[a + gnx * 3 + q] * (1 - u) + NR[a + gnx * 3 + 3 + q] * u) * v;
+          const l = Math.hypot(nOut[0], nOut[1], nOut[2]) || 1; nOut[0] /= l; nOut[1] /= l; nOut[2] /= l;
+          return nOut;
+        };
+        const F = [0, 0.08, 0.2, 0.4, 0.65, 1], va = new Acc();
+        for (const side of [0, 1]) {
+          const sg = side ? 1 : -1;
+          let prev = -1;
+          for (let i = 0; i <= N; i++) {
+            const k = mod(i, N), e = VG.E[side][k];
+            if (!(e === e)) { prev = -1; continue; }
+            const o = VG.out[side][k], base = va.k;
+            // (rows in order of signed offset, as ribbon() lays them, so the faces look up on both sides)
+            const rows = side ? F : F.slice().reverse();
+            for (const f of rows) {
+              const ad = e + (o - e) * f, x = tr.x[k] + tr.nx[k] * sg * ad, z = tr.y[k] + tr.ny[k] * sg * ad, g = gY(x, z);
+              const my = VG.meet[side][k], y = f === 1 ? (my === my ? my + 0.003 : g + 0.003) : Math.max(VG.at(k, side, ad, x, z, 0), g + 0.012), n = gN(x, z);
+              va.v(x, y, z, n[0], n[1], n[2], x / 36, z / 36);
+            }
+            if (prev >= 0) for (let r = 0; r < F.length - 1; r++) { const a0 = prev + r, a1 = a0 + 1, b0 = base + r, b1 = b0 + 1; va.t(a0, a1, b0); va.t(a1, b1, b0); }
+            prev = base;
+          }
+        }
+        if (va.k) add(va.geo(), gm, { order: 4 });
+      }
       turf = turfMap(hgrid, tr);
       const size = span + 9000;
       add(grid(cx - size / 2, cz - size / 2, cx + size / 2, cz + size / 2, 90, false), gn || gm, { order: 5 });
@@ -2023,42 +2195,22 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
     // run-off: gravel traps and tarmac, per side
     {
-      const gr = new Acc(), ta = new Acc(), ve = new Acc(), band = new Acc();
-      // (a town's lap has a pavement either side; only its pit lane keeps the circuit's surfaces)
-      const Tg = W2.townGates, pS = tr.pit.side > 0 ? 1 : 0, inPit = (side, k) => !Tg || (side === pS && !isNaN(tr.pit.off[k]));
-      // run-off width eased over 12 samples either side (within the same surface), so steps in
-      // the data become curves instead of polygon corners
-      const smoothW = (side, k, t) => {
-        let w = 0, n = 0;
-        for (let q = -12; q <= 12; q++) { const kk = mod(k + q, N); if (tr.runT[side][kk] !== t) continue; const f = 13 - Math.abs(q); w += tr.runW[side][kk] * f; n += f; }
-        return w / n;
-      };
+      const gr = new Acc(), ta = new Acc(), ve = new Acc();
+      // (a town's lap has a pavement either side; only its pit lane keeps the circuit's surfaces: inPit)
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         for (const t of [SURF.GRAVEL, SURF.TARMAC, SURF.GRASS]) {
           const acc = t === SURF.GRAVEL ? gr : t === SURF.TARMAC ? ta : ve;
-          if (t === SURF.GRASS && (style === 'park' || W2.town)) continue;
+          if (!runDrawn(t)) continue;
           for (const [i0, i1] of runs(N, k => tr.runT[side][k] === t && inPit(side, k))) {
-            // a gravel trap's outer edge is raked by hand, not cut by a ruler: it wanders by half
-            // a metre and the trap rounds off at its ends instead of stopping square
-            const gw = k => {
-              const w = smoothW(side, k, t);
-              const e = Math.min(mod(k - i0, N), mod(i1 - k, N)) * tr.ds;
-              const taper = w * (0.3 + 0.7 * U.smooth(Math.min(1, e / 14)));
-              if (t !== SURF.GRAVEL) return taper;
-              const h = Math.sin(k * 12.9898 + side * 78.2) * 43758.5453;
-              return taper + (Math.sin(k * 0.9 + side) * 0.35 + (h - Math.floor(h) - 0.5) * 0.5) * Math.min(1, e / 6);
-            };
+            const gw = k => runGw(side, t, i0, i1, k);
             const fa = k => (sg < 0 ? -(hw + gw(k)) : hw - 0.3);
             const fb = k => (sg < 0 ? -hw + 0.3 : hw + gw(k));
             ribbon(acc, tr, i0, i1, fa, fb, t === SURF.GRAVEL ? -0.035 : -0.02, 10);
           }
         }
-        // modern venues: a painted band along the edge of the road on the grey run-off
-        if (style === 'modern') {
-          const fa = k => (sg < 0 ? -(hw + 1.9) : hw + 0.3), fb = k => (sg < 0 ? -(hw + 0.3) : hw + 1.9);
-          for (const [i0, i1] of runs(N, k => isNaN(tr.pit.off[k]))) ribbon(band, tr, i0, i1, fa, fb, -0.012, 10);
-        }
+        // (modern venues had a teal band painted along every edge of the lap: no circuit is. The paint
+        // goes where real ones put it, behind the kerbs at the corners: buildCornerDress)
         // street circuits: tarmac right up to the wall
         if (style === 'street') {
           const fa = k => (sg < 0 ? -(tr.barr[0][k] + 0.2) : hw - 0.3), fb = k => (sg < 0 ? -hw + 0.3 : tr.barr[1][k] + 0.2);
@@ -2067,16 +2219,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
       }
       add(gr.geo(), M.gravel);
-      if (band.k) add(band.geo(), M.runBand || (M.runBand = std({ color: '#3f8c97', roughness: 0.92 })));
       // worn verges: a strip of sandy soil and thinned turf where the grass meets the track or
       // the run-off, 0.25 to 0.8 m wide and broken up toward the grass (a decal over the lawn)
       if (style !== 'street') {
         const wa = new Acc();
         for (const side of [0, 1]) {
           const sg = side ? 1 : -1;
-          // (behind the kerb where there is one: the decal must never lie over the paint)
-          const kb = side ? tr.kerbR : tr.kerbL;
-          const edge = k => tr.runT[side][k] === SURF.GRASS ? hw + (kb[k] ? tr.kerbW : 0) + 0.04 : hw + smoothW(side, k, tr.runT[side][k]);
+          // (behind the kerb and the run-off as drawn: the decal must never lie over the paint, and it
+          // lies on the verge, which is level with the track there)
+          const edge = k => hw + Math.max(kerbE[side][k], runE[side][k]) + 0.04;
+          const yAt = (k, d) => tr.z[k] + Tracks.crossZ(tr, k, d) + 0.02;
           let prev = -1, len = 0, px = 0, pz = 0;
           for (let i = 0; i <= N; i++) {
             const k = mod(i, N), e0 = edge(k), wd = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(k * 0.37 + side * 2.1) * Math.sin(k * 0.071 + 1.3));
@@ -2085,8 +2237,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             const bx = tr.x[k] + tr.nx[k] * sg * (e0 + wd), bz = tr.y[k] + tr.ny[k] * sg * (e0 + wd);
             if (prev >= 0) len += Math.hypot(ax - px, az - pz);
             px = ax; pz = az;
-            const a = wa.v(ax, Tracks.surfZ(tr, k, sg * e0) + 0.02, az, 0, 1, 0, len / 30, 0);
-            wa.v(bx, Tracks.surfZ(tr, k, sg * (e0 + wd)) + 0.02, bz, 0, 1, 0, len / 30, 1);
+            const a = wa.v(ax, yAt(k, sg * e0), az, 0, 1, 0, len / 30, 0);
+            wa.v(bx, yAt(k, sg * (e0 + wd)), bz, 0, 1, 0, len / 30, 1);
             if (prev >= 0) { if (side) wa.t(prev, a, prev + 1), wa.t(prev + 1, a, a + 1); else wa.t(prev, prev + 1, a), wa.t(prev + 1, a + 1, a); }
             prev = a;
           }
@@ -2309,6 +2461,12 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const d0 = -hw + (k + 0.25) * tr.w / 8;
         quad(s, s + 0.2, d0, d0 + tr.w / 16, white);
       }
+      // the pit lane's speed limit, where it starts and ends: a white line across the lane (F1 Sporting
+      // Regulations, art. 34), at the very places the race enforces it (tr.pit.limitIn, limitOut)
+      if (!W2.town) for (const s of [tr.pit.limitIn, tr.pit.limitOut]) {
+        const k = mod(Math.round(s / tr.ds), N), o = tr.pit.off[k];
+        if (!isNaN(o)) quad(s, s + 0.3, o - L2 + 0.05, o + L2 - 0.05, white, 0.009);
+      }
       // pit boxes in team colours
       for (const it of W2.decor) {
         if (it.type !== 'box') continue;
@@ -2396,9 +2554,12 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (g) add(g, M.kerb);
     }
 
+    // paint, artificial grass, sponsors and braking boards at the corners
+    const dress = !W2.town && style !== 'street' ? buildCornerDress(tr, add, M, { kerbE, runE, VG, style }) : null;
+
     // barriers
     {
-      const fpost = new Batch(false), armW = new Acc(), orn = new Acc(), nose = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
+      const tp = new Acc(), fpost = new Batch(false), armW = new Acc(), orn = new Acc(), nose = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
       const pit = tr.pit, ps = pit.side > 0 ? 1 : 0;
       const gz0 = (pit.boxS[9] - 16 + tr.L) % tr.L, gz1 = (pit.boxS[0] + 16) % tr.L;
       const garageZone = k => !isNaN(pit.off[k]) && Tracks.inRange(tr, k * tr.ds, gz0, gz1);
@@ -2438,8 +2599,13 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
               i = j;
             }
           } else if (style === 'modern') {
+            const tec = dress && dress.tec[side];
             for (let i = i0; i < i1;) {
-              const j = Math.min(i1, i + Math.round((90 + rnA() * 140) / tr.ds)), bought = mainStraight(i) || rnA() < 0.34;
+              // (TecPro where the run-off ends at an impact zone, its face where the wall's face is: barrierFace in js/race.js)
+              if (tec && tec[mod(i, N)]) { let j = i; while (j < i1 && tec[mod(j, N)]) j++; wallRun(tp, tr, i, j, d, -0.07, 1.2, 3, 1.27, 0.6, undefined, true); i = j; continue; }
+              let j = Math.min(i1, i + Math.round((90 + rnA() * 140) / tr.ds));
+              if (tec) for (let q = i + 1; q < j; q++) if (tec[mod(q, N)]) { j = q; break; }
+              const bought = mainStraight(i) || rnA() < 0.34;
               if (bought) boardRun(ad, tr, i, j, d, -0.07, 1.05, 1.12, 0.55, adPal, rnB); else wallRun(conc, tr, i, j, d, -0.07, 1.05, 8, 1.12, 0.55);
               i = j;
             }
@@ -2505,6 +2671,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
       if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = F1.R3S.wear.barrier(std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap }))); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
+      if (tp.k) add(tp.geo(), M.tecpro || (M.tecpro = std({ map: tecproTex(), roughness: 0.55, side: THREE.DoubleSide })), { cast: true });
       if (armW.k) add(armW.geo(), M.railW || (M.railW = std({ color: '#cfd4d2', roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide, normalMap: T.corrugation() })), { cast: true });
       if (orn.k) add(orn.geo(), M.orangeEnd || (M.orangeEnd = std({ map: absorberTex(), roughness: 0.7, side: THREE.DoubleSide })), { cast: true });
       if (nose.k) add(nose.geo(), M.stripeEnd || (M.stripeEnd = std({ map: stripeTex(), roughness: 0.5, side: THREE.DoubleSide })), { cast: true });
@@ -2537,16 +2704,29 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         add(hg.geo(), M.vcol, { cast: true });
       }
-      // marshal posts: a white cabin with an orange roof behind the barrier every 280 m
+      // marshal posts: a white cabin with an orange roof behind the barrier every 190 m (the FIA's
+      // circuit maps: some 31 posts on a 5.3 to 5.9 km lap), each with its digital light panel on the
+      // roof, faced to the oncoming cars (FIA: at every flag point on a Grade 1 circuit since 2023)
       {
         const mp = new Batch(true), b = new THREE.BoxGeometry(1, 1, 1);
-        for (let i = Math.round(90 / tr.ds), n = 0; i < N; i += Math.round(280 / tr.ds), n++) {
+        for (let i = Math.round(90 / tr.ds), n = 0; i < N; i += Math.round(190 / tr.ds), n++) {
           const sd = n % 2 ? 1 : -1, o = sd * ((sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 2.4), x = tr.x[i] + tr.nx[i] * o, z = tr.y[i] + tr.ny[i] * o, ry = -Math.atan2(tr.ty[i], tr.tx[i]);
           if (W2.town && (W2.town.site.inland(x, z) < 6 || (W2.town.tunnel && i >= W2.town.tunnel.i0 - 8 && i <= W2.town.tunnel.i1 + 8))) continue;
+          // (inside a tight bend the barrier stands close in and the cabin, 2.4 m behind it, came out on the
+          // kerb of the road round the bend: nowhere nearer any part of the lap than its kerbs and 2.5 m)
+          let clear = true;
+          tr.hash.near(x, z, 40, j => { if (Math.hypot(tr.x[j] - x, tr.y[j] - z) < tr.hw + tr.kerbW + 2.5) clear = false; });
+          if (!clear) continue;
           const y = Math.max(tr.z[i], Tracks.groundAt(tr, x, z));
           mp.add(b, mat(x, y + 1.25, z, ry, 2.2, 2.5, 2.0), col('#e9e9e4'));
           mp.add(b, mat(x, y + 2.6, z, ry, 2.8, 0.14, 2.6), col('#e2641c'));
           mp.add(b, mat(x - tr.nx[i] * sd * 1.02, y + 1.6, z - tr.ny[i] * sd * 1.02, ry, 1.5, 0.8, 0.04), col('#2a3440'));
+          if (!W2.town) {
+            const lx = x - tr.nx[i] * sd * 0.7 - tr.tx[i] * 0.9, lz = z - tr.ny[i] * sd * 0.7 - tr.ty[i] * 0.9;
+            mp.add(b, mat(lx, y + 3.15, lz, ry, 0.1, 0.85, 1.0), col('#17191c'));
+            mp.add(b, mat(lx - tr.tx[i] * 0.03, y + 3.15, lz - tr.ty[i] * 0.03, ry, 0.06, 0.72, 0.86), col('#24272b'));
+            mp.add(b, mat(lx, y + 2.67, lz, ry, 0.08, 0.14, 0.08), col('#5b6067'));
+          }
         }
         add(mp.geo(), M.vcol, { cast: true });
       }
@@ -4144,6 +4324,232 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   }
 
   // start gantry with five pairs of red lights
+  // ---------- the corners' trackside detail ----------
+  // What a modern circuit has round its corners besides the kerbs (FIA Appendix O, the FIA's circuit
+  // drawing standard, photographs of the Red Bull Ring, Bahrain, Yas Marina, Barcelona):
+  //  - a green strip behind the kerbs: painted on asphalt run-off (2.5 m behind the exit kerb, 1.5 m
+  //    behind the apex kerb), artificial grass where the verge is turf (at least 1.8 m, FIA)
+  //  - on the asphalt run-off out of the slower corners, wide red and white bands beyond the green,
+  //    narrowing to points at both ends
+  //  - a sponsor painted on the biggest run-offs
+  //  - braking boards at 150, 100 and 50 m before the turn-in of the heavy stops, on the outside of
+  //    the approach, at least 3 m off the track
+  // All of it is paint and props: what the cars feel (Tracks.surfaceAt) is the surface underneath.
+  function buildCornerDress(tr, add, M, o) {
+    const N = tr.N, hw = tr.hw, ds = tr.ds, { kerbE, runE, VG, style } = o, modern = style === 'modern';
+    const ms = x => Math.round(x / ds), pS = tr.pit.side > 0 ? 1 : 0;
+    const pitBad = new Uint8Array(N);
+    for (let k = 0; k < N; k++) if (!isNaN(tr.pit.off[k])) for (let q = -10; q <= 10; q++) pitBad[mod(k + q, N)] = 1;
+    // corners: apex, turn-in and exit (where the bend, the same way, tightens past 1/400 and eases below it)
+    const C = [];
+    for (const c of tr.apexes || []) {
+      if (Math.abs(c.k) < 1 / 260) continue;
+      const same = i => { const v = tr.kap[mod(i, N)]; return Math.abs(v) > 1 / 400 && Math.sign(v) === Math.sign(c.k); };
+      let ti = c.i, te = c.i;
+      for (let q = 0; q < ms(400) && same(ti - 1); q++) ti--;
+      for (let q = 0; q < ms(400) && same(te + 1); q++) te++;
+      let app = 0;
+      for (let q = 1; q < ms(1200) && Math.abs(tr.kap[mod(ti - q, N)]) < 1 / 300; q++) app += ds;
+      C.push({ i: c.i, R: 1 / Math.abs(c.k), ti, te, app, inS: c.k > 0 ? 1 : 0 });
+    }
+    // the surface beside the road at offset ad on a side, as drawn: run-off ribbon, verge or ground
+    const runY = { [SURF.GRAVEL]: -0.035, [SURF.TARMAC]: -0.02, [SURF.GRASS]: -0.02 };
+    const surfY = (side, k, ad, x, z) => {
+      const e = hw + runE[side][k];
+      if (ad <= e && runE[side][k] > 0) return Tracks.surfZ(tr, k, (side ? 1 : -1) * ad) + (runY[tr.runT[side][k]] || -0.02);
+      if (VG && VG.E[side][k] === VG.E[side][k] && ad >= VG.E[side][k] && ad <= VG.out[side][k]) return VG.at(k, side, ad, x, z, 0);
+      return Tracks.groundAt(tr, x, z);
+    };
+    // where each side wants a green strip, and how wide
+    const want = [new Float32Array(N), new Float32Array(N)], bands = [new Uint8Array(N), new Uint8Array(N)], tec = [new Uint8Array(N), new Uint8Array(N)];
+    for (const c of C) {
+      const oS = 1 - c.inS, extra = U.clamp(c.R * 0.35, 15, 45);
+      for (let i = c.i - ms(5); i <= c.te + ms(extra); i++) want[oS][mod(i, N)] = Math.max(want[oS][mod(i, N)], modern ? 2.5 : 2.0);
+      // (energy absorbers, not a bare wall, where a car leaving a slow corner would hit it: FIA
+      // Safety Bulletin 41, impact angles over 20 degrees)
+      if (modern && c.R < 160) for (let i = c.i - ms(15); i <= c.te + ms(25); i++) tec[oS][mod(i, N)] = 1;
+      for (let i = Math.round(c.ti + (c.i - c.ti) * 0.3); i <= Math.round(c.i + (c.te - c.i) * 0.4) + ms(4); i++) want[c.inS][mod(i, N)] = Math.max(want[c.inS][mod(i, N)], modern ? 1.5 : 2.0);
+      if (modern && c.R < 160) for (let i = c.i + ms(5); i <= c.te + ms(extra * 0.9); i++) bands[oS][mod(i, N)] = 1;
+    }
+    const GREEN = col('#227a56'), RED = col('#c4262e'), WHITE = col('#ebebe6'), BANDW = 5.9;
+    const pa = new Acc(true), turf = new Acc();
+    // a strip from offset a(k) to a(k) + w(k) on one side, heights from surfY plus lift
+    const strip = (acc, side, i0, i1, a, w, lift, c, uv) => {
+      const sg = side ? 1 : -1;
+      let prev = -1, s = 0;
+      for (let i = i0; i <= i1; i++) {
+        const k = mod(i, N), A = a(i, k), Wd = w(i, k);
+        if (!(Wd > 0.02)) { prev = -1; continue; }
+        const rows = side ? [A, A + Wd] : [A + Wd, A], base = acc.k;
+        for (const ad of rows) {
+          const x = tr.x[k] + tr.nx[k] * sg * ad, z = tr.y[k] + tr.ny[k] * sg * ad;
+          acc.v(x, surfY(side, k, ad, x, z) + lift, z, 0, 1, 0, uv ? (i * ds) / 4 : x / 9, uv ? (ad - A) / 2 : z / 9, c);
+        }
+        if (prev >= 0) { acc.t(prev, prev + 1, base); acc.t(prev + 1, base + 1, base); }
+        prev = base;
+      }
+    };
+    for (const side of [0, 1]) {
+      // where the strip can lie: behind a kerb, on asphalt run-off with room for it (modern), or on a
+      // turf verge (artificial grass); never by the pit lane, never on gravel
+      const ok = k => want[side][k] > 0 && kerbE[side][k] > 0.3 && !(side === pS && pitBad[k]) && (modern
+        ? tr.runT[side][k] === SURF.TARMAC && runE[side][k] >= kerbE[side][k] + want[side][k] + 0.3
+        : tr.runT[side][k] === SURF.GRASS && VG && VG.E[side][k] === VG.E[side][k] && VG.out[side][k] - VG.E[side][k] >= want[side][k] + 0.5);
+      for (const [i0, i1] of runs(N, ok)) {
+        if ((i1 - i0) * ds < 10) continue;
+        // (it narrows to a point at both ends, over 8 m)
+        // (by k: the bands' runs count their indices from elsewhere round the loop)
+        const gw = (i, k) => { const r = mod(k - i0, N); return want[side][k] * U.smooth(Math.min(1, Math.min(r, i1 - 1 - i0 - r) * ds / 8)); };
+        const a = (i, k) => hw + kerbE[side][k] - 0.03;
+        if (modern) {
+          strip(pa, side, i0, i1 - 1, a, gw, 0.007, GREEN);
+          // the red and white bands beyond, out of the slower corners, where the run-off is wide enough
+          const bOk = k => bands[side][k] && runE[side][k] >= kerbE[side][k] + want[side][k] + BANDW + 1;
+          for (const [j0, j1] of runs(N, k => bOk(k) && Tracks.inRange(tr, k * ds, i0 * ds, (i1 - 1) * ds))) {
+            if ((j1 - j0) * ds < 20) continue;
+            const tw = i => BANDW * U.smooth(Math.min(1, Math.min(i - j0, j1 - 1 - i) * ds / 18));
+            let off = 0;
+            for (const [f, c] of [[0.41, RED], [0.18, WHITE], [0.41, RED]]) {
+              const o0 = off;
+              strip(pa, side, j0, j1 - 1, (i, k) => a(i, k) + gw(i, k) + tw(i) * o0, i => tw(i) * f, 0.007, c);
+              off += f;
+            }
+          }
+        } else strip(turf, side, i0, i1 - 1, a, gw, 0.012, null, true);
+      }
+    }
+    if (pa.k) add(pa.geo(), M.paint, { receive: true, order: 1 });
+    if (turf.k) {
+      if (!M.astro) {
+        // artificial grass: a uniform bright green, a lighter stripe every 0.9 m roll, fine and matt
+        const c = document.createElement('canvas'); c.width = 64; c.height = 256;
+        const g = c.getContext('2d'), r = U.rng(5);
+        g.fillStyle = '#1f4a24'; g.fillRect(0, 0, 64, 256);
+        g.fillStyle = 'rgba(150,200,110,0.08)'; g.fillRect(0, 0, 64, 112);
+        for (let q = 0; q < 1400; q++) { g.fillStyle = r() < 0.5 ? 'rgba(20,60,20,0.18)' : 'rgba(190,230,150,0.12)'; g.fillRect(r() * 64, r() * 256, 1, 2); }
+        const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+        M.astro = std({ map: t, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+        M.astro.userData.wetK = [0.5, 0.3];
+      }
+      add(turf.geo(), M.astro, { receive: true, order: 1 });
+    }
+
+    // sponsors painted on the biggest asphalt run-offs: a dark panel with the name in yellow, read
+    // from the track, out beyond the bands, at the three corners with most room, 300 m apart at least
+    if (modern) {
+      const cand = [];
+      for (const c of C) {
+        const oS = 1 - c.inS, k0 = c.i + ms(8), k1 = k0 + ms(14);
+        if (pitBad[mod(k0, N)] || pitBad[mod(k1, N)]) continue;
+        let lo = 1e9; for (let i = k0; i <= k1; i++) { const k = mod(i, N); lo = Math.min(lo, tr.runT[oS][k] === SURF.TARMAC ? runE[oS][k] - kerbE[oS][k] : 0); }
+        const need = 2.5 + BANDW + 1.5 + 5 + 1;
+        if (lo >= need) cand.push({ c, oS, k0, k1, room: lo });
+      }
+      cand.sort((p, q) => q.room - p.room);
+      const pick = [];
+      for (const q of cand) if (pick.length < 3 && pick.every(p => Math.abs(((q.k0 - p.k0) % N + N + N / 2) % N - N / 2) * ds > 300)) pick.push(q);
+      if (pick.length) {
+        const NAMES = [['KODIAK', '#f2c230'], ['VANTA', '#d8b45a'], ['HALCYON', '#ff8a2a'], ['MERIDIAN', '#f4f1e6'], ['AUREX', '#f2e14a']];
+        const lg = new Acc(), rn = U.rng((tr.def.seed || 3) * 31 + 7), slots = NAMES.length;
+        for (const p of pick) {
+          const slot = Math.floor(rn() * slots), sg = p.oS ? 1 : -1;
+          let prev = -1;
+          for (let i = p.k0; i <= p.k1; i++) {
+            const k = mod(i, N), a0 = hw + kerbE[p.oS][k] + 2.5 + BANDW + 1.5, t = (i - p.k0) / (p.k1 - p.k0);
+            // (read from the track: the name runs the way the cars go on the left, against it on the right)
+            const u = (slot + 0.02 + 0.96 * (p.oS ? 1 - t : t)) / slots, base = lg.k;
+            for (const [ad, v] of p.oS ? [[a0, 0], [a0 + 5, 1]] : [[a0 + 5, 1], [a0, 0]]) {
+              const x = tr.x[k] + tr.nx[k] * sg * ad, z = tr.y[k] + tr.ny[k] * sg * ad;
+              lg.v(x, surfY(p.oS, k, ad, x, z) + 0.008, z, 0, 1, 0, u, v);
+            }
+            if (prev >= 0) { lg.t(prev, prev + 1, base); lg.t(prev + 1, base + 1, base); }
+            prev = base;
+          }
+        }
+        if (!M.runLogo) {
+          const c = document.createElement('canvas'); c.width = 512 * slots; c.height = 192;
+          const g = c.getContext('2d');
+          NAMES.forEach(([t, fg], k) => {
+            g.fillStyle = '#26282b'; g.fillRect(k * 512, 0, 512, 192);
+            g.fillStyle = fg; g.font = 'italic 900 128px Titillium Web, Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.fillText(t, k * 512 + 256, 100, 470);
+          });
+          const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 16;
+          M.runLogo = std({ map: t, roughness: 0.62, normalMap: M.paint.normalMap, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+        }
+        add(lg.geo(), M.runLogo, { receive: true, order: 1 });
+      }
+    }
+
+    // braking boards: 150, 100, 50 m before the turn-in of each heavy stop (a slow corner at the end of
+    // a straight of 180 m or more), on the outside of the approach, 3.5 m off the track (FIA: at least
+    // 3 m), on two posts; faced to the oncoming cars
+    {
+      const panel = new Acc(), post = new Batch(false), pg = new THREE.BoxGeometry(1, 1, 1);
+      let n = 0;
+      for (const c of C) {
+        if (c.app < 180 || c.R > 140) continue;
+        const side = 1 - c.inS, sg = side ? 1 : -1;
+        [150, 100, 50].forEach((dist, tile) => {
+          if (dist > c.app - 20) return;
+          const i = c.ti - ms(dist), k = mod(i, N);
+          if (side === pS && pitBad[k]) return;
+          const ad = Math.min(hw + Math.max(kerbE[side][k], 0) + 3.5, tr.barr[side][k] - 0.9);
+          if (ad < hw + 3) return;
+          const x = tr.x[k] + tr.nx[k] * sg * ad, z = tr.y[k] + tr.ny[k] * sg * ad, y = surfY(side, k, ad, x, z);
+          const tx = tr.tx[k], tz = tr.ty[k], px = -tz, pz = tx; // across the track (local x of the board)
+          const W = 1.3, y0 = y + 0.55, y1 = y0 + 1.0, hx = px * W / 2, hz = pz * W / 2;
+          // the face, toward the cars coming (-t), then the plain back
+          for (const [f, nx, nz, u0, u1] of [[-0.04, -tx, -tz, tile / 4, (tile + 1) / 4], [0.04, tx, tz, 0.76, 0.99]]) {
+            const cx = x + tx * f, cz = z + tz * f, b = panel.k, flip = f < 0 ? 1 : -1;
+            panel.v(cx - hx * flip, y0, cz - hz * flip, nx, 0, nz, u0, 0); panel.v(cx + hx * flip, y0, cz + hz * flip, nx, 0, nz, u1, 0);
+            panel.v(cx + hx * flip, y1, cz + hz * flip, nx, 0, nz, u1, 1); panel.v(cx - hx * flip, y1, cz - hz * flip, nx, 0, nz, u0, 1);
+            panel.t(b, b + 1, b + 2); panel.t(b, b + 2, b + 3);
+          }
+          const ry = -Math.atan2(tz, tx);
+          for (const e of [-0.45, 0.45]) post.add(pg, mat(x + px * e * W, y + 0.3, z + pz * e * W, ry, 0.08, 0.6, 0.08));
+          n++;
+        });
+      }
+      if (n) {
+        if (!M.brakeBoard) {
+          const c = document.createElement('canvas'); c.width = 1024; c.height = 256;
+          const g = c.getContext('2d');
+          ['150', '100', '50'].forEach((t, k) => {
+            g.fillStyle = '#f2f2ee'; g.fillRect(k * 256, 0, 256, 256);
+            g.fillStyle = '#16224a'; g.fillRect(k * 256, 0, 256, 54);
+            g.fillStyle = '#f2f2ee'; g.font = 'italic 900 36px Titillium Web, Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.fillText('SLIPSTREAM', k * 256 + 128, 29, 220);
+            g.fillStyle = '#121212'; g.font = '900 150px Titillium Web, Segoe UI, sans-serif';
+            g.fillText(t, k * 256 + 128, 160, 230);
+            g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 6; g.strokeRect(k * 256 + 3, 3, 250, 250);
+          });
+          g.fillStyle = '#d9d9d4'; g.fillRect(768, 0, 256, 256);
+          const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.flipY = true;
+          M.brakeBoard = std({ map: t, roughness: 0.7 });
+        }
+        add(panel.geo(), M.brakeBoard, { cast: true, far: 420 });
+        add(post.geo(), M.steel, { cast: true, far: 300 });
+      }
+    }
+    return { tec };
+  }
+  // TecPro: polyethylene blocks 1.5 m long and 1.2 m high, red and white, strapped in a row (one
+  // texture repeat is two blocks: 3 m)
+  function tecproTex() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+    const g = c.getContext('2d');
+    ['#b3262d', '#e6e6e0'].forEach((f, k) => {
+      g.fillStyle = f; g.fillRect(k * 128, 0, 128, 128);
+      const sh = g.createLinearGradient(0, 0, 0, 128); sh.addColorStop(0, 'rgba(255,255,255,0.18)'); sh.addColorStop(0.12, 'rgba(0,0,0,0)'); sh.addColorStop(0.9, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,0.3)');
+      g.fillStyle = sh; g.fillRect(k * 128, 0, 128, 128);
+      g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(k * 128, 0, 3, 128); // the joint
+      g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(k * 128, 34, 128, 3); g.fillRect(k * 128, 92, 128, 3); // the straps
+    });
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
+
   function buildGantry(root, tr) {
     const M = materials();
     const g = new THREE.Group();
