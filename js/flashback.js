@@ -68,7 +68,12 @@
         if (copy) { let m = 0; for (const k in prev) m++; if (m !== n) copy = null; }
       }
       const fresh = !copy;
-      if (fresh) copy = {};
+      // (a copy is a dictionary from the start, prototype null: built key by key as an ordinary object it
+      // walked the same hidden-class tree the live cars use, and with a car's 150 fields went to a
+      // dictionary part way through every time; that churn, four snapshots a second, kept retiring the
+      // live cars' classes, and the browser threw away the optimised code of the whole frame (render,
+      // HUD, game loop) every few seconds: a frame run unoptimised, two to five times slower, a stutter)
+      if (fresh) copy = Object.create(null);
       const soft = typeof o.ver === 'number' && typeof o.awake === 'number';
       const was = walk.owner;
       if (soft) walk.owner = o;
@@ -84,7 +89,7 @@
       const v = race[k];
       if (v !== null && typeof v === 'object' && !SHARED.has(k) && !DROP.has(k)) walk(v);
     }
-    const top = {};
+    const top = Object.create(null);
     for (const k in race) if (typeof race[k] !== 'object' || race[k] === null || !DROP.has(k)) top[k] = race[k];
     return { t: race.time, list, top };
   }
