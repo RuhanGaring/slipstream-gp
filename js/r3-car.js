@@ -1358,10 +1358,11 @@
     if (u.hurt && u.shBody && u.shBody.on) shadowBodyOff(u);
     // the mid level, unless the car is damaged (it cannot show a dent or a missing wheel either),
     // or the atlas cannot be made; then the low-detail model as it is. Debug: G.__noMid
-    const wantMid = !!u.midG && !G.__noMid && !u.hurt && u.wheels.every(w => w.userData.lods.length) && bakeFar(u.md);
+    const wantMid = !!u.midG && !G.__noMid && !u.hurt && !u.pitWheels && u.wheels.every(w => w.userData.lods.length) && bakeFar(u.md);
     if (wantMid !== !!u.useMid) { u.useMid = wantMid; if (u.lod != null && u.lod >= 0) levels(u, root, (u.lodFrom >= 0 ? 1 << u.lodFrom : 0) | (1 << u.lod), u.inner || u.innerT >= 0); }
     // the merged full-detail wheels, unless the car is damaged (each wheel may hang or come off alone)
-    const wantWhl = !!u.whl && !G.__noWheelMerge && !u.hurt && u.wheels.every(w => w.userData.lods.length);
+    // or its wheels are coming off in a pit stop (pitWheels, js/r3-pitcrew.js: each goes whole, rim and all)
+    const wantWhl = !!u.whl && !G.__noWheelMerge && !u.hurt && !u.pitWheels && u.wheels.every(w => w.userData.lods.length);
     if (wantWhl !== !!u.useWhl) { u.useWhl = wantWhl; if (u.lod != null && u.lod >= 0) levels(u, root, (u.lodFrom >= 0 ? 1 << u.lodFrom : 0) | (1 << u.lod), u.inner || u.innerT >= 0); }
     if (u.lod === lod && u.inner === inner && u.lodFrom < 0 && u.innerT < 0 && !(lod === 2 && u.hurt)) return; // settled, as nearly every car is on nearly every frame
     // the far mesh cannot show a dent or a missing wheel, and it needs its atlas

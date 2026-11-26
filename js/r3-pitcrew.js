@@ -727,6 +727,9 @@
     // holds a copy of it, so no wheel ever changes its look.
     const cr = stop && S ? S.crews.find(q => q.team === c.team || q.team.id === c.team.id) : null;
     const off = cr && u > 0.17 && u < 0.55;
+    // (the wheels drawn one by one, not merged, from a little before they come off: the metal wheel is
+    // partly among the parts that do not spin, and goes off with the rest of it)
+    if (body.userData) body.userData.pitWheels = !!(cr && u > 0.1 && u < 0.62);
     if (off) { o.updateMatrix(); body.updateMatrix(); }
     if (!off && !c.__crewOff && !(stop && u >= 0.55)) return;
     for (const w of wl) {
@@ -740,6 +743,9 @@
         tilt.position.copy(at).applyMatrix4(_M);
         d.crewAng = d.ang || 0;
       } else tilt.position.set(0, 0, 0);
+      // (and the spoked metal wheel, which the model keeps among the parts that do not spin: it goes
+      // with the tyre, leaving the brake drum and the upright on the car)
+      for (const m of rimsOf(d)) m.position.copy(tilt.position);
       // (the new wheel goes on as the copy was carried: unturned; the car turns it on from there)
       if (stop && u >= 0.55) { d.ang = 0; d.spin.rotation.z = 0; }
     }
@@ -754,6 +760,15 @@
     c.__crewOff = off;
   }
   const _M = new THREE.Matrix4();
+  // a wheel's spoked metal rim where the model keeps it with the upright (by its material's name: the
+  // carbon brake drum and duct stay on the car)
+  function rimsOf(d) {
+    if (d.crewRims) return d.crewRims;
+    const r = [];
+    for (const hg of d.hubs || []) for (const m of hg.children) if (m.isMesh && /wheel/i.test((m.material && m.material.name) || '')) r.push(m);
+    d.crewRims = r;
+    return r;
+  }
 
   // Copies of the team's own wheels for the crew's hands: the wheel-on men's new wheels (n) and, once
   // theirs is off, the wheel-off men's old ones (o); the car's own wheel parts (their geometry and
@@ -810,6 +825,8 @@
         const ci = (w.position.x > 0 ? 0 : 2) + (w.position.z > 0 ? 1 : 0);
         for (const [arr, set] of [[n, 'n'], [o, 'o'], [f, 'f']]) {
           const g = w.userData.lods[0].clone(true);
+          // (whole: its spoked metal rim as well)
+          for (const m of rimsOf(w.userData)) if (m.parent === w.userData.hubs[0]) { const q = m.clone(); q.position.set(0, 0, 0); g.add(q); }
           g.visible = false; g.matrixAutoUpdate = false;
           g.traverse(q => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; if (!Array.isArray(q.material)) q.material = matFor(q.material, set); } });
           S.root.add(g); arr[ci] = { g, w }; all.push(g);
