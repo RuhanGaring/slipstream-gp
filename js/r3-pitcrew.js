@@ -273,28 +273,41 @@
     // (a signalling arm raised: that hand lets go)
     if ((P.armR || 0) < -0.3) gR = null;
     if ((P.armL || 0) < -0.3) gL = null;
-    const kG = DT > 0 ? 1 - Math.exp(-DT / 0.12) : 1;
-    P.gwL = (P.gwL || 0) + ((gL ? 1 : 0) - (P.gwL || 0)) * kG;
-    P.gwR = (P.gwR || 0) + ((gR ? 1 : 0) - (P.gwR || 0)) * kG;
-    if (gL) P.gpL = (P.gpL || new THREE.Vector3()).copy(gL);
-    if (gR) P.gpR = (P.gpR || new THREE.Vector3()).copy(gR);
+    // (a hand takes hold and lets go on a spring; and where a hold jumps from one frame to the next, as
+    // when the gun comes off the nut or a wheel changes hands, the jump is not followed at once: it
+    // fades out over a few tenths of a second while the hold's own movement is followed exactly)
+    const wsp = (kw, kv, on) => { let x = P[kw] || 0, v = P[kv] || 0; const nn = DT > 0 ? Math.max(1, Math.ceil(DT / 0.02)) : 0, hh = nn ? DT / nn : 0; if (!nn) { P[kw] = on; P[kv] = 0; return; } for (let i = 0; i < nn; i++) { v += (196 * (on - x) - 28 * v) * hh; x += v * hh; } P[kw] = U.clamp(x, 0, 1); P[kv] = v; };
+    wsp('gwL', 'gvL', gL ? 1 : 0); wsp('gwR', 'gvR', gR ? 1 : 0);
+    const fadeK = DT > 0 ? Math.exp(-DT / 0.13) : 0;
+    const hold = (g, kp, kr, ko, kw) => {
+      if (!g) return;
+      const raw = P[kr] || (P[kr] = g.clone()), off = P[ko] || (P[ko] = new THREE.Vector3());
+      if ((P[kw] || 0) > 0.05 && raw.distanceTo(g) > 0.06) off.add(raw).sub(g); // (a jump: carried as an offset)
+      off.multiplyScalar(fadeK); raw.copy(g);
+      (P[kp] || (P[kp] = new THREE.Vector3())).copy(g).add(off);
+    };
+    hold(gL, 'gpL', 'grL', 'goL', 'gwL'); hold(gR, 'gpR', 'grR', 'goR', 'gwR');
     // hips, then the torso leaning forward from them, the helmet on top with its visor ahead; bent
     // further, as far as it must be, for the hands to reach their holds
     const lean0 = 0.3 * c + (P.lean || 0) * (1 - amp) + amp * (0.05 + 0.12 * U.smooth((spd - 1.5) / 3));
     const shAt = (ln, sd) => V(sd * 0.235, -0.07 * Math.cos(ln) + 0.6 * Math.cos(ln) + hip + 0.06, -0.07 * Math.sin(ln) + 0.6 * Math.sin(ln));
     let leanN = lean0;
     if (P.gpL || P.gpR) {
-      let best = lean0, bestE = 1e9;
-      for (let ln = lean0; ln <= lean0 + 1.1; ln += 0.05) {
-        let e = 0;
-        if (P.gpL && P.gwL > 0.01) e = Math.max(e, shAt(ln, -1).distanceTo(P.gpL) - 0.56);
-        if (P.gpR && P.gwR > 0.01) e = Math.max(e, shAt(ln, 1).distanceTo(P.gpR) - 0.56);
-        if (e <= 0) { best = ln; bestE = 0; break; }
-        if (e < bestE) { bestE = e; best = ln; }
+      // (the least bend that reaches, found to a hundredth of a radian, so it moves smoothly as the
+      // holds do; where nothing reaches, the bend that comes nearest)
+      const err = ln => { let e = 0; if (P.gpL && P.gwL > 0.01) e = Math.max(e, shAt(ln, -1).distanceTo(P.gpL) - 0.56); if (P.gpR && P.gwR > 0.01) e = Math.max(e, shAt(ln, 1).distanceTo(P.gpR) - 0.56); return e; };
+      if (err(lean0) <= 0) leanN = lean0;
+      else {
+        let best = lean0, bestE = 1e9;
+        for (let ln = lean0; ln <= lean0 + 1.1; ln += 0.1) { const e = err(ln); if (e < bestE) { bestE = e; best = ln; } if (e <= 0) break; }
+        if (bestE <= 0) { let lo = Math.max(lean0, best - 0.1), hi = best; for (let it = 0; it < 7; it++) { const m = (lo + hi) / 2; if (err(m) <= 0) hi = m; else lo = m; } leanN = hi; }
+        else { let lo = Math.max(lean0, best - 0.1), hi = Math.min(lean0 + 1.1, best + 0.1); for (let it = 0; it < 8; it++) { const m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3; if (err(m1) < err(m2)) hi = m2; else lo = m1; } leanN = (lo + hi) / 2; }
       }
-      leanN = best;
     }
-    const lean = lean0 + (leanN - lean0) * Math.max(P.gwL || 0, P.gwR || 0);
+    let lean = lean0 + (leanN - lean0) * Math.max(P.gwL || 0, P.gwR || 0);
+    // (the bend, likewise: a jump in it fades out rather than snapping the back)
+    if (P.lnRaw != null && Math.abs(lean - P.lnRaw) > 0.06) P.lnOff = (P.lnOff || 0) + P.lnRaw - lean;
+    P.lnOff = (P.lnOff || 0) * fadeK; P.lnRaw = lean; lean += P.lnOff;
     put('pelvis', 0, hip + 0.12, 0, 0, 0, 0.2);
     E.set(lean, 0, 0); Q.setFromEuler(E);
     const top = V(0, 0.6, 0).applyQuaternion(Q).add(V(0, hip + 0.06, 0));
@@ -513,13 +526,15 @@
         const wA = U.smooth((along + HL + 0.6) / 0.6) * U.smooth((HL + ahead + 0.6 - along) / 0.6), pen = Math.max(0, HW - Math.abs(acr)) * wA;
         if (pen > 0) {
           const sd = Math.abs(acr) > 0.05 ? Math.sign(acr) : cr.side || 1;
-          P.x += -sh * sd * pen; P.z += ch * sd * pen;
+          P.x += -sh * sd * pen; P.z += ch * sd * pen; P.away = true;
         }
       }
       // (walking: facing the way they go)
       if (cr.moving && Math.hypot(ax - bx, az - bz) > 0.3) yaw = Math.atan2((az - bz) * cr.dir, (ax - bx) * cr.dir) - F.h;
       // (a wheel carried at the waist, lower and further out as they crouch over their work)
-      if (P.tyre && P.tyreAt && P.tyreAt.y > 0.9) P.tyreAt.set(0, 1.0 - 0.5 * (P.crouch || 0), 0.38 + 0.15 * (P.crouch || 0));
+      // (the crouch as it is: walking stands a person up)
+      const cE = (P.crouch || 0) * (1 - ((cr.cur[q] && cr.cur[q].up) || 0));
+      if (P.tyre && P.tyreAt && P.tyreAt.y > 0.9) P.tyreAt.set(0, 1.0 - 0.5 * cE, 0.38 + 0.15 * cE);
       // three's y rotation: local +z to (sin, cos); a person faces local +z
       const hW = F.h + yaw;
       P.yaw = Math.PI / 2 - hW;
@@ -528,7 +543,7 @@
       if (P.lerpT && R.corner) {
         const hubs = cr.car && HUBS.get(cr.car), hub = hubs && hubs[(R.corner[0] > 0 ? 0 : 2) + (R.corner[1] > 0 ? 1 : 0)];
         if (hub) {
-          const cz = 0.38 + 0.15 * (P.crouch || 0), cyy = 1.0 - 0.5 * (P.crouch || 0);
+          const cz = 0.38 + 0.15 * cE, cyy = 1.0 - 0.5 * cE;
           const hw = V(P.x + Math.sin(P.yaw) * cz, P.y + cyy, P.z + Math.cos(P.yaw) * cz), f = P.lerpT.f;
           P.tyreW = P.lerpT.from === 'hub' ? hub.clone().lerp(hw, f) : hw.lerp(hub, f);
         }
@@ -540,19 +555,37 @@
       const C = cr.cur[q] || (cr.cur[q] = Object.assign({ walkAmp: 0 }, P, { jack: P.jack }));
       // (a person moves no faster than a sprint, 4.5 m/s, and turns no faster than 7 rad/s: nothing
       // slides or spins however the plan changes)
+      // Every change eased as a body moves: by critically damped springs, so a move gathers speed and
+      // slows to a stop instead of starting at full speed the moment the plan changes (a first-order
+      // ease did that, and read as a snap from one pose to the next). A person moves no faster than a
+      // sprint, 4.5 m/s, nor speeds up or slows faster than 7 m/s^2; turns no faster than 7 rad/s.
       const k = dt > 0 ? 1 - Math.exp(-dt / 0.11) : 1;
-      for (const key of ['y', 'crouch', 'arms', 'lean', 'armR', 'armL']) C[key] = (C[key] || 0) + ((P[key] || 0) - (C[key] || 0)) * k;
+      C.sv = C.sv || {};
+      const n = dt > 0 ? Math.max(1, Math.ceil(dt / 0.02)) : 0, h = n ? dt / n : 0;
+      const spring = (key, w, tgt) => {
+        if (!n) { C[key] = tgt; C.sv[key] = 0; return; }
+        let x = C[key] == null ? tgt : C[key], v = C.sv[key] || 0;
+        for (let i = 0; i < n; i++) { v += (w * w * (tgt - x) - 2 * w * v) * h; x += v * h; }
+        C[key] = x; C.sv[key] = v;
+      };
+      for (const key of ['y', 'crouch', 'arms', 'lean', 'armR', 'armL']) spring(key, 10, P[key] || 0);
       const ox = C.x, oz = C.z;
-      {
-        let mx = (P.x - C.x) * k, mz = (P.z - C.z) * k;
-        const lim = dt > 0 ? 4.5 * dt : 1e9, l = Math.hypot(mx, mz);
-        if (l > lim) { mx *= lim / l; mz *= lim / l; }
-        C.x += mx; C.z += mz;
+      if (!n) { C.x = P.x; C.z = P.z; C.mvx = C.mvz = 0; }
+      else for (let i = 0; i < n; i++) {
+        const w = P.away ? 12 : 7; // (quicker out of a car's way)
+        let ax = w * w * (P.x - C.x) - 2 * w * (C.mvx || 0), az = w * w * (P.z - C.z) - 2 * w * (C.mvz || 0);
+        const al = Math.hypot(ax, az); if (al > 7) { ax *= 7 / al; az *= 7 / al; }
+        let vx = (C.mvx || 0) + ax * h, vz = (C.mvz || 0) + az * h;
+        const vl = Math.hypot(vx, vz); if (vl > 4.5) { vx *= 4.5 / vl; vz *= 4.5 / vl; }
+        C.mvx = vx; C.mvz = vz; C.x += vx * h; C.z += vz * h;
       }
-      let dy = Math.atan2(Math.sin(P.yaw - C.yaw), Math.cos(P.yaw - C.yaw)) * (dt > 0 ? 1 - Math.exp(-dt / 0.16) : 1);
-      if (dt > 0) dy = U.clamp(dy, -7 * dt, 7 * dt);
-      C.yaw += dy;
-      C.jack = P.jack == null ? null : C.jack == null ? P.jack : C.jack + (P.jack - C.jack) * k;
+      {
+        let dyaw = Math.atan2(Math.sin(P.yaw - C.yaw), Math.cos(P.yaw - C.yaw)), yv = C.sv.yaw || 0;
+        for (let i = 0; i < n; i++) { yv += (81 * dyaw - 18 * yv) * h; yv = U.clamp(yv, -7, 7); C.yaw += yv * h; dyaw -= yv * h; }
+        if (!n) C.yaw = P.yaw;
+        C.sv.yaw = yv;
+      }
+      if (P.jack == null) C.jack = null; else { if (C.jack == null) C.jack = P.jack; spring('jack', 12, P.jack); }
       // The walk: how fast they really go (eased a little), the way they go in their own frame, and the
       // stride's phase run on by the ground covered, so the feet keep pace with the body.
       if (dt > 0) {
@@ -570,12 +603,15 @@
       C.walkAmp += (Math.max(U.smooth((C.spd - 0.12) / 0.45), C.far && (P.crouch || 0) < 0.3 ? 0.6 : 0) - C.walkAmp) * (dt > 0 ? 1 - Math.exp(-dt / 0.12) : 1);
       C.tyre = P.tyre; C.tyreW = P.tyreW;
       // (a wheel lifted or set down, not jumped)
-      if (P.tyreAt) { if (!C.tyreAt || !C.tyre0) C.tyreAt = P.tyreAt.clone(); else C.tyreAt.lerp(P.tyreAt, k * 0.6); } else C.tyreAt = null;
+      if (P.tyreAt) {
+        if (!C.tyreAt || !C.tyre0) { C.tyreAt = P.tyreAt.clone(); C.tav = new THREE.Vector3(); }
+        else for (let i = 0; i < n; i++) { const w = 8; C.tav.x += (w * w * (P.tyreAt.x - C.tyreAt.x) - 2 * w * C.tav.x) * h; C.tav.y += (w * w * (P.tyreAt.y - C.tyreAt.y) - 2 * w * C.tav.y) * h; C.tav.z += (w * w * (P.tyreAt.z - C.tyreAt.z) - 2 * w * C.tav.z) * h; C.tyreAt.addScaledVector(C.tav, h); }
+      } else C.tyreAt = null;
       C.tyre0 = P.tyre; C.carried = P.carried; C.gun = P.gun;
       // (still settling: keep posing this crew)
       // (walking while their place moves under them by more than a stroll)
       const mv = Math.hypot(P.x - C.x, P.z - C.z);
-      if (mv + Math.abs(dy) + Math.abs((P.crouch || 0) - C.crouch) > 0.002 || C.walkAmp > 0.01 || Math.abs(C.up - C.walkAmp) > 0.01) cr.settling = true;
+      if (mv + Math.abs(Math.atan2(Math.sin(P.yaw - C.yaw), Math.cos(P.yaw - C.yaw))) + Math.abs((P.crouch || 0) - C.crouch) > 0.002 || Math.hypot(C.mvx || 0, C.mvz || 0) > 0.005 || Object.values(C.sv).some(v => Math.abs(v) > 0.005) || C.walkAmp > 0.01 || Math.abs(C.up - C.walkAmp) > 0.01) cr.settling = true;
       person(cr, q, C);
     }
   }
