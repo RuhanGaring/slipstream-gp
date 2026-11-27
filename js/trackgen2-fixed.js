@@ -466,7 +466,7 @@
           const x = a[0] + (c[0] - a[0]) * t / (l || 1), y = a[1] + (c[1] - a[1]) * t / (l || 1);
           let bi = -1, bd = 1e18;
           tr.hash.near(x, y, 30, i => { const q = (x - tr.x[i]) ** 2 + (y - tr.y[i]) ** 2; if (q < bd) { bd = q; bi = i; } });
-          if (bi >= 0) { const dl = (x - tr.x[bi]) * tr.nx[bi] + (y - tr.y[bi]) * tr.ny[bi]; if (Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][bi] + 1.6) return false; }
+          if (bi >= 0) { const dl = (x - tr.x[bi]) * tr.nx[bi] + (y - tr.y[bi]) * tr.ny[bi]; if (Math.abs(dl) < (tr.barrG || tr.barr)[dl > 0 ? 1 : 0][bi] + 1.6) return false; }
         }
       }
       return true;
@@ -897,7 +897,7 @@
   function groundFn(tr, H, slope) {
     const N = tr.N, edge = new Float64Array(N);
     for (let i = 0; i < N; i++) {
-      edge[i] = Math.max(tr.barr[0][i], tr.barr[1][i], isNaN(tr.pit.off[i]) ? 0 : Math.abs(tr.pit.off[i]) + tr.pit.lane / 2 + 1) + 4;
+      edge[i] = Math.max((tr.barrG || tr.barr)[0][i], (tr.barrG || tr.barr)[1][i], isNaN(tr.pit.off[i]) ? 0 : Math.abs(tr.pit.off[i]) + tr.pit.lane / 2 + 1) + 4;
     }
     tr.edge2 = edge;
     const fn = (x, y, info) => {
@@ -1380,7 +1380,7 @@
       for (let i = 0; i < N; i++) {
         let m = 0; for (let q = -2; q <= 2; q++) m += b[(i + q + N) % N];
         const v = Math.min(m / 5, lim[i]);
-        if (isNaN(tr.pit.off[i])) { tr.barr[side][i] = v; tr.runT[side][i] = F1.SURF.TARMAC; tr.runW[side][i] = Math.max(0, v - tr.hw); }
+        if (isNaN(tr.pit.off[i])) { tr.barr[side][i] = v; if (tr.barrG) tr.barrG[side][i] = v; tr.runT[side][i] = F1.SURF.TARMAC; tr.runW[side][i] = Math.max(0, v - tr.hw); }
       }
     }
   }

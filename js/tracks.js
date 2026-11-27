@@ -466,6 +466,45 @@
         if (barr[side][i] > lim) { barr[side][i] = lim; runW[side][i] = Math.min(runW[side][i], lim - hw - 0.5); }
       }
     }
+    // --- and a wall closes in on the road no faster than 0.7 m a metre ---
+    // (between two bends a wall that stood 50 m out beyond one bend's gravel had to come in to
+    // 15 m on the inside of the next within a few metres: drawn, that step ran across the bend and
+    // looped back over itself. Now it angles in, as a real wall does at a chicane. A generated
+    // circuit's ground was cut to the walls as they stood before, so it keeps those, barrG, to
+    // build the same: js/trackgen2.js groundFn)
+    const barrG = fixedB ? [Float64Array.from(barr[0]), Float64Array.from(barr[1])] : null;
+    const keep0 = [Float64Array.from(barr[0]), Float64Array.from(barr[1])];
+    // (the two legs of a hairpin are under 120 m apart along the lap, so the clamp above let their
+    // inside walls both stand 20 m out across a gap of 25: they crossed. Here they meet halfway)
+    for (let i = 0; i < N; i++) {
+      for (let side = 0; side < 2; side++) {
+        const sgn = side ? 1 : -1;
+        let lim = barr[side][i];
+        hash.near(x[i], y[i], 90, j => {
+          let sep = Math.abs(i - j); sep = Math.min(sep, N - sep) * ds;
+          if (sep < 30 || sep >= 120) return;
+          const dx = x[j] - x[i], dy = y[j] - y[i], d = Math.hypot(dx, dy);
+          if (d > sep * 0.75) return;
+          if (Math.abs(dx * tx[i] + dy * ty[i]) > 25) return;
+          const lat = (dx * nx[i] + dy * ny[i]) * sgn;
+          if (lat <= 0) return;
+          if (lat / 2 < lim) lim = Math.max(hw + 1.2, lat / 2);
+        });
+        barr[side][i] = lim;
+      }
+    }
+    for (let side = 0; side < 2; side++) {
+      const b = barr[side], m = 0.7 * ds, keep = keep0[side];
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < N; i++) { const j = (i + 1) % N; if (b[j] > b[i] + m) b[j] = b[i] + m; }
+        for (let i = N - 1; i >= 0; i--) { const j = (i + 1) % N; if (b[i] > b[j] + m) b[i] = b[j] + m; }
+      }
+      for (let i = 0; i < N; i++) {
+        // (the pit lane keeps the room it needs)
+        if (side === ps && !isNaN(pitOff[i])) b[i] = Math.max(b[i], Math.min(keep[i], Math.abs(pitOff[i]) + pit.lane / 2 + 1.0));
+        if (b[i] < keep[i]) runW[side][i] = Math.min(runW[side][i], b[i] - hw - 0.5);
+      }
+    }
     // the tarmac strip: only in front of gravel, easing to nothing over the trap's first and last 10 m
     // (where the trap's own drawn edge narrows in, js/render3d.js runGw), never past the trap's far side
     for (let side = 0; side < 2; side++) {
@@ -518,7 +557,7 @@
 
     const tr = {
       def, id: def.id, name: def.name, N, L, ds, x, y, tx, ty, nx, ny, kap,
-      w, hw, kerbL, kerbR, kerbW, kerbH, runT, runW, runS, barr, pit, sectors, drs, grid,
+      w, hw, kerbL, kerbR, kerbW, kerbH, runT, runW, runS, barr, barrG, pit, sectors, drs, grid,
       filletWarn: tt.warn, dir: tt.dir,
       corners: 0,
     };

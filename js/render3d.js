@@ -348,7 +348,7 @@
       MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 2, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
       MATS.pitlane = macro(pbr('pitlane', 9 / 3, { color: '#dedede' }), 50, 0.07);
       // (the colour of a used trap, 169, 155, 143 in the photographs; and the stones' relief half as strong again)
-      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#d8c3a0' }), 45, 0.2); // (warm ochre as Monza's: it read pink, and blue-white under a cool sky)
+      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#dcc9bc' }), 45, 0.2);
       MATS.gravel.normalScale.set(1.5, 1.5);
     } else {
       MATS.asphalt = std({ map: T.asphalt(), roughness: 0.88 });
@@ -5051,7 +5051,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const i = c.i + Math.round((rn() * 2 - 1) * ms(75)), k = mod(i, N);
         if (oS === pS && !isNaN(tr.pit.off[k])) continue;
         const depth = -Math.log(1 - rn() * 0.95) * 4.5; // most at the fence, a few far back
-        const d = sg * (tr.barr[oS][k] + 2.6 + depth), x = tr.x[k] + tr.nx[k] * d + (rn() - 0.5) * 1.5, z = tr.y[k] + tr.ny[k] * d + (rn() - 0.5) * 1.5;
+        const d = sg * (tr.barr[oS][k] + 2.6 + depth), j0 = (rn() - 0.5) * 1.5, j1 = (rn() - 0.5) * 0.6, x = tr.x[k] + tr.nx[k] * (d + sg * Math.abs(j1)) + tr.tx[k] * j0, z = tr.y[k] + tr.ny[k] * (d + sg * Math.abs(j1)) + tr.ty[k] * j0; // (scattered along the fence and back from it, never in front of it)
         if (W2.water && z < W2.water.y + 3) continue;
         if (!outside(x, z) || !away(x, z)) continue;
         const y = Tracks.groundAt(tr, x, z) - 0.04, th = Math.atan2(tr.x[k] - x, tr.y[k] - z) + (rn() - 0.5) * 0.7, s = 0.92 + rn() * 0.16;
