@@ -150,7 +150,7 @@
   // a race only (menus always use the keys they show). The arrow keys stay as extra driving keys.
   const ACTIONS = Game.ACTIONS = [['thr', 'Accelerate', 'KeyW'], ['brk', 'Brake and reverse', 'KeyS'], ['left', 'Steer left', 'KeyA'], ['right', 'Steer right', 'KeyD'],
     ['drs', 'Overtake mode', 'Space'], ['pit', 'Pit strategy', 'KeyP'], ['flash', 'Flashback', 'Backspace'], ['reset', 'Reset car', 'KeyR'], ['cam', 'Camera', 'KeyC'],
-    ['up', 'Shift up', 'KeyE'], ['down', 'Shift down', 'KeyQ']];
+    ['up', 'Shift up', 'KeyE'], ['down', 'Shift down', 'KeyQ'], ['ers', 'Energy mode', 'KeyX']];
   const binds = Game.binds = Object.assign({}, ...ACTIONS.map(a => ({ [a[0]]: a[2] })), store.get('slip_keys', {}));
   let remap = {};
   function buildRemap() {
@@ -164,7 +164,7 @@
   Game.keyName = id => keyLabel(binds[id] || '');
   Game.keyLabel = keyLabel;
   // what a prompt in the race should name: the buttons of the device in use
-  const PAD_LABEL = { thr: 'RT', brk: 'LT', left: 'LS', right: 'LS', drs: 'A', pit: 'Y', flash: 'VIEW', reset: 'X', cam: 'B', up: 'RB', down: 'LB' };
+  const PAD_LABEL = { thr: 'RT', brk: 'LT', left: 'LS', right: 'LS', drs: 'A', pit: 'Y', flash: 'VIEW', reset: 'X', cam: 'B', up: 'RB', down: 'LB', ers: 'D-UP' };
   Game.hintKey = id => (Game.usingPad ? PAD_LABEL[id] : Game.keyName(id));
   // moving an action onto a key another action holds swaps the two
   Game.bindKey = (id, code) => {
@@ -419,6 +419,13 @@
         if (code === 'KeyE' || code === 'ShiftLeft') { if (!simAct('shift', p, 1)) Car.shift(p, 1); }
         if (code === 'KeyQ' || code === 'ControlLeft') { if (!simAct('shift', p, -1)) Car.shift(p, -1); }
       }
+      // energy mode: balanced, hotlap (spend it all), charge (harvest for later)
+      if (race.sim && code === 'KeyX' && !p.finished && !p.retired) {
+        const M = Car.ERS_MODES, m = ((p.ersMode || 0) + 1) % M.length;
+        p.ersMode = m; simAct('set', p, ['ersMode'], m);
+        HUD.message('ENERGY  ' + M[m].name, '', '', 1.2);
+        return;
+      }
       if (race.sim && race.mode !== 'tt' && code === 'KeyP') {
         if (Game.pitMenu || p.brain.pit) { Game.pitMenu = false; if (p.brain.pit && p.brain.pit.phase === 'approach') { p.brain.pit = null; simAct('set', p, ['brain', 'pit'], null); HUD.message('PIT STOP CANCELLED', 'yellow'); } }
         else if (!p.inPit && !p.finished) {
@@ -488,6 +495,7 @@
       if (pressed(5)) onKey('KeyE');
       if (pressed(4)) onKey('KeyQ');
       if (pressed(3)) onKey('KeyP');
+      if (pressed(12)) onKey('KeyX'); // d-pad up: energy mode
       if (pressed(8)) onKey('Backspace');
       if (pressed(2)) onKey('KeyR');
       if (pressed(1)) onKey('KeyC');
@@ -545,6 +553,7 @@
       if (Wh.pressed(dev, 'gearUp')) onKey('KeyE');
       if (Wh.pressed(dev, 'gearDown')) onKey('KeyQ');
       if (Wh.pressed(dev, 'pit')) onKey('KeyP');
+      if (Wh.pressed(dev, 'ersMode')) onKey('KeyX');
       if (Game.pitMenu) { if (Wh.pressed(dev, 'menuLeft')) onKey('ArrowLeft'); if (Wh.pressed(dev, 'menuRight')) onKey('ArrowRight'); if (Wh.pressed(dev, 'menuOk')) onKey('Enter'); }
       if (Wh.pressed(dev, 'camera')) onKey('KeyC');
       if (Wh.pressed(dev, 'reset')) onKey('KeyR');
@@ -872,7 +881,7 @@
     if (F1.R3D) { F1.R3D.clock = Game.state === 'race' || Game.state === 'rewind' ? race.time : null; F1.R3D.rewindT = Game.state === 'rewind' && fb.P ? fb.P.T : null; }
     const tR3 = F1.Perf ? F1.Perf.t0() : 0;
     R3.render({
-      cars: RP ? RP.cars() : race.cars, focus, mode: camMode, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: Game.settings.shake === false ? 0 : cam.shake, fx: FX,
+      cars: RP ? RP.cars() : race.cars, focus, mode: camMode, halo: Game.settings.halo, dt: Game.paused ? 0 : dt, zoomK: step.k * Game.settings.zoom, shake: Game.settings.shake === false ? 0 : cam.shake, fx: FX,
       assist: camMode === 'tv' || camMode === 'show' ? null : assist, ghost: vw ? null : ghostPose(race),
       lightsOn: Game.state === 'replay' ? race.lightsOn : race.phase === 'lights' || race.phase === 'grid' ? race.lightsOn : 0,
       weather: race, sc: race.sc, free: vw && vw.free, snap: vw && vw.snap,

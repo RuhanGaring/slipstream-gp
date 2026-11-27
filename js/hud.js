@@ -134,7 +134,7 @@
     kh.push([padOn ? 'LS RT LT' : [K('thr', 'W'), K('left', 'A'), K('brk', 'S'), K('right', 'D')].join(' '), 'drive']);
     if (F1.Game.fbCan && F1.Game.fbCan()) kh.push([K('flash', 'BACKSPACE'), 'flashback']);
     if (!simCar || !inRace) kh.push([K('reset', 'R'), 'reset car']);
-    if (inRace && simCar) kh.push([K('drs', 'SPACE'), 'overtake'], [K('pit', 'P'), 'pit strategy']);
+    if (inRace && simCar) kh.push([K('drs', 'SPACE'), 'overtake'], [K('ers', 'X'), 'energy mode'], [K('pit', 'P'), 'pit strategy']);
     if (inRace && !padOn) kh.push(['T', 'full order']);
     kh.push([K('cam', 'C'), 'camera']);
     if (padOn) kh.push(['START', 'pause']); else kh.push(['Z', 'zoom'], ['RMB', 'mouse steering'], ['ESC', 'pause']);
@@ -252,6 +252,9 @@
       e.ersBox.classList.toggle('harv', !!p.harvest && !(p.deploy > 0.05));
       const pct = Math.round(p.soc * 100);
       if (e.ersPct._v !== pct) { e.ersPct.textContent = pct + '%'; e.ersPct._v = pct; }
+      // the energy mode beside the label (BALANCED shows as plain ERS)
+      const md = p.ersMode || 0;
+      if (e.ersBox._m !== md) { e.ersBox._m = md; const l = e.ersBox.querySelector('.lbl'); if (l) l.textContent = md ? 'ERS ' + (md === 1 ? 'HOT' : 'CHG') : 'ERS'; e.ersBox.classList.toggle('hot', md === 1); e.ersBox.classList.toggle('chg', md === 2); }
     }
     e.lim.classList.toggle('show', !!p.limiter); e.lim.classList.toggle('on', !!p.limiter);
     const boxing = p.brain && p.brain.pit;

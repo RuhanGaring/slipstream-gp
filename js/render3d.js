@@ -7128,6 +7128,8 @@ void main() {
     clock += dt;
     state.lastCars = o.cars;
     focusCar = o.focus || null; camMode = o.mode || '';
+    // the halo from the driver's seat: shown, see-through or hidden (Settings > Display > Halo)
+    F1.R3S.U.uHalo.value.x = (o.mode === 'cockpit' || o.mode === 'helmet') && o.focus ? ({ clear: 1, off: 2 }[o.halo] || 0) : 0;
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null, o.mode === 'tcam' ? o.focus : null); // (the T-cam sees the wheel buzz and the hands shake too, the helmet stays shown)
     if (F1.R3Crew) F1.R3Crew.update(o.cars || [], dt);
     updateHeli(o, dt);

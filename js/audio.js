@@ -613,7 +613,10 @@
     const sq = tarmac ? U.clamp(Math.max(slip, sat), 0, 0.6) * (1 - 0.7 * wet) : 0;
     at(L.squeal.g.gain, sq, 0.04); at(L.squeal2.g.gain, sq * 0.6, 0.05);
     at(L.squeal.f[0].frequency, 1200 + Math.min(900, v * 7) + (Math.random() - 0.5) * 160, 0.05);
-    at(L.scrub.g.gain, tarmac ? U.clamp(slip * 0.6 + spin * 0.06, 0, 0.12) : 0, 0.05);
+    // the front tyres scrubbing as they reach their peak: a low, dry rasp that starts a little before
+    // the limit and grows past it, so a driver without force feedback hears the front going
+    const push = U.clamp(((p.satF || 0) - 0.8) * 0.55, 0, 0.11) * Math.min(1, v / 15);
+    at(L.scrub.g.gain, tarmac ? U.clamp(slip * 0.6 + spin * 0.06 + push, 0, 0.16) : 0, 0.05);
     at(L.judder.g.gain, lock * Math.min(1, v / 20) * 0.35, 0.03); // a locked tyre flat-spotting
     // --- road and surfaces ---
     const SURF = F1.SURF, gravel = (p.surfMask & (1 << SURF.GRAVEL)) ? 1 : 0, grass = (p.surfMask & (1 << SURF.GRASS)) ? 1 : 0;

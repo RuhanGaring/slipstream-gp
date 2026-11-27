@@ -280,7 +280,8 @@
       }
       const q = 0.5 * Car.RHO * v * v;
       const down = spec.ClA * q;
-      const rearLoad = m * Car.GRAV * spec.cgFront + down * (1 - spec.aeroBal) + m * 0.4 * Car.GRAV * spec.cgH / spec.wb;
+      // (cgFront is the front axle's share of the weight: the rear carries the rest)
+      const rearLoad = m * Car.GRAV * (1 - spec.cgFront) +down * (1 - spec.aeroBal) + m * 0.4 * Car.GRAV * spec.cgH / spec.wb;
       best = Math.min(best, rearLoad * mu * 0.95);
       const drag = spec.CdA * q;
       tab.push((best - drag - 0.012 * m * Car.GRAV) / m);

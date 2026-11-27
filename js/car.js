@@ -40,20 +40,24 @@
   const BODY_TILT = 0.6, BUMP = 0.075; // (rad, m: see the vertical model)
   const STUB_DROP = 0.07, STUB_K = 4e5, STUB_C = 6e3, STUB_MU = 0.5, FLAT_KT = 7e4, FLAT_ROLL = 0.05;
   const SPEC = {
-    mass: 768, fuelMax: 40, wb: 3.6, cgFront: 0.455, cgH: 0.30, trackF: 1.62, trackR: 1.56,
-    Iz: 1000, Iyy: 1050, Ixx: 260, R: 0.36, len: 5.6, wid: 2.0,
+    // 2026 car: 3.4 m wheelbase and 1.9 m wide (track 1.54 / 1.48 m); centre of mass about 27 cm up
+    mass: 768, fuelMax: 40, wb: 3.4, cgFront: 0.455, cgH: 0.27, trackF: 1.54, trackR: 1.48,
+    Iz: 890, Iyy: 940, Ixx: 260, R: 0.36, len: 5.6, wid: 2.0,
     // aero (Z-mode, cornering); X-mode on straights is lower drag and lower downforce
-    ClA: 4.53, aeroBal: 0.46, CdA: 1.12, xModeCl: 0.74, xModeCd: 0.68,
+    ClA: 4.53, aeroBal: 0.465, CdA: 1.12, xModeCl: 0.74, xModeCd: 0.68,
     rh0F: 0.045, rh0R: 0.085, hRef: 0.05, hStall: 0.012, geGain: 0.45,
     // power unit: spec.power is the nominal total used by the speed planner
     power: 750000, iceShare: 0.533, rpmPeak: 11200, rpmLimit: 12300, rpmIdle: 4000,
     battery: 4.0e6, kMax: 350000,
-    gears: [17.0, 12.8, 10.35, 8.6, 7.3, 6.2, 5.3, 4.52], rev: 15,
+    // gears: top gear reaches the limiter at about 350 km/h (a low-drag setup with Overtake), so the
+    // car's own top speed (some 320 km/h) falls near the engine's peak in 8th; the upper gears stand
+    // closer together than they did
+    gears: [16.7, 12.4, 10.12, 8.56, 7.42, 6.47, 5.6, 4.78], rev: 15,
     Ie: 0.07, IwF: 0.9, IwR: 1.15,
     brakeMax: 42000, brakeBias: 0.6,
     // tyres
     mu: 1.78, muLoadK: 0.11, Fz0: 4000, muX: 1.04,
-    alphaPk: 0.105, kappaPk: 0.1, shapeC: 1.35, relax: 0.35, muRear: 1.08,
+    alphaPk: 0.105, kappaPk: 0.1, shapeC: 1.35, relax: 0.35, muRear: 1.07,
     B: 15.5, C: 1.45, // legacy lateral shape, kept for the speed planner's calibration
     pColdF: 21.5, pColdR: 19.5, pOptF: 25.5, pOptR: 23.5, camberF: -3.2, camberR: -2.0, camberGain: 0.8,
     // the car setup's own effects (js/setup.js): static toe against the base car (rad, front out and
@@ -68,7 +72,8 @@
     // at lowV1 (m/s), where the wings set the balance. Without it the front washes out with the rear far
     // from its limit. Arcade takes less, as its yaw assist already helps the car rotate
     lowTurn: 0.14, lowGrip: 0.06, lowDown: 0.2, lowAbs: 0.7, lowV0: 20, lowV1: 42, steerRateLow: 1.6,
-    rollF: 0.6,
+    // the front's slow-corner help fades out by turnV1 (m/s), and the throttle takes lowTurnThr of it
+    turnV1: 55, lowTurnThr: 0.3,
   };
   // magic-formula shape for the normalised slip: peak 1 at s = 1, about 0.85 when sliding
   const MF_B = Math.tan(Math.PI / (2 * SPEC.shapeC));
@@ -79,8 +84,22 @@
   SURF_PROPS[SURF.PIT] = { mu: 0.98, roll: 0.012 };
   SURF_PROPS[SURF.KERB] = { mu: 0.9, roll: 0.02, bump: 1 };
   SURF_PROPS[SURF.TARMAC] = { mu: 0.9, roll: 0.016 };
-  SURF_PROPS[SURF.GRASS] = { mu: 0.34, roll: 0.1, dirt: 1 };
-  SURF_PROPS[SURF.GRAVEL] = { mu: 0.42, roll: 0.42, dirt: 2 };
+  // Off the road a tyre also ploughs: turf and gravel heap up against a wheel sliding sideways and
+  // push back on it (dig, a share of the wheel's load at a sideways slide of 2 m/s or more). That
+  // resistance does not fall away the way a tyre's grip does past its peak, so a car sliding over
+  // grass or gravel is pulled straight rather than spun, as a real one is.
+  SURF_PROPS[SURF.GRASS] = { mu: 0.48, roll: 0.1, dirt: 1, dig: 0.14 };
+  SURF_PROPS[SURF.GRAVEL] = { mu: 0.5, roll: 0.42, dirt: 2, dig: 0.4 };
+
+  // Energy modes (the driver's choice, c.ersMode). floor and band: the charge below which deployment
+  // is metered back (it reaches nothing at floor, full at floor + band); deploy: a cap on it; clip:
+  // the charge below which the car super-clips at speed; part and lift: how hard it harvests at part
+  // throttle and lifting off; top: the speed (km/h) from which it clips at the end of a straight.
+  const ERS_MODES = [
+    { id: 'balanced', name: 'BALANCED', floor: 0.3, band: 0.25, deploy: 1, clip: 0.3, part: 1, lift: 1, top: 285 },
+    { id: 'hotlap', name: 'HOTLAP', floor: 0.03, band: 0.08, deploy: 1, clip: 0.04, part: 0, lift: 0.5, top: 0 },
+    { id: 'charge', name: 'CHARGE', floor: 0.45, band: 0.3, deploy: 0.45, clip: 0.6, part: 1.6, lift: 1.4, top: 250 },
+  ];
 
   const COMPOUNDS = {
     // wl / wq: grip lost as the track gets wet, linearly and quadratically (aquaplaning). A slick
@@ -189,7 +208,9 @@
     // assisted: stop short of peak front slip, which keeps the rear planted on a keyboard (all or
     // nothing). With analogue steering (mouse, stick) the driver modulates the angle, and a cap
     // at 60 % of the peak made every medium-speed corner understeer: the cap is the peak itself
-    const k0 = c.assist.stability ? 0.8 : c.assist.steerAssist ? 0.6 : 1.4;
+    // (the assisted cap was 0.6 of the peak, which pushed every mid-speed corner wide; 0.75 keeps
+    // the rear planted on keys without the understeer)
+    const k0 = c.assist.stability ? 0.8 : c.assist.steerAssist ? 0.75 : 1.4;
     const k = c.ctl.analog ? Math.max(k0, 1.0) : k0;
     return Math.min(sp.lockF, kin + peakAlpha * k);
   }
@@ -233,7 +254,15 @@
     // --- steering ---
     let target;
     if (ctl.steerDirect != null) target = U.clamp(ctl.steerDirect, -sp.lockF, sp.lockF);
-    else target = ctl.steer * steerLimit(c);
+    else {
+      // Opposite lock is never capped short of the slide: steering into a slide on keys, pad or
+      // touch may go as far as the car's body slip plus the tyre's peak, so a rear that steps out
+      // can be caught (the grip cap held it to a few degrees, and the car spun with full opposite lock)
+      let lim = steerLimit(c);
+      const beta = c.beta || 0;
+      if (ctl.steer * beta > 0 && Math.abs(beta) > 0.03 && speed > 8) lim = Math.max(lim, Math.min(sp.lockF, Math.abs(beta) + sp.alphaPk));
+      target = ctl.steer * lim;
+    }
     if (a.stability > 0 && speed > 8 && ctl.steerDirect == null) {
       const beta = Math.atan2(c.v, Math.abs(c.u));
       target += beta * 0.7 * a.stability;
@@ -294,7 +323,10 @@
 
     // --- suspension: loads from springs, dampers and bars over the road surface ---
     const cs = Math.cos(c.steer), ss = Math.sin(c.steer);
-    const turnF = 1 + sp.lowTurn * (1 - 0.8 * throttle) * (1 - 0.4 * a.stability) * U.clamp((sp.lowV1 - speed) / (sp.lowV1 - sp.lowV0), 0, 1);
+    // (the help fades smoothly through the speed window, and the throttle takes only a small part
+    // of it: picking up the throttle at an apex no longer takes the front's grip away at once)
+    const turnK = U.clamp((sp.turnV1 - speed) / (sp.turnV1 - sp.lowV0), 0, 1);
+    const turnF = 1 + sp.lowTurn * (1 - sp.lowTurnThr * throttle) * (1 - 0.4 * a.stability) * turnK * turnK * (3 - 2 * turnK);
     let mask = 0, kerb = 0, off = 0;
     const roadC = c.zRoad = Tracks.surfZ(tr, i0, c.loc.d);
     for (let k = 0; k < 4; k++) {
@@ -369,13 +401,25 @@
       const taper = c.overtake ? U.clamp((355 - kmh) / 18, 0, 1) : U.clamp((345 - kmh) / 55, 0, 1);
       // (an AI energy plan may hold the deployment back above a speed, keeping charge for the exits)
       const cut = c.ersCut && !c.overtake ? U.clamp((c.ersCut - kmh) / 20, 0, 1) : 1;
-      // energy management meters deployment against the charge left (Overtake opens it up)
-      const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - 0.12) / 0.3, 0, 1);
+      // energy management meters deployment against the charge left (Overtake opens it up). The
+      // driver's energy mode (c.ersMode: ERS_MODES) sets how low it may go and how much it deploys.
+      const EM = ERS_MODES[c.ersMode || 0];
+      const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - EM.floor) / EM.band, 0, 1) * EM.deploy;
       // (none on the grid: a car held on its brakes before the start keeps its charge however the
       // throttle is pressed; launch revs come from the engine alone)
       if (throttle > 0.85 && !(speed < 1 && brake > 0.5)) Pk =sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
       // super-clipping: with an almost flat battery the MGU-K harvests at full throttle at speed
-      if (c.soc < 0.3 && !c.overtake && kmh > 270) Pk = -120000 * kScale;
+      if (c.soc < EM.clip && !c.overtake && kmh > 270) Pk = -120000 * kScale;
+      // End-of-straight clipping: near the top speed, where the deployment has tapered away anyway,
+      // the MGU-K turns round and harvests (as the 2026 cars do); off below EM.top or with a full battery
+      else if (EM.top && !c.overtake && kmh > EM.top && throttle > 0.85 && c.soc < 0.9) Pk = Math.min(Pk, -150000 * kScale * U.clamp((kmh - EM.top) / 35, 0, 1));
+      // Part-throttle harvesting: below full throttle the engine runs harder than the driver asks
+      // and the MGU-K takes the difference as charge, so the wheels get exactly what the pedal says
+      // (2026 power units recharge this way through corners and on exits).
+      else if (throttle > 0.05 && throttle < 0.85 && kmh > 60 && c.soc < 1 && EM.part > 0) {
+        const extra = Math.min(sp.kMax * 0.5 * kScale, sp.power * sp.iceShare * powerFrac(rpm, sp) * Math.min(0.35, 0.95 - throttle)) * EM.part * (D ? D.power : 1);
+        Pice += extra; Pk = -extra;
+      }
     }
     let Tengine = 0;
     if (Pice + Pk !== 0) {
@@ -390,12 +434,15 @@
     let regenAxleT = 0;
     const omA = Math.abs(omAxle);
     if (throttle < 0.05 && omA > 8) {
-      const liftHarvest = 120000 * kScale * U.clamp((kmh - 150) / 80, 0, 1) * U.clamp(1 - Math.abs(c.steer) * 12, 0, 1);
-      const want = (brake > 0.05 ? sp.kMax * kScale * Math.min(1, brake * 1.6) : liftHarvest) * (c.soc < 1 ? 1 : 0);
+      const EM = ERS_MODES[c.ersMode || 0];
+      const liftHarvest = 200000 * kScale * EM.lift * U.clamp((kmh - 100) / 80, 0, 1) * U.clamp(1 - Math.abs(c.steer) * 10, 0, 1);
+      // (under braking the MGU-K takes all it can, up to its full power: brake-by-wire takes it out of
+      // what the rear brakes were asked for, so the braking itself is the same)
+      const want = (brake > 0.05 ? sp.kMax * kScale : liftHarvest) * (c.soc < 1 ? 1 : 0);
       // (under braking only as much as the rear brakes were asked for: ABS trims the friction brakes,
       // which is what stops a rear lock, and the regen comes out of what they would have done)
       const Tdem = brake > 0.05 ? sp.brakeMax * brake * (1 - sp.brakeBias) * sp.R * Math.min(W[2].bmod, W[3].bmod) : 1e9;
-      regenAxleT = Math.min(2600, want / Math.max(30, omA), Tdem) * U.clamp((omA - 8) / 30, 0, 1);
+      regenAxleT = Math.min(3600, want / Math.max(30, omA), Tdem) * U.clamp((omA - 8) / 30, 0, 1);
       regenP = regenAxleT * omA;
       Tengine -= (550 * U.clamp(omA / 40, 0, 1) + regenAxleT) * Math.sign(omAxle);
     }
@@ -517,6 +564,7 @@
       let fx = TF[0], fy = TF[1];
       // rolling resistance and dirt drag
       fx -= S.roll * Fz * 0.7 * Math.sign(vxw) * Math.min(1, Math.abs(vxw));
+      if (S.dig) fy -= S.dig * Fz * U.clamp(vyw / 2, -1, 1);
       if (D && D.puncture[k]) fx -= FLAT_ROLL * Fz * Math.sign(vxw) * Math.min(1, Math.abs(vxw)); // a flat tyre's carcass flexing
       // ABS and TC controllers act on slip, like the real systems
       const over = w.kappa / sp.kappaPk;
@@ -599,6 +647,13 @@
     }
     const gxW = -GRAV * (grade * tx + bank * nx), gyW = -GRAV * (grade * ty + bank * ny);
     Fx += m * (gxW * ch + gyW * sh); Fy += m * (-gxW * sh + gyW * ch);
+    // steering assist on keys, pad or touch: a mild damper on yaw beyond what the steering asks for,
+    // only while the car rotates faster than that (oversteer). On/off keys cannot meter the steering
+    // a rear slide needs; a wheel can, and gets none of this.
+    if (a.steerAssist && !(a.stability > 0) && ctl.steerDirect == null && speed > 5) {
+      const rKin = c.u * Math.tan(c.steer) / sp.wb, over = c.r - rKin;
+      if (over * c.r > 0) Mz -= over * sp.Iz * 0.6;
+    }
     // arcade stability: yaw damping beyond what the steering asks for
     if (a.stability > 0 && speed > 5) {
       const rKin = c.u * Math.tan(c.steer) / sp.wb;
@@ -665,5 +720,5 @@
     Tracks.locate(tr, c.x, c.y, c.loc.i, c.loc);
   }
 
-  F1.Car = { SPEC, COMPOUNDS, SURF_PROPS, makeCar, place, step, shift, steerLimit, powerFrac, setTyreTemp, syncWheels, RHO, GRAV };
+  F1.Car = { SPEC, COMPOUNDS, ERS_MODES, SURF_PROPS, makeCar, place, step, shift, steerLimit, powerFrac, setTyreTemp, syncWheels, RHO, GRAV };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -61,6 +61,9 @@
     uRingH: { value: new THREE.Vector4(0, 0, 1e9, 0) },
     uFootT: { value: new THREE.Vector3(1, 1, 1) },
     uLodJit: { value: 0 },
+    // the halo seen from the driver's seat (Settings: Halo): x 0 shown, 1 see-through, 2 hidden;
+    // y the share of it kept when see-through. Set only for the onboard cameras (render3d).
+    uHalo: { value: new THREE.Vector2(0, 0.35) },
     uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
     // ceiling on the light the road mirrors (sun and sky together), for a venue whose low sun turned
@@ -399,11 +402,27 @@
     '    float lodN = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit, vec2(0.06711056, 0.00583715))));',
     '    if (vLodF <= 1.002 ? lodN > vLodF : lodN < vLodF - 1.0) discard;',
     '  }'].join('\n');
+  // The halo from the driver's seat, when the player asks for it see-through or gone: its parts in the
+  // car's own frame (the hoop's sides round the cockpit opening, its top and the centre pillar down
+  // to the nose, much the same on every car model), cut only within arm's reach of the camera, so
+  // every other car keeps its halo. A stipple keeps a share of it when see-through.
+  const HALO_CUT = [
+    '  if (uHalo.x > 0.5 && length(vViewPosition) < 1.7) {',
+    '    vec3 hp = vHaloP; float az = abs(hp.z), py = 0.97 - 0.69 * (hp.x - 0.75);',
+    '    float hoop = step(0.8, hp.y) * step(0.1, hp.x) * step(hp.x, 0.9) * step(0.15, az) * step(az, 0.42);',
+    '    float front = step(0.55, hp.x) * step(hp.x, 1.2) * step(az, 0.3) * step(max(0.78, py - 0.07), hp.y);',
+    '    if (hoop + front > 0.5) {',
+    '      if (uHalo.x > 1.5) discard;',
+    '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > uHalo.y) discard;',
+    '    }',
+    '  }'].join('\n');
   // (the scale also carries the car's row in the soft-body texture, three per row: fade + 3 x row)
   function patchLodFade(sh) {
-    sh.uniforms.uLodJit = U.uLodJit;
-    sh.vertexShader = 'varying float vLodF;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  { float lodS = length(normalMatrix[0]) - 1.0; vLodF = lodS - 3.0 * floor(lodS / 3.0 + 0.25); }');
-    sh.fragmentShader = 'varying float vLodF; uniform float uLodJit;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT);
+    sh.uniforms.uLodJit = U.uLodJit; sh.uniforms.uHalo = U.uHalo;
+    sh.vertexShader = 'varying float vLodF; varying vec3 vHaloP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vHaloP = position;\n  { float lodS = length(normalMatrix[0]) - 1.0; vLodF = lodS - 3.0 * floor(lodS / 3.0 + 0.25); }');
+    // (only where the shader has the view position: the lit materials)
+    const halo = /varying vec3 vViewPosition/.test(sh.fragmentShader) ? '\n' + HALO_CUT : '';
+    sh.fragmentShader = 'varying float vLodF; varying vec3 vHaloP; uniform float uLodJit; uniform vec2 uHalo;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT + halo);
   }
 
   // Crash damage on the GPU. Every body vertex is tied to the two nearest pieces of the car's

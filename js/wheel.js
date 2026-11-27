@@ -208,7 +208,7 @@
   }
   // the actions a wheel can be mapped to, in the order the mapping screen lists them
   const ACTIONS = [
-    ['gearUp', 'Upshift'], ['gearDown', 'Downshift'], ['overtake', 'Overtake mode'], ['pit', 'Pit strategy'],
+    ['gearUp', 'Upshift'], ['gearDown', 'Downshift'], ['overtake', 'Overtake mode'], ['ersMode', 'Energy mode'], ['pit', 'Pit strategy'],
     ['camera', 'Change camera'], ['reset', 'Reset car (arcade)'], ['pause', 'Pause'],
     ['menuUp', 'Menu up'], ['menuDown', 'Menu down'], ['menuLeft', 'Menu left'], ['menuRight', 'Menu right'],
     ['menuOk', 'Menu select'], ['menuBack', 'Menu back'],
