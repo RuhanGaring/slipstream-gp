@@ -1840,7 +1840,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     { const T = tr.gen2 && tr.gen2.tunnel, S3 = F1.R3S.U;
       if (T) { if (!built.tunMask) built.tunMask = tunMask(tr, T); S3.uTunMap.value = built.tunMask.tex; S3.uTunBox.value.copy(built.tunMask.box); S3.uTunH.value.set(built.tunMask.h0, built.tunMask.hr); }
       F1.R3S.setTun(!!T); }
-    state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass;
+    state.tr = tr; state.root = built.root; state.gantry = built.gantry; state.water = built.water; state.tvCams = built.tvCams; state.grass = built.grass; state.wheel = built.wheel || null;
     if (state.grass) { state.grass.visible = grassOn(); F1.R3Grass.setQuality(state.grass, grassQ()); }
     if (built.turf) { F1.R3S.U.uTurf.value = built.turf.tex; F1.R3S.U.uTurfB.value.copy(built.turf.b); }
     if (built.grass && built.grass.userData.parts) { const gu = built.grass.userData.parts[0].material.userData.grass; F1.R3S.U.uGrassMask.value = gu.uGMask.value; F1.R3S.U.uGrassMaskB.value.copy(gu.uGMaskB.value); }
@@ -2870,6 +2870,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // roof, faced to the oncoming cars (FIA: at every flag point on a Grade 1 circuit since 2023)
       {
         const mp = new Batch(true), b = new THREE.BoxGeometry(1, 1, 1);
+        // (and its two marshals in orange, standing by the cabin's track side, shifting on their feet:
+        // fansMat, uv x their phase, y the height up the body)
+        const mk = new Batch(true), hd = new THREE.SphereGeometry(0.5, 6, 4), rmk = U.rng((tr.def.seed || 7) * 37 + 5);
+        const tagM = (g, ph) => { g = g.index ? g.toNonIndexed() : g.clone(); const p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let q = 0; q < p.count; q++) { uv[q * 2] = ph; uv[q * 2 + 1] = Math.min(Math.max(p.getY(q), 0) / 1.8, 1.0); } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); return g; };
+        const body = (() => { const g = new Batch(true); g.add(b, mat(0, 0.45, 0, 0, 0.36, 0.9, 0.22), col('#e2641c')); g.add(b, mat(0, 1.18, 0, 0, 0.48, 0.62, 0.28), col('#ef6c1f')); g.add(b, mat(0, 1.15, 0, 0, 0.62, 0.5, 0.18), col('#e2641c')); g.add(hd, mat(0, 1.6, 0, 0, 0.23, 0.27, 0.25), col('#f2f2ee')); return g.geo(); })();
         for (let i = Math.round(90 / tr.ds), n = 0; i < N; i += Math.round(190 / tr.ds), n++) {
           const sd = n % 2 ? 1 : -1, o = sd * ((sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 2.4), x = tr.x[i] + tr.nx[i] * o, z = tr.y[i] + tr.ny[i] * o, ry = -Math.atan2(tr.ty[i], tr.tx[i]);
           if (W2.town && (W2.town.site.inland(x, z) < 6 || (W2.town.tunnel && i >= W2.town.tunnel.i0 - 8 && i <= W2.town.tunnel.i1 + 8))) continue;
@@ -2888,6 +2893,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           mp.add(b, mat(x, y + 1.25, z, ry, 2.2, 2.5, 2.0), col('#e9e9e4'));
           mp.add(b, mat(x, y + 2.6, z, ry, 2.8, 0.14, 2.6), col('#e2641c'));
           mp.add(b, mat(x - tr.nx[i] * sd * 1.02, y + 1.6, z - tr.ny[i] * sd * 1.02, ry, 1.5, 0.8, 0.04), col('#2a3440'));
+          for (const l of [-1.7, 1.6]) { let ph = rmk(); while ((ph * 13.7) % 1 > 0.8) ph = rmk(); const mx = x - tr.nx[i] * sd * 0.4 + tr.tx[i] * l, mz = z - tr.ny[i] * sd * 0.4 + tr.ty[i] * l; mk.add(tagM(body, ph), mat(mx, Math.max(tr.z[i], Tracks.groundAt(tr, mx, mz)), mz, Math.atan2(-tr.nx[i] * sd, -tr.ny[i] * sd) + (rmk() - 0.5) * 0.8)); }
           if (!W2.town) {
             const lx = x - tr.nx[i] * sd * 0.7 - tr.tx[i] * 0.9, lz = z - tr.ny[i] * sd * 0.7 - tr.ty[i] * 0.9;
             mp.add(b, mat(lx, y + 3.15, lz, ry, 0.1, 0.85, 1.0), col('#17191c'));
@@ -2896,6 +2902,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           }
         }
         add(mp.geo(), M.vcol, { cast: true });
+        if (mk.parts.length) add(mk.geo(), fansMat(), { cast: false, far: 300 });
       }
     }
 
@@ -3298,7 +3305,9 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     tag('lots');
     // (the venue first: the trees keep out of the buildings and trucks it places)
     const venue = buildVenue(root, tr, W2); tag('venue');
-    buildTrackside(tr, W2, add, venue); tag('trackside');
+    buildTrackside(tr, W2, add, venue);
+    const wheel = tr.__wheel || null; delete tr.__wheel; if (wheel) root.add(wheel);
+    tag('trackside');
     buildTrees(root, W2, tr, venue); tag('trees');
     const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue, { root, renderer, ground: MATS['ground_' + style] }) : null;
     if (grass) root.add(grass);
@@ -3323,7 +3332,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     root.traverse(o => { const g = o.geometry; if (g && g.isBufferGeometry && !Object.values(g.attributes).some(a => a.isInterleavedBufferAttribute || a.isGLBufferAttribute)) g.r3k = 1; });
     root.userData.farList = root.children.filter(o => o.userData.far && o.geometry);
     for (const o of root.userData.farList) if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
-    return { tr, root, gantry, water, tvCams, grass, turf };
+    return { tr, root, gantry, water, tvCams, grass, turf, wheel };
   }
 
   // Dressed limestone for retaining walls: courses 0.5 m high of blocks 0.7 to 1.3 m long, each
@@ -5029,6 +5038,24 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // figures (legs, a shirt in the crowd's colours, a head, a cap now and then), merged a corner to
   // a mesh so the ones out of view or far off are not drawn. Never inside a barrier, on a stand,
   // a building, the paddock or the pit side by the garages.
+  // the crowd's material, its figures and flags moving on the wind clock (see buildFans)
+  function fansMat() {
+    if (!MATS.fans) {
+      MATS.fans = std({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+      MATS.fans.userData.patchKey = 'fans1';
+      MATS.fans.userData.patchExtra = sh => {
+        sh.uniforms.uFanT = F1.R3S.U.uWindT;
+        sh.vertexShader = 'uniform float uFanT;\n' + sh.vertexShader.replace('#include <begin_vertex>', [
+          '#include <begin_vertex>',
+          '  { float ph = uv.x * 6.2832, fh = min(uv.y, 1.0), beh = fract(uv.x * 13.7);',
+          '    vec2 sw = vec2(sin(uFanT * 1.2 + ph), cos(uFanT * 0.9 + ph * 1.7)) * 0.035 * fh;',
+          '    float bob = beh > 0.8 ? max(0.0, sin(uFanT * 6.5 + ph * 3.0)) * 0.11 : 0.0;',
+          '    if (uv.y > 1.5) { float u = clamp(uv.y - 2.0, 0.0, 1.0); transformed += objectNormal * (sin(uFanT * 7.0 - u * 4.5 + ph * 5.0) * 0.14 + 0.05) * u; transformed.y -= 0.12 * u * u; }',
+          '    transformed.xz += sw; transformed.y += bob; }'].join('\n'));
+      };
+    }
+    return MATS.fans;
+  }
   function buildFans(tr, W2, add, venue) {
     const N = tr.N, ds = tr.ds, rn = U.rng((tr.def.seed || 5) * 131 + 17);
     const ms = x => Math.round(x / ds);
@@ -5042,6 +5069,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const cap = new THREE.BoxGeometry(0.23, 0.07, 0.27); cap.translate(0, 1.7, 0.03);
     const shirts = ['#1b2030', '#141518', '#23262b', '#1d2a44', '#3a3f48', '#586270', '#d8d6cf', '#e4e2dc', '#b8322a', '#d2691e', '#c9a227', '#1f6f5c', '#2b5fa8', '#a02040', '#f4f1e8', '#c8102e', '#ff8000'];
     const skins = ['#d9b08c', '#c4946c', '#a5714c', '#7a4f33', '#e6c3a3'];
+    // The crowd moves (MATS.fans, a vertex shader on the wind clock): everyone sways a little,
+    // one in five bounces on the spot, and one in nine waves a flag on a 1.6 m stick. Each figure
+    // carries its own phase and its own height up the body in its uv (x: phase, y: height / 1.8 m;
+    // a flag's cloth: 2 + its distance from the stick, 0 to 1, so it ripples out to its free edge).
+    const rp = U.rng((tr.def.seed || 5) * 977 + 29);
+    const tagged = (g0, ph) => { const g = (g0.index ? g0.toNonIndexed() : g0.clone()), p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let q = 0; q < p.count; q++) { uv[q * 2] = ph; uv[q * 2 + 1] = Math.min(p.getY(q) / 1.8, 1.2); } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); return g; };
+    const flagCloth = (() => { const g = new THREE.PlaneGeometry(1, 0.62, 4, 1).toNonIndexed(); g.translate(0.5, 0, 0); return g; })();
+    const stick = new THREE.BoxGeometry(0.03, 1.6, 0.03); stick.translate(0.28, 1.75, 0);
+    // (tricolours and plain fan colours; none is any team's livery)
+    const FLAGS = [['#009246', '#f4f5f0', '#ce2b37'], ['#0055a4', '#f4f5f0', '#ef4135'], ['#169b62', '#f4f5f0', '#ff883e'], ['#1b1b1b', '#fdda24', '#ef3340'], ['#f77f00', '#f77f00', '#f77f00'], ['#d40000', '#d40000', '#d40000'], ['#1f4e9e', '#f4f5f0', '#1f4e9e']];
+    const flagOf = (m, ph, fl) => { const parts = []; for (let b = 0; b < 3; b++) { const g = flagCloth.clone(); g.scale(1 / 3, 1, 1); g.translate(b / 3, 0, 0); const p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let q = 0; q < p.count; q++) { uv[q * 2] = ph; uv[q * 2 + 1] = 2 + p.getX(q); } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.translate(0.29, 2.24, 0); g.applyMatrix4(m); parts.push([g, col(fl[b])]); } return parts; };
     const stands = W2.decor.filter(it => it.type === 'stand' || it.type === 'garage' || it.type === 'building' || it.type === 'lot' || it.type === 'poly');
     const away = (x, z) => {
       for (const it of stands) { const r = it.type === 'stand' ? 22 : it.type === 'poly' ? 60 : it.type === 'garage' ? 30 : Math.max(it.w || 20, it.h || 20) * 0.7; if (Math.hypot(it.x - x, it.y - z) < r) return false; }
@@ -5073,9 +5111,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         if (!outside(x, z) || !away(x, z)) continue;
         const y = Tracks.groundAt(tr, x, z) - 0.04, th = Math.atan2(tr.x[k] - x, tr.y[k] - z) + (rn() - 0.5) * 0.7, s = 0.92 + rn() * 0.16;
         const m = new THREE.Matrix4().compose(V(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, th, 0)), V(s, s, s));
-        body.add(torso, m, col(shirts[Math.floor(rn() * shirts.length)]));
-        heads.add(rest, m);
-        if (rn() < 0.3) body.add(cap, m, col(shirts[Math.floor(rn() * 6)]));
+        const ph = rp();
+        body.add(tagged(torso, ph), m, col(shirts[Math.floor(rn() * shirts.length)]));
+        heads.add(tagged(rest, ph), m);
+        if (rn() < 0.3) body.add(tagged(cap, ph), m, col(shirts[Math.floor(rn() * 6)]));
+        if (rp() < 0.11) { body.add(tagged(stick, ph), m, col('#c9c2b4')); for (const [g, c] of flagOf(m, ph, FLAGS[Math.floor(rp() * FLAGS.length)])) body.add(g, null, c); }
         n++;
       }
       if (!n) continue;
@@ -5101,7 +5141,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // (skin tone per corner group is the rest's own colour; a few tones across the groups)
       const g2 = heads.geo(), cc = g2.attributes.color, sk = col(skins[made % skins.length]);
       for (let q = 0; q < cc.count; q++) if (cc.getX(q) > 0.5) cc.setXYZ(q, sk.r, sk.g, sk.b);
-      if (!MATS.fans) MATS.fans = std({ vertexColors: true, roughness: 0.85 });
+      fansMat();
       add(body.geo(), MATS.fans, { cast: false, far: 520 });
       add(g2, MATS.fans, { cast: false, far: 520 });
       made++;
@@ -5331,6 +5371,137 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         for (const u of [-2.4, 2.4]) put(box, x + ca * u - fx * 1.2, y + 2, z - sa * u - fz * 1.2, yaw + 0, 0.08, 0.08, 2.6, '#9aa0a6'); // stays
         venue.push({ x, y: z, w: 6, d: 2, h: 6.6, r: 3.5 });
       }
+    }
+    // Campsites, as on the fields round Monza, Spa and Silverstone on a race weekend: three or four
+    // clusters 50 to 90 m behind a barrier, each a scatter of dome tents in a dozen colours, camper
+    // vans and cars parked among them, and a flag or two on a pole (fansMat, waving with the crowd's)
+    {
+      const domeG = new THREE.SphereGeometry(1, 8, 4, 0, 6.2832, 0, Math.PI / 2), wheelG = new THREE.CylinderGeometry(0.36, 0.36, 0.25, 8).rotateX(Math.PI / 2);
+      const tentC = ['#2b5fa8', '#d2691e', '#1f6f5c', '#c9a227', '#b8322a', '#586270', '#e4e2dc', '#3d7a2a', '#7a3e8e', '#f08a24', '#1d2a44', '#9aa3a8'];
+      const vanC = ['#f2f2ee', '#e9e6dc', '#dfe3e6', '#c7ccd1', '#8a9aa6', '#2b4a6b'];
+      const cand = [];
+      for (let i = 0; i < N; i += Math.max(1, Math.round(60 / ds))) for (const side of [0, 1]) {
+        if (side === pS && !isNaN(tr.pit.off[i])) continue;
+        const sg = side ? 1 : -1, back = 50 + rn() * 40, [x, z] = at(i, sg * (tr.barr[side][i] + back), 0);
+        if (!clear(x, z, 40) || !away(x, z, 20)) continue;
+        cand.push([i, side, x, z]);
+      }
+      const used = [], CB = new Batch(true), FBc = new Batch(true), poleC = new THREE.CylinderGeometry(0.04, 0.05, 6, 5); poleC.translate(0, 3, 0);
+      const flagC = new THREE.PlaneGeometry(1, 1, 4, 1).toNonIndexed(); flagC.translate(0.5, 0, 0);
+      for (let t = 0; t < 40 && used.length < 4 && cand.length; t++) {
+        const [i, side, cx0, cz0] = cand[Math.floor(rn() * cand.length)];
+        if (used.some(([x, z]) => Math.hypot(x - cx0, z - cz0) < 250)) continue;
+        used.push([cx0, cz0]);
+        const ry = ry0(i), ca = Math.cos(ry), sa = Math.sin(ry);
+        const P = (u, v) => [cx0 + ca * u + sa * v, cz0 - sa * u + ca * v];
+        let put1 = 0;
+        for (let q = 0; q < 60 && put1 < 34; q++) {
+          const u = (rn() - 0.5) * 70, v = (rn() - 0.5) * 30, [x, z] = P(u, v);
+          if (!clear(x, z, 30) || !away(x, z, 3)) continue;
+          const y = Tracks.groundAt(tr, x, z), r2 = rn(), yaw = ry + (rn() - 0.5) * 0.6;
+          if (r2 < 0.62) { const s = 0.9 + rn() * 0.7; CB.add(domeG, mat(x, y, z, yaw, 1.15 * s, 1.15 * s * 0.8, 1.0 * s), col(tentC[Math.floor(rn() * tentC.length)])); }
+          else if (r2 < 0.85) {
+            // a camper van: body, cab, a dark window band, four wheels
+            const c = col(vanC[Math.floor(rn() * vanC.length)]), sx = Math.cos(yaw), sz = -Math.sin(yaw);
+            CB.add(box, mat(x, y + 1.55, z, yaw, 5.6, 2.3, 2.2), c);
+            CB.add(box, mat(x + sx * 3.25, y + 1.05, z + sz * 3.25, yaw, 1.1, 1.3, 2.1), c);
+            CB.add(box, mat(x + sx * 0.2, y + 1.95, z + sz * 0.2, yaw, 4.6, 0.5, 2.22), col('#1e252b'));
+            for (const a of [-1.9, 2.6]) for (const b2 of [-1, 1]) CB.add(wheelG, mat(x + sx * a - sz * b2 * 0.98, y + 0.36, z + sz * a + sx * b2 * 0.98, yaw), col('#16181a'));
+            venue.push({ x, y: z, w: 6, d: 2.4, h: 2.8, r: 3.5 });
+          } else {
+            // a car parked by the tents
+            const c = col(['#2a2f3a', '#c7ccd1', '#8e1b1b', '#1d3557', '#e6e6e2', '#4a4f55'][Math.floor(rn() * 6)]), sx = Math.cos(yaw), sz = -Math.sin(yaw);
+            CB.add(box, mat(x, y + 0.6, z, yaw, 4.3, 0.75, 1.8), c);
+            CB.add(box, mat(x - sx * 0.2, y + 1.15, z - sz * 0.2, yaw, 2.3, 0.55, 1.6), col('#20262c'));
+            venue.push({ x, y: z, w: 4.5, d: 2, h: 1.6, r: 2.6 });
+          }
+          put1++;
+        }
+        // one or two flags over the camp on tall poles (a camp's own flag, a nation's)
+        for (let f = 0; f < 2; f++) {
+          const [x, z] = P((rn() - 0.5) * 40, (rn() - 0.5) * 16); if (!clear(x, z, 30) || !away(x, z, 1)) continue;
+          let ph = rn(); while ((ph * 13.7) % 1 > 0.8) ph = rn();
+          const y = Tracks.groundAt(tr, x, z), m = mat(x, y, z, ry + 0.8), fl = [['#009246', '#f4f5f0', '#ce2b37'], ['#f77f00', '#f77f00', '#f77f00'], ['#0055a4', '#f4f5f0', '#ef4135'], ['#1b1b1b', '#fdda24', '#ef3340']][Math.floor(rn() * 4)];
+          const tg = (g, fu) => { const p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let q = 0; q < p.count; q++) { uv[q * 2] = ph; uv[q * 2 + 1] = fu(p.getX(q)); } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); return g; };
+          FBc.add(tg(poleC.clone(), () => 0), m, col('#d9d9d4'));
+          for (let b2 = 0; b2 < 3; b2++) { const g = flagC.clone(); g.scale(0.5, 1, 1); g.translate(0.06 + b2 * 0.5, 5.5, 0); tg(g, X => 2 + (X - 0.06) / 1.5); FBc.add(g, m, col(fl[b2])); }
+        }
+        venue.push({ x: cx0, y: cz0, w: 70, d: 30, h: 3, r: 40 }); // (an open field: the trees keep off it)
+      }
+      tr.camps = used; // (for the test tools)
+      if (CB.parts.length) add(CB.geo(), M.vcol, { cast: true, far: 900 });
+      if (FBc.parts.length) add(FBc.geo(), fansMat(), { cast: true, far: 700 });
+    }
+    // The fan zone's big wheel, as at Silverstone, Austin and Zandvoort: 40 m across, 70 m or more
+    // behind a barrier and clear of the lap, its face to the track, turning once in 100 s, its 18
+    // gondolas hanging level. Handed to buildTrack (tr.__wheel), which adds it to the circuit and
+    // turns it each frame (spinWheel). Three draws: frame, wheel, gondolas.
+    {
+      const cand = [];
+      for (let i = 0; i < N; i += Math.max(1, Math.round(40 / ds))) for (const side of [0, 1]) {
+        if (side === pS && !isNaN(tr.pit.off[i])) continue;
+        const sg = side ? 1 : -1, [x, z] = at(i, sg * (tr.barr[side][i] + 75), 0);
+        if (!clear(x, z, 45) || !away(x, z, 26)) continue;
+        let ok = true; tr.hash.near(x, z, 60, j => { if (Math.hypot(tr.x[j] - x, tr.y[j] - z) < 55) ok = false; });
+        if (ok) cand.push([i, x, z]);
+      }
+      if (cand.length) {
+        const [i, x, z] = cand[Math.floor(rn() * cand.length)], y = Tracks.groundAt(tr, x, z), R = 20, HUB = 23.5;
+        const grp = new THREE.Group(); grp.position.set(x, y, z); grp.rotation.y = ry0(i);
+        const fr = new Batch(true), wh = new Batch(true);
+        // frame: two A-legs either side of the wheel, a hub axle, a platform and a ticket kiosk
+        for (const zz of [-2.6, 2.6]) for (const xx of [-1, 1]) { const dx = xx * 11, ln = Math.hypot(dx, HUB), a = Math.atan2(dx, HUB); fr.add(box, mat(dx / 2, HUB / 2, zz, 0, 0.7, ln, 0.7, 0, -a), col('#e8e8e4')); }
+        fr.add(box, mat(0, HUB, 0, 0, 1.2, 1.2, 5.6), col('#cfd2d4'));
+        fr.add(box, mat(0, 0.3, 0, 0, 26, 0.6, 9), col('#9b9a94'));
+        fr.add(box, mat(9, 1.8, -3.4, 0, 3, 2.4, 2), col('#1f4e9e'));
+        // wheel: two rims of 40 straight lengths, a spoke to each gondola on both, cross ties
+        const NS = 40;
+        for (const zz of [-1.2, 1.2]) for (let s = 0; s < NS; s++) { const a = (s + 0.5) / NS * 6.2832; wh.add(box, mat(Math.cos(a) * R, Math.sin(a) * R, zz, 0, 0.35, 2 * Math.PI * R / NS * 1.03, 0.35, 0, a), col('#f2f2ee')); }
+        for (let s = 0; s < 18; s++) {
+          const a = s / 18 * 6.2832;
+          for (const zz of [-1.2, 1.2]) wh.add(box, mat(Math.cos(a) * R / 2, Math.sin(a) * R / 2, zz * 0.7, 0, R, 0.12, 0.12, 0, a), col('#d9dbdc'));
+          wh.add(box, mat(Math.cos(a) * R, Math.sin(a) * R, 0, 0, 0.2, 0.2, 2.6), col('#d9dbdc'));
+        }
+        wh.add(new THREE.CylinderGeometry(1.4, 1.4, 3, 12).rotateX(Math.PI / 2), null, col('#cfd2d4'));
+        const frame = new THREE.Mesh(fr.geo(), M.vcol), wheel = new THREE.Mesh(wh.geo(), M.vcol);
+        wheel.position.y = HUB; grp.add(frame, wheel);
+        // gondolas: a cabin in one of four colours under a white roof, hung from the rim
+        const gb = new Batch(true); gb.add(box, mat(0, -1.7, 0, 0, 2.2, 2.0, 1.8), null); gb.add(box, mat(0, -0.55, 0, 0, 2.4, 0.25, 2.0), col('#f4f4f0')); gb.add(box, mat(0, -0.25, 0, 0, 0.12, 0.6, 0.12), col('#8a8d90'));
+        const gg = gb.geo();
+        const gon = new THREE.InstancedMesh(gg, M.vcol, 18), gc = ['#c8102e', '#1f4e9e', '#f2a900', '#1f6f5c'];
+        for (let s = 0; s < 18; s++) gon.setColorAt(s, col(gc[s % 4]));
+        gon.position.y = HUB; gon.frustumCulled = false; grp.add(gon);
+        grp.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+        grp.userData.wheel = { wheel, gon, R, n: 18 };
+        tr.__wheel = grp;
+        venue.push({ x, y: z, w: 44, d: 12, h: 46, r: 25 });
+      }
+    }
+    // Flag poles along the start straight, across from the pits, as at Monza, Sakhir and Spa: a row of
+    // 10 m white poles 8 m apart, their flags all streaming the same way in the one breeze and
+    // rippling on the wind clock (the crowd's material, fansMat: uv x the phase, y 2 + the distance
+    // out from the pole, 0 on the pole itself, which stands still)
+    {
+      const FB = new Batch(true), poleG = new THREE.CylinderGeometry(0.05, 0.08, 10, 6); poleG.translate(0, 5, 0);
+      const cloth = new THREE.PlaneGeometry(1, 1, 6, 1).toNonIndexed(); cloth.translate(0.5, 0, 0);
+      const FL = [['#009246', '#f4f5f0', '#ce2b37'], ['#0055a4', '#f4f5f0', '#ef4135'], ['#1b1b1b', '#fdda24', '#ef3340'], ['#169b62', '#f4f5f0', '#ff883e'], ['#f4f5f0', '#f4f5f0', '#f4f5f0'], ['#d40000', '#f4f5f0', '#d40000'], ['#1f4e9e', '#1f4e9e', '#1f4e9e'], ['#006847', '#f4f5f0', '#ce1126']];
+      const rf = U.rng((tr.def.seed || 3) * 59 + 11), side = 1 - pS, sg = side ? 1 : -1, wind = rf() * 6.283;
+      const uvd = (g, ph, f) => { const p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let q = 0; q < p.count; q++) { uv[q * 2] = ph; uv[q * 2 + 1] = f(p.getX(q)); } g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); return g; };
+      let made = 0;
+      for (let l = -88; l <= 88; l += 8) {
+        const k = mod(Math.round(l / ds), N);
+        if (!isNaN(tr.pit.off[k]) && side === pS) continue;
+        const [x, z] = at(k, sg * (tr.barr[side][k] + 5), 0);
+        if (!clear(x, z, 3) || !away(x, z, 1.5)) continue;
+        // (a phase whose figure would bob is skipped: the pole stays put)
+        let ph = rf(); while ((ph * 13.7) % 1 > 0.8) ph = rf();
+        const y = Tracks.groundAt(tr, x, z), fl = FL[made % FL.length], m = mat(x, y, z, wind + (rf() - 0.5) * 0.25);
+        FB.add(uvd(poleG.clone(), ph, () => 0), m, col('#eeeeea'));
+        for (let b = 0; b < 3; b++) { const g = cloth.clone(); g.scale(0.6, 1.2, 1); g.translate(0.08 + b * 0.6, 9.2, 0); uvd(g, ph, X => 2 + (X - 0.08) / 1.8); FB.add(g, m, col(fl[b])); }
+        venue.push({ x, y: z, w: 1, d: 1, h: 10, r: 1.5 });
+        made++;
+      }
+      if (FB.parts.length) add(FB.geo(), fansMat(), { cast: true, far: 900 });
     }
     if (B.parts.length) add(B.geo(), M.vcol, { cast: true, far: 1400 });
     flushAds();
@@ -6884,6 +7055,68 @@ void main() {
     }
     return k;
   }
+  // The TV helicopter: every Grand Prix has one over the leader, the source of the overhead shots.
+  // Ours flies some 60 m behind and 70 m above whoever leads, to their outside, banking into its
+  // turns and dipping its nose as it speeds up, main and tail rotors turning. One for the whole
+  // game, built the first time it is wanted; hidden while the camera is the helicopter's own.
+  // the fan zone's wheel (buildTrackside): turned by the clock, its gondolas kept hanging level
+  const WM = new THREE.Matrix4();
+  function spinWheel(g, t) {
+    const W = g.userData.wheel, a0 = t * 0.0628;
+    W.wheel.rotation.z = a0;
+    for (let s = 0; s < W.n; s++) { const a = a0 + s / W.n * 6.2832; WM.makeTranslation(Math.cos(a) * W.R, Math.sin(a) * W.R, 0); W.gon.setMatrixAt(s, WM); }
+    W.gon.instanceMatrix.needsUpdate = true;
+  }
+  let heli = null;
+  function buildHeli() {
+    const g = new THREE.Group(), b = new Batch(true), box = new THREE.BoxGeometry(1, 1, 1), M = materials();
+    const cab = new THREE.SphereGeometry(1, 10, 8);
+    // (the model's x is its nose: the cabin, a white body with a blue band, a tail boom and fin, skids)
+    b.add(cab, mat(0.6, 0, 0, 0, 2.1, 1.35, 1.2), col('#f2f2ee'));
+    b.add(cab, mat(1.55, 0.25, 0, 0, 0.95, 0.8, 0.95), col('#1e2a36'));                // the glazing
+    b.add(box, mat(-0.5, -0.15, 0, 0, 2.2, 1.6, 2.0), col('#f2f2ee'));
+    b.add(box, mat(-0.2, -0.3, 0, 0, 3.4, 0.3, 2.05), col('#1f4e9e'));                // band
+    b.add(box, mat(-4.2, 0.35, 0, 0, 5.5, 0.38, 0.34), col('#f2f2ee'));               // boom
+    b.add(box, mat(-6.8, 1.0, 0, 0, 0.9, 1.6, 0.12, 0, 0.35), col('#1f4e9e'));        // fin
+    b.add(box, mat(-6.3, 0.4, 0, 0, 0.7, 0.08, 1.6), col('#f2f2ee'));                 // stabiliser
+    b.add(box, mat(0.1, 1.15, 0, 0, 1.4, 0.5, 0.9), col('#d9dad6'));                  // engine fairing
+    b.add(box, mat(0.1, 1.55, 0, 0, 0.2, 0.4, 0.2), col('#3a3f45'));                  // mast
+    for (const z of [-0.95, 0.95]) { b.add(box, mat(0.2, -1.45, z, 0, 3.4, 0.08, 0.1), col('#3a3f45')); for (const x of [-0.6, 1.0]) b.add(box, mat(x, -1.15, z * 0.85, 0, 0.08, 0.6, 0.08, z * 0.3), col('#3a3f45')); }
+    b.add(cab, mat(1.95, -0.65, 0, 0, 0.32, 0.32, 0.32), col('#22262b'));            // the camera ball under the nose
+    const body = new THREE.Mesh(b.geo(), M.vcol); g.add(body);
+    const rb = new Batch(true);
+    for (const a of [0, Math.PI * 2 / 3, Math.PI * 4 / 3]) rb.add(box, mat(Math.cos(a) * 2.6, 0, -Math.sin(a) * 2.6, a, 5.2, 0.05, 0.28), col('#2b2f34'));
+    const rotor = new THREE.Mesh(rb.geo(), M.vcol); rotor.position.set(0.1, 1.78, 0); g.add(rotor);
+    const tb = new Batch(true); tb.add(box, mat(0, 0, 0, 0, 0.12, 1.3, 0.04), col('#2b2f34')); tb.add(box, mat(0, 0, 0, 0, 1.3, 0.12, 0.04), col('#2b2f34'));
+    const tail = new THREE.Mesh(tb.geo(), M.vcol); tail.position.set(-6.8, 1.0, 0.22); g.add(tail);
+    g.traverse(m => { if (m.isMesh) m.castShadow = true; });
+    g.userData = { rotor, tail, v: new THREE.Vector3(), bank: 0, pitch: 0, yaw: 0, on: false };
+    return g;
+  }
+  function updateHeli(o, dt) {
+    const cars = o.cars || [];
+    const want = cars.length && state.tr && !(o.mode === 'heli') && GFX.heli !== false;
+    if (!want) { if (heli) heli.visible = false; return; }
+    if (!heli) { heli = buildHeli(); scene.add(heli); }
+    const H = heli.userData, lead = cars.find(c => c.pos === 1) || cars[0];
+    if (!lead || !isFinite(lead.x)) { heli.visible = false; return; }
+    const cx = Math.cos(lead.h), cz = Math.sin(lead.h), g0 = carY(lead);
+    const tgt = V(lead.x - cx * 60 - cz * 30, g0 + 70, lead.y - cz * 60 + cx * 30);
+    const p = heli.position;
+    if (!H.on || p.distanceToSquared(tgt) > 600 * 600) { p.copy(tgt); H.v.set(0, 0, 0); H.yaw = lead.h; H.on = true; }
+    // (a damped spring to the target, moving at the leader's speed: it keeps station on the
+    // straights and swings wide and late through the turns)
+    const k = 0.9, sv = lead.speed || 0, acc = tgt.clone().sub(p).multiplyScalar(k * k).add(V(cx * sv - H.v.x, 0, cz * sv - H.v.z).multiplyScalar(2 * k)).addScaledVector(V(0, H.v.y, 0), -2 * k);
+    H.v.addScaledVector(acc, dt); p.addScaledVector(H.v, dt);
+    const sp = Math.hypot(H.v.x, H.v.z);
+    if (sp > 3) H.yaw += U.wrapAngle(Math.atan2(H.v.z, H.v.x) - H.yaw) * (1 - Math.exp(-2 * dt));
+    const fwd = acc.x * Math.cos(H.yaw) + acc.z * Math.sin(H.yaw), side = -acc.x * Math.sin(H.yaw) + acc.z * Math.cos(H.yaw);
+    H.pitch += (U.clamp(-sp / 400 - fwd / 60, -0.35, 0.2) - H.pitch) * Math.min(1, dt * 2);
+    H.bank += (U.clamp(side / 40, -0.45, 0.45) - H.bank) * Math.min(1, dt * 2);
+    heli.rotation.set(H.bank, -H.yaw, H.pitch, 'YXZ');
+    H.rotor.rotation.y += dt * 40; H.tail.rotation.z += dt * 120;
+    heli.visible = true;
+  }
   let ctxLost = false;
   function render(o) {
     if (!renderer || !state.tr || compiling || ctxLost) return;
@@ -6894,6 +7127,8 @@ void main() {
     focusCar = o.focus || null; camMode = o.mode || '';
     updateCars(o.cars || [], dt, o.mode === 'cockpit' ? o.focus : null, o.mode === 'tcam' ? o.focus : null); // (the T-cam sees the wheel buzz and the hands shake too, the helmet stays shown)
     if (F1.R3Crew) F1.R3Crew.update(o.cars || [], dt);
+    updateHeli(o, dt);
+    if (state.wheel) spinWheel(state.wheel, clock);
     if (state.root && state.root.userData.farList) {
       const cp = camera.position, lift = 1 + Math.max(0, cp.y - (o.focus ? o.focus.z || 0 : 0)) / 40;
       for (const m of state.root.userData.farList) { const b = m.geometry.boundingSphere, c = b.center, dx = c.x - cp.x, dz = c.z - cp.z, r = m.userData.far * lift + b.radius; m.visible = dx * dx + dz * dz < r * r; }
