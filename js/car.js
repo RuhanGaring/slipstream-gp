@@ -227,6 +227,7 @@
     if (dir < 0 && wheelRpm(c, g) > c.spec.rpmLimit + 200) return;
     c.gear = g; c.shiftT = 0.045 * (c.dm ? c.dm.shiftK : 1); c.shiftDir = dir;
     if (c.onShift) c.onShift(dir);
+    return true;
   }
 
   // tyre force for a slip state (combined, normalised slip vector)
@@ -282,11 +283,21 @@
     const reversing = c.gear < 0;
     if (a.autoGear && !reversing) {
       const r = wheelRpm(c, c.gear);
-      if (r > sp.rpmLimit - 350 && c.gear < sp.gears.length && throttle > 0.1) shift(c, 1);
+      // (and when the car has stopped gaining speed past the engine's peak, as at its top speed in a
+      // gear without the straight-line aero mode: the revs settled just under the shift point and
+      // the car sat in 7th at 285 km/h, never reaching 8th)
+      const plateau = r > sp.rpmPeak && Math.abs(c.ax) < 0.4 && c.gear < sp.gears.length && wheelRpm(c, c.gear + 1) > sp.rpmPeak * 0.8;
+      c.upHold = Math.max(0, (c.upHold || 0) - dt);
+      if ((r > sp.rpmLimit - 350 || plateau) && c.gear < sp.gears.length && throttle > 0.1) { if (shift(c, 1)) c.upHold = 0.8; }
       else if (c.gear > 1) {
         const down = wheelRpm(c, c.gear - 1);
         const thr = brake > 0.1 ? sp.rpmLimit - 900 : sp.rpmLimit - 2600;
-        if (down < thr && r < sp.rpmPeak * 0.83) shift(c, -1);
+        // On the throttle it only goes down when the engine is labouring, and never just after going
+        // up: with the rears spinning (traction control off) the revs rose to the shift point, the
+        // wheels bit in the next gear, the revs fell and it went straight back down, ten times over
+        // between 1st and 2nd on a full-throttle start
+        const lug = throttle > 0.5 ? r < sp.rpmPeak * 0.5 && c.upHold <= 0 : r < sp.rpmPeak * 0.83;
+        if (down < thr && lug) shift(c, -1);
       }
     }
     if (!reversing && speed < 0.6 && brake > 0.5 && throttle < 0.1) {
