@@ -671,7 +671,7 @@
     if (FX.skidHead >= cap) FX.skidHead = 0;
     const k = FX.skidHead * 5;
     FX.skid[k] = x1; FX.skid[k + 1] = y1; FX.skid[k + 2] = x2; FX.skid[k + 3] = y2; FX.skid[k + 4] = kind;
-    FX.skidHead = (FX.skidHead + 1) % cap; FX.skidN = Math.min(cap, FX.skidN + 1);
+    FX.skidHead = (FX.skidHead + 1) % cap; FX.skidN = Math.min(cap, FX.skidN + 1); FX.cap = cap; // (the renderer walks the ring with the same size)
   }
   let fxZ = 0; // ground height for the particles being spawned (the 3D view sits them on the road)
   function puff(x, y, vx, vy, r0, r1, life, col, a) {
@@ -715,7 +715,11 @@
       const mark = (hard && !dirt) || (dirt && c.speed > 6);
       if (mark && w.lmx != null) {
         const dx = w.wx - w.lmx, dy = w.wy - w.lmy;
-        if (dx * dx + dy * dy > 0.5) { addSkid(w.lmx, w.lmy, w.wx, w.wy, dirt ? (w.surf === SURF.GRAVEL ? 2 : 1) : 0); w.lmx = w.wx; w.lmy = w.wy; }
+        // (a jump of more than 3 m, a car put back on the road, a flashback, a long frame, starts a
+        // new mark: drawn, the one segment from the old spot ran hundreds of metres in a straight line,
+        // and in a hilly town hung over the street below)
+        if (dx * dx + dy * dy > 9) { w.lmx = w.wx; w.lmy = w.wy; }
+        else if (dx * dx + dy * dy > 0.5) { addSkid(w.lmx, w.lmy, w.wx, w.wy, dirt ? (w.surf === SURF.GRAVEL ? 2 : 1) : 0); w.lmx = w.wx; w.lmy = w.wy; }
       } else if (mark) { w.lmx = w.wx; w.lmy = w.wy; } else w.lmx = null;
       if (hard && !dirt && Math.random() < dt * 40) puff(w.wx, w.wy, c.vx * 0.15, c.vy * 0.15, 0.6, 3.6 + Math.random() * 2, 1.1 + Math.random() * 0.6, '200,202,206', 0.28);
       if (dirt && c.speed > 8 && Math.random() < dt * 30) {

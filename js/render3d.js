@@ -6267,12 +6267,15 @@ void main() {
       const x1 = S[o], z1 = S[o + 1], x2 = S[o + 2], z2 = S[o + 3], kind = S[o + 4];
       let dx = x2 - x1, dz = z2 - z1;
       const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-      const w = 0.17, nx = -dz * w, nz = dx * w, y = 0.018 + (state.tr ? Tracks.groundAt(state.tr, x1, z1) : 0);
-      pos.setXYZ(k * 4, x1 + nx, y, z1 + nz); pos.setXYZ(k * 4 + 1, x1 - nx, y, z1 - nz);
-      pos.setXYZ(k * 4 + 2, x2 - nx, y, z2 - nz); pos.setXYZ(k * 4 + 3, x2 + nx, y, z2 + nz);
+      // (each end on its own ground: one height for both ends, the start's, left a mark on a slope
+      // floating; and none longer than 4 m, whatever the game sent)
+      const w = l > 4 ? 0 : 0.17, nx = -dz * w, nz = dx * w, gy = state.tr ? Tracks.groundAt : null;
+      const y1 = 0.018 + (gy ? gy(state.tr, x1, z1) : 0), y2 = 0.018 + (gy ? gy(state.tr, x2, z2) : 0);
+      pos.setXYZ(k * 4, x1 + nx, y1, z1 + nz); pos.setXYZ(k * 4 + 1, x1 - nx, y1, z1 - nz);
+      pos.setXYZ(k * 4 + 2, x2 - nx, y2, z2 - nz); pos.setXYZ(k * 4 + 3, x2 + nx, y2, z2 + nz);
       const c = SKIDC[kind] || SKIDC[0];
       for (let q = 0; q < 4; q++) cl.setXYZW(k * 4 + q, c[0], c[1], c[2], c[3]);
-      k = (k + 1) % 9000; wrote++;
+      k = (k + 1) % (F.cap || 9000); wrote++;
     }
     if (wrote) { pos.needsUpdate = true; cl.needsUpdate = true; }
     fx.skidHead = F.skidHead; fx.skidN = F.skidN;
