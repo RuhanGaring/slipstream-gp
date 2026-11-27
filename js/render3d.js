@@ -2837,7 +2837,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // (never inside another part of the lap's barriers: one stood in the middle of a run-off)
           let clr = true;
           tr.hash.near(x, z, 70, j => { if (!clr) return; const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j], al = dx * tr.tx[j] + dz * tr.ty[j]; if (Math.abs(al) < 3 * tr.ds && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][j] + 3) clr = false; });
-          if (!clr) continue;
+          if (!clr || W2.decor.some(it => it.type === 'stand' && Math.hypot(it.x - x, it.y - z) < 24)) continue;
+          (tr.__masts || (tr.__masts = [])).push([x, z]); // (the crowd keeps a metre and a half off: buildFans)
           pole.add(cg, mat(x, y + 18, z, 0, 1, 36, 1));
           // the head as Sakhir's: a frame of four by four lamps, tipped down toward the track
           const head = new THREE.Matrix4().compose(V(x - tr.nx[i] * sd * 0.6, y + 36.8, z - tr.ny[i] * sd * 0.6), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 0.35, 'YXZ')), V(1, 1, 1));
@@ -4732,11 +4733,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // Safety Bulletin 41, impact angles over 20 degrees)
       if (modern && c.R < 160) for (let i = c.i - ms(15); i <= c.te + ms(25); i++) tec[oS][mod(i, N)] = 1;
       for (let i = Math.round(c.ti + (c.i - c.ti) * 0.3); i <= Math.round(c.i + (c.te - c.i) * 0.4) + ms(4); i++) want[c.inS][mod(i, N)] = Math.max(want[c.inS][mod(i, N)], modern ? 1.5 : 2.0);
-      if (modern && c.R < 160) for (let i = c.i + ms(5); i <= c.te + ms(extra * 0.9); i++) bands[oS][mod(i, N)] = 1;
+      if (modern && c.R < 260) for (let i = c.i + ms(5); i <= c.te + ms(extra * 0.9); i++) bands[oS][mod(i, N)] = 1;
     }
-    // (a desert venue paints its bands blue and sand, as Sakhir does; elsewhere red and white)
-    const lookId = tr.def.look || tr.def.id, desert = lookId === 'rimal' || lookId === 'lonestar';
-    const GREEN = col('#227a56'), RED = col(desert ? '#2f5ea8' : '#c4262e'), WHITE = col(desert ? '#d8c6a2' : '#ebebe6'), BANDW = 5.9;
+    // (no lap-long edge band and no blue paint: the owner cancelled both on 2026-11-26)
+    const GREEN = col('#227a56'), RED = col('#c4262e'), WHITE = col('#ebebe6'), BANDW = 5.9;
     const pa = new Acc(true), turf = new Acc();
     // a strip from offset a(k) to a(k) + w(k) on one side, heights from surfY plus lift
     const strip = (acc, side, i0, i1, a, w, lift, c, uv) => {
@@ -5029,6 +5029,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     const away = (x, z) => {
       for (const it of stands) { const r = it.type === 'stand' ? 22 : it.type === 'poly' ? 60 : it.type === 'garage' ? 30 : Math.max(it.w || 20, it.h || 20) * 0.7; if (Math.hypot(it.x - x, it.y - z) < r) return false; }
       for (const f of venue || []) if (Math.hypot(f.x - x, f.y - z) < f.r + 3) return false;
+      for (const m of tr.__masts || []) if (Math.hypot(m[0] - x, m[1] - z) < 1.5) return false;
       return true;
     };
     // outside every barrier of the lap, by 2 m
@@ -5204,7 +5205,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       for (const [, i] of cand) { if (picked.length >= want) break; if (picked.every(j => Math.min(mod(i - j, N), mod(j - i, N)) * ds > L / 4)) picked.push(i); }
       const BR = B, adA = adAcc;
       picked.forEach((i, n) => {
-        const dl = -(tr.barr[0][i] + 3.2), dr = tr.barr[1][i] + 3.2, ry = ry0(i), span = dr - dl;
+        const dl = -(tr.barr[0][i] + 4.6), dr = tr.barr[1][i] + 4.6, ry = ry0(i), span = dr - dl; // (towers clear of the fence's cranked top and its posts)
         let top = -1e9; for (let d = dl; d <= dr; d += 1) top = Math.max(top, Tracks.surfZ(tr, i, d));
         const deckY = top + 6.6, mid = (dl + dr) / 2, steel = '#5d6670', light = '#6f8798'; // (light: the glazing, sky-tinted)
         const P = d => [tr.x[i] + tr.nx[i] * d, tr.y[i] + tr.ny[i] * d];
