@@ -3034,13 +3034,21 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const sideS = new THREE.Shape([new THREE.Vector2(-6, 0), new THREE.Vector2(6.3, 0), new THREE.Vector2(6.3, 10.5), new THREE.Vector2(-6, 1.4)]);
       const side = new THREE.ExtrudeGeometry(sideS, { depth: 0.35, bevelEnabled: false });
       side.rotateY(Math.PI / 2); // shape x -> -z, extrusion -> +x
-      const col0 = new THREE.CylinderGeometry(0.18, 0.18, 1, 6);
+      const col0 = new THREE.CylinderGeometry(0.18, 0.18, 1, 6), cone4 = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1); cone4.rotateY(Math.PI / 4);
       // (roof edges: weathered off-white and galvanised grey sheet, one dull green among them; the
       // pure red, yellow, teal and navy they had are colours a stand roof does not come in)
       const ads = ['#cfcdc4', '#aeb3b5', '#d6d4cc', '#5f7468', '#b9bcbd'];
+      // Three kinds of stand, as the surveyed circuits mix them (Monza's long open aluminium
+      // bleachers, Sakhir's white fabric canopies, roofed stands): ours were one design repeated.
+      // A stretch of 150 m of the lap holds one kind, so the units of a group match.
+      const canopy = new Batch(false), endsPlain = new Batch(false), kindAt = it => {
+        const L = Tracks.locate(tr, it.x, it.y, -1), b = Math.floor((L.s || 0) / 150), h = Math.sin((b + 1) * 12.9898 + (tr.def.seed || 1) * 78.233) * 43758.5453;
+        const f = h - Math.floor(h); return f < 0.4 ? 0 : f < 0.7 ? 1 : 2;
+      };
       let n = 0;
       for (const it of W2.decor) {
         if (it.type !== 'stand') continue;
+        const kind = W2.town ? 0 : kindAt(it);
         const ry = -it.h + (it.side > 0 ? 0 : Math.PI);
         const base = new THREE.Matrix4().compose(V(it.x, Tracks.groundAt(tr, it.x, it.y), it.y), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), V(1, 1, 1));
         const at = m => base.clone().multiply(m);
@@ -3050,13 +3058,29 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         conc.add(box, at(mat(0, 5.4, 6.4, 0, 28, 10.8, 0.4)));
         // (the ends: scaffold wrapped in printed scrim, the event's colours; no lettering, which would
         // read backwards from one side)
+        if (kind === 1) {
+          // open bleachers: bare aluminium ends, no roof
+          endsPlain.add(side, at(mat(-14.2, 0, 0))); endsPlain.add(side, at(mat(13.85, 0, 0)));
+          for (const x of [-10, -3.5, 3.5, 10]) steel.add(col0, at(mat(x, 5.2, 6.0, 0, 0.6, 10.4, 0.6)));
+          n++;
+          continue;
+        }
         lattice.add(side, at(mat(-14.2, 0, 0)));
         lattice.add(side, at(mat(13.85, 0, 0)));
+        if (kind === 2) {
+          // fabric canopy: three white peaks on masts over the seats
+          for (const x of [-9.4, 0, 9.4]) { canopy.add(cone4, at(mat(x, 14.4, 1.2, 0, 9.6, 2.6, 13))); steel.add(col0, at(mat(x, 7.6, 6.6, 0, 1, 15.2, 1))); }
+          canopy.add(box, at(mat(0, 13.1, 1.2, 0, 29.2, 0.12, 13)));
+          n++;
+          continue;
+        }
         roof.add(box, at(mat(0, 13.2, 2.0, 0, 29.5, 0.35, 10, -0.06)));
         for (const x of [-12, -4, 4, 12]) steel.add(col0, at(mat(x, 6.6, 6.2, 0, 1, 13.2, 1)));
         fascia.add(box, at(mat(0, 12.6, -3.0, 0, 29.5, 1.0, 0.25, -0.06)), col(ads[n++ % ads.length]));
       }
       if (lattice.parts.length) add(lattice.geo(), M.standEnd || (M.standEnd = std({ map: standEndTex(), roughness: 0.92, side: THREE.DoubleSide })), { cast: true });
+      if (endsPlain.parts.length) add(endsPlain.geo(), M.alu || (M.alu = std({ color: '#b9bec4', roughness: 0.45, metalness: 0.6, side: THREE.DoubleSide })), { cast: true });
+      if (canopy.parts.length) add(canopy.geo(), M.fabric || (M.fabric = std({ color: '#f2f1ec', roughness: 0.8, side: THREE.DoubleSide, emissive: '#26251f' })), { cast: true });
       if (banners.parts.length) add(banners.geo(), M.adwall, { cast: false, far: 600 });
       // Giant screens: an LED wall on a scaffold tower across the track from each of the three biggest
       // groups of stands, facing them (the crowd watches the rest of the race on it)
