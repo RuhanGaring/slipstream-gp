@@ -63,7 +63,7 @@
     uLodJit: { value: 0 },
     // the halo seen from the driver's seat (Settings: Halo): x 0 shown, 1 see-through, 2 hidden;
     // y the share of it kept when see-through. Set only for the onboard cameras (render3d).
-    uHalo: { value: new THREE.Vector2(0, 0.45) },
+    uHalo: { value: new THREE.Vector2(0, 0.4) },
     uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
     // ceiling on the light the road mirrors (sun and sky together), for a venue whose low sun turned
@@ -413,9 +413,15 @@
     // sides, so the airbox and the driver's own helmet stay; and the pillar down toward the nose)
     '    float hoop = step(0.8, hp.y) * step(0.1, hp.x) * step(hp.x, 1.3) * max(step(0.5, hp.x), step(0.15, az) * step(az, 0.45));',
     '    float front = step(0.55, hp.x) * step(hp.x, 1.2) * step(az, 0.09) * step(max(0.75, py - 0.08), hp.y);',
-    '    if (hoop + front > 0.5) {',
-    '      if (uHalo.x > 1.5) discard;',
-    '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > uHalo.y) discard;',
+    '    if (uHalo.x > 1.5) { if (hoop + front > 0.5) discard; }',
+    // see-through: only the upright pillar, the hoop over the head stays as it is. The pillar thins
+    // gradually, and the stipple moves each frame so the anti-aliasing blends it into an even veil
+    '    else if (front > 0.5) {',
+    // (the stem below where the hoop's two arms meet: whole at the join, clearing over the next 10 cm,
+    // and whole again where it meets the nose)
+    '      float m = smoothstep(0.87, 0.97, hp.x) * smoothstep(0.74, 0.8, hp.y);',
+    '      float keep = mix(1.0, uHalo.y, m);',
+    '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit * 7.0, vec2(0.06711056, 0.00583715)))) > keep) discard;',
     '    }',
     '  }'].join('\n');
   // (the scale also carries the car's row in the soft-body texture, three per row: fade + 3 x row)
