@@ -29,7 +29,7 @@
     // the edge (metres, at full wet) the car keeps (tuned on heavy-rain races: recoveries 151 to 22)
     wetK: 0.82, wetMargin: 0.05, wetEdge: 0.6,
     // racecraft margins, tuned on full 20-car races (tools/racetune.js)
-    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 1.6, launchT: 0, launchGap: 0.6, capClose: 0, crawlK: 0, sepLook: 0.5, sepHard: 1, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
+    mpc: 0, mpcTrig: 60, mpcCorner: 3.5, mpcCare: 1.6, mpcKeep: 1.5, mpcPass: 8, hitK: 0.5, trafK: 0.975, lap1K: 0.97, lap1T: 35, lap1Gap: 1.6, lap1Brk: 0.68, launchT: 0, launchGap: 0.6, capClose: 0, crawlK: 0, sepLook: 0.5, sepHard: 1, gapV: 0.12, gapBrk: 0.14, trafBrk: 1,
     dirtyK: 0.5, // how much of the downforce lost in dirty air the corner speed allows for
     // live grip reading: on, tyre load that counts as past the limit, metres off line that count as
     // running wide, load below which there is grip to spare, the step down and up, the limits
@@ -1061,8 +1061,11 @@
         const room = Math.max(0.3, gap - 1.0);
         const aLead = Math.max(0, -(blk.ax || 0));
         const aReq = closing > 0 ? closing * closing / (2 * room) + aLead * 0.9 : (gap < want ? aLead : 0);
-        const aMax = (14 + 0.0045 * v * v) * 0.85;
-        b.followBrake = aReq > 0.35 * aMax ? U.clamp(aReq / aMax * 1.15, 0, 1) : 0;
+        // (on the opening lap a driver allows for less: cold tyres and brakes, dirty air, a car ahead
+        // that brakes early in the pack. The start's contacts were nearly all rear-ends into the first
+        // braking zones, closing at 40 to 90 km/h: P.lap1Brk is the share of the braking counted on then)
+        const aMax = (14 + 0.0045 * v * v) * (lap1 ? P.lap1Brk : 0.85);
+        b.followBrake = aReq > (lap1 ? 0.25 : 0.35) * aMax ? U.clamp(aReq / aMax * 1.15, 0, 1) : 0;
       } else { b.closeFollow = false; b.followBrake = 0; }
       // alongside into a corner: the car behind on the outside lifts
       const al = b.alongside;

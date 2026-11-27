@@ -252,9 +252,9 @@
       e.ersBox.classList.toggle('harv', !!p.harvest && !(p.deploy > 0.05));
       const pct = Math.round(p.soc * 100);
       if (e.ersPct._v !== pct) { e.ersPct.textContent = pct + '%'; e.ersPct._v = pct; }
-      // the energy mode beside the label (BALANCED shows as plain ERS)
+      // the energy mode as the battery's label (BALANCED keeps the plain BATTERY)
       const md = p.ersMode || 0;
-      if (e.ersBox._m !== md) { e.ersBox._m = md; const l = e.ersBox.querySelector('.lbl'); if (l) l.textContent = md ? 'ERS ' + (md === 1 ? 'HOT' : 'CHG') : 'ERS'; e.ersBox.classList.toggle('hot', md === 1); e.ersBox.classList.toggle('chg', md === 2); }
+      if (e.ersBox._m !== md) { e.ersBox._m = md; const l = e.ersBox.querySelector('.lbl'); if (l) l.textContent = md === 1 ? 'HOTLAP' : md === 2 ? 'CHARGE' : 'BATTERY'; e.ersBox.classList.toggle('hot', md === 1); e.ersBox.classList.toggle('chg', md === 2); }
     }
     e.lim.classList.toggle('show', !!p.limiter); e.lim.classList.toggle('on', !!p.limiter);
     const boxing = p.brain && p.brain.pit;

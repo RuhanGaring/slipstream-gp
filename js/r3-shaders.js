@@ -63,7 +63,7 @@
     uLodJit: { value: 0 },
     // the halo seen from the driver's seat (Settings: Halo): x 0 shown, 1 see-through, 2 hidden;
     // y the share of it kept when see-through. Set only for the onboard cameras (render3d).
-    uHalo: { value: new THREE.Vector2(0, 0.35) },
+    uHalo: { value: new THREE.Vector2(0, 0.45) },
     uFieldK: { value: 0.7 },
     uRoadSky: { value: 3.2 },
     // ceiling on the light the road mirrors (sun and sky together), for a venue whose low sun turned
@@ -409,8 +409,10 @@
   const HALO_CUT = [
     '  if (uHalo.x > 0.5 && length(vViewPosition) < 1.7) {',
     '    vec3 hp = vHaloP; float az = abs(hp.z), py = 0.97 - 0.69 * (hp.x - 0.75);',
-    '    float hoop = step(0.8, hp.y) * step(0.1, hp.x) * step(hp.x, 0.9) * step(0.15, az) * step(az, 0.42);',
-    '    float front = step(0.55, hp.x) * step(hp.x, 1.2) * step(az, 0.3) * step(max(0.78, py - 0.07), hp.y);',
+    // (all of the car above 0.8 m ahead of the driver's head; beside and behind it only the hoop's
+    // sides, so the airbox and the driver's own helmet stay; and the pillar down toward the nose)
+    '    float hoop = step(0.8, hp.y) * step(0.1, hp.x) * step(hp.x, 1.3) * max(step(0.5, hp.x), step(0.15, az) * step(az, 0.45));',
+    '    float front = step(0.55, hp.x) * step(hp.x, 1.2) * step(az, 0.09) * step(max(0.75, py - 0.08), hp.y);',
     '    if (hoop + front > 0.5) {',
     '      if (uHalo.x > 1.5) discard;',
     '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > uHalo.y) discard;',
