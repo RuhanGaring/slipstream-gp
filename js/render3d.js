@@ -350,6 +350,9 @@
       // (the colour of a used trap, 169, 155, 143 in the photographs; and the stones' relief half as strong again)
       MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#dcc9bc' }), 45, 0.2);
       MATS.gravel.normalScale.set(1.5, 1.5);
+      // (one 6 m photo tile repeated over a 40 m trap read from the air as a quilt of diamonds:
+      // every sample now taken from two shifted copies blended over a slow noise, colour and relief)
+      F1.R3S.noTile(MATS.gravel);
     } else {
       MATS.asphalt = std({ map: T.asphalt(), roughness: 0.88 });
       MATS.pitlane = std({ map: T.asphalt(), color: '#e3e3e6', roughness: 0.82 });
@@ -2874,6 +2877,12 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           // kerb of the road round the bend: nowhere nearer any part of the lap than its kerbs and 2.5 m)
           let clear = true;
           tr.hash.near(x, z, 40, j => { if (Math.hypot(tr.x[j] - x, tr.y[j] - z) < tr.hw + tr.kerbW + 2.5) clear = false; });
+          // (nor on the inside of a tight bend, where the wall comes in close and the cabin stood
+          // at the apex kerb; the post moves to the outside, as a real one does)
+          { let ins = 0; for (let q = -12; q <= 12; q++) ins = Math.max(ins, tr.kap[(i + q + N) % N] * sd); if (ins > 1 / 80) continue; }
+          // (nor inside another part of the lap's barrier: in a hairpin's infield it stood on the
+          // apex kerb, between the two legs' walls)
+          tr.hash.near(x, z, 60, j => { if (!clear) return; let sp = Math.abs(i - j); sp = Math.min(sp, N - sp) * tr.ds; if (sp < 20) return; const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j]; if (Math.abs(dx * tr.tx[j] + dz * tr.ty[j]) < 2 * tr.ds && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][j] + 1.5) clear = false; });
           if (!clear) continue;
           const y = Math.max(tr.z[i], Tracks.groundAt(tr, x, z));
           mp.add(b, mat(x, y + 1.25, z, ry, 2.2, 2.5, 2.0), col('#e9e9e4'));
@@ -3066,8 +3075,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           n++;
           continue;
         }
-        lattice.add(side, at(mat(-14.2, 0, 0)));
-        lattice.add(side, at(mat(13.85, 0, 0)));
+        // (the printed scrim on one roofed stand in three; it was on every stand, the same navy and
+        // red at every corner. The rest: concrete ends under a roof, bare aluminium under a canopy)
+        const endB = kind === 2 ? endsPlain : (Math.floor((Tracks.locate(tr, it.x, it.y, -1).s || 0) / 150) % 3 === 0 ? lattice : conc); // (by the 150 m stretch, so a row of stands matches)
+        endB.add(side, at(mat(-14.2, 0, 0)));
+        endB.add(side, at(mat(13.85, 0, 0)));
         if (kind === 2) {
           // fabric canopy: three white peaks on masts over the seats
           for (const x of [-9.4, 0, 9.4]) { canopy.add(cone4, at(mat(x, 14.4, 1.2, 0, 9.6, 2.6, 13))); steel.add(col0, at(mat(x, 7.6, 6.6, 0, 1, 15.2, 1))); }
@@ -3099,13 +3111,18 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const d = sg * (tr.barr[side][k] + 9), x = tr.x[k] + tr.nx[k] * d, z = tr.y[k] + tr.ny[k] * d;
           // (clear of every part of the lap by 14 m, and of the run-offs)
           let clear = true;
-          tr.hash.near(x, z, 60, j => { const dx = x - tr.x[j], dz = z - tr.y[j], dl = Math.abs(dx * tr.nx[j] + dz * tr.ny[j]); if (Math.hypot(dx, dz) < Math.max(14, tr.barr[dl > 0 ? 1 : 0][j] + 4)) clear = false; });
+          tr.hash.near(x, z, 60, j => { const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j]; if (Math.hypot(dx, dz) < Math.max(14, tr.barr[dl > 0 ? 1 : 0][j] + 4)) clear = false; }); // (the side the point is on: it read the right-hand barrier for both, and a screen stood over a fence)
           if (!clear) continue;
           const y = Tracks.groundAt(tr, x, z), ry = -Math.atan2(tr.ty[k], tr.tx[k]) + (sg < 0 ? Math.PI : 0);
           const B = new THREE.Matrix4().compose(V(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), V(1, 1, 1)), at = m => B.clone().multiply(m);
           for (const lx of [-4.5, 4.5]) tower.add(bx, at(mat(lx, 5, 0.6, 0, 0.5, 10, 0.5)));
           tower.add(bx, at(mat(0, 4.9, 0.6, 0, 9.5, 0.3, 0.3)));
           frame.add(bx, at(mat(0, 8.6, 0, 0, 12.6, 7.3, 0.55)));
+          // its back, seen from the far side and the air: the scaffold the LED wall hangs on, not a
+          // bare black slab (posts, ties at three heights, two raking stays to the ground)
+          for (const lx of [-6, -2, 2, 6]) tower.add(bx, at(mat(lx, 8.6, 0.42, 0, 0.14, 7.3, 0.14)));
+          for (const ly of [5.6, 8.6, 11.6]) tower.add(bx, at(mat(0, ly, 0.5, 0, 12.4, 0.12, 0.12)));
+          for (const lx of [-4.5, 4.5]) tower.add(bx, at(mat(lx, 4.6, 2.2, 0, 0.18, 9.4, 0.18, -0.45)));
           // (the screen faces -z, toward the track and the stands beyond it)
           face.add(sp, at(mat(0, 8.6, -0.29, Math.PI, 12, 6.75, 1)));
           made++;
@@ -5018,8 +5035,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // one figure: legs and head (their own colours), the shirt (coloured per person)
     const torso = new THREE.BoxGeometry(0.44, 0.58, 0.26); torso.translate(0, 1.13, 0);
     const rest = (() => {
-      const b = new Batch(true), legs = new THREE.BoxGeometry(0.34, 0.84, 0.2), head = new THREE.BoxGeometry(0.2, 0.24, 0.22), arms = new THREE.BoxGeometry(0.56, 0.5, 0.16);
-      b.add(legs, mat(0, 0.42, 0), col('#2a2f3a')); b.add(head, mat(0, 1.56, 0), col('#c9a07c')); b.add(arms, mat(0, 1.1, 0.02), col('#c9a07c'));
+      const b = new Batch(true), legs = new THREE.BoxGeometry(0.34, 0.84, 0.2), head = new THREE.SphereGeometry(0.5, 6, 4), arms = new THREE.BoxGeometry(0.56, 0.5, 0.16);
+      b.add(legs, mat(0, 0.42, 0), col('#2a2f3a')); b.add(head, mat(0, 1.57, 0, 0, 0.21, 0.25, 0.23), col('#c9a07c')); // (a round head: boxes read as robots at the fence) b.add(arms, mat(0, 1.1, 0.02), col('#c9a07c'));
       return b.geo();
     })();
     const cap = new THREE.BoxGeometry(0.23, 0.07, 0.27); cap.translate(0, 1.7, 0.03);
@@ -5051,7 +5068,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         const i = c.i + Math.round((rn() * 2 - 1) * ms(75)), k = mod(i, N);
         if (oS === pS && !isNaN(tr.pit.off[k])) continue;
         const depth = -Math.log(1 - rn() * 0.95) * 4.5; // most at the fence, a few far back
-        const d = sg * (tr.barr[oS][k] + 2.6 + depth), j0 = (rn() - 0.5) * 1.5, j1 = (rn() - 0.5) * 0.6, x = tr.x[k] + tr.nx[k] * (d + sg * Math.abs(j1)) + tr.tx[k] * j0, z = tr.y[k] + tr.ny[k] * (d + sg * Math.abs(j1)) + tr.ty[k] * j0; // (scattered along the fence and back from it, never in front of it)
+        const d = sg * (tr.barr[oS][k] + 4.5 + depth), j0 = (rn() - 0.5) * 1.5, j1 = (rn() - 0.5) * 0.6, x = tr.x[k] + tr.nx[k] * (d + sg * Math.abs(j1)) + tr.tx[k] * j0, z = tr.y[k] + tr.ny[k] * (d + sg * Math.abs(j1)) + tr.ty[k] * j0; // (scattered along the fence and back from it, never in front of it)
         if (W2.water && z < W2.water.y + 3) continue;
         if (!outside(x, z) || !away(x, z)) continue;
         const y = Tracks.groundAt(tr, x, z) - 0.04, th = Math.atan2(tr.x[k] - x, tr.y[k] - z) + (rn() - 0.5) * 0.7, s = 0.92 + rn() * 0.16;
@@ -5066,7 +5083,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // strands of barbed wire along the top (the surveyed circuits' second fence line, 2 to 5 m
       // behind the catch fence; ours had the crowd on open grass right behind it)
       {
-        const d = k => sg * (tr.barr[oS][k] + 2.1), i0 = c.i - ms(80), i1 = c.i + ms(80);
+        const d = k => sg * (tr.barr[oS][k] + 4.0), i0 = c.i - ms(80), i1 = c.i + ms(80); // (4 m back: the surveyed circuits keep the public 3 to 5 m behind the catch fence)
         const okK = k => !(oS === pS && !isNaN(tr.pit.off[k])) && outside(tr.x[k] + tr.nx[k] * d(k), tr.y[k] + tr.ny[k] * d(k));
         for (let i = i0, a = -1; i <= i1 + 1; i++) {
           const on = i <= i1 && okK(mod(i, N));
@@ -5205,25 +5222,52 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       for (const [, i] of cand) { if (picked.length >= want) break; if (picked.every(j => Math.min(mod(i - j, N), mod(j - i, N)) * ds > L / 4)) picked.push(i); }
       const BR = B, adA = adAcc;
       picked.forEach((i, n) => {
-        const dl = -(tr.barr[0][i] + 4.6), dr = tr.barr[1][i] + 4.6, ry = ry0(i), span = dr - dl; // (towers clear of the fence's cranked top and its posts)
+        // (the stair towers 6.5 m behind the barrier, clear of the catch fence, its cranked top and
+        // the spectators' fence behind it)
+        const dl = -(tr.barr[0][i] + 6.5), dr = tr.barr[1][i] + 6.5, ry = ry0(i), span = dr - dl;
         let top = -1e9; for (let d = dl; d <= dr; d += 1) top = Math.max(top, Tracks.surfZ(tr, i, d));
-        const deckY = top + 6.6, mid = (dl + dr) / 2, steel = '#5d6670', light = '#6f8798'; // (light: the glazing, sky-tinted)
+        const deckY = top + 6.6, mid = (dl + dr) / 2;
+        // two finishes: galvanised, or painted white (Monza's span over the start is white)
+        const steel = n % 2 ? '#e4e5e2' : '#7d858c', dark = n % 2 ? '#b9bcbd' : '#4d545b';
         const P = d => [tr.x[i] + tr.nx[i] * d, tr.y[i] + tr.ny[i] * d];
         // (the bridge's own frame: x along the track, z across it; mat() turns x to the track's heading)
-        const [cx, cz] = P(mid);
-        BR.add(box, mat(cx, deckY - 0.25, cz, ry, 2.6, 0.5, span + 3.2), col(steel));                 // deck
-        BR.add(box, mat(cx, deckY - 0.9, cz, ry, 0.35, 0.8, span + 3.2), col('#3b4148'));             // girder
+        const [cx, cz] = P(mid), S = span + 3.2, H = 2.3;
+        BR.add(box, mat(cx, deckY - 0.25, cz, ry, 2.6, 0.5, S), col(dark));                            // deck
+        BR.add(box, mat(cx, deckY + 0.02, cz, ry, 2.3, 0.04, S), col('#8a8478'));                       // walkway
+        BR.add(box, mat(cx, deckY - 0.9, cz, ry, 0.35, 0.8, S), col(dark));                            // girder
+        // A Warren truss down each side, as the footbridges at Monza and Sakhir: chords, a post at every
+        // panel point, one diagonal a panel, the diagonals alternating; mesh to handrail height between
+        // (theirs are open steelwork you see the sky through; ours was a glazed box on two white piers)
+        const np = Math.max(4, Math.round(S / 3.2)), w = S / np, dg = Math.hypot(w, H), ag = Math.atan2(w, H);
         for (const sx of [-1, 1]) {
           const ox = tr.tx[i] * sx * 1.25, oz = tr.ty[i] * sx * 1.25;
-          BR.add(box, mat(cx + ox, deckY + 1.1, cz + oz, ry, 0.08, 2.2, span + 3.2), col(light));       // glazed sides' frame
-          BR.add(box, mat(cx + ox, deckY + 2.25, cz + oz, ry, 0.3, 0.12, span + 3.2), col(steel));      // roof edge
+          BR.add(box, mat(cx + ox, deckY + 0.08, cz + oz, ry, 0.22, 0.26, S), col(steel));               // bottom chord
+          BR.add(box, mat(cx + ox, deckY + H, cz + oz, ry, 0.22, 0.22, S), col(steel));                  // top chord
+          BR.add(box, mat(cx + ox * 0.97, deckY + 0.62, cz + oz * 0.97, ry, 0.03, 1.05, S), col('#959ca1')); // mesh panel
+          for (let p = 0; p <= np; p++) {
+            const [x, z] = P(mid - S / 2 + p * w);
+            BR.add(box, mat(x + ox, deckY + H / 2, z + oz, ry, 0.14, H, 0.14), col(steel));              // post
+            if (p < np) { const [x2, z2] = P(mid - S / 2 + (p + 0.5) * w); BR.add(box, mat(x2 + ox, deckY + H / 2 + 0.1, z2 + oz, ry, 0.1, dg, 0.1, p % 2 ? ag : -ag), col(steel)); } // diagonal
+          }
         }
-        BR.add(box, mat(cx, deckY + 2.32, cz, ry, 2.8, 0.1, span + 3.4), col('#e6e7e8'));              // roof
+        for (let p = 0; p <= np; p += 2) { const [x, z] = P(mid - S / 2 + p * w); BR.add(box, mat(x, deckY + H, z, ry, 2.5, 0.12, 0.12), col(steel)); } // top ties
+        // stair towers: an open steel frame, a landing every 2.2 m, flights between them turning
+        // back and forth along the track, a solid sheet only on the side to the track
         for (const d of [dl, dr]) {
-          const [x, z] = P(d + Math.sign(d) * 0.4), g0 = Tracks.groundAt(tr, x, z), h = deckY + 2.4 - g0;
-          BR.add(box, mat(x, g0 + h / 2, z, ry, 3.4, h, 3.4), col('#d8d9d6'));                         // stair tower
-          for (let y = g0 + 2.2; y < deckY; y += 2.2) BR.add(box, mat(x, y, z, ry, 3.5, 0.12, 3.5), col(steel)); // landings
+          const sd = Math.sign(d), [x, z] = P(d + sd * 1.3), g0 = Tracks.groundAt(tr, x, z), h = deckY + 1.1 - g0;
+          for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) BR.add(box, mat(x + tr.tx[i] * a * 1.6 + tr.nx[i] * b * 1.6, g0 + h / 2, z + tr.ty[i] * a * 1.6 + tr.ny[i] * b * 1.6, ry, 0.16, h, 0.16), col(steel));
+          let f = 0;
+          for (let y = g0 + 2.2; y < deckY + 0.1; y += 2.2, f++) BR.add(box, mat(x, Math.min(y, deckY - 0.05), z, ry, 3.4, 0.12, 3.4), col(dark)); // landings
+          const nf = Math.max(1, Math.ceil((deckY - g0) / 2.2));
+          for (let q = 0; q < nf; q++) {
+            const y0 = g0 + q * 2.2, y1 = Math.min(deckY, y0 + 2.2), side = q % 2 ? 1 : -1, ln = Math.hypot(3.0, y1 - y0), sl = Math.atan2(y1 - y0, 3.0);
+            const fx = x + tr.nx[i] * side * 0.85, fz = z + tr.ny[i] * side * 0.85;
+            BR.add(box, mat(fx, (y0 + y1) / 2, fz, ry, ln, 0.1, 1.1, 0, q % 2 ? sl : -sl), col(dark));          // flight
+          }
+          const [sx2, sz2] = P(d + sd * (1.3 - 1.72));
+          BR.add(box, mat(sx2, g0 + h / 2 + 0.6, sz2, ry, 3.3, h - 1.2, 0.05), col('#d8d9d6'));             // sheet to the track
           venue.push({ x, y: z, w: 4, d: 4, h, r: 3.2 });
+          void f;
         }
         // the sponsor's panels, both faces, under the deck's edge: u along the span, one board a 6 m
         for (const sx of [-1, 1]) {
