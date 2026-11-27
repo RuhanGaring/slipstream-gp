@@ -2705,7 +2705,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           const nx = -tr.nx[k] * sg, nz = -tr.ny[k] * sg, q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), V(nx * 0.7, 0.71, nz * 0.7));
           posts.add(fpG, new THREE.Matrix4().compose(V(x + nx * 0.39, y + h + 0.39, z + nz * 0.39), q, V(0.8, 1.1, 0.8)));
         }
+        // sponsors' scrims tied to the fence through the slow corners, where the cameras look
+        // (Sakhir's model hangs 72 of them, Monaco's dozens; ours had none on a fence)
+        for (let i = i0, a = -1; i <= i1 + 1; i++) {
+          const on = i <= i1 && slowNear[mod(i, N)];
+          if (on && a < 0) a = i;
+          if (!on && a >= 0) { if (i - 1 - a >= 8) boardRun(scrim, tr, a, i - 1, k => dOf(k) - sg * 0.06, y0 + 0.35, y0 + 1.55, 1.2, 0, adPal, rnB); a = -1; }
+        }
       };
+      const slowNear = new Uint8Array(N), scrim = new Acc();
+      { const r = Math.round(25 / tr.ds); for (let k = 0; k < N; k++) { let m = 0; for (let q = -r; q <= r; q += 2) m = Math.max(m, Math.abs(tr.kap[mod(k + q, N)])); slowNear[k] = m > 1 / 110 ? 1 : 0; } }
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         const skip = k => side === ps && garageZone(k);
@@ -2814,6 +2823,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (fpost.parts.length) add(fpost.geo(), M.fencePost || (M.fencePost = std({ color: '#5f6c64', roughness: 0.6, metalness: 0.3 })), { cast: true });
       add(fen.geo(), fenceMat(M, W2), { cast: false, far: 260 });
       if (fcab.k) posts.add(fcab.geo());
+      if (scrim.k) add(scrim.geo(), M.adwall, { cast: false, far: 400 });
       add(posts.geo(), M.steel, { cast: true });
       // floodlight masts: 36 m poles with a lamp bank, every 90 m round a modern venue
       if (style === 'modern') {
@@ -5102,6 +5112,93 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           cranes++;
         }
       }
+    }
+    // Footbridges over the track: real Grand Prix venues span the lap with one to four of them
+    // (Monza's overpasses, Sakhir's and Monaco's sponsor bridges in the surveys), a deck some 6.5 m
+    // over the road on two stair towers standing behind the fences, its faces sold to a sponsor.
+    // Ours had none. Two a circuit, on straight road well clear of the start, the pit lane and every
+    // other part of the lap, where the barriers stand close enough for one span.
+    {
+      const L = tr.L, s0 = tr.pit ? 0 : 0, cand = [], want = 2;
+      const stra = new Float32Array(N);
+      for (let i = 0; i < N; i++) { let m = 0; for (let q = -Math.round(45 / ds); q <= Math.round(45 / ds); q++) m = Math.max(m, Math.abs(tr.kap[mod(i + q, N)])); stra[i] = m; }
+      for (let i = 0; i < N; i += 3) {
+        const s = i * ds;
+        if (s < 320 + s0 || s > L - 260 || stra[i] > 1 / 700) continue;
+        let pitNear = false; for (let q = -Math.round(60 / ds); q <= Math.round(60 / ds); q++) if (!isNaN(tr.pit.off[mod(i + q, N)])) { pitNear = true; break; }
+        if (pitNear) continue;
+        const bl = tr.barr[0][i], br = tr.barr[1][i];
+        if (bl > 26 || br > 26) continue;
+        // nothing else of the lap within reach of the span or its towers
+        const hx = tr.x[i], hz = tr.y[i]; let clr = true;
+        tr.hash.near(hx, hz, 90, j => { let sep = Math.abs(i - j); sep = Math.min(sep, N - sep) * ds; if (sep > 120 && Math.hypot(tr.x[j] - hx, tr.y[j] - hz) < Math.max(bl, br) + 40) clr = false; });
+        if (clr) cand.push([stra[i] + (bl + br) * 1e-5, i]);
+      }
+      cand.sort((a, b) => a[0] - b[0]);
+      const picked = [];
+      for (const [, i] of cand) { if (picked.length >= want) break; if (picked.every(j => Math.min(mod(i - j, N), mod(j - i, N)) * ds > L / 4)) picked.push(i); }
+      const BR = new Batch(true), adA = new Acc();
+      picked.forEach((i, n) => {
+        const dl = -(tr.barr[0][i] + 3.2), dr = tr.barr[1][i] + 3.2, ry = ry0(i), span = dr - dl;
+        let top = -1e9; for (let d = dl; d <= dr; d += 1) top = Math.max(top, Tracks.surfZ(tr, i, d));
+        const deckY = top + 6.6, mid = (dl + dr) / 2, steel = '#5d6670', light = '#6f8798'; // (light: the glazing, sky-tinted)
+        const P = d => [tr.x[i] + tr.nx[i] * d, tr.y[i] + tr.ny[i] * d];
+        // (the bridge's own frame: x along the track, z across it; mat() turns x to the track's heading)
+        const [cx, cz] = P(mid);
+        BR.add(box, mat(cx, deckY - 0.25, cz, ry, 2.6, 0.5, span + 3.2), col(steel));                 // deck
+        BR.add(box, mat(cx, deckY - 0.9, cz, ry, 0.35, 0.8, span + 3.2), col('#3b4148'));             // girder
+        for (const sx of [-1, 1]) {
+          const ox = tr.tx[i] * sx * 1.25, oz = tr.ty[i] * sx * 1.25;
+          BR.add(box, mat(cx + ox, deckY + 1.1, cz + oz, ry, 0.08, 2.2, span + 3.2), col(light));       // glazed sides' frame
+          BR.add(box, mat(cx + ox, deckY + 2.25, cz + oz, ry, 0.3, 0.12, span + 3.2), col(steel));      // roof edge
+        }
+        BR.add(box, mat(cx, deckY + 2.32, cz, ry, 2.8, 0.1, span + 3.4), col('#e6e7e8'));              // roof
+        for (const d of [dl, dr]) {
+          const [x, z] = P(d + Math.sign(d) * 0.4), g0 = Tracks.groundAt(tr, x, z), h = deckY + 2.4 - g0;
+          BR.add(box, mat(x, g0 + h / 2, z, ry, 3.4, h, 3.4), col('#d8d9d6'));                         // stair tower
+          for (let y = g0 + 2.2; y < deckY; y += 2.2) BR.add(box, mat(x, y, z, ry, 3.5, 0.12, 3.5), col(steel)); // landings
+          venue.push({ x, y: z, w: 4, d: 4, h, r: 3.2 });
+        }
+        // the sponsor's panels, both faces, under the deck's edge: u along the span, one board a 6 m
+        for (const sx of [-1, 1]) {
+          const off = sx * 1.36;
+          const q = (d, y, u, v) => { const [x, z] = P(d); return adA.v(x + tr.tx[i] * off, y, z + tr.ty[i] * off, tr.tx[i] * sx, 0, tr.ty[i] * sx, u, v); };
+          const a = q(dl - 1.5, deckY - 1.85, 0, 0); q(dr + 1.5, deckY - 1.85, (span + 3) / 6, 0); q(dr + 1.5, deckY - 0.05, (span + 3) / 6, 1); q(dl - 1.5, deckY - 0.05, 0, 1);
+          adA.t(a, a + 1, a + 2); adA.t(a, a + 2, a + 3);
+        }
+        void n;
+      });
+      if (BR.parts.length) add(BR.geo(), M.vcol, { cast: true });
+      if (adA.k) {
+        const k = (tr.def.seed || 3) % 8, key = 'bridgeAd' + k;
+        const am = M[key] || (M[key] = std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide }));
+        add(adA.geo(), am, { cast: false });
+      }
+      tr.bridges = picked.map(i => i * ds); // (for the test tools)
+    }
+    // TV camera scaffolds: an open scaffold tower 4 to 6 m high behind the fence at the bigger
+    // corners, a platform with its camera and operator on top (Sakhir's model has 22 of them)
+    {
+      const SC = new Batch(true);
+      let n = 0;
+      for (const c of corners) {
+        if (n >= 6) break;
+        const oS = c.k > 0 ? 0 : 1, sg = oS ? 1 : -1, k = mod(c.i - Math.round(30 / ds), N);
+        if (oS === pS && !isNaN(tr.pit.off[k])) continue;
+        const [x, z] = at(k, sg * (tr.barr[oS][k] + 5.5), 0);
+        if (!clear(x, z, 4) || !away(x, z, 3)) continue;
+        const y = Tracks.groundAt(tr, x, z), h = 4 + (n % 3), ry = ry0(k);
+        for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) put(box, x + tr.tx[k] * a * 0.9 + tr.nx[k] * b * 0.9, y + h / 2, z + tr.ty[k] * a * 0.9 + tr.ny[k] * b * 0.9, ry, 0.07, h, 0.07, '#9aa0a6');
+        for (let yy = y + 1; yy < y + h; yy += 1.5) put(box, x, yy, z, ry, 1.9, 0.06, 1.9, '#9aa0a6');
+        put(box, x, y + h + 0.05, z, ry, 2.3, 0.1, 2.3, '#6b4f2e');                                  // boards
+        put(box, x, y + h + 0.55, z, ry, 2.3, 0.9, 0.04, '#e9b21b');                                // toe board / rail
+        put(box, x - tr.nx[k] * sg * 0.3, y + h + 0.6, z - tr.ny[k] * sg * 0.3, ry, 0.7, 0.45, 0.4, '#1a1b1d'); // camera
+        put(box, x + tr.nx[k] * sg * 0.35, y + h + 0.95, z + tr.ny[k] * sg * 0.35, ry, 0.45, 1.7, 0.35, '#ff8000'); // operator
+        venue.push({ x, y: z, w: 2.4, d: 2.4, h: h + 1.5, r: 2 });
+        n++;
+      }
+      if (SC.parts.length) add(SC.geo(), M.vcol, { cast: true, far: 600 });
+      void SC;
     }
     if (B.parts.length) add(B.geo(), M.vcol, { cast: true, far: 700 });
   }
