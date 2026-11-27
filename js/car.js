@@ -95,10 +95,14 @@
   // is metered back (it reaches nothing at floor, full at floor + band); deploy: a cap on it; clip:
   // the charge below which the car super-clips at speed; part and lift: how hard it harvests at part
   // throttle and lifting off; top: the speed (km/h) from which it clips at the end of a straight.
+  // the throttle position that splits deploying from recharging; the most a car may recover in a
+  // lap (J: the 2026 rules' 7 MJ, after the season's cut from 8.5); and the most drag (N) that
+  // harvesting on a lift may put on the rear axle
+  const ERS_SPLIT = 0.75, HARVEST_LAP = 7.0e6, LIFT_F = 4200;
   const ERS_MODES = [
-    { id: 'balanced', name: 'BALANCED', floor: 0.3, band: 0.25, deploy: 1, clip: 0.3, part: 1, lift: 1, top: 285 },
+    { id: 'balanced', name: 'BALANCED', floor: 0.3, band: 0.25, deploy: 1, clip: 0.3, part: 0.7, lift: 1, top: 285 },
     { id: 'hotlap', name: 'HOTLAP', floor: 0.03, band: 0.08, deploy: 1, clip: 0.04, part: 0, lift: 0.5, top: 0 },
-    { id: 'charge', name: 'CHARGE', floor: 0.45, band: 0.3, deploy: 0.45, clip: 0.6, part: 1.6, lift: 1.4, top: 250 },
+    { id: 'charge', name: 'CHARGE', floor: 0.45, band: 0.3, deploy: 0.45, clip: 0.6, part: 1, lift: 1, top: 250 },
   ];
 
   const COMPOUNDS = {
@@ -405,19 +409,26 @@
       // driver's energy mode (c.ersMode: ERS_MODES) sets how low it may go and how much it deploys.
       const EM = ERS_MODES[c.ersMode || 0];
       const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - EM.floor) / EM.band, 0, 1) * EM.deploy;
+      // The pedal splits at ERS_SPLIT (75 per cent): above it the MGU-K deploys, reaching full power
+      // by 95 per cent; below it the car recharges. (Not in the rules, which leave the maps to the
+      // teams: the split is how simulators drive it, and a driver can feel where it is.)
       // (none on the grid: a car held on its brakes before the start keeps its charge however the
       // throttle is pressed; launch revs come from the engine alone)
-      if (throttle > 0.85 && !(speed < 1 && brake > 0.5)) Pk =sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
+      if (throttle > ERS_SPLIT && !(speed < 1 && brake > 0.5)) Pk = sp.kMax * kScale * U.clamp((throttle - ERS_SPLIT) / (0.95 - ERS_SPLIT), 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
+      const canHarvest = c.soc < 1 && (c.lapHarv || 0) < HARVEST_LAP;
       // super-clipping: with an almost flat battery the MGU-K harvests at full throttle at speed
-      if (c.soc < EM.clip && !c.overtake && kmh > 270) Pk = -120000 * kScale;
+      if (c.soc < EM.clip && !c.overtake && kmh > 270 && canHarvest) Pk = -200000 * kScale;
       // End-of-straight clipping: near the top speed, where the deployment has tapered away anyway,
-      // the MGU-K turns round and harvests (as the 2026 cars do); off below EM.top or with a full battery
-      else if (EM.top && !c.overtake && kmh > EM.top && throttle > 0.85 && c.soc < 0.9) Pk = Math.min(Pk, -150000 * kScale * U.clamp((kmh - EM.top) / 35, 0, 1));
-      // Part-throttle harvesting: below full throttle the engine runs harder than the driver asks
-      // and the MGU-K takes the difference as charge, so the wheels get exactly what the pedal says
-      // (2026 power units recharge this way through corners and on exits).
-      else if (throttle > 0.05 && throttle < 0.85 && kmh > 60 && c.soc < 1 && EM.part > 0) {
-        const extra = Math.min(sp.kMax * 0.5 * kScale, sp.power * sp.iceShare * powerFrac(rpm, sp) * Math.min(0.35, 0.95 - throttle)) * EM.part * (D ? D.power : 1);
+      // the MGU-K turns round and harvests with the pedal still flat, up to 250 kW (the 2026 rules'
+      // super-clipping allowance); off below EM.top or with a full battery
+      else if (EM.top && !c.overtake && kmh > EM.top && throttle > 0.85 && c.soc < 0.9 && canHarvest) Pk = Math.min(Pk, -250000 * kScale * U.clamp((kmh - EM.top) / 35, 0, 1));
+      // Part-throttle harvesting: below the split the engine runs harder than the driver asks and
+      // the MGU-K takes the difference as charge, so the wheels get exactly what the pedal says
+      // (2026 power units recharge this way through corners and on exits). It grows as the pedal
+      // comes back from the split, up to the MGU-K's 350 kW.
+      else if (throttle > 0.05 && throttle < ERS_SPLIT && kmh > 60 && canHarvest && EM.part > 0) {
+        const full = sp.power * sp.iceShare * powerFrac(rpm, sp) * (D ? D.power : 1);
+        const extra = Math.min(sp.kMax * kScale, full * (1 - throttle)) * EM.part * U.clamp((ERS_SPLIT - throttle) / 0.1, 0, 1);
         Pice += extra; Pk = -extra;
       }
     }
@@ -435,10 +446,13 @@
     const omA = Math.abs(omAxle);
     if (throttle < 0.05 && omA > 8) {
       const EM = ERS_MODES[c.ersMode || 0];
-      const liftHarvest = 200000 * kScale * EM.lift * U.clamp((kmh - 100) / 80, 0, 1) * U.clamp(1 - Math.abs(c.steer) * 10, 0, 1);
+      // Lifting off: the MGU-K recharges up to its full 350 kW (lift and coast), held to a drag of
+      // LIFT_F newtons on the rear axle so a lift in a slower corner is not a sudden brake on the
+      // rears (350 kW is about 0.55 g at 300 km/h, and would be twice that at 150)
+      const liftHarvest = Math.min(sp.kMax * kScale, LIFT_F * speed) * EM.lift * U.clamp((kmh - 60) / 40, 0, 1) * U.clamp(1 - Math.abs(c.steer) * 10, 0, 1);
       // (under braking the MGU-K takes all it can, up to its full power: brake-by-wire takes it out of
       // what the rear brakes were asked for, so the braking itself is the same)
-      const want = (brake > 0.05 ? sp.kMax * kScale : liftHarvest) * (c.soc < 1 ? 1 : 0);
+      const want = (brake > 0.05 ? sp.kMax * kScale : liftHarvest) * (c.soc < 1 && (c.lapHarv || 0) < HARVEST_LAP ? 1 : 0);
       // (under braking only as much as the rear brakes were asked for: ABS trims the friction brakes,
       // which is what stops a rear lock, and the regen comes out of what they would have done)
       const Tdem = brake > 0.05 ? sp.brakeMax * brake * (1 - sp.brakeBias) * sp.R * Math.min(W[2].bmod, W[3].bmod) : 1e9;
@@ -450,6 +464,9 @@
     // battery
     // deploying drains the battery; clipping and regeneration charge it at 85 % efficiency
     c.soc = U.clamp(c.soc + (Pk > 0 ? -Pk * dt : -Pk * dt * 0.85) / sp.battery + regenP * dt * 0.85 / sp.battery, 0, 1);
+    // energy recovered this lap, against the rules' cap (HARVEST_LAP)
+    if (c.harvLap !== c.lap) { c.harvLap = c.lap; c.lapHarv = 0; }
+    c.lapHarv += ((Pk < 0 ? -Pk : 0) + regenP) * dt;
     c.deploy = Pk > 0 ? Pk / sp.kMax : 0; c.harvest = regenP > 0 || Pk < 0 ? 1 : 0;
     // traction control trims engine torque when the rears slip past the peak
     if (a.tc > 0 && Tengine > 0) Tengine *= c.tcMod;
