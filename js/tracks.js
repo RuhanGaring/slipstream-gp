@@ -327,6 +327,13 @@
     // (hand-made circuits only: a generated circuit's ground is cut to its barriers, js/trackgen2.js
     // groundFn, so moving them would change, or fail to rebuild, every circuit already generated and saved)
     const fixedB = !!def.gen2 || /^gen/.test(String(def.id || ''));
+    // (and only where no other part of the lap runs within 70 m: there two barriers wandering out
+    // met in the middle and crossed, as in Rimal's hairpin infield)
+    const crowd = new Uint8Array(N);
+    if (!fixedB) {
+      const h0 = makeHash(x, y, 40);
+      for (let i = 0; i < N; i++) h0.near(x[i], y[i], 70, j => { let sep = Math.abs(i - j); sep = Math.min(sep, N - sep) * ds; if (sep > 60 && Math.hypot(x[j] - x[i], y[j] - y[i]) < 70) crowd[i] = 1; });
+    }
     const lie = (i, side) => {
       const s = i * ds, a = sid * 0.731 + side * 2.3, b = sid * 1.913 + side * 0.7;
       return U.clamp(0.5 + 0.5 * (0.62 * Math.sin(s / 173 + a) + 0.38 * Math.sin(s / 61 + b)), 0, 1);
@@ -351,12 +358,12 @@
           t = SURF.TARMAC; rw = 0.6; extra = 0;
         } else if (def.style === 'modern') {
           if (outside) { t = SURF.TARMAC; rw = 14 + Math.min(26, absK[i] * 900); extra = 6; }
-          else { t = SURF.TARMAC; rw = 5; extra = fixedB ? 8 : 3 + 16 * Math.pow(lie(i, side), 1.3); }
+          else { t = SURF.TARMAC; rw = 5; extra = fixedB || crowd[i] ? 8 : 3 + 16 * Math.pow(lie(i, side), 1.3); }
         } else {
           if (outside && absK[i] > 1 / 260) {
             const st = 1.0 + 1.5 * lie(i * 3, side + 4);
             t = SURF.GRAVEL; rw = (fixedB ? 0 : st) + 12 + Math.min(26, absK[i] * 900); extra = 4; runS[side][i] = kb + st;
-          } else { t = SURF.GRASS; rw = 4; extra = fixedB ? 8 : 1 + 13 * Math.pow(lie(i, side), 1.4); }
+          } else { t = SURF.GRASS; rw = 4; extra = fixedB || crowd[i] ? 8 : 1 + 13 * Math.pow(lie(i, side), 1.4); }
         }
         runT[side][i] = t; runW[side][i] = kb + rw;
         barr[side][i] = hw + kb + rw + extra;

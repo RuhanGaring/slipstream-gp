@@ -348,7 +348,7 @@
       MATS.asphalt = F1.R3S.wear.asphalt(macro(pbr('asphalt', 9 / 2, { color: '#d2d2d2' }), 70, 0.09, 0.15), 5.5);
       MATS.pitlane = macro(pbr('pitlane', 9 / 3, { color: '#dedede' }), 50, 0.07);
       // (the colour of a used trap, 169, 155, 143 in the photographs; and the stones' relief half as strong again)
-      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#dcc9bc' }), 45, 0.2);
+      MATS.gravel = macro(pbr('gravel', 10 / 1.6, { normalMap: T.photo('gravel_n', 10 / 1.6, false), color: '#d8c3a0' }), 45, 0.2); // (warm ochre as Monza's: it read pink, and blue-white under a cool sky)
       MATS.gravel.normalScale.set(1.5, 1.5);
     } else {
       MATS.asphalt = std({ map: T.asphalt(), roughness: 0.88 });
@@ -2247,7 +2247,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
     // run-off: gravel traps and tarmac, per side
     {
-      const gr = new Acc(), ta = new Acc(), ve = new Acc();
+      const gr = new Acc(), ta = new Acc(), ve = new Acc(), gs = new Acc(); // (gs: the strip before a gravel trap, painted green as Monza's)
       // (a town's lap has a pavement either side; only its pit lane keeps the circuit's surfaces: inPit)
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
@@ -2265,7 +2265,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
             if (t === SURF.GRAVEL && tr.runS) for (const [j0, j1] of runs(N, k => tr.runT[side][k] === t && tr.runS[side][k] > 0 && inPit(side, k))) {
               if (mod(j0 - i0, N) > mod(i1 - i0, N)) continue; // (each strip with its own trap)
               const se = k => Math.max(hw, st(k) + 0.08);
-              ribbon(ta, tr, j0, j1, k => (sg < 0 ? -se(k) : hw - 0.3), k => (sg < 0 ? -hw + 0.3 : se(k)), -0.02, 10);
+              ribbon(gs, tr, j0, j1, k => (sg < 0 ? -se(k) : hw - 0.3), k => (sg < 0 ? -hw + 0.3 : se(k)), -0.02, 10);
             }
           }
         }
@@ -2345,6 +2345,10 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         // sealed run-off is dull: a low sun gives it a sheen, not a mirror
         tm.userData.patchKey = 'runoffDull'; tm.userData.patchExtra = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= 0.2;'); };
         add(ta.geo(), tm);
+        if (gs.k) {
+          const gm = tm.clone(); gm.color.set('#5fa77c'); gm.userData = Object.assign({}, tm.userData); gm.userData.patchKey = 'runoffDull';
+          add(gs.geo(), gm);
+        }
       }
       add(ve.geo(), T.has('grass') ? macro(pbr('grass', 10 / 3.2), 140, 0.1, 0.1, true) : std({ map: T.grass(th.grassA, th.grassB), roughness: 0.97 }));
     }
@@ -2710,7 +2714,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         for (let i = i0, a = -1; i <= i1 + 1; i++) {
           const on = i <= i1 && slowNear[mod(i, N)];
           if (on && a < 0) a = i;
-          if (!on && a >= 0) { if (i - 1 - a >= 8) boardRun(scrim, tr, a, i - 1, k => dOf(k) - sg * 0.06, y0 + 0.35, y0 + 1.55, 1.2, 0, adPal, rnB); a = -1; }
+          if (!on && a >= 0) { if (i - 1 - a >= 8) boardRun(scrim, tr, a, i - 1, k => dOf(k) - sg * 0.08, y0 + 0.35, y0 + 1.55, 1.2, 0.02, adPal, rnB); a = -1; } // (0.02 thick: a plain back, read from behind the print came out mirrored)
         }
       };
       const slowNear = new Uint8Array(N), scrim = new Acc();
@@ -2823,15 +2827,22 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (fpost.parts.length) add(fpost.geo(), M.fencePost || (M.fencePost = std({ color: '#5f6c64', roughness: 0.6, metalness: 0.3 })), { cast: true });
       add(fen.geo(), fenceMat(M, W2), { cast: false, far: 260 });
       if (fcab.k) posts.add(fcab.geo());
-      if (scrim.k) add(scrim.geo(), M.adwall, { cast: false, far: 400 });
+      tr.__adAcc = scrim; // (drawn with the billboards and bridge panels, one mesh: buildTrackside)
       add(posts.geo(), M.steel, { cast: true });
       // floodlight masts: 36 m poles with a lamp bank, every 90 m round a modern venue
       if (style === 'modern') {
         const pole = new Batch(false), bank = new Batch(false), cg = new THREE.CylinderGeometry(0.16, 0.3, 1, 6, 1, true), b = new THREE.BoxGeometry(1, 1, 1);
         for (let i = 0, n = 0; i < N; i += Math.round(90 / tr.ds), n++) {
           const sd = n % 2 ? 1 : -1, o = sd * ((sd > 0 ? tr.barr[1][i] : tr.barr[0][i]) + 7), x = tr.x[i] + tr.nx[i] * o, z = tr.y[i] + tr.ny[i] * o, y = Tracks.groundAt(tr, x, z), ry = -Math.atan2(tr.ty[i], tr.tx[i]);
+          // (never inside another part of the lap's barriers: one stood in the middle of a run-off)
+          let clr = true;
+          tr.hash.near(x, z, 70, j => { if (!clr) return; const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j], al = dx * tr.tx[j] + dz * tr.ty[j]; if (Math.abs(al) < 3 * tr.ds && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][j] + 3) clr = false; });
+          if (!clr) continue;
           pole.add(cg, mat(x, y + 18, z, 0, 1, 36, 1));
-          bank.add(b, mat(x, y + 36.6, z, ry, 5, 1.5, 0.5));
+          // the head as Sakhir's: a frame of four by four lamps, tipped down toward the track
+          const head = new THREE.Matrix4().compose(V(x - tr.nx[i] * sd * 0.6, y + 36.8, z - tr.ny[i] * sd * 0.6), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 0.35, 'YXZ')), V(1, 1, 1));
+          bank.add(b, head.clone().multiply(mat(0, 0, 0, 0, 0.3, 3.6, 4.4)));
+          for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) bank.add(b, head.clone().multiply(mat(0.32, -1.32 + r * 0.88, -1.62 + c * 1.08, 0, 0.35, 0.62, 0.8)));
         }
         add(pole.geo(), M.steel, { cast: true }); add(bank.geo(), M.steel, { cast: false });
       }
@@ -4689,15 +4700,19 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // where each side wants a green strip, and how wide
     const want = [new Float32Array(N), new Float32Array(N)], bands = [new Uint8Array(N), new Uint8Array(N)], tec = [new Uint8Array(N), new Uint8Array(N)];
     for (const c of C) {
-      const oS = 1 - c.inS, extra = U.clamp(c.R * 0.35, 15, 45);
-      for (let i = c.i - ms(5); i <= c.te + ms(extra); i++) want[oS][mod(i, N)] = Math.max(want[oS][mod(i, N)], modern ? 2.5 : 2.0);
+      // (the exit strip as the surveyed circuits paint it: 3 to 4 m wide, on for 25 to 60 m past the
+      // bend's end; ours was 2 to 2.5 m and 15 to 45 m, a sliver from the stands)
+      const oS = 1 - c.inS, extra = U.clamp(c.R * 0.45, 25, 60);
+      for (let i = c.i - ms(5); i <= c.te + ms(extra); i++) want[oS][mod(i, N)] = Math.max(want[oS][mod(i, N)], modern ? 3.5 : 3.0);
       // (energy absorbers, not a bare wall, where a car leaving a slow corner would hit it: FIA
       // Safety Bulletin 41, impact angles over 20 degrees)
       if (modern && c.R < 160) for (let i = c.i - ms(15); i <= c.te + ms(25); i++) tec[oS][mod(i, N)] = 1;
       for (let i = Math.round(c.ti + (c.i - c.ti) * 0.3); i <= Math.round(c.i + (c.te - c.i) * 0.4) + ms(4); i++) want[c.inS][mod(i, N)] = Math.max(want[c.inS][mod(i, N)], modern ? 1.5 : 2.0);
       if (modern && c.R < 160) for (let i = c.i + ms(5); i <= c.te + ms(extra * 0.9); i++) bands[oS][mod(i, N)] = 1;
     }
-    const GREEN = col('#227a56'), RED = col('#c4262e'), WHITE = col('#ebebe6'), BANDW = 5.9;
+    // (a desert venue paints its bands blue and sand, as Sakhir does; elsewhere red and white)
+    const lookId = tr.def.look || tr.def.id, desert = lookId === 'rimal' || lookId === 'lonestar';
+    const GREEN = col('#227a56'), RED = col(desert ? '#2f5ea8' : '#c4262e'), WHITE = col(desert ? '#d8c6a2' : '#ebebe6'), BANDW = 5.9;
     const pa = new Acc(true), turf = new Acc();
     // a strip from offset a(k) to a(k) + w(k) on one side, heights from surfY plus lift
     const strip = (acc, side, i0, i1, a, w, lift, c, uv) => {
@@ -4999,6 +5014,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       return ok;
     };
     const pS = tr.pit.side > 0 ? 1 : 0;
+    const sfen = new Acc(), swire = new Acc(), spost = new Batch(false), spG = new THREE.CylinderGeometry(0.04, 0.04, 1, 4, 1, true);
     let made = 0;
     for (const c of tr.apexes || []) {
       if (Math.abs(c.k) < 1 / 400) continue;
@@ -5021,6 +5037,25 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         n++;
       }
       if (!n) continue;
+      // the spectators' own fence in front of them, 1.8 m chain link on posts every 2.5 m with three
+      // strands of barbed wire along the top (the surveyed circuits' second fence line, 2 to 5 m
+      // behind the catch fence; ours had the crowd on open grass right behind it)
+      {
+        const d = k => sg * (tr.barr[oS][k] + 2.1), i0 = c.i - ms(80), i1 = c.i + ms(80);
+        const okK = k => !(oS === pS && !isNaN(tr.pit.off[k])) && outside(tr.x[k] + tr.nx[k] * d(k), tr.y[k] + tr.ny[k] * d(k));
+        for (let i = i0, a = -1; i <= i1 + 1; i++) {
+          const on = i <= i1 && okK(mod(i, N));
+          if (on && a < 0) a = i;
+          if (!on && a >= 0) {
+            if (i - 1 - a >= 6) {
+              wallRun(sfen, tr, a, i - 1, d, 0, 1.8, 1.6, 1.6, 0);
+              for (const y of [1.9, 2.05, 2.2]) wallRun(swire, tr, a, i - 1, k => d(k) + sg * 0.02, y, y + 0.015, 4, 1, 0);
+              for (let q = a; q <= i - 1; q += Math.max(1, Math.round(2.5 / ds))) { const k = mod(q, N), x = tr.x[k] + tr.nx[k] * d(k), z = tr.y[k] + tr.ny[k] * d(k); spost.add(spG, mat(x, Tracks.surfZ(tr, k, d(k)) + 1.13, z, 0, 0.7, 2.25, 0.7)); }
+            }
+            a = -1;
+          }
+        }
+      }
       // (skin tone per corner group is the rest's own colour; a few tones across the groups)
       const g2 = heads.geo(), cc = g2.attributes.color, sk = col(skins[made % skins.length]);
       for (let q = 0; q < cc.count; q++) if (cc.getX(q) > 0.5) cc.setXYZ(q, sk.r, sk.g, sk.b);
@@ -5029,6 +5064,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       add(g2, MATS.fans, { cast: false, far: 520 });
       made++;
     }
+    if (swire.k) spost.add(swire.geo());
+    if (sfen.k) { const Mm = materials(); add(sfen.geo(), fenceMat(Mm, W2), { cast: false, far: 260 }); add(spost.geo(), Mm.steel, { cast: false, far: 400 }); }
   }
 
   // ---------- what stands behind the fences ----------
@@ -5040,7 +5077,11 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
   // the crowd keep clear of them. Every piece is boxes and a four-sided cone in vertex colour,
   // merged into one mesh for the circuit.
   function buildTrackside(tr, W2, add, venue) {
-    if (W2.town || tr.def.style === 'street') return;
+    // (every sponsor's print round the lap in one mesh, one draw a tile: the fence scrims of
+    // buildTrack, the billboards and the bridges' panels here)
+    const adAcc = tr.__adAcc || new Acc(); delete tr.__adAcc;
+    const flushAds = () => { if (adAcc.k) add(adAcc.geo(), materials().adwall, { cast: false, far: 800 }); };
+    if (W2.town || tr.def.style === 'street') { flushAds(); return; }
     const N = tr.N, ds = tr.ds, rn = U.rng((tr.def.seed || 9) * 313 + 71), M = materials();
     const decor = W2.decor.filter(it => it.type === 'stand' || it.type === 'garage' || it.type === 'building' || it.type === 'lot' || it.type === 'poly');
     const away = (x, z, r) => {
@@ -5137,7 +5178,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       cand.sort((a, b) => a[0] - b[0]);
       const picked = [];
       for (const [, i] of cand) { if (picked.length >= want) break; if (picked.every(j => Math.min(mod(i - j, N), mod(j - i, N)) * ds > L / 4)) picked.push(i); }
-      const BR = new Batch(true), adA = new Acc();
+      const BR = B, adA = adAcc;
       picked.forEach((i, n) => {
         const dl = -(tr.barr[0][i] + 3.2), dr = tr.barr[1][i] + 3.2, ry = ry0(i), span = dr - dl;
         let top = -1e9; for (let d = dl; d <= dr; d += 1) top = Math.max(top, Tracks.surfZ(tr, i, d));
@@ -5163,17 +5204,16 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         for (const sx of [-1, 1]) {
           const off = sx * 1.36;
           const q = (d, y, u, v) => { const [x, z] = P(d); return adA.v(x + tr.tx[i] * off, y, z + tr.ty[i] * off, tr.tx[i] * sx, 0, tr.ty[i] * sx, u, v); };
-          const a = q(dl - 1.5, deckY - 1.85, 0, 0); q(dr + 1.5, deckY - 1.85, (span + 3) / 6, 0); q(dr + 1.5, deckY - 0.05, (span + 3) / 6, 1); q(dl - 1.5, deckY - 0.05, 0, 1);
-          adA.t(a, a + 1, a + 2); adA.t(a, a + 2, a + 3);
+          const slot = ((tr.def.seed || 3) + n) % 8, nb = Math.max(1, Math.round((span + 3) / 5)), bw = (span + 3) / nb;
+          for (let b = 0; b < nb; b++) {
+            // (each board reads left to right from its own face)
+            const d0 = dl - 1.5 + b * bw, d1 = d0 + bw, u0 = (slot + 0.03) / 8, u1 = (slot + 0.97) / 8, ua = sx > 0 ? u1 : u0, ub = sx > 0 ? u0 : u1;
+            const a = q(d0, deckY - 1.85, ua, 0); q(d1, deckY - 1.85, ub, 0); q(d1, deckY - 0.05, ub, 1); q(d0, deckY - 0.05, ua, 1);
+            adA.t(a, a + 1, a + 2); adA.t(a, a + 2, a + 3);
+          }
         }
         void n;
       });
-      if (BR.parts.length) add(BR.geo(), M.vcol, { cast: true });
-      if (adA.k) {
-        const k = (tr.def.seed || 3) % 8, key = 'bridgeAd' + k;
-        const am = M[key] || (M[key] = std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide }));
-        add(adA.geo(), am, { cast: false });
-      }
       tr.bridges = picked.map(i => i * ds); // (for the test tools)
     }
     // TV camera scaffolds: an open scaffold tower 4 to 6 m high behind the fence at the bigger
@@ -5200,7 +5240,31 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (SC.parts.length) add(SC.geo(), M.vcol, { cast: true, far: 600 });
       void SC;
     }
-    if (B.parts.length) add(B.geo(), M.vcol, { cast: true, far: 700 });
+    // Billboards on scaffolds behind the fences, as Monza's and Sakhir's: a 6 by 2.5 m sponsor's
+    // panel 4 m up on two scaffold legs, every 180 m or so round the lap, sides alternating, facing
+    // the oncoming cars a little. Ours had sponsors only on the walls.
+    {
+      const bb = adAcc, adPal = [0, 1, 2, 3, 4, 5, 6, 7], rb = U.rng((tr.def.seed || 5) * 71 + 3);
+      for (let i = Math.round(120 / ds), n = 0; i < N; i += Math.round((150 + rb() * 70) / ds), n++) {
+        const side = n % 2, sg = side ? 1 : -1, k = i;
+        if (side === pS && !isNaN(tr.pit.off[k])) continue;
+        const d = sg * (tr.barr[side][k] + 4.5), [x, z] = at(k, d, 0);
+        if (!clear(x, z, 3.5) || !away(x, z, 4)) continue;
+        const y = Tracks.groundAt(tr, x, z), slot = adPal[Math.floor(rb() * 8)];
+        // (turned 25 degrees toward the cars coming)
+        let fx = -sg * tr.nx[k] - 0.45 * tr.tx[k], fz = -sg * tr.ny[k] - 0.45 * tr.ty[k]; const fl = Math.hypot(fx, fz); fx /= fl; fz /= fl; // the face: to the track, a little to the cars coming
+        const ca = fz, sa = fx, yaw = Math.atan2(-(-fx), fz); // (u, the panel's run as read from the track: (fz, -fx))
+        const P = (u, v) => [x + ca * u, y + 4 + v, z - sa * u];
+        for (const [u, v, uu, vv] of [[-3, 0, slot / 8 + 0.004, 0], [3, 0, (slot + 1) / 8 - 0.004, 0], [3, 2.5, (slot + 1) / 8 - 0.004, 1], [-3, 2.5, slot / 8 + 0.004, 1]]) { const q = P(u, v); bb.v(q[0] + fx * 0.06, q[1], q[2] + fz * 0.06, fx, 0, fz, uu, vv); }
+        const a = bb.k - 4; bb.t(a, a + 1, a + 2); bb.t(a, a + 2, a + 3);
+        put(box, x, y + 5.25, z, yaw, 6.1, 2.6, 0.1, '#7a8088');                                        // the back sheet
+        for (const u of [-2.4, 2.4]) put(box, x + ca * u, y + 2.6, z - sa * u, yaw, 0.12, 5.2, 0.12, '#9aa0a6'); // legs
+        for (const u of [-2.4, 2.4]) put(box, x + ca * u - fx * 1.2, y + 2, z - sa * u - fz * 1.2, yaw + 0, 0.08, 0.08, 2.6, '#9aa0a6'); // stays
+        venue.push({ x, y: z, w: 6, d: 2, h: 6.6, r: 3.5 });
+      }
+    }
+    if (B.parts.length) add(B.geo(), M.vcol, { cast: true, far: 1400 });
+    flushAds();
   }
 
   function buildGantry(root, tr) {

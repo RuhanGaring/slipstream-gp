@@ -441,6 +441,39 @@
           }
         }
       }
+      // broadleaf parkland venues as Monza's: belts of tall trees 10 to 40 m behind the barriers,
+      // three rows deep, broken by clearings, closing the view (the surveyed park lined 38 % of
+      // its lap with trees within 40 m and 68 % within 80 m; ours stood as single trees on open lawn;
+      // two rows, tall ones, for the frame time: the crowns' triangles are what a tree costs)
+      if (!th.palms && Tracks.treesOf(tr) !== 'fir' && !W.town && tr.def.style === 'park') {
+        const taken = new Set(), cell = 7;
+        // (only where trees stand already, by the 450 m tiles js/render3d.js draws them in: a tree in a
+        // tile of its own is a draw call more for each of its kinds, and a generated park's frame time
+        // rose by a millisecond)
+        const TS = 450, has = new Map();
+        for (const it of W.decor) if (it.type === 'tree') { const k = Math.floor(it.x / TS) + ',' + Math.floor(it.y / TS); has.set(k, (has.get(k) || 0) + 1); }
+        const vn = (x, y) => {
+          const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+          const h = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+          const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+          return (h(ix, iy) * (1 - sx) + h(ix + 1, iy) * sx) * (1 - sy) + (h(ix, iy + 1) * (1 - sx) + h(ix + 1, iy + 1) * sx) * sy;
+        };
+        for (let i = 0; i < tr.N; i += Math.max(1, Math.round(10 / tr.ds))) for (let side = 0; side < 2; side++) {
+          const sg = side ? 1 : -1, b0 = tr.barr[side][i];
+          for (let o = 0; o < 18; o += 10 + rnd() * 4) {
+            const x = tr.x[i] + tr.nx[i] * sg * (b0 + 10 + o) + (rnd() - 0.5) * 5, y = tr.y[i] + tr.ny[i] * sg * (b0 + 10 + o) + (rnd() - 0.5) * 5;
+            const n = vn(x / 160, y / 160) * 0.7 + vn(x / 45, y / 45) * 0.3;
+            if (n < 0.5 || o < (1 - n) * 14) continue;
+            const k = Math.floor(x / cell) + ',' + Math.floor(y / cell);
+            if (taken.has(k)) continue;
+            if (W.water && y < W.water.y + 4) continue;
+            if ((has.get(Math.floor(x / TS) + ',' + Math.floor(y / TS)) || 0) < 6) continue;
+            if (!clearance(tr, x, y, 12, W)) continue;
+            taken.add(k);
+            addDecor(W, { type: 'tree', x, y, r: 4.5 + rnd() * 4.5, c: th.tree[Math.floor(rnd() * th.tree.length)], deep: o > 9, forest: 1 });
+          }
+        }
+      }
       // car parks / service roads for the modern venue
       if (th.palms) {
         for (let k = 0; k < 14; k++) {
