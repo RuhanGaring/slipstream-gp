@@ -416,10 +416,12 @@
     '    if (uHalo.x > 1.5) { if (hoop + front > 0.5) discard; }',
     // see-through: only the upright pillar, the hoop over the head stays as it is. The pillar thins
     // gradually, and the stipple moves each frame so the anti-aliasing blends it into an even veil
-    '    else if (front > 0.5) {',
-    // (the stem below where the hoop's two arms meet: whole at the join, clearing over the next 10 cm,
-    // and back to whole over its last 18 cm down to the nose, so the foot has no edge)
-    '      float m = smoothstep(0.87, 0.97, hp.x) * smoothstep(1.16, 0.98, hp.x) * smoothstep(0.75, 0.82, hp.y);',
+    // (the stem below where the hoop's two arms meet, foot and all, down to the dash: whole at the
+    // join, clearing over the next 10 cm, and fading back into the bodywork only in its last 7 cm
+    // above the nose. The nose's own top, which faces up, is never touched; the stem's own upward
+    // faces higher up are.)
+    '    else if (step(0.87, hp.x) * step(hp.x, 1.25) * step(az, 0.1) * step(max(0.68, py - 0.08), hp.y) * max(step(normalize(vHaloN).y, 0.75), step(0.74, hp.y)) > 0.5) {',
+    '      float m = smoothstep(0.87, 0.97, hp.x) * smoothstep(0.69, 0.76, hp.y);',
     '      float keep = mix(1.0, uHalo.y, m);',
     '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit * 7.0, vec2(0.06711056, 0.00583715)))) > keep) discard;',
     '    }',
@@ -427,10 +429,10 @@
   // (the scale also carries the car's row in the soft-body texture, three per row: fade + 3 x row)
   function patchLodFade(sh) {
     sh.uniforms.uLodJit = U.uLodJit; sh.uniforms.uHalo = U.uHalo;
-    sh.vertexShader = 'varying float vLodF; varying vec3 vHaloP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vHaloP = position;\n  { float lodS = length(normalMatrix[0]) - 1.0; vLodF = lodS - 3.0 * floor(lodS / 3.0 + 0.25); }');
+    sh.vertexShader = 'varying float vLodF; varying vec3 vHaloP; varying vec3 vHaloN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vHaloP = position; vHaloN = normal;\n  { float lodS = length(normalMatrix[0]) - 1.0; vLodF = lodS - 3.0 * floor(lodS / 3.0 + 0.25); }');
     // (only where the shader has the view position: the lit materials)
     const halo = /varying vec3 vViewPosition/.test(sh.fragmentShader) ? '\n' + HALO_CUT : '';
-    sh.fragmentShader = 'varying float vLodF; varying vec3 vHaloP; uniform float uLodJit; uniform vec2 uHalo;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT + halo);
+    sh.fragmentShader = 'varying float vLodF; varying vec3 vHaloP; varying vec3 vHaloN; uniform float uLodJit; uniform vec2 uHalo;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + LOD_CUT + halo);
   }
 
   // Crash damage on the GPU. Every body vertex is tied to the two nearest pieces of the car's
