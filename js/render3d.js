@@ -2256,9 +2256,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           if (!runDrawn(t)) continue;
           for (const [i0, i1] of runs(N, k => tr.runT[side][k] === t && inPit(side, k))) {
             const gw = k => runGw(side, t, i0, i1, k);
-            const fa = k => (sg < 0 ? -(hw + gw(k)) : hw - 0.3);
-            const fb = k => (sg < 0 ? -hw + 0.3 : hw + gw(k));
+            // (a gravel trap begins beyond its tarmac strip, tr.runS, which is paved like the run-off)
+            const st = k => (t === SURF.GRAVEL && tr.runS && tr.runS[side][k] > 0 ? Math.min(hw + tr.runS[side][k], hw + gw(k)) : hw - 0.3);
+            const fa = k => (sg < 0 ? -(hw + gw(k)) : st(k));
+            const fb = k => (sg < 0 ? -st(k) : hw + gw(k));
             ribbon(acc, tr, i0, i1, fa, fb, t === SURF.GRAVEL ? -0.035 : -0.02, 10);
+            // the strip itself, inside the trap (and a hand under its inner edge: no gap between them)
+            if (t === SURF.GRAVEL && tr.runS) for (const [j0, j1] of runs(N, k => tr.runT[side][k] === t && tr.runS[side][k] > 0 && inPit(side, k))) {
+              if (mod(j0 - i0, N) > mod(i1 - i0, N)) continue; // (each strip with its own trap)
+              const se = k => Math.max(hw, st(k) + 0.08);
+              ribbon(ta, tr, j0, j1, k => (sg < 0 ? -se(k) : hw - 0.3), k => (sg < 0 ? -hw + 0.3 : se(k)), -0.02, 10);
+            }
           }
         }
         // (modern venues had a teal band painted along every edge of the lap: no circuit is. The paint
@@ -2297,6 +2305,40 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
         }
         if (!M.wear) { M.wear = std({ map: T.wear(), transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); M.wear.userData.maskK = 0.5; }
         add(wa.geo(), M.wear, { order: 1, far: 300 });
+        // Gravel spilt over the edges of every trap: thrown on to the grass behind it and on to the
+        // tarmac strip in front by the cars that went in and came out (the surveyed circuits model
+        // this as a band of their own over each edge of the gravel, Sakhir's "gravaborde"). Ours
+        // ended in a clean line. A decal of scattered stones, thinning out from the trap's edge.
+        const sp = new Acc();
+        for (const side of [0, 1]) {
+          const sg = side ? 1 : -1;
+          for (const [i0, i1] of runs(N, k => tr.runT[side][k] === SURF.GRAVEL && inPit(side, k))) {
+            const gw = k => runGw(side, SURF.GRAVEL, i0, i1, k);
+            const inner = k => (tr.runS && tr.runS[side][k] > 0 ? hw + Math.min(tr.runS[side][k], gw(k)) : NaN);
+            // (v runs 0 at the gravel's edge to 1 out over the ground; on either edge)
+            for (const [eOf, w0, w1, dy] of [[k => hw + gw(k), -0.25, 1.6, 0.025], [inner, 0.15, -1.1, 0.012]]) {
+              let prev = -1, len = 0, px = 0, pz = 0;
+              for (let i = i0; i <= i1; i++) {
+                const k = mod(i, N), e = eOf(k);
+                if (isNaN(e) || gw(k) < 1.5) { prev = -1; continue; }
+                const da = sg * (e + w0), db = sg * (e + w1);
+                const ax = tr.x[k] + tr.nx[k] * da, az = tr.y[k] + tr.ny[k] * da, bx = tr.x[k] + tr.nx[k] * db, bz = tr.y[k] + tr.ny[k] * db;
+                if (prev >= 0) len += Math.hypot(ax - px, az - pz);
+                px = ax; pz = az;
+                const ya = dy > 0.02 ? tr.z[k] + Tracks.crossZ(tr, k, da) + dy : Tracks.surfZ(tr, k, da) - 0.02 + dy;
+                const yb = dy > 0.02 ? tr.z[k] + Tracks.crossZ(tr, k, db) + dy : Tracks.surfZ(tr, k, db) - 0.02 + dy;
+                const a = sp.v(ax, ya, az, 0, 1, 0, len / 4, 0);
+                sp.v(bx, yb, bz, 0, 1, 0, len / 4, 1);
+                if (prev >= 0) { if ((side ? 1 : -1) * (w1 - w0) > 0) sp.t(prev, a, prev + 1), sp.t(prev + 1, a, a + 1); else sp.t(prev, prev + 1, a), sp.t(prev + 1, a + 1, a); }
+                prev = a;
+              }
+            }
+          }
+        }
+        if (sp.k) {
+          if (!M.spill) { M.spill = std({ map: spillTex(), transparent: true, depthWrite: false, side: THREE.DoubleSide, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }); M.spill.userData.wetK = [0.8, 0.5]; M.spill.userData.maskK = 0.3; M.spill.name = 'spill'; } // (no grass blades over it: js/r3-grass.js surfaceMask)
+          add(sp.geo(), M.spill, { order: 1, far: 220 });
+        }
       }
       {
         const tm = std({ map: T.runoff(th.runoff), roughness: 0.96 }); tm.userData.wetK = [1, 1];
@@ -2632,7 +2674,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
 
     // barriers
     {
-      const tp = new Acc(), fpost = new Batch(false), armW = new Acc(), orn = new Acc(), nose = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
+      const tp = new Acc(), belt = new Acc(), fpost = new Batch(false), armW = new Acc(), orn = new Acc(), nose = new Acc(), cab = new Acc(), conc = new Acc(), ad = new Acc(), arm = new Acc(), tyr = new Acc(), fen = new Acc(), hoard = new Acc(), posts = new Batch(false);
       const pit = tr.pit, ps = pit.side > 0 ? 1 : 0;
       const gz0 = (pit.boxS[9] - 16 + tr.L) % tr.L, gz1 = (pit.boxS[0] + 16) % tr.L;
       const garageZone = k => !isNaN(pit.off[k]) && Tracks.inRange(tr, k * tr.ds, gz0, gz1);
@@ -2645,6 +2687,25 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       const rnB = U.rng(4243 + [...String(tr.id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 9973, 7)), adPal = [0, 1, 2, 3, 4, 5, 6, 7];
       for (let k = 7; k > 0; k--) { const j = Math.floor(rnB() * (k + 1)); [adPal[k], adPal[j]] = [adPal[j], adPal[k]]; }
       adPal.length = 4;
+      // A debris fence as the surveyed circuits build it (Monza's and Sakhir's fences: 3.3 to 4.9 m
+      // high, standing 2 to 10 m behind the track's edge along 40 to 90 % of the lap): galvanised posts
+      // every 4 m whose tops crank in toward the track, the mesh hung on them, and three steel cables
+      // run through the posts to catch what the mesh alone would not. Ours stood on plain poles every
+      // 6 m, with no cables. (from a height y0 over the ground to h; dOf the mesh's offset, signed;
+      // posts and cables go in with the other steel posts: a mesh more is more draws in every tile)
+      const fcab = new Acc(), fpG = new THREE.CylinderGeometry(0.06, 0.06, 1, 4, 1, true); // (four sides: 4 m apart, a post is a line)
+      const fenceLine = (i0, i1, dOf, y0, h, sg) => {
+        wallRun(fen, tr, i0, i1, dOf, y0, h, 1.6, 1.6, 0);
+        const span = h - y0;
+        for (const f of [0.3, 0.65, 0.97]) wallRun(fcab, tr, i0, i1, k => dOf(k) - sg * 0.03, y0 + span * f, y0 + span * f + 0.022, 4, 1, 0);
+        const pitch = Math.max(1, Math.round(4 / tr.ds));
+        for (let i = i0; i <= i1; i += pitch) {
+          const k = mod(i, N), dd = dOf(k) + sg * 0.05, x = tr.x[k] + tr.nx[k] * dd, z = tr.y[k] + tr.ny[k] * dd, y = Tracks.surfZ(tr, k, dd);
+          posts.add(fpG, mat(x, y + y0 + span / 2, z, 0, 0.95, span, 0.95));
+          const nx = -tr.nx[k] * sg, nz = -tr.ny[k] * sg, q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), V(nx * 0.7, 0.71, nz * 0.7));
+          posts.add(fpG, new THREE.Matrix4().compose(V(x + nx * 0.39, y + h + 0.39, z + nz * 0.39), q, V(0.8, 1.1, 0.8)));
+        }
+      };
       for (const side of [0, 1]) {
         const sg = side ? 1 : -1;
         const skip = k => side === ps && garageZone(k);
@@ -2685,8 +2746,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           } else if (style === 'park') wallRun(conc, tr, i0, i1, d, -0.07, 1.05, 8, 1.12, 0.55);
           else boardRun(ad, tr, i0, i1, d, -0.07, 1.05, 1.12, 0.55, adPal, rnB);
           if (!Tg2) {
-            wallRun(fen, tr, i0, i1, k => d(k) + sg * 0.45, 1.05, fenceH, 1.6, 1.6, 0);
-            for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 0.5; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + 1.05 + (fenceH - 1.05) / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH - 1.05, 1)); }
+            fenceLine(i0, i1, k => d(k) + sg * 0.45, 1.05, fenceH, sg);
           }
         }
         if (Tg2) {
@@ -2724,16 +2784,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
           }
           // catch fence: behind gravel traps, and behind the hoardings everywhere else
           for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] !== SURF.GRAVEL)) {
-            wallRun(fen, tr, i0, i1, k => d(k) + sg * 1.6, 0, fenceH * 0.85, 1.6, 1.6, 0);
-            for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 1.65; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + fenceH * 0.425, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH * 0.85, 1)); }
+            fenceLine(i0, i1, k => d(k) + sg * 1.6, 0, fenceH * 0.85, sg);
           }
           for (const [i0, i1] of runs(N, k => !skip(k) && !isConc(k) && tr.runT[side][k] === SURF.GRAVEL)) {
-            wallRun(fen, tr, i0, i1, k => d(k) + sg * 1.4, 0, fenceH, 1.6, 1.6, 0);
-            for (let i = i0; i <= i1; i += 3) { const k = mod(i, N), dd = d(k) + sg * 1.45; posts.add(postG, mat(tr.x[k] + tr.nx[k] * dd, Tracks.surfZ(tr, k, dd) + fenceH / 2, tr.y[k] + tr.ny[k] * dd, 0, 1, fenceH, 1)); }
+            fenceLine(i0, i1, k => d(k) + sg * 1.4, 0, fenceH, sg);
           }
         }
         // tyre walls in front of the barrier at gravel traps
-        for (const [i0, i1] of runs(N, k => !skip(k) && tr.runT[side][k] === SURF.GRAVEL)) wallRun(tyr, tr, i0, i1, k => sg * (tr.barr[side][k] - 0.5), -0.05, 0.95, 4, 1.0, 0.9);
+        for (const [i0, i1] of runs(N, k => !skip(k) && tr.runT[side][k] === SURF.GRAVEL)) {
+          wallRun(tyr, tr, i0, i1, k => sg * (tr.barr[side][k] - 0.5), -0.05, 0.95, 4, 1.0, 0.9);
+          wallRun(belt, tr, i0, i1, k => sg * (tr.barr[side][k] - 0.53), -0.02, 0.9, 3, 0.92, 0); // its belt
+        }
       }
       // pit wall with fence
       for (const [i0, i1] of runs(N, k => !isNaN(pit.wall[k]))) {
@@ -2744,6 +2805,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       add(conc.geo(), M.concrete, { cast: true }); add(ad.geo(), M.adwall, { cast: true }); add(hoard.geo(), M.adwall, { cast: true });
       if (adRuns) adRuns.forEach((a, k) => { if (!a.k) return; const m = M['adwall' + k] || (M['adwall' + k] = F1.R3S.wear.barrier(std({ map: adTexture(k), roughness: 0.5, side: THREE.DoubleSide, normalMap: M.adwall.normalMap }))); m.normalScale.copy(M.adwall.normalScale); add(a.geo(), m, { cast: true }); });
       add(arm.geo(), M.armco, { cast: true }); add(tyr.geo(), M.tyres, { cast: true });
+      if (belt.k) add(belt.geo(), M.belt || (M.belt = std({ map: beltTex(), roughness: 0.82, side: THREE.DoubleSide })), { cast: true });
       if (tp.k) add(tp.geo(), M.tecpro || (M.tecpro = std({ map: tecproTex(), roughness: 0.55, side: THREE.DoubleSide })), { cast: true });
       if (armW.k) add(armW.geo(), M.railW || (M.railW = std({ color: '#cfd4d2', roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide, normalMap: T.corrugation() })), { cast: true });
       if (orn.k) add(orn.geo(), M.orangeEnd || (M.orangeEnd = std({ map: absorberTex(), roughness: 0.7, side: THREE.DoubleSide })), { cast: true });
@@ -2751,6 +2813,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (cab.k) add(cab.geo(), M.dark, { cast: false, far: 160 });
       if (fpost.parts.length) add(fpost.geo(), M.fencePost || (M.fencePost = std({ color: '#5f6c64', roughness: 0.6, metalness: 0.3 })), { cast: true });
       add(fen.geo(), fenceMat(M, W2), { cast: false, far: 260 });
+      if (fcab.k) posts.add(fcab.geo());
       add(posts.geo(), M.steel, { cast: true });
       // floodlight masts: 36 m poles with a lamp bank, every 90 m round a modern venue
       if (style === 'modern') {
@@ -3172,6 +3235,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     tag('lots');
     // (the venue first: the trees keep out of the buildings and trucks it places)
     const venue = buildVenue(root, tr, W2); tag('venue');
+    buildTrackside(tr, W2, add, venue); tag('trackside');
     buildTrees(root, W2, tr, venue); tag('trees');
     const grass = F1.R3Grass && hgrid ? F1.R3Grass.build(tr, W2, hgrid, venue, { root, renderer, ground: MATS['ground_' + style] }) : null;
     if (grass) root.add(grass);
@@ -4802,6 +4866,57 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     return t;
   }
 
+  // Loose gravel for the spill over a trap's edges: stones (the trap's own pale tones, some darker,
+  // each with a shadow) thick at v = 0 and thinning out to none at v = 1. 4 m along a repeat.
+  function spillTex() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+    const g = c.getContext('2d'), r = U.rng(907);
+    const tones = ['#d9c8b6', '#cbb9a6', '#bfae9c', '#e4d6c4', '#a89886', '#8f8173'];
+    for (let n = 0; n < 20000; n++) {
+      const v = Math.pow(r(), 1.5), x = r() * 512, y = v * 250, sz = 1.3 + r() * r() * 3.8;
+      if (r() < v * 0.9) continue;
+      g.fillStyle = 'rgba(40,32,24,0.35)'; g.beginPath(); g.ellipse(x + 0.6, y + 0.8, sz, sz * 0.75, 0, 0, 6.283); g.fill();
+      g.fillStyle = tones[Math.floor(r() * tones.length)]; g.beginPath(); g.ellipse(x, y, sz, sz * (0.6 + r() * 0.4), r() * 3, 0, 6.283); g.fill();
+    }
+    // (stones a few pixels across: from a canvas, whose clear pixels are black, the mipmaps drew them
+    // dark. So the clear pixels take the stones' own colour, alpha untouched, in a texture of our own;
+    // its first row, the thick edge, is v = 0)
+    const id = g.getImageData(0, 0, 512, 256), px = id.data;
+    for (let q = 0; q < px.length; q += 4) if (px[q + 3] < 250) { const a = px[q + 3] / 255; px[q] = Math.round(px[q] * a + 203 * (1 - a)); px[q + 1] = Math.round(px[q + 1] * a + 188 * (1 - a)); px[q + 2] = Math.round(px[q + 2] * a + 170 * (1 - a)); }
+    const t = new THREE.DataTexture(new Uint8Array(px.buffer.slice(0)), 512, 256); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.anisotropy = 8;
+    t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true;
+    return t;
+  }
+
+  // The conveyor belt strapped over the face of a tyre barrier (FIA: tyre walls are bolted together
+  // and belted, so a car slides along them instead of digging in; every tyre wall in the surveyed
+  // circuits wears one). Black rubber in 1.5 m lengths lapped over each other, bolted through to the
+  // tyres in three rows, scuffed; a red and white band along the top, as most circuits paint them.
+  // The repeat is two lengths: 3 m by 0.92 m.
+  function beltTex() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 160;
+    const g = c.getContext('2d'), r = U.rng(4711);
+    g.fillStyle = '#1d1e20'; g.fillRect(0, 0, 512, 160);
+    for (let k = 0; k < 2; k++) {
+      const x0 = k * 256;
+      g.fillStyle = k ? '#e3e3dc' : '#b52a2a'; g.fillRect(x0, 0, 256, 26);
+      const sh = g.createLinearGradient(0, 26, 0, 160); sh.addColorStop(0, 'rgba(255,255,255,0.06)'); sh.addColorStop(1, 'rgba(0,0,0,0.25)');
+      g.fillStyle = sh; g.fillRect(x0, 26, 256, 134);
+      g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x0, 0, 4, 160); g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(x0 + 4, 0, 2, 160); // the lap joint
+      for (const y of [48, 92, 136]) for (let x = x0 + 22; x < x0 + 256; x += 58) {
+        g.fillStyle = 'rgba(150,150,145,0.8)'; g.beginPath(); g.arc(x, y, 3.2, 0, 6.283); g.fill();
+        g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x - 7, y + 4, 14, 2);
+      }
+    }
+    for (let n = 0; n < 70; n++) { // scuffs where cars have slid along it
+      const x = r() * 512, y = 30 + r() * 120, l = 10 + r() * 60;
+      g.strokeStyle = `rgba(${r() < 0.7 ? '120,120,118' : '60,40,30'},${0.08 + r() * 0.2})`; g.lineWidth = 1 + r() * 2;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + l, y + (r() - 0.5) * 6); g.stroke();
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    return t;
+  }
+
   // what a circuit's giant screen shows: the broadcast's running order beside a frame of the race
   function bigScreenTex() {
     const c = document.createElement('canvas'); c.width = 1024; c.height = 576;
@@ -4904,6 +5019,91 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       add(g2, MATS.fans, { cast: false, far: 520 });
       made++;
     }
+  }
+
+  // ---------- what stands behind the fences ----------
+  // The surveyed circuits keep the land behind their barriers busy: Monza's spectator banks carry
+  // some 120 gazebo tents and stalls (white pyramid roofs, a few in sponsors' colours) with toilet
+  // cabins near them, set back 15 to 50 m from the track; Sakhir and Monaco park recovery cranes by
+  // their run-off, ready to lift a stranded car over the barrier. Ours had the crowd and nothing
+  // around it. Placed before the trees, whose footprints list (venue) these join so trees and
+  // the crowd keep clear of them. Every piece is boxes and a four-sided cone in vertex colour,
+  // merged into one mesh for the circuit.
+  function buildTrackside(tr, W2, add, venue) {
+    if (W2.town || tr.def.style === 'street') return;
+    const N = tr.N, ds = tr.ds, rn = U.rng((tr.def.seed || 9) * 313 + 71), M = materials();
+    const decor = W2.decor.filter(it => it.type === 'stand' || it.type === 'garage' || it.type === 'building' || it.type === 'lot' || it.type === 'poly');
+    const away = (x, z, r) => {
+      for (const it of decor) { const q = it.type === 'stand' ? 22 : it.type === 'poly' ? 60 : it.type === 'garage' ? 30 : Math.max(it.w || 20, it.h || 20) * 0.7; if (Math.hypot(it.x - x, it.y - z) < q + r) return false; }
+      for (const f of venue) if (Math.hypot(f.x - x, f.y - z) < f.r + r) return false;
+      return !(W2.water && z < W2.water.y + 6);
+    };
+    // clear of every barrier of the lap by m metres (and of the track itself)
+    const clear = (x, z, m) => {
+      let ok = true;
+      tr.hash.near(x, z, 90, j => { if (!ok) return; const dx = x - tr.x[j], dz = z - tr.y[j], dl = dx * tr.nx[j] + dz * tr.ny[j], al = dx * tr.tx[j] + dz * tr.ty[j]; if (Math.abs(al) < 3 * ds && Math.abs(dl) < tr.barr[dl > 0 ? 1 : 0][j] + m) ok = false; if (Math.hypot(dx, dz) < tr.hw + m + 2) ok = false; });
+      if (ok && !isNaN(tr.pit.off[0])) { /* (the pit side is checked through the barrier, which stands beyond the lane) */ }
+      return ok;
+    };
+    const B = new Batch(true), box = new THREE.BoxGeometry(1, 1, 1), cone = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1); cone.rotateY(Math.PI / 4);
+    const put = (g, x, y, z, ry, sx, sy, sz, c) => B.add(g, mat(x, y, z, ry, sx, sy, sz), col(c));
+    // (a point at lateral d, along l from sample k, local frame of the track: along t, across n)
+    const at = (k, d, l) => [tr.x[k] + tr.nx[k] * d + tr.tx[k] * l, tr.y[k] + tr.ny[k] * d + tr.ty[k] * l];
+    const pS = tr.pit.side > 0 ? 1 : 0, ry0 = k => -Math.atan2(tr.ty[k], tr.tx[k]);
+    const roofs = ['#f2f2ee', '#f2f2ee', '#f2f2ee', '#eeeeea', '#c8102e', '#1d2a44', '#141518', '#2b5fa8'];
+    let groups = 0, cranes = 0;
+    const corners = (tr.apexes || []).filter(c => Math.abs(c.k) > 1 / 400).sort((a, b) => Math.abs(b.k) - Math.abs(a.k));
+    for (const c of corners) {
+      const oS = c.k > 0 ? 0 : 1, sg = oS ? 1 : -1;
+      if (oS === pS && !isNaN(tr.pit.off[c.i])) continue;
+      // spectator village: a row of gazebos behind the crowd, toilet cabins at one end
+      if (groups < 7 && rn() < 0.75) {
+        const nT = 3 + Math.floor(rn() * 4), sz = 3 + Math.round(rn()) * 1.5, along0 = (rn() - 0.5) * 50, back = 16 + rn() * 14;
+        const k = mod(c.i, N), d = sg * (tr.barr[oS][k] + back), ry = ry0(k);
+        let placed = 0;
+        for (let q = 0; q < nT; q++) {
+          const l = along0 + (q - nT / 2) * (sz + 1.2), [x, z] = at(k, d, l);
+          if (!clear(x, z, 10) || !away(x, z, sz)) continue;
+          const y = Tracks.groundAt(tr, x, z), rc = roofs[Math.floor(rn() * roofs.length)], h = 2.25;
+          for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) { const [lx, lz] = [x + (a * Math.cos(ry) + b * Math.sin(ry)) * sz * 0.48, z + (-a * Math.sin(ry) + b * Math.cos(ry)) * sz * 0.48]; put(box, lx, y + h / 2, lz, ry, 0.05, h, 0.05, '#c9ccd0'); }
+          put(box, x, y + h + 0.12, z, ry, sz, 0.24, sz, rc); // the valance
+          put(cone, x, y + h + 0.24 + 0.55, z, ry, sz, 1.1, sz, rc);
+          if (rn() < 0.6) put(box, x, y + 0.45, z + 0, ry, sz * 0.8, 0.9, 0.6, '#d8d4c8'); // a counter
+          venue.push({ x, y: z, w: sz, d: sz, h: 3.4, r: sz * 0.75 });
+          placed++;
+        }
+        if (placed) {
+          // toilet cabins: four in a row, blue with white roofs
+          const [x0, z0] = at(k, d + sg * 2, along0 + (nT / 2 + 1.5) * (sz + 1.2));
+          if (clear(x0, z0, 10) && away(x0, z0, 4)) {
+            const y = Tracks.groundAt(tr, x0, z0);
+            for (let q = 0; q < 4; q++) { const ox = x0 + Math.cos(-ry) * (q - 1.5) * 1.3, oz = z0 + Math.sin(-ry) * (q - 1.5) * 1.3; put(box, ox, y + 1.15, oz, ry, 1.15, 2.3, 1.2, '#2f5da8'); put(box, ox, y + 2.34, oz, ry, 1.25, 0.08, 1.3, '#e8e8e4'); }
+            venue.push({ x: x0, y: z0, w: 5.5, d: 1.6, h: 2.4, r: 3.5 });
+          }
+          groups++;
+        }
+      }
+      // a recovery crane by a gravel trap, its boom folded down over the cab, outriggers out
+      const kG = mod(c.i + Math.round(25 / ds), N);
+      if (cranes < 4 && tr.runT[oS][kG] === SURF.GRAVEL && rn() < 0.8) {
+        const k = kG, d = sg * (tr.barr[oS][k] + 9), [x, z] = at(k, d, 0), ry = ry0(k);
+        if (clear(x, z, 6) && away(x, z, 7)) {
+          const y = Tracks.groundAt(tr, x, z), ca = Math.cos(-ry), sa = Math.sin(-ry);
+          const P = (l, w) => [x + ca * l - sa * w * sg * 0 + tr.nx[k] * sg * w, z + sa * l + tr.ny[k] * sg * w];
+          const yel = '#e9b21b';
+          put(box, x, y + 1.05, z, ry, 9, 1.0, 2.5, yel);                       // the carrier
+          { const [cx, cz] = P(3.6, 0); put(box, cx, y + 2.0, cz, ry, 1.9, 1.5, 2.45, yel); put(box, cx + ca * 0.96, y + 2.2, cz + sa * 0.96, ry, 0.04, 0.8, 2.1, '#26303a'); } // cab, windscreen
+          for (const l of [-3.2, -1.6, 2.2, 3.4]) { const [wx, wz] = P(l, 0); put(box, wx, y + 0.52, wz, ry, 1.05, 1.05, 2.7, '#1a1b1d'); } // wheels
+          { const [tx2, tz2] = P(-2.2, 0); put(box, tx2, y + 2.0, tz2, ry, 2.6, 1.0, 2.3, '#d39c12'); } // turntable
+          { const [bx, bz] = P(0.4, 0); put(box, bx, y + 2.75, bz, ry, 8.6, 0.75, 0.75, yel); put(box, bx + ca * 4.3, y + 2.6, bz + sa * 4.3, ry, 0.5, 0.9, 0.5, '#3b3f44'); } // boom and hook block
+          for (const l of [-3.9, 2.9]) for (const w of [-2.3, 2.3]) { const [ox, oz] = P(l, w); put(box, ox, y + 0.45, oz, ry, 0.5, 0.9, 0.5, '#d39c12'); } // outriggers
+          { const [bx, bz] = P(-4.3, 0); put(box, bx, y + 1.5, bz, ry, 0.3, 0.5, 2.4, '#c8102e'); } // tail lights bar
+          venue.push({ x, y: z, w: 10, d: 3, h: 3.2, r: 6.5 });
+          cranes++;
+        }
+      }
+    }
+    if (B.parts.length) add(B.geo(), M.vcol, { cast: true, far: 700 });
   }
 
   function buildGantry(root, tr) {

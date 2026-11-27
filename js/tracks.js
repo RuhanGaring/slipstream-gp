@@ -317,6 +317,25 @@
     }
     // kerb heights: refined from the corner speeds once the racing line exists (Raceline.prepare)
     const kerbH = new Float32Array(N).fill(0.035);
+    // Surveyed Grand Prix circuits (Sakhir, Monza, Monaco, from their Assetto Corsa track files) put
+    // the barrier along a straight anywhere from 2 to 28 m beyond the track's edge (Monza: a tenth
+    // nearer than 2 m, half nearer than 5 m, a tenth beyond 19 m; Sakhir 7.5, 11 and 29 m), never at
+    // one fixed distance; ours stood at 12 m round every lap. Now it wanders with the lie of the land
+    // over a few hundred metres, from 5 m (no nearer: the racing line keeps clear of a wall by more
+    // than that, js/raceline.js lineLimits) to 18 m in a park, 8 to 24 m at a modern venue.
+    const sid = [...String(def.id || '')].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 9973, 17) + (def.seed || 0);
+    // (hand-made circuits only: a generated circuit's ground is cut to its barriers, js/trackgen2.js
+    // groundFn, so moving them would change, or fail to rebuild, every circuit already generated and saved)
+    const fixedB = !!def.gen2 || /^gen/.test(String(def.id || ''));
+    const lie = (i, side) => {
+      const s = i * ds, a = sid * 0.731 + side * 2.3, b = sid * 1.913 + side * 0.7;
+      return U.clamp(0.5 + 0.5 * (0.62 * Math.sin(s / 173 + a) + 0.38 * Math.sin(s / 61 + b)), 0, 1);
+    };
+    // Between the kerb and a gravel trap real circuits keep a strip of tarmac, 1 to 2.5 m wide (the
+    // surveys: gravel begins a metre out from the edge at the median, 7 m at the tenth farthest), so
+    // a car that runs wide puts its wheels on to paving first and the gravel is not dragged on to the
+    // track. ours began at the white line. runS: where the strip ends, measured like runW from the edge.
+    const runS = [new Float64Array(N), new Float64Array(N)];
     for (let i = 0; i < N; i++) {
       for (let side = 0; side < 2; side++) {
         const sgn = side ? 1 : -1;
@@ -332,10 +351,12 @@
           t = SURF.TARMAC; rw = 0.6; extra = 0;
         } else if (def.style === 'modern') {
           if (outside) { t = SURF.TARMAC; rw = 14 + Math.min(26, absK[i] * 900); extra = 6; }
-          else { t = SURF.TARMAC; rw = 5; extra = 8; }
+          else { t = SURF.TARMAC; rw = 5; extra = fixedB ? 8 : 3 + 16 * Math.pow(lie(i, side), 1.3); }
         } else {
-          if (outside && absK[i] > 1 / 260) { t = SURF.GRAVEL; rw = 12 + Math.min(26, absK[i] * 900); extra = 4; }
-          else { t = SURF.GRASS; rw = 4; extra = 8; }
+          if (outside && absK[i] > 1 / 260) {
+            const st = 1.0 + 1.5 * lie(i * 3, side + 4);
+            t = SURF.GRAVEL; rw = (fixedB ? 0 : st) + 12 + Math.min(26, absK[i] * 900); extra = 4; runS[side][i] = kb + st;
+          } else { t = SURF.GRASS; rw = 4; extra = fixedB ? 8 : 1 + 13 * Math.pow(lie(i, side), 1.4); }
         }
         runT[side][i] = t; runW[side][i] = kb + rw;
         barr[side][i] = hw + kb + rw + extra;
@@ -438,6 +459,21 @@
         if (barr[side][i] > lim) { barr[side][i] = lim; runW[side][i] = Math.min(runW[side][i], lim - hw - 0.5); }
       }
     }
+    // the tarmac strip: only in front of gravel, easing to nothing over the trap's first and last 10 m
+    // (where the trap's own drawn edge narrows in, js/render3d.js runGw), never past the trap's far side
+    for (let side = 0; side < 2; side++) {
+      const S = runS[side], T = runT[side], e = Math.round(10 / ds);
+      for (let i = 0; i < N; i++) if (T[i] !== SURF.GRAVEL) S[i] = 0;
+      for (let i = 0; i < N; i++) {
+        if (!S[i]) continue;
+        let a = 0, b = 0;
+        while (a < e && T[(i - a - 1 + N) % N] === SURF.GRAVEL) a++;
+        while (b < e && T[(i + b + 1) % N] === SURF.GRAVEL) b++;
+        const kb = (side ? kerbR : kerbL)[i] ? kerbW : 0;
+        S[i] = Math.min(runW[side][i] - 1, kb + (S[i] - kb) * U.smooth(Math.min(a, b) / e));
+        if (S[i] <= kb + 0.05) S[i] = 0;
+      }
+    }
 
     // --- sectors, DRS zones ---
     const sectors = [0, L * (def.s1 || 0.33), L * (def.s2 || 0.68)];
@@ -475,7 +511,7 @@
 
     const tr = {
       def, id: def.id, name: def.name, N, L, ds, x, y, tx, ty, nx, ny, kap,
-      w, hw, kerbL, kerbR, kerbW, kerbH, runT, runW, barr, pit, sectors, drs, grid,
+      w, hw, kerbL, kerbR, kerbW, kerbH, runT, runW, runS, barr, pit, sectors, drs, grid,
       filletWarn: tt.warn, dir: tt.dir,
       corners: 0,
     };
@@ -717,7 +753,7 @@
     const e = ad - tr.hw;
     const kerb = side ? tr.kerbR[i] : tr.kerbL[i];
     if (kerb && e < tr.kerbW) return SURF.KERB;
-    if (e < tr.runW[side][i]) return tr.runT[side][i];
+    if (e < tr.runW[side][i]) return tr.runS && e < tr.runS[side][i] ? SURF.TARMAC : tr.runT[side][i];
     return tr.def.style === 'street' ? SURF.TARMAC : (tr.def.style === 'modern' ? SURF.GRAVEL : SURF.GRASS);
   }
 
