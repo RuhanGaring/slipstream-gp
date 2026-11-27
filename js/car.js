@@ -371,7 +371,9 @@
       const cut = c.ersCut && !c.overtake ? U.clamp((c.ersCut - kmh) / 20, 0, 1) : 1;
       // energy management meters deployment against the charge left (Overtake opens it up)
       const budget = c.overtake ? U.clamp((c.soc - 0.03) / 0.1, 0, 1) : U.clamp((c.soc - 0.12) / 0.3, 0, 1);
-      if (throttle > 0.85) Pk = sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
+      // (none on the grid: a car held on its brakes before the start keeps its charge however the
+      // throttle is pressed; launch revs come from the engine alone)
+      if (throttle > 0.85 && !(speed < 1 && brake > 0.5)) Pk =sp.kMax * kScale * U.clamp((throttle - 0.85) / 0.15, 0, 1) * taper * cut * budget * (D && D.failed === 'ENGINE' ? 0 : 1);
       // super-clipping: with an almost flat battery the MGU-K harvests at full throttle at speed
       if (c.soc < 0.3 && !c.overtake && kmh > 270) Pk = -120000 * kScale;
     }
