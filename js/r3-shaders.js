@@ -418,8 +418,8 @@
     // gradually, and the stipple moves each frame so the anti-aliasing blends it into an even veil
     '    else if (front > 0.5) {',
     // (the stem below where the hoop's two arms meet: whole at the join, clearing over the next 10 cm,
-    // and whole again where it meets the nose)
-    '      float m = smoothstep(0.87, 0.97, hp.x) * smoothstep(0.74, 0.8, hp.y);',
+    // and back to whole over its last 18 cm down to the nose, so the foot has no edge)
+    '      float m = smoothstep(0.87, 0.97, hp.x) * smoothstep(1.16, 0.98, hp.x) * smoothstep(0.75, 0.82, hp.y);',
     '      float keep = mix(1.0, uHalo.y, m);',
     '      if (fract(52.9829189 * fract(dot(gl_FragCoord.xy + uLodJit * 7.0, vec2(0.06711056, 0.00583715)))) > keep) discard;',
     '    }',
