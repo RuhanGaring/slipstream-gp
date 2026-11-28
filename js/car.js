@@ -640,8 +640,14 @@
       w.brakeT += (Tb * Math.abs(w.omega) / 1100 - (0.5 + 0.07 * speed) * (w.brakeT - 60) * 0.011) * dt;
     }
     // traction control: trim engine torque while the rears are over the slip peak
-    const rearOver = Math.max(W[2].kappa, W[3].kappa) / sp.kappaPk;
-    if (a.tc > 0 && rearOver > (a.tc > 1 ? 0.85 : 1.0)) c.tcMod = Math.max(0.15, c.tcMod - 12 * dt);
+    // Traction control reads the rear tyres' combined slip, wheelspin and sideways slide together:
+    // on wheelspin alone it let full lock and full throttle at 60 to 90 km/h spin the car, the
+    // power pushing a rear already near its cornering limit past it without the wheels spinning
+    const comb = w => Math.hypot(Math.max(0, w.kappa) / sp.kappaPk, (w.alpha || 0) / sp.alphaPk);
+    const rearOver = Math.max(comb(W[2]), comb(W[3]));
+    // (and a rear stepping out: body slip growing on the throttle)
+    const stepping = Math.abs(c.beta || 0) > (a.tc > 1 ? 0.05 : 0.08) && (c.beta || 0) * (c.r || 0) < 0;
+    if (a.tc > 0 && (rearOver > (a.tc > 1 ? 0.85 : 1.0) || stepping)) c.tcMod = Math.max(stepping ? 0 : 0.15, c.tcMod - 12 * dt);
     else c.tcMod = Math.min(1, c.tcMod + 5 * dt);
     // axle slide, weighted by load: a light inside wheel spinning up over a kerb or on exit
     // is not the car sliding; the loaded tyres are what hold it
