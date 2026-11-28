@@ -1267,6 +1267,17 @@
     add(optRow('Name tags', 'Driver codes above nearby cars', [true, false], () => st.tags, v => { st.tags = v; touched(); }, v => (v ? 'ON' : 'OFF')));
     const onOff0 = v => (v ? 'ON' : 'OFF');
     here = 'aids';
+    // Driving assists of the race in progress (simulation handling), changed at once: they act on the
+    // player's car (and the race thread's copy of it) and become the defaults for the next race
+    {
+      const G = F1.Game, race = G && G.race, p = race && race.player;
+      if (p && race.sim && G.state === 'race' && !G.spectate) {
+        const setA = (k, v, rk, rv) => { p.assist[k] = v; if (G.simAct) G.simAct('set', p, ['assist', k], v); G.raceDefaults[rk] = rv; G.saveSettings && G.saveSettings(); };
+        add(optRow('ABS', 'This race, at once: prevents wheel lock under braking', [true, false], () => !!p.assist.abs, v => setA('abs', v, 'abs', v), onOff0), 'THIS RACE');
+        add(optRow('Traction control', 'This race, at once: cuts power when the rear tyres spin', [0, 1, 2], () => p.assist.tc | 0, v => setA('tc', v, 'tc', v), v => ['OFF', 'MEDIUM', 'FULL'][v]));
+        add(optRow('Steering assist', 'This race, at once: limits lock to the grip available on keys and pad', [true, false], () => !!p.assist.steerAssist, v => setA('steerAssist', v ? 1 : 0, 'steerAssist', v), onOff0));
+      }
+    }
     add(optRow('Race coach', 'Short tips in your first races. Each stops once you have seen it', [true, false], () => st.hints !== false, v => { st.hints = v; touched(); }, onOff0), 'RACE AIDS');
     add(optRow('Spotter', 'A bar at the edge of the screen when a car is alongside', [true, false], () => st.spotter !== false, v => { st.spotter = v; touched(); }, onOff0));
     add(optRow('HUD size', '', [0.85, 1, 1.15, 1.3], () => st.hudSize || 1, v => { st.hudSize = v; touched(); }, v => Math.round(v * 100) + '%'), 'ACCESSIBILITY');

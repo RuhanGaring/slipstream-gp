@@ -1096,6 +1096,7 @@
   let simLink = null;
   const simWanted = () => !!(Game.settings.gfx.simWorker || /[?&]simw=1/.test(location.search)) && !!F1.SimWorker && F1.SimWorker.available();
   const simAct = (name, car, ...args) => !!(simLink && simLink.usable && simLink.act(name, car, ...args));
+  Game.simAct = simAct;
   let finishT = -1, retireT = -1, launching = false;
   const trace = { cur: [], best: null };
 
