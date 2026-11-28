@@ -6587,17 +6587,19 @@ void main() {
     // the head lags the chassis: displaced against the acceleration (metres per g)
     // (sideways only 4.5 mm a g: a braced neck and the headrest pads hold the head in a corner,
     // and more reads as the whole view swaying)
-    const tx = -aR * 0.0045, ty = -aU * 0.006, tz = aF * 0.009; // braking (aF < 0) throws it forward (-z)
-    const w = 2 * Math.PI * 2.2, z = 0.55, k = w * w, c = 2 * z * w;
+    // (owner: less side to side sway and fore-aft springing: sideways 1.8 mm a g, fore-aft 4 mm a g)
+    const tx = -aR * 0.0018, ty = -aU * 0.006, tz = aF * 0.004; // braking (aF < 0) throws it forward (-z)
+    // (damped near critically, 0.9: the head settles without bouncing back and forth)
+    const w = 2 * Math.PI * 2.2, z = 0.9, k = w * w, c = 2 * z * w;
     const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
     for (let i = 0; i < n; i++) {
       HM.v.x += (k * (tx - HM.x.x) - c * HM.v.x) * h; HM.v.y += (k * (ty - HM.x.y) - c * HM.v.y) * h; HM.v.z += (k * (tz - HM.x.z) - c * HM.v.z) * h;
       HM.x.addScaledVector(HM.v, h);
     }
     // keep it inside the helmet's travel
-    HM.x.x = THREE.MathUtils.clamp(HM.x.x, -0.03, 0.03); HM.x.y = THREE.MathUtils.clamp(HM.x.y, -0.04, 0.04); HM.x.z = THREE.MathUtils.clamp(HM.x.z, -0.06, 0.06);
+    HM.x.x = THREE.MathUtils.clamp(HM.x.x, -0.015, 0.015); HM.x.y = THREE.MathUtils.clamp(HM.x.y, -0.04, 0.04); HM.x.z = THREE.MathUtils.clamp(HM.x.z, -0.03, 0.03);
     // eyes lead into the corner: the lateral load says which way and how hard (about 0.35 deg/g, at most 1.5)
-    const look = THREE.MathUtils.clamp(aR * 0.006, -0.026, 0.026);
+    const look = THREE.MathUtils.clamp(aR * 0.003, -0.013, 0.013);
     HM.yaw += (look - HM.yaw) * (1 - Math.exp(-dt / 0.35));
     // engine and road buzz: tiny and fast, grows with speed; enough to feel, not to blur
     HM.buzz += dt;
