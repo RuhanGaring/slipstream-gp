@@ -1091,6 +1091,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     });
   }
 
+  const SUN_K = 1.12, FILL_K = 0.82;
   function applyLook(id) {
     const L = LOOKS[id] || LOOKS.kestrel;
     state.tod0 = null; state.todOn = false; state.todExp = 1; state.todShaft = 1; state.todSoft = 0; state.todBloom = 1; state.todAO = 1;
@@ -1136,7 +1137,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       // band under a darker sky; the sky's fill light, which is this colour too, is left as it was)
       const fk = (L.fogK || 1) * (L.hazeK || 1); scene.fog.color.setRGB(H0.fog[0] * fk, H0.fog[1] * fk, H0.fog[2] * fk, THREE.LinearSRGBColorSpace);
       S3.uFogCol.value.copy(scene.fog.color);
-      state.exposure = { kestrel: 1.06, bahia: 1.22, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
+      state.exposure = { kestrel: 1.06, bahia: 1.08, varenna: 0.9, lucerne: 1.0, hakone: 1.0, rimal: 0.85, sierra: 0.88, lonestar: 0.85 }[id] || 1;
     } else {
       envRT = pmrem.fromScene(envScene, 0.02);
       state.exposure = L.exp;
@@ -1151,13 +1152,17 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
     // (against the broadcast pictures of Monaco: a lower, warmer sun, sunlit whites held under the
     // clip, and far less fill, so one side of a street stands in real shade)
     if (rivi) { state.exposure *= 1.12; sun.intensity *= 1.36; sun.color.multiply(RIVI_SUN); } else state.exposure *= L.expK || 1.15;
+    // (the light rig: a firmer sun against less sky fill. Shade lit nearly as bright as sun is what
+    // reads as a video game; in broadcast and F1 game footage the sunlit side is some four times the
+    // shaded side, which models the cars and the ground. SUN_K and FILL_K set the balance)
+    if (H0 && !rivi) { sun.intensity *= SUN_K; state.exposure *= 1.04; }
     scene.environment = envRT.texture;
     S3.uSunDir.value.copy(state.sunDir); S3.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
     S3.uRoadSky.value = L.roadSky || 3.2; S3.uRoadGlare.value = L.roadGlare || 100;
     state.sky = T.has('sky_' + id) ? T.photo('sky_' + id, 1) : null;
     state.skyReady = false;
     if (state.sky) { state.sky.mapping = THREE.EquirectangularReflectionMapping; state.sky.wrapS = THREE.RepeatWrapping; state.sky.wrapT = THREE.ClampToEdgeWrapping; }
-    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = MATS[k].userData.noSky ? 0 : H0 ? (rivi ? 0.82 : 1) : L.env;
+    for (const k in MATS) if (MATS[k].isMeshStandardMaterial) MATS[k].envMapIntensity = MATS[k].userData.noSky ? 0 : H0 ? (rivi ? 0.82 : FILL_K) : L.env;
     // (the light bounced off sunlit stucco into the street's shade)
     if (rivi) {
       hemi.color.set('#e9e8e5'); hemi.groundColor.set('#c9ad88'); hemi.intensity = 0.46;
@@ -1172,7 +1177,7 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       scene.backgroundIntensity = (H0 ? H0.bg : 1) * RIVI_SKY;
     }
     // (shade is lit by the sky and the ground: without this, shadowed foliage goes black)
-    else if (H0) { hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.42; }
+    else if (H0) { hemi.color.set(L.hor); hemi.groundColor.set(L.bot); hemi.intensity = 0.42 * FILL_K * 0.7; }
     state.base = { sunI: sun.intensity, fogD: S3.uFogDensity.value, fog: S3.uFogCol.value.clone(), hemi: hemi.intensity, bg: scene.backgroundIntensity, hemiC: rivi ? hemi.color.clone() : null, hemiG: rivi ? hemi.groundColor.clone() : null };
   }
 
@@ -4762,7 +4767,8 @@ float rmH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33
       if (modern && c.R < 260) for (let i = c.i + ms(5); i <= c.te + ms(extra * 0.9); i++) bands[oS][mod(i, N)] = 1;
     }
     // (no lap-long edge band and no blue paint: the owner cancelled both on 2026-11-26)
-    const GREEN = col('#227a56'), RED = col('#c4262e'), WHITE = col('#ebebe6'), BANDW = 5.9;
+    const GREEN = col('#2f6a4f'), // (deeper and greyer: real run-off paint is a dark green, the brighter one read as a toy)
+      RED = col('#c4262e'), WHITE = col('#ebebe6'), BANDW = 5.9;
     const pa = new Acc(true), turf = new Acc();
     // a strip from offset a(k) to a(k) + w(k) on one side, heights from surfY plus lift
     const strip = (acc, side, i0, i1, a, w, lift, c, uv) => {
@@ -7022,7 +7028,8 @@ void main() {
     const p = tr ? SV('satP_' + tr.id, SV(tr.gen2 && tr.gen2.city ? 'satP_city' : 'satP_gen', 1)) : 1;
     return Math.max(0, SV('satAll', 1) * (1 + (p - 1) * SV('satAuto', 1)) * (1 + ((state.todSat || 1) - 1) * SV('satTod', 1)));
   };
-  const grassSatOf = tr => Math.max(0, SV('satGAll', 1) * (1 + ((tr ? SV('satG_' + tr.id, SV('satG_gen', 1)) : 1) - 1) * SV('satGAuto', 1)));
+  // (lawns at 0.85 of their photo's colour by default: the lime of a sunlit lawn read as a video game)
+  const grassSatOf = tr => Math.max(0, SV('satGAll', 0.85) * (1 + ((tr ? SV('satG_' + tr.id, SV('satG_gen', 1)) : 1) - 1) * SV('satGAuto', 1)));
   function tunnelLight(dt) {
     const tr = state.tr, T = tr && tr.gen2 && tr.gen2.tunnel;
     let want = 0;

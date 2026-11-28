@@ -547,7 +547,9 @@
     // (the punch is for the mid tones: full strength in the shadows crushed foliage to black)
     '  vec3 tSh = smoothstep(vec3(0.12), vec3(0.42), max(c, 0.0)); c = pow(max(c, 0.0), 1.0 + 0.3 * tSh);',
     '  l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
-    '  c = l + 1.3 * (c - l);',
+    // (1.1, was 1.3: the extra saturation on top of AgX read as a video game, neon grass and kerbs;
+    // broadcast and the F1 games keep colour close to the camera's own)
+    '  c = l + 1.1 * (c - l);',
     '  c = outset * c;',
     '  c = pow(max(c, 0.0), vec3(2.2));',
     '  return clamp(R2020_SRGB * c, 0.0, 1.0);',
@@ -605,6 +607,9 @@
     // contrast about a low pivot (display values), so the lifted shadows stay lifted and the mids and highlights open up
     '  c = clamp((c - uPivot) * uContrast + uPivot, 0.0, 1.0);',
     '  c = mix(c, c * c * (3.0 - 2.0 * c), uGrade.x);',
+    // split tone, as a broadcast camera's grade: the sunlit highlights a touch warm, the shade a
+    // touch cool (sky-lit), so light and shadow separate by colour as well as by level
+    '  { float sL = dot(c, vec3(0.2126, 0.7152, 0.0722)); c += vec3(0.016, 0.006, -0.014) * smoothstep(0.45, 0.95, sL) + vec3(-0.01, -0.003, 0.012) * (1.0 - smoothstep(0.05, 0.4, sL)) * smoothstep(0.0, 0.05, sL); }',
     // luminance-saturation curve on the display values: colour drains as light falls, the way
     // the eye (rods take over in dim light) and film (the toe) both lose it, full saturation
     // from the knee up, and a gentle roll-off in the brightest values where film's dyes run out
